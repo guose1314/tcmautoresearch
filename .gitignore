@@ -23,22 +23,7 @@ wheels/
 *.egg
 
 # Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+
 
 # PyInstaller
 #  #  All file types have the .exe extension.
@@ -56,7 +41,7 @@ htmlcov/
 .coverage.*
 .cache
 nosetests.xml
-coverage.xml
+# Usually these are .exe files on Windows; uncomment the next line to ignore them.
 *.cover
 *.log
 .mypy_cache/
@@ -79,7 +64,7 @@ docs/_build/
 # PyBuilder
 target/
 
-# Jupyter Notebook
+
 .ipynb_checkpoints
 
 # IPython
