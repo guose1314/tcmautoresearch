@@ -1,0 +1,64 @@
+name: Dependency Graph
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/**/*.py'
+      - 'tools/generate_dependency_graph.py'
+      - 'tests/unit/test_dependency_graph_tool.py'
+      - 'README.md'
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**/*.py'
+      - 'tools/generate_dependency_graph.py'
+      - 'tests/unit/test_dependency_graph_tool.py'
+      - 'README.md'
+
+permissions:
+  contents: write
+
+jobs:
+  generate-dependency-graph:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run dependency graph unit tests
+        run: python -m unittest tests.unit.test_dependency_graph_tool
+
+      - name: Generate dependency graph artifacts
+        run: python tools/generate_dependency_graph.py
+
+      - name: Upload dependency graph artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-graph
+          path: |
+            docs/architecture/dependency-graph.json
+            docs/architecture/dependency-graph.mmd
+            docs/architecture/dependency-graph.md
+
+      - name: Commit updated dependency graph
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- docs/architecture/dependency-graph.json docs/architecture/dependency-graph.mmd docs/architecture/dependency-graph.md; then
+            echo "No dependency graph changes detected."
+            exit 0
+          fi
+          git add docs/architecture/dependency-graph.json docs/architecture/dependency-graph.mmd docs/architecture/dependency-graph.md
+          git commit -m "Update dependency graph"
+          git push

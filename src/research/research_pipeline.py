@@ -12,7 +12,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.core.module_base import get_global_executor
 from src.extractors.advanced_entity_extractor import AdvancedEntityExtractor
@@ -361,68 +361,16 @@ class ResearchPipeline:
         """
         context = context or {}
 
-        corpus_result = None
-        if self._should_collect_ctext_corpus(context):
-            corpus_result = self._collect_ctext_observation_corpus(context)
+        corpus_result = self._collect_observe_corpus_if_enabled(context)
+        literature_result = self._run_observe_literature_if_enabled(context)
 
-        literature_result = None
-        if self._should_run_observe_literature(context):
-            literature_result = self._run_observe_literature_pipeline(context)
+        observations, findings = self._build_observe_seed_lists()
+        self._append_corpus_observe_updates(corpus_result, observations, findings)
 
-        # 模拟观察阶段的执行
-        observations = [
-            "收集到原始中医古籍文本数据",
-            "识别出多个方剂实例",
-            "发现不同朝代的用药规律",
-            "提取出关键症候信息"
-        ]
-        
-        findings = [
-            "方剂组成存在地域差异",
-            "药材使用呈现时代演变特征",
-            "症候分类具有系统性规律"
-        ]
+        ingestion_result = self._run_observe_ingestion_if_enabled(corpus_result, context)
+        self._append_ingestion_observe_updates(ingestion_result, observations, findings)
 
-        if corpus_result and not corpus_result.get("error"):
-            stats = corpus_result.get("stats", {})
-            observations.insert(0, f"已从 ctext 白名单自动采集 {stats.get('document_count', 0)} 个根文献")
-            findings.insert(0, "观察阶段已接入标准语料白名单，可直接进入后续假设生成")
-        elif corpus_result and corpus_result.get("error"):
-            findings.append(f"ctext 白名单采集失败: {corpus_result['error']}")
-
-        ingestion_result = None
-        if corpus_result and not corpus_result.get("error") and self._should_run_observe_ingestion(context):
-            ingestion_result = self._run_observe_ingestion_pipeline(corpus_result, context)
-            if ingestion_result and not ingestion_result.get("error"):
-                observations.append(
-                    f"已完成 {ingestion_result.get('processed_document_count', 0)} 篇文本的预处理、实体抽取与语义建模"
-                )
-                findings.append(
-                    f"首段主流程累计识别 {ingestion_result.get('aggregate', {}).get('total_entities', 0)} 个实体"
-                )
-                findings.append(
-                    f"累计构建 {ingestion_result.get('aggregate', {}).get('semantic_graph_nodes', 0)} 个语义节点与 {ingestion_result.get('aggregate', {}).get('semantic_graph_edges', 0)} 条关系"
-                )
-            elif ingestion_result and ingestion_result.get("error"):
-                findings.append(f"预处理、实体抽取与语义建模链路失败: {ingestion_result['error']}")
-
-        if literature_result and not literature_result.get("error"):
-            clinical_gap = (literature_result.get("clinical_gap_analysis") or {})
-            observations.append(
-                f"已完成 {literature_result.get('record_count', 0)} 条医学文献检索并抽取摘要证据"
-            )
-            findings.append(
-                f"证据矩阵覆盖 {literature_result.get('evidence_matrix', {}).get('dimension_count', 0)} 个维度"
-            )
-            findings.append(
-                f"文献来源统计: {', '.join(literature_result.get('source_counts_summary', [])) or '无'}"
-            )
-            if clinical_gap.get("report"):
-                findings.append("已完成 Qwen 临床关联 Gap Analysis，可直接用于选题与方案设计")
-        elif literature_result and literature_result.get("error"):
-            findings.append(f"文献检索链路失败: {literature_result['error']}")
-        
-        clinical_gap = ((literature_result or {}).get("clinical_gap_analysis") or {})
+        self._append_literature_observe_updates(literature_result, observations, findings)
 
         return {
             "phase": "observe",
@@ -431,34 +379,146 @@ class ResearchPipeline:
             "corpus_collection": corpus_result,
             "ingestion_pipeline": ingestion_result,
             "literature_pipeline": literature_result,
-            "metadata": {
-                "data_source": self._resolve_observe_data_source(context),
-                "observation_count": len(observations),
-                "finding_count": len(findings),
-                "auto_collected_ctext": bool(corpus_result),
-                "ctext_groups": self._resolve_whitelist_groups(context),
-                "downstream_processing": bool(
-                    ingestion_result
-                    and not ingestion_result.get("error")
-                    and ingestion_result.get("processed_document_count", 0) > 0
-                ),
-                "semantic_modeling": bool(
-                    ingestion_result
-                    and not ingestion_result.get("error")
-                    and ingestion_result.get("aggregate", {}).get("semantic_graph_nodes", 0) > 0
-                ),
-                "literature_retrieval": bool(literature_result and not literature_result.get("error")),
-                "evidence_matrix": bool(
-                    literature_result
-                    and not literature_result.get("error")
-                    and literature_result.get("evidence_matrix", {}).get("record_count", 0) > 0
-                ),
-                "clinical_gap_analysis": bool(
-                    literature_result
-                    and not literature_result.get("error")
-                    and clinical_gap.get("report")
-                )
-            }
+            "metadata": self._build_observe_metadata(
+                context,
+                observations,
+                findings,
+                corpus_result,
+                ingestion_result,
+                literature_result,
+            )
+        }
+
+    def _build_observe_seed_lists(self) -> Tuple[List[str], List[str]]:
+        observations = [
+            "收集到原始中医古籍文本数据",
+            "识别出多个方剂实例",
+            "发现不同朝代的用药规律",
+            "提取出关键症候信息"
+        ]
+        findings = [
+            "方剂组成存在地域差异",
+            "药材使用呈现时代演变特征",
+            "症候分类具有系统性规律"
+        ]
+        return observations, findings
+
+    def _collect_observe_corpus_if_enabled(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not self._should_collect_ctext_corpus(context):
+            return None
+        return self._collect_ctext_observation_corpus(context)
+
+    def _run_observe_literature_if_enabled(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not self._should_run_observe_literature(context):
+            return None
+        return self._run_observe_literature_pipeline(context)
+
+    def _run_observe_ingestion_if_enabled(
+        self,
+        corpus_result: Optional[Dict[str, Any]],
+        context: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        if not corpus_result or corpus_result.get("error"):
+            return None
+        if not self._should_run_observe_ingestion(context):
+            return None
+        return self._run_observe_ingestion_pipeline(corpus_result, context)
+
+    def _append_corpus_observe_updates(
+        self,
+        corpus_result: Optional[Dict[str, Any]],
+        observations: List[str],
+        findings: List[str],
+    ) -> None:
+        if not corpus_result:
+            return
+        if corpus_result.get("error"):
+            findings.append(f"ctext 白名单采集失败: {corpus_result['error']}")
+            return
+
+        stats = corpus_result.get("stats", {})
+        observations.insert(0, f"已从 ctext 白名单自动采集 {stats.get('document_count', 0)} 个根文献")
+        findings.insert(0, "观察阶段已接入标准语料白名单，可直接进入后续假设生成")
+
+    def _append_ingestion_observe_updates(
+        self,
+        ingestion_result: Optional[Dict[str, Any]],
+        observations: List[str],
+        findings: List[str],
+    ) -> None:
+        if not ingestion_result:
+            return
+        if ingestion_result.get("error"):
+            findings.append(f"预处理、实体抽取与语义建模链路失败: {ingestion_result['error']}")
+            return
+
+        aggregate = ingestion_result.get("aggregate", {})
+        observations.append(
+            f"已完成 {ingestion_result.get('processed_document_count', 0)} 篇文本的预处理、实体抽取与语义建模"
+        )
+        findings.append(
+            f"首段主流程累计识别 {aggregate.get('total_entities', 0)} 个实体"
+        )
+        findings.append(
+            f"累计构建 {aggregate.get('semantic_graph_nodes', 0)} 个语义节点与 {aggregate.get('semantic_graph_edges', 0)} 条关系"
+        )
+
+    def _append_literature_observe_updates(
+        self,
+        literature_result: Optional[Dict[str, Any]],
+        observations: List[str],
+        findings: List[str],
+    ) -> None:
+        if not literature_result:
+            return
+        if literature_result.get("error"):
+            findings.append(f"文献检索链路失败: {literature_result['error']}")
+            return
+
+        clinical_gap = (literature_result.get("clinical_gap_analysis") or {})
+        evidence_matrix = literature_result.get("evidence_matrix", {})
+        observations.append(
+            f"已完成 {literature_result.get('record_count', 0)} 条医学文献检索并抽取摘要证据"
+        )
+        findings.append(
+            f"证据矩阵覆盖 {evidence_matrix.get('dimension_count', 0)} 个维度"
+        )
+        findings.append(
+            f"文献来源统计: {', '.join(literature_result.get('source_counts_summary', [])) or '无'}"
+        )
+        if clinical_gap.get("report"):
+            findings.append("已完成 Qwen 临床关联 Gap Analysis，可直接用于选题与方案设计")
+
+    def _build_observe_metadata(
+        self,
+        context: Dict[str, Any],
+        observations: List[str],
+        findings: List[str],
+        corpus_result: Optional[Dict[str, Any]],
+        ingestion_result: Optional[Dict[str, Any]],
+        literature_result: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        clinical_gap = ((literature_result or {}).get("clinical_gap_analysis") or {})
+        ingestion_ok = bool(ingestion_result and not ingestion_result.get("error"))
+        literature_ok = bool(literature_result and not literature_result.get("error"))
+
+        return {
+            "data_source": self._resolve_observe_data_source(context),
+            "observation_count": len(observations),
+            "finding_count": len(findings),
+            "auto_collected_ctext": bool(corpus_result),
+            "ctext_groups": self._resolve_whitelist_groups(context),
+            "downstream_processing": bool(
+                ingestion_ok and ingestion_result.get("processed_document_count", 0) > 0
+            ),
+            "semantic_modeling": bool(
+                ingestion_ok and ingestion_result.get("aggregate", {}).get("semantic_graph_nodes", 0) > 0
+            ),
+            "literature_retrieval": literature_ok,
+            "evidence_matrix": bool(
+                literature_ok and literature_result.get("evidence_matrix", {}).get("record_count", 0) > 0
+            ),
+            "clinical_gap_analysis": bool(literature_ok and clinical_gap.get("report"))
         }
 
     def _should_run_observe_ingestion(self, context: Dict[str, Any]) -> bool:

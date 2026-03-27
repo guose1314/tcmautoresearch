@@ -141,6 +141,35 @@ python run_cycle_demo.py --demo-type full
 
 # 运行逻辑检查机制（跨平台路径/重复定义/导出重复）
 python tools/logic_checks.py
+
+# 生成应用内部依赖关系图（src/ 内部 import）
+python tools/generate_dependency_graph.py
+
+# 运行代码质量检查（语法/复杂度/参数规模/裸 except）
+python tools/code_quality_checks.py
+
+# 运行统一质量门（逻辑检查 + 依赖图生成 + 代码质量检查 + 质量工具单测）
+python tools/quality_gate.py
+
+# 运行质量评估体系（根据质量门结果计算评分/等级/改进建议）
+python tools/quality_assessment.py --gates-report output/quality-gate.json
+
+# 运行持续改进循环（沉淀历史基线 + 趋势分析 + 下一轮行动清单）
+python tools/continuous_improvement_loop.py --assessment-report output/quality-assessment.json
+
+# 生成质量改进档案（时间线 + 单次改进档案）
+python tools/quality_improvement_archive.py
+
+# 生成质量反馈报告（分级反馈 + 优先行动）
+python tools/quality_feedback.py
+
+# 运行创新激励评估（按贡献档案生成评分与奖励建议）
+python tools/innovation_incentives.py --input docs/templates/innovation-profile.template.json
+
+# 运行创新激励自适应学习（带反馈分自动调权）
+python tools/innovation_incentives.py --input docs/templates/innovation-profile.template.json --feedback 4.0
+
+# CI 会在 PR 和 main 分支变更时自动重新生成依赖关系图，产物位于 docs/architecture/
 系统运行
 # 简单使用示例
 from src.core.architecture import SystemArchitecture

@@ -5,7 +5,7 @@
 基于T/C IATCM 098-2023标准
 """
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import networkx as nx
 
@@ -65,6 +65,7 @@ class SemanticGraphBuilder(BaseModule):
             # 【新增】提取关键方剂和药物
             formulas = [e for e in entities if e.get("type") == "formula"]
             herbs = [e for e in entities if e.get("type") == "herb"]
+            herb_names = [h.get("name") for h in herbs if h.get("name")]
             
             # 【新增】生成高级研究视角
             research_perspectives = self._generate_research_perspectives(formulas)
@@ -78,17 +79,31 @@ class SemanticGraphBuilder(BaseModule):
             # 【新增】现代药理学集成
             pharmacology_data = self._collect_pharmacology_data(herbs)
 
-            # 【新增】网络药理学与系统性生物学
-            network_systems = self._analyze_network_systems(formulas, herbs)
-
-            # 【新增】超分子化学和物理化学
-            supramolecular_physicochemistry = self._analyze_supramolecular_physicochemistry(formulas, herbs)
-
-            # 【新增】古典文献数字化与知识考古
-            knowledge_archaeology = self._analyze_knowledge_archaeology(formulas, herbs)
-
-            # 【新增】复杂性科学与非线性动力学
-            complexity_dynamics = self._analyze_complexity_dynamics(formulas, herbs)
+            # 优先复用 integrated 结果，避免首轮重复高级分析
+            network_systems = self._extract_from_integrated(
+                formulas,
+                research_perspectives,
+                integrated_key="network_pharmacology",
+                fallback=lambda items: self._analyze_network_systems(items, herb_names),
+            )
+            supramolecular_physicochemistry = self._extract_from_integrated(
+                formulas,
+                research_perspectives,
+                integrated_key="supramolecular_physicochemical",
+                fallback=lambda items: self._analyze_supramolecular_physicochemistry(items, herb_names),
+            )
+            knowledge_archaeology = self._extract_from_integrated(
+                formulas,
+                research_perspectives,
+                integrated_key="knowledge_archaeology",
+                fallback=lambda items: self._analyze_knowledge_archaeology(items, herb_names),
+            )
+            complexity_dynamics = self._extract_from_integrated(
+                formulas,
+                research_perspectives,
+                integrated_key="complexity_dynamics",
+                fallback=lambda items: self._analyze_complexity_dynamics(items, herb_names),
+            )
 
             # 【新增】统一评分面板（8维 0-1 标准化 + 总分 + 95%CI）
             scoring_panel = self._build_research_scoring_panel(research_perspectives, formula_comparison)
@@ -186,6 +201,11 @@ class SemanticGraphBuilder(BaseModule):
         # 提取方剂实体，用于君臣佐使推断
         formulas = [e for e in entities if e.get("type") == "formula"]
         herbs = [e for e in entities if e.get("type") == "herb"]
+        herb_name_to_node = {
+            h["name"]: f"herb:{h['name']}"
+            for h in herbs
+            if h.get("name")
+        }
         
         # 【策略1】方剂 → 药物 的君臣佐使关系
         for formula in formulas:
@@ -194,35 +214,24 @@ class SemanticGraphBuilder(BaseModule):
             
             composition = TCMRelationshipDefinitions.get_formula_composition(formula_name)
             if composition:
-                # 针对每个药物，根据预定义组成推断其在方剂中的角色
-                for herb in herbs:
-                    herb_name = herb['name']
-                    herb_node = f"herb:{herb_name}"
-                    
-                    # 确定药物在方剂中的角色（君臣佐使）
-                    role = None
-                    confidence = 0.0
-                    
-                    if herb_name in composition.get("sovereign", []):
-                        role = RelationshipType.SOVEREIGN
-                        confidence = 0.95
-                    elif herb_name in composition.get("minister", []):
-                        role = RelationshipType.MINISTER
-                        confidence = 0.95
-                    elif herb_name in composition.get("assistant", []):
-                        role = RelationshipType.ASSISTANT
-                        confidence = 0.95
-                    elif herb_name in composition.get("envoy", []):
-                        role = RelationshipType.ENVOY
-                        confidence = 0.95
-                    
-                    if role:
+                role_groups = {
+                    RelationshipType.SOVEREIGN: composition.get("sovereign", []),
+                    RelationshipType.MINISTER: composition.get("minister", []),
+                    RelationshipType.ASSISTANT: composition.get("assistant", []),
+                    RelationshipType.ENVOY: composition.get("envoy", []),
+                }
+
+                for role, herb_names in role_groups.items():
+                    for herb_name in herb_names:
+                        herb_node = herb_name_to_node.get(herb_name)
+                        if not herb_node:
+                            continue
                         self.graph.add_edge(
                             formula_node, herb_node,
                             relationship_type=role.value,
                             relationship_name=role.name,
                             description=TCMRelationshipDefinitions.get_relationship_description(role),
-                            confidence=confidence
+                            confidence=0.95
                         )
                         self._record_relationship(role.value)
         
@@ -352,9 +361,35 @@ class SemanticGraphBuilder(BaseModule):
                 }
         return pharmacology
 
-    def _analyze_network_systems(self, formulas: List[Dict], herbs: List[Dict]) -> Dict:
+    def _extract_from_integrated(
+        self,
+        formulas: List[Dict],
+        research_perspectives: Dict[str, Dict[str, Any]],
+        integrated_key: str,
+        fallback,
+    ) -> Dict[str, Any]:
+        """从 integrated 结果提取目标分析，缺失时回退到独立分析器。"""
+        output: Dict[str, Any] = {}
+        missing_formulas: List[Dict[str, Any]] = []
+
+        for formula in formulas:
+            formula_name = formula.get("name")
+            if not formula_name:
+                continue
+            integrated = (research_perspectives.get(formula_name) or {}).get("integrated", {})
+            value = integrated.get(integrated_key)
+            if value:
+                output[formula_name] = value
+            else:
+                missing_formulas.append(formula)
+
+        if missing_formulas:
+            output.update(fallback(missing_formulas))
+
+        return output
+
+    def _analyze_network_systems(self, formulas: List[Dict], herb_names: List[str]) -> Dict:
         """网络药理学与系统性生物学分析"""
-        herb_names = [h.get("name") for h in herbs if h.get("name")]
         output: Dict[str, Any] = {}
         for formula in formulas:
             formula_name = formula.get("name")
@@ -365,9 +400,8 @@ class SemanticGraphBuilder(BaseModule):
                 )
         return output
 
-    def _analyze_supramolecular_physicochemistry(self, formulas: List[Dict], herbs: List[Dict]) -> Dict:
+    def _analyze_supramolecular_physicochemistry(self, formulas: List[Dict], herb_names: List[str]) -> Dict:
         """超分子化学和物理化学分析"""
-        herb_names = [h.get("name") for h in herbs if h.get("name")]
         output: Dict[str, Any] = {}
         for formula in formulas:
             formula_name = formula.get("name")
@@ -378,9 +412,8 @@ class SemanticGraphBuilder(BaseModule):
                 )
         return output
 
-    def _analyze_knowledge_archaeology(self, formulas: List[Dict], herbs: List[Dict]) -> Dict:
+    def _analyze_knowledge_archaeology(self, formulas: List[Dict], herb_names: List[str]) -> Dict:
         """古典文献数字化与知识考古分析"""
-        herb_names = [h.get("name") for h in herbs if h.get("name")]
         output: Dict[str, Any] = {}
         for formula in formulas:
             formula_name = formula.get("name")
@@ -391,9 +424,8 @@ class SemanticGraphBuilder(BaseModule):
                 )
         return output
 
-    def _analyze_complexity_dynamics(self, formulas: List[Dict], herbs: List[Dict]) -> Dict:
+    def _analyze_complexity_dynamics(self, formulas: List[Dict], herb_names: List[str]) -> Dict:
         """复杂性科学与非线性动力学分析"""
-        herb_names = [h.get("name") for h in herbs if h.get("name")]
         output: Dict[str, Any] = {}
         for formula in formulas:
             formula_name = formula.get("name")

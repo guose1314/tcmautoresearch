@@ -4,20 +4,35 @@
 基于T/C IATCM 098-2023标准的智能修复管理
 """
 
+import hashlib
+import json
 import logging
 import time
 import traceback
-import json
-import hashlib
-from typing import Dict, Any, List, Optional, Callable
-from datetime import datetime
-from dataclasses import dataclass, field
 from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
 import networkx as nx
 
 # 配置日志
 logger = logging.getLogger(__name__)
+
+ISSUE_MESSAGE_RULES = [
+    (("input", "parameter"), "input_validation"),
+    (("memory", "resource"), "memory_leak"),
+    (("slow", "timeout"), "performance_issue"),
+    (("dependency", "module"), "dependency_error"),
+    (("security", "vulnerability"), "security_vulnerability"),
+    (("data", "quality"), "data_quality"),
+]
+
+ISSUE_CATEGORY_RULES = [
+    ("performance", "performance_issue"),
+    ("security", "security_vulnerability"),
+]
 
 class RepairPriority(Enum):
     """修复优先级枚举"""
@@ -240,28 +255,16 @@ class FixingStage:
         """识别问题类型"""
         issue_message = issue.get("message", "").lower()
         issue_category = issue.get("category", "unknown").lower()
-        
-        # 基于消息内容和类别识别问题类型
-        if "input" in issue_message or "parameter" in issue_message:
-            return "input_validation"
-        elif "memory" in issue_message or "resource" in issue_message:
-            return "memory_leak"
-        elif "slow" in issue_message or "timeout" in issue_message:
-            return "performance_issue"
-        elif "dependency" in issue_message or "module" in issue_message:
-            return "dependency_error"
-        elif "security" in issue_message or "vulnerability" in issue_message:
-            return "security_vulnerability"
-        elif "data" in issue_message or "quality" in issue_message:
-            return "data_quality"
-        else:
-            # 根据类别识别
-            if "performance" in issue_category:
-                return "performance_issue"
-            elif "security" in issue_category:
-                return "security_vulnerability"
-            else:
-                return "general_issue"
+
+        for keywords, issue_type in ISSUE_MESSAGE_RULES:
+            if any(keyword in issue_message for keyword in keywords):
+                return issue_type
+
+        for keyword, issue_type in ISSUE_CATEGORY_RULES:
+            if keyword in issue_category:
+                return issue_type
+
+        return "general_issue"
     
     def _select_repair_rule(self, issue_type: str) -> Dict[str, Any]:
         """选择修复规则"""

@@ -73,6 +73,25 @@ def build_real_modules() -> List[tuple[str, Any]]:
     ]
 
 
+def initialize_real_modules(modules: List[tuple[str, Any]]) -> None:
+    """统一初始化模块，避免在每次迭代中重复初始化。"""
+    for module_name, module in modules:
+        logger.info(f"初始化真实模块: {module_name}")
+        initialized = module.initialize()
+        if not initialized:
+            raise RuntimeError(f"模块初始化失败: {module_name}")
+
+
+def cleanup_real_modules(modules: List[tuple[str, Any]]) -> None:
+    """统一清理模块资源。"""
+    for module_name, module in modules:
+        try:
+            module.cleanup()
+            logger.info(f"真实模块 {module_name} 资源清理完成")
+        except Exception as exc:
+            logger.warning(f"真实模块 {module_name} 清理异常: {exc}")
+
+
 def summarize_module_quality(module_name: str, result: Dict[str, Any]) -> Dict[str, float]:
     """为真实模块结果生成统一质量指标。"""
     quality_metrics = {
@@ -95,36 +114,45 @@ def summarize_module_quality(module_name: str, result: Dict[str, Any]) -> Dict[s
     return quality_metrics
 
 
-def execute_real_module_pipeline(input_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+def execute_real_module_pipeline(
+    input_data: Dict[str, Any],
+    modules: Optional[List[tuple[str, Any]]] = None,
+    manage_module_lifecycle: bool = False,
+) -> List[Dict[str, Any]]:
     """顺序执行真实 src 模块。"""
     context = dict(input_data)
     module_results = []
+    module_chain = modules or build_real_modules()
 
-    for module_name, module in build_real_modules():
-        logger.info(f"开始执行真实模块: {module_name}")
-        initialized = module.initialize()
-        if not initialized:
-            raise RuntimeError(f"模块初始化失败: {module_name}")
+    if manage_module_lifecycle:
+        initialize_real_modules(module_chain)
 
-        module_start_time = time.time()
-        result = module.execute(context)
-        execution_time = time.time() - module_start_time
-        context.update(result)
+    try:
+        for module_name, module in module_chain:
+            logger.info(f"开始执行真实模块: {module_name}")
 
-        module_results.append(
-            {
-                "module": module_name,
-                "status": "completed",
-                "execution_time": execution_time,
-                "timestamp": datetime.now().isoformat(),
-                "input_data": dict(context),
-                "output_data": result,
-                "quality_metrics": summarize_module_quality(module_name, result),
-            }
-        )
+            module_start_time = time.time()
+            result = module.execute(context)
+            execution_time = time.time() - module_start_time
+            context.update(result)
 
-        module.cleanup()
-        logger.info(f"真实模块 {module_name} 执行完成，耗时: {execution_time:.2f}秒")
+            module_results.append(
+                {
+                    "module": module_name,
+                    "status": "completed",
+                    "execution_time": execution_time,
+                    "timestamp": datetime.now().isoformat(),
+                    "input_data": dict(context),
+                    "output_data": result,
+                    "quality_metrics": summarize_module_quality(module_name, result),
+                }
+            )
+
+            logger.info(f"真实模块 {module_name} 执行完成，耗时: {execution_time:.2f}秒")
+
+    finally:
+        if manage_module_lifecycle:
+            cleanup_real_modules(module_chain)
 
     return module_results
 
@@ -210,8 +238,12 @@ def simulate_module_execution(module_name: str, input_data: Dict[str, Any]) -> D
     return result
 
 
-def run_iteration_cycle(iteration_number: int, input_data: Dict[str, Any],
-                       max_iterations: int=5) -> Dict[str, Any]:
+def run_iteration_cycle(
+    iteration_number: int,
+    input_data: Dict[str, Any],
+    max_iterations: int = 5,
+    shared_modules: Optional[List[tuple[str, Any]]] = None,
+) -> Dict[str, Any]:
     """
     运行单次迭代循环
     
@@ -245,7 +277,11 @@ def run_iteration_cycle(iteration_number: int, input_data: Dict[str, Any],
     
     try:
         # 依次执行每个模块
-        for module_result in execute_real_module_pipeline(input_data):
+        for module_result in execute_real_module_pipeline(
+            input_data,
+            modules=shared_modules,
+            manage_module_lifecycle=False,
+        ):
             iteration_results["modules"].append(module_result)
             
             # 更新质量指标
@@ -358,6 +394,10 @@ def run_full_cycle_demo(max_iterations: int=3, sample_data: Optional[List[str]]=
     }
     
     try:
+        # 全循环复用模块，减少每轮初始化/清理开销
+        shared_modules = build_real_modules()
+        initialize_real_modules(shared_modules)
+
         # 运行迭代循环
         for i in range(max_iterations):
             logger.info(f"开始第 {i+1} 次迭代")
@@ -366,7 +406,12 @@ def run_full_cycle_demo(max_iterations: int=3, sample_data: Optional[List[str]]=
             input_data = test_inputs[i % len(test_inputs)]
             
             # 执行迭代
-            iteration_result = run_iteration_cycle(i + 1, input_data, max_iterations)
+            iteration_result = run_iteration_cycle(
+                i + 1,
+                input_data,
+                max_iterations,
+                shared_modules=shared_modules,
+            )
             
             # 记录迭代结果
             cycle_results["iterations"].append(iteration_result)
@@ -436,6 +481,9 @@ def run_full_cycle_demo(max_iterations: int=3, sample_data: Optional[List[str]]=
         logger.error(f"演示执行失败: {e}")
         logger.error(traceback.format_exc())
         raise
+    finally:
+        if 'shared_modules' in locals():
+            cleanup_real_modules(shared_modules)
 
 
 def run_academic_demo():

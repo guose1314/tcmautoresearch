@@ -1,0 +1,20 @@
+{
+  "title": "示例：统一质量门与依赖图自动化",
+  "owner": "your-name",
+  "summary": "建立统一质量门、依赖图自动生成与 CI 自动更新机制。",
+  "novelty": 4,
+  "impact": 5,
+  "validation": 4,
+  "reuse": 5,
+  "knowledge_sharing": 4,
+  "has_tests": true,
+  "has_docs": true,
+  "has_artifact": true,
+  "quality_gate_passed": true,
+  "feedback_score": 4.0,
+  "linked_files": [
+    "tools/quality_gate.py",
+    "tools/generate_dependency_graph.py",
+    ".github/workflows/quality-control.yml"
+  ]
+}
