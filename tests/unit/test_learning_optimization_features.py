@@ -1,0 +1,111 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from src.core.algorithm_optimizer import AlgorithmOptimizer
+from src.learning.adaptive_tuner import AdaptiveTuner
+from src.learning.pattern_recognizer import PatternRecognizer
+from src.learning.self_learning_engine import SelfLearningEngine
+from src.research.multimodal_fusion import FusionStrategy, MultimodalFusionEngine
+
+
+class TestOptimizationAndLearningFeatures(unittest.TestCase):
+    def test_algorithm_optimizer_can_select_and_benchmark(self):
+        optimizer = AlgorithmOptimizer(exploration_c=1.0)
+
+        def fast_algo(context):
+            return {"quality_score": 0.7, "result": "fast"}
+
+        def accurate_algo(context):
+            return {"quality_score": 0.9, "result": "accurate"}
+
+        optimizer.register("fast", fast_algo, tags=["text"])
+        optimizer.register("accurate", accurate_algo, tags=["text"])
+
+        name, result = optimizer.run_best({"x": 1}, candidate_tags=["text"])
+        self.assertIn(name, {"fast", "accurate"})
+        self.assertIn("quality_score", result)
+
+        report = optimizer.benchmark({"x": 1}, candidate_tags=["text"])
+        self.assertIn(report["winner"], {"fast", "accurate"})
+        self.assertEqual(set(report["results"].keys()), {"fast", "accurate"})
+
+    def test_pattern_recognizer_detects_patterns(self):
+        recognizer = PatternRecognizer(min_frequency=2, anomaly_z_threshold=2.0)
+        for _ in range(12):
+            recognizer.analyze(
+                {
+                    "topic": "伤寒论",
+                    "entities": [{"name": "桂枝汤", "type": "formula", "confidence": 0.9}],
+                    "performance_score": 0.8,
+                    "confidence_score": 0.85,
+                }
+            )
+
+        patterns = recognizer.analyze(
+            {
+                "topic": "伤寒论",
+                "entities": [{"name": "桂枝汤", "type": "formula", "confidence": 0.95}],
+                "performance_score": 0.82,
+                "confidence_score": 0.87,
+            }
+        )
+        self.assertTrue(len(patterns) > 0)
+
+    def test_adaptive_tuner_updates_parameters(self):
+        tuner = AdaptiveTuner(performance_target=0.8)
+        last = None
+        for _ in range(20):
+            last = tuner.step({"performance": 0.6, "quality": 0.6, "confidence": 0.6})
+
+        self.assertIsNotNone(last)
+        if last is None:
+            self.fail("tuner.step did not return parameter dict")
+        self.assertIn("learning_threshold", last)
+        self.assertTrue(0.4 <= last["learning_threshold"] <= 0.9)
+        self.assertGreaterEqual(len(tuner.get_update_log()), 1)
+
+    def test_multimodal_fusion_produces_confidence(self):
+        engine = MultimodalFusionEngine(strategy=FusionStrategy.ATTENTION)
+        context = {
+            "processed_text": "桂枝汤用于太阳中风证。",
+            "entities": [
+                {"name": "桂枝汤", "type": "formula", "confidence": 0.92},
+                {"name": "桂枝", "type": "herb", "confidence": 0.88},
+            ],
+            "semantic_graph": {
+                "nodes": [{"id": 1}, {"id": 2}],
+                "edges": [{"source": 1, "target": 2}],
+            },
+            "performance_score": 0.81,
+            "confidence_score": 0.86,
+            "quality_score": 0.84,
+        }
+        modalities = engine.extract_modalities(context)
+        result = engine.fuse(modalities)
+        self.assertTrue(0.0 <= result.confidence <= 1.0)
+        self.assertTrue(len(result.fused_features) > 0)
+
+    def test_self_learning_engine_has_new_capabilities(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_file = str(Path(tmp) / "learning_data.pkl")
+            engine = SelfLearningEngine({"learning_data_file": data_file})
+            self.assertTrue(engine.initialize({}))
+            output = engine.execute(
+                {
+                    "processed_text": "麻黄汤主治太阳伤寒。",
+                    "entities": [{"name": "麻黄汤", "type": "formula", "confidence": 0.9}],
+                    "semantic_graph": {"nodes": [{"id": 1}], "edges": []},
+                    "reasoning_results": {"diagnosis": "太阳伤寒"},
+                    "confidence_score": 0.86,
+                    "quality_score": 0.82,
+                }
+            )
+        self.assertIn("learning_suggestions", output)
+        self.assertIn("discovered_patterns", output)
+        self.assertIn("tuned_parameters", output)
+        self.assertIn("ewma_performance", output)
+
+
+if __name__ == "__main__":
+    unittest.main()

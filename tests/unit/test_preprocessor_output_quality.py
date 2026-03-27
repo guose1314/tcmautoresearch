@@ -1,0 +1,201 @@
+import unittest
+from unittest.mock import patch
+
+from src.output.output_generator import OutputGenerator
+from src.preprocessor.document_preprocessor import DocumentPreprocessor
+
+
+class TestDocumentPreprocessorQuality(unittest.TestCase):
+    def test_preprocessor_sanitizes_and_normalizes_text(self):
+        module = DocumentPreprocessor({"max_input_chars": 1000})
+        self.assertTrue(module.initialize())
+
+        result = module.execute({"raw_text": "小柴胡\x00汤  \n\n\n 主治"})
+        text = result["processed_text"]
+
+        self.assertNotIn("\x00", text)
+        self.assertNotIn("\n\n\n", text)
+        self.assertIn("小柴胡", text)
+        self.assertIn("主治", text)
+
+    def test_preprocessor_rejects_non_string_input(self):
+        module = DocumentPreprocessor()
+        self.assertTrue(module.initialize())
+
+        with self.assertRaises(ValueError):
+            module.execute({"raw_text": 12345})
+
+    def test_preprocessor_rejects_oversized_input(self):
+        module = DocumentPreprocessor({"max_input_chars": 5})
+        self.assertTrue(module.initialize())
+
+        with self.assertRaises(ValueError):
+            module.execute({"raw_text": "123456"})
+
+    def test_internal_text_helpers(self):
+        module = DocumentPreprocessor()
+        self.assertEqual(module._sanitize_text("a\x00b\x01c"), "abc")
+        self.assertEqual(module._clean_line_breaks("ab\ncd\n\n\nxy"), "abcd\n\nxy")
+        self.assertEqual(module._normalize_whitespace("a   b\n c"), "a b c")
+
+    def test_segment_and_ancient_punctuation(self):
+        module = DocumentPreprocessor()
+        self.assertTrue(module.initialize())
+
+        words = module.segment_text("小柴胡汤")
+        self.assertGreater(len(words), 0)
+
+        words_pos = module.segment_text("小柴胡汤", use_pos=True)
+        self.assertGreater(len(words_pos), 0)
+
+        sentences = module.segment_with_ancient_punctuation("主治寒热往来。功效和解少阳")
+        self.assertGreater(len(sentences), 0)
+
+    def test_extract_metadata_and_cleanup(self):
+        module = DocumentPreprocessor()
+        self.assertTrue(module.initialize())
+
+        md = module._extract_metadata(
+            {
+                "source_file": "demo.txt",
+                "raw_text": "abc",
+                "metadata": {"dynasty": "东汉"},
+            }
+        )
+        self.assertEqual(md["source_file"], "demo.txt")
+        self.assertEqual(md["dynasty"], "东汉")
+        self.assertEqual(md["encoding_detected"], "utf-8")
+        self.assertTrue(module.cleanup())
+
+    def test_missing_raw_text_raises(self):
+        module = DocumentPreprocessor()
+        self.assertTrue(module.initialize())
+        with self.assertRaises(ValueError):
+            module.execute({})
+
+    def test_convert_text_fallback_on_converter_error(self):
+        class BrokenOpenCC:
+            def convert(self, _text):
+                raise RuntimeError("boom")
+
+        module = DocumentPreprocessor()
+        module._opencc = BrokenOpenCC()
+        self.assertEqual(module._convert_text("abc"), "abc")
+
+    def test_segment_text_fallback_when_no_jieba(self):
+        module = DocumentPreprocessor()
+        with patch("src.preprocessor.document_preprocessor.HAS_JIEBA", False):
+            out = module.segment_text("a b c")
+        self.assertEqual(out, ["a", "b", "c"])
+
+    def test_segment_text_fallback_on_cut_error(self):
+        module = DocumentPreprocessor()
+        self.assertTrue(module.initialize())
+        with patch("src.preprocessor.document_preprocessor.jieba.cut", side_effect=RuntimeError("bad cut")):
+            out = module.segment_text("a b c")
+        self.assertEqual(out, ["a", "b", "c"])
+
+    def test_detect_encoding_fallback_branch(self):
+        module = DocumentPreprocessor()
+
+        class BadText:
+            def encode(self, _enc):
+                raise RuntimeError("encode failed")
+
+        self.assertEqual(module._detect_encoding(BadText()), "utf-8")
+
+    def test_initialize_with_disabled_optional_dependencies(self):
+        module = DocumentPreprocessor({"convert_mode": "t2s"})
+        with patch("src.preprocessor.document_preprocessor.HAS_JIEBA", False), patch(
+            "src.preprocessor.document_preprocessor.HAS_OPENCC", False
+        ):
+            self.assertTrue(module.initialize())
+
+    def test_cleanup_exception_path(self):
+        module = DocumentPreprocessor()
+        with patch.object(module.logger, "info", side_effect=RuntimeError("logger fail")):
+            self.assertFalse(module._do_cleanup())
+
+
+class TestOutputGeneratorQuality(unittest.TestCase):
+    def test_output_generator_sanitizes_source_and_limits_entities(self):
+        module = OutputGenerator({"max_entities": 2, "max_string_length": 32})
+        self.assertTrue(module.initialize())
+
+        result = module.execute(
+            {
+                "source_file": "../secret/path/input.txt",
+                "objective": "A" * 100,
+                "entities": [1, 2, 3, 4],
+                "statistics": {"formulas_count": -1, "herbs_count": -2, "syndromes_count": -3},
+                "reasoning_results": {"unsafe": object()},
+            }
+        )
+
+        output_data = result["output_data"]
+        metadata = output_data["metadata"]
+        analysis = output_data["analysis_results"]
+        quality = output_data["quality_metrics"]
+
+        self.assertEqual(metadata["source"], "input.txt")
+        self.assertEqual(len(analysis["entities"]), 2)
+        self.assertGreaterEqual(quality["formulas_found"], 0)
+        self.assertGreaterEqual(quality["herbs_identified"], 0)
+        self.assertGreaterEqual(quality["syndromes_recognized"], 0)
+
+    def test_output_generator_returns_json_safe_payload(self):
+        module = OutputGenerator({"max_entities": 10, "max_string_length": 16})
+        self.assertTrue(module.initialize())
+
+        result = module.execute(
+            {
+                "entities": ["a"],
+                "reasoning_results": {"nested": {"obj": object()}},
+            }
+        )
+
+        output_data = result["output_data"]
+        unsafe_value = output_data["analysis_results"]["reasoning_results"]["nested"]["obj"]
+
+        self.assertIsInstance(unsafe_value, str)
+        self.assertLessEqual(len(unsafe_value), 16)
+
+    def test_output_recommendations_and_cleanup(self):
+        module = OutputGenerator({"max_recommendations": 1})
+        self.assertTrue(module.initialize())
+
+        recs = module._build_recommendations({"entities": [1, 2], "confidence_score": 0.6})
+        self.assertEqual(len(recs), 1)
+
+        recs_many = module._build_recommendations({"entities": list(range(80)), "confidence_score": 0.99})
+        self.assertEqual(len(recs_many), 1)
+        self.assertTrue(module.cleanup())
+
+    def test_make_json_safe_depth_limit(self):
+        module = OutputGenerator({"max_string_length": 8})
+        self.assertTrue(module.initialize())
+
+        deep = {"a": {"b": {"c": {"d": {"e": {"f": {"g": {"h": {"i": "too deep"}}}}}}}}}
+        safe = module._make_json_safe(deep)
+        # 深度超过限制时会被截断为标记字符串
+        self.assertIn("a", safe)
+
+    def test_execute_exception_path(self):
+        class BrokenOutput(OutputGenerator):
+            def _generate_output_format(self, context):
+                raise RuntimeError("broken")
+
+        module = BrokenOutput()
+        self.assertTrue(module.initialize())
+        with self.assertRaises(RuntimeError):
+            module.execute({"entities": []})
+
+    def test_initialize_and_cleanup_exception_paths(self):
+        module = OutputGenerator()
+        with patch.object(module.logger, "info", side_effect=RuntimeError("logger fail")):
+            self.assertFalse(module._do_initialize())
+            self.assertFalse(module._do_cleanup())
+
+
+if __name__ == "__main__":
+    unittest.main()

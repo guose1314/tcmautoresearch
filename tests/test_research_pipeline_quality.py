@@ -1,0 +1,364 @@
+import json
+import os
+import tempfile
+import unittest
+from unittest.mock import Mock, patch
+
+from src.research.research_pipeline import (
+    ResearchCycleStatus,
+    ResearchPhase,
+    ResearchPipeline,
+)
+
+
+class TestResearchPipelineQuality(unittest.TestCase):
+    def setUp(self):
+        self.pipeline = ResearchPipeline({})
+
+    def tearDown(self):
+        self.pipeline.cleanup()
+
+    def test_execute_all_phases_and_complete_cycle(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="quality-cycle",
+            description="quality test",
+            objective="full phase execution",
+            scope="src/research",
+            researchers=["tester"],
+        )
+        self.assertTrue(self.pipeline.start_research_cycle(cycle.cycle_id))
+
+        observe_result = self.pipeline.execute_research_phase(
+            cycle.cycle_id,
+            ResearchPhase.OBSERVE,
+            {
+                "run_literature_retrieval": False,
+                "run_preprocess_and_extract": False,
+                "use_ctext_whitelist": False,
+                "data_source": "manual",
+            },
+        )
+        self.assertEqual(observe_result["phase"], "observe")
+
+        self.assertEqual(
+            self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.HYPOTHESIS)["phase"],
+            "hypothesis",
+        )
+        self.assertEqual(
+            self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.EXPERIMENT)["phase"],
+            "experiment",
+        )
+        self.assertEqual(
+            self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.ANALYZE)["phase"],
+            "analyze",
+        )
+        self.assertEqual(
+            self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.PUBLISH)["phase"],
+            "publish",
+        )
+        self.assertEqual(
+            self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.REFLECT)["phase"],
+            "reflect",
+        )
+
+        self.assertTrue(self.pipeline.complete_research_cycle(cycle.cycle_id))
+        status = self.pipeline.get_cycle_status(cycle.cycle_id)
+        self.assertEqual(status["status"], ResearchCycleStatus.COMPLETED.value)
+
+        summary = self.pipeline.get_pipeline_summary()["pipeline_summary"]
+        self.assertEqual(summary["total_cycles"], 1)
+        self.assertEqual(summary["completed_cycles"], 1)
+        all_cycles = self.pipeline.get_all_cycles()
+        self.assertEqual(len(all_cycles), 1)
+
+    def test_invalid_cycle_paths_and_suspend_resume(self):
+        self.assertFalse(self.pipeline.start_research_cycle("missing"))
+        missing_result = self.pipeline.execute_research_phase("missing", ResearchPhase.OBSERVE)
+        self.assertIn("error", missing_result)
+        self.assertFalse(self.pipeline.suspend_research_cycle("missing"))
+        self.assertFalse(self.pipeline.resume_research_cycle("missing"))
+
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="state-cycle",
+            description="state test",
+            objective="state transitions",
+            scope="src/research",
+            researchers=["tester"],
+        )
+        self.assertTrue(self.pipeline.start_research_cycle(cycle.cycle_id))
+        self.assertTrue(self.pipeline.suspend_research_cycle(cycle.cycle_id))
+        self.assertTrue(self.pipeline.resume_research_cycle(cycle.cycle_id))
+
+    def test_execute_requires_active_cycle(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="inactive-cycle",
+            description="inactive",
+            objective="inactive",
+            scope="src/research",
+            researchers=["tester"],
+        )
+        result = self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.OBSERVE)
+        self.assertIn("error", result)
+
+    def test_collect_and_resolve_ctext_config(self):
+        pipeline = ResearchPipeline(
+            {
+                "ctext_corpus": {
+                    "enabled": True,
+                    "whitelist": {"enabled": True, "default_groups": ["jing"]},
+                }
+            }
+        )
+        self.assertTrue(pipeline._should_collect_ctext_corpus({}))
+        self.assertEqual(pipeline._resolve_observe_data_source({}), "ctext_whitelist")
+        self.assertEqual(pipeline._resolve_whitelist_groups({}), ["jing"])
+        pipeline.cleanup()
+
+    @patch("src.research.research_pipeline.CTextCorpusCollector.cleanup")
+    @patch("src.research.research_pipeline.CTextCorpusCollector.execute", side_effect=RuntimeError("x"))
+    @patch("src.research.research_pipeline.CTextCorpusCollector.initialize", return_value=True)
+    def test_collect_ctext_observation_exception(self, _init, _execute, _cleanup):
+        result = self.pipeline._collect_ctext_observation_corpus({})
+        self.assertIn("error", result)
+
+    @patch("src.research.research_pipeline.CTextCorpusCollector.initialize", return_value=False)
+    def test_collect_ctext_observation_init_fail(self, _init):
+        result = self.pipeline._collect_ctext_observation_corpus({})
+        self.assertIn("error", result)
+
+    def test_run_ingestion_empty_entries(self):
+        with patch.object(self.pipeline, "_extract_corpus_text_entries", return_value=[]):
+            result = self.pipeline._run_observe_ingestion_pipeline({"documents": []}, {})
+        self.assertEqual(result["processed_document_count"], 0)
+
+    @patch("src.research.research_pipeline.DocumentPreprocessor.initialize", return_value=False)
+    def test_run_ingestion_preprocessor_init_fail(self, _pre_init):
+        with patch.object(
+            self.pipeline,
+            "_extract_corpus_text_entries",
+            return_value=[{"urn": "u", "title": "t", "text": "abc"}],
+        ):
+            result = self.pipeline._run_observe_ingestion_pipeline({"documents": [{}]}, {})
+        self.assertIn("error", result)
+
+    def test_execute_phase_internal_unknown_phase(self):
+        class _FakePhase:
+            value = "unknown"
+
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="unknown-phase",
+            description="d",
+            objective="o",
+            scope="s",
+            researchers=["tester"],
+        )
+        result = self.pipeline._execute_phase_internal(_FakePhase(), cycle, {})  # type: ignore[arg-type]
+        self.assertIn("error", result)
+
+    def test_should_run_flag_branches(self):
+        pipeline = ResearchPipeline(
+            {
+                "observe_pipeline": {"enabled": True},
+                "literature_retrieval": {"enabled": False},
+                "clinical_gap_analysis": {"enabled": True},
+            }
+        )
+        self.assertTrue(pipeline._should_run_observe_ingestion({}))
+        self.assertFalse(pipeline._should_run_observe_literature({}))
+        self.assertTrue(pipeline._should_run_clinical_gap_analysis({}))
+        self.assertFalse(pipeline._should_run_observe_ingestion({"run_preprocess_and_extract": False}))
+        self.assertTrue(pipeline._should_run_observe_literature({"run_literature_retrieval": True}))
+        self.assertFalse(pipeline._should_run_clinical_gap_analysis({"run_clinical_gap_analysis": False}))
+        pipeline.cleanup()
+
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.initialize", return_value=False)
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.initialize", return_value=True)
+    @patch("src.research.research_pipeline.DocumentPreprocessor.initialize", return_value=True)
+    def test_run_ingestion_semantic_init_fail(self, _pre, _ext, _sem):
+        with patch.object(
+            self.pipeline,
+            "_extract_corpus_text_entries",
+            return_value=[{"urn": "u", "title": "t", "text": "abc"}],
+        ):
+            result = self.pipeline._run_observe_ingestion_pipeline({"documents": [{}]}, {})
+        self.assertIn("error", result)
+
+    def test_run_clinical_gap_analysis_success_and_error(self):
+        class _GoodEngine:
+            def __init__(self, **kwargs):
+                _ = kwargs
+
+            def load(self):
+                return None
+
+            def clinical_gap_analysis(self, **kwargs):
+                _ = kwargs
+                return "ok"
+
+            def unload(self):
+                return None
+
+        class _BadEngine(_GoodEngine):
+            def load(self):
+                raise RuntimeError("load failed")
+
+        with patch("src.research.research_pipeline.LLMEngine", _GoodEngine):
+            ok = self.pipeline._run_clinical_gap_analysis({}, [], {})
+            self.assertEqual(ok.get("report"), "ok")
+
+        with patch("src.research.research_pipeline.LLMEngine", _BadEngine):
+            bad = self.pipeline._run_clinical_gap_analysis({}, [], {})
+            self.assertIn("error", bad)
+
+    @patch("src.research.research_pipeline.LiteratureRetriever.close")
+    @patch("src.research.research_pipeline.LiteratureRetriever.search")
+    @patch.object(ResearchPipeline, "_run_clinical_gap_analysis")
+    def test_literature_pipeline_with_clinical_gap(self, mock_gap, mock_search, mock_close):
+        mock_close.return_value = None
+        mock_gap.return_value = {"report": "ok"}
+        mock_search.return_value = {
+            "query": "q",
+            "sources": ["pubmed"],
+            "records": [
+                {
+                    "source": "pubmed",
+                    "title": "t",
+                    "year": 2024,
+                    "doi": "",
+                    "url": "u",
+                    "abstract": "randomized efficacy",
+                }
+            ],
+            "query_plans": [],
+            "source_stats": {"pubmed": {"count": 1}},
+            "errors": [],
+        }
+        pipeline = ResearchPipeline({"literature_retrieval": {"enabled": True}, "clinical_gap_analysis": {"enabled": True}})
+        result = pipeline._run_observe_literature_pipeline({"run_clinical_gap_analysis": True})
+        self.assertIn("clinical_gap_analysis", result)
+        self.assertEqual(result["clinical_gap_analysis"], {"report": "ok"})
+        pipeline.cleanup()
+
+    @patch("src.research.research_pipeline.SemanticGraphBuilder")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor")
+    @patch("src.research.research_pipeline.DocumentPreprocessor")
+    def test_run_ingestion_happy_path_with_mocks(self, mock_pre, mock_ext, mock_sem):
+        pre = Mock()
+        pre.initialize.return_value = True
+        pre.execute.return_value = {"processed_text": "p"}
+        pre.cleanup.return_value = None
+
+        ext = Mock()
+        ext.initialize.return_value = True
+        ext.execute.return_value = {
+            "entities": [{"confidence": 0.8}],
+            "statistics": {"by_type": {"herb": 1}},
+            "confidence_scores": {"average_confidence": 0.8},
+        }
+        ext.cleanup.return_value = None
+
+        sem = Mock()
+        sem.initialize.return_value = True
+        sem.execute.return_value = {
+            "graph_statistics": {"nodes_count": 2, "edges_count": 1, "relationships_by_type": {"r": 1}}
+        }
+        sem.cleanup.return_value = None
+
+        mock_pre.return_value = pre
+        mock_ext.return_value = ext
+        mock_sem.return_value = sem
+
+        with patch.object(
+            self.pipeline,
+            "_extract_corpus_text_entries",
+            return_value=[{"urn": "u", "title": "t", "text": "abc"}],
+        ):
+            result = self.pipeline._run_observe_ingestion_pipeline({"documents": [{}]}, {})
+
+        self.assertEqual(result["processed_document_count"], 1)
+        self.assertEqual(result["aggregate"]["total_entities"], 1)
+
+    @patch("src.research.research_pipeline.LiteratureRetriever.close")
+    @patch("src.research.research_pipeline.LiteratureRetriever.search")
+    def test_literature_max_results_is_clamped(self, mock_search, mock_close):
+        mock_close.return_value = None
+        mock_search.return_value = {
+            "query": "q",
+            "sources": ["pubmed"],
+            "records": [],
+            "query_plans": [],
+            "source_stats": {},
+            "errors": [],
+        }
+
+        pipeline = ResearchPipeline({"literature_retrieval": {"enabled": True}})
+        pipeline._run_observe_literature_pipeline(
+            {
+                "run_literature_retrieval": True,
+                "literature_query": "q",
+                "literature_max_results": 999,
+            }
+        )
+
+        self.assertEqual(mock_search.call_args.kwargs["max_results_per_source"], 50)
+        pipeline.cleanup()
+
+    def test_extract_entries_export_and_history(self):
+        entries = self.pipeline._extract_corpus_text_entries(
+            {
+                "documents": [
+                    {
+                        "urn": "u1",
+                        "title": "t1",
+                        "text": "a",
+                        "children": [{"urn": "u2", "title": "t2", "text": "b"}],
+                    }
+                ]
+            }
+        )
+        self.assertEqual(len(entries), 2)
+
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="export-cycle",
+            description="export test",
+            objective="export",
+            scope="src/research",
+            researchers=["tester"],
+        )
+        self.pipeline.start_research_cycle(cycle.cycle_id)
+        self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.HYPOTHESIS)
+
+        fd, output_path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        try:
+            self.assertTrue(self.pipeline.export_pipeline_data(output_path))
+            with open(output_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.assertIn("pipeline_info", data)
+            self.assertIn("research_cycles", data)
+            history = self.pipeline.get_cycle_history(cycle.cycle_id)
+            self.assertTrue(len(history) >= 2)
+        finally:
+            if os.path.exists(output_path):
+                os.remove(output_path)
+
+    def test_complete_cycle_without_start_fails(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="not-started",
+            description="d",
+            objective="o",
+            scope="s",
+            researchers=["tester"],
+        )
+        self.assertFalse(self.pipeline.complete_research_cycle(cycle.cycle_id))
+
+    def test_cleanup_failure_returns_false(self):
+        pipeline = ResearchPipeline({})
+        bad_executor = Mock()
+        bad_executor.shutdown.side_effect = RuntimeError("shutdown failed")
+        pipeline.executor = bad_executor
+        self.assertFalse(pipeline.cleanup())
+
+
+if __name__ == "__main__":
+    unittest.main()

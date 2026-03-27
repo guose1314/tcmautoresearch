@@ -1,0 +1,542 @@
+# 中医古籍全自动研究系统 - 专业学术配置文件
+# 基于T/C IATCM 098-2023标准的配置文件
+
+# 系统基本信息
+system:
+  name: "中医古籍全自动研究系统"
+  version: "2.0.0"
+  description: "基于AI技术的中医古籍智能分析与研究系统"
+  author: "中医古籍全自动研究团队"
+  organization: "中医药研究院"
+  contact: "tcmautoresearch@example.com"
+  license: "MIT"
+  standards:
+    - "T/C IATCM 098-2023"
+    - "GB/T 15657"
+    - "ISO 21000"
+  principles:
+    - "系统性原则"
+    - "科学性原则"
+    - "实用性原则"
+    - "创新性原则"
+
+# 核心模块配置
+modules:
+  # 文档预处理模块
+  document_preprocessing:
+    enabled: true
+    name: "DocumentPreprocessor"
+    version: "2.0.0"
+    description: "中医古籍文档预处理模块"
+    priority: "high"
+    timeout: 30
+    max_concurrent: 4
+    encoding_detection: true
+    text_normalization: true
+    line_break_fixing: true
+    metadata_extraction: true
+    quality_threshold: 0.95
+
+  # 实体抽取模块
+  entity_extraction:
+    enabled: true
+    name: "EntityExtractor"
+    version: "2.0.0"
+    description: "中医古籍实体抽取模块"
+    priority: "high"
+    timeout: 60
+    max_concurrent: 4
+    threshold: 0.7
+    max_entities: 1000
+    use_llm: true
+    llm_model: "Qwen1.5-7B-Chat"
+    llm_temperature: 0.7
+    llm_max_tokens: 2048
+    semantic_matching: true
+    pattern_matching: true
+
+  # 语义建模模块
+  semantic_modeling:
+    enabled: true
+    name: "SemanticModeler"
+    version: "2.0.0"
+    description: "中医古籍语义建模模块"
+    priority: "high"
+    timeout: 120
+    max_concurrent: 2
+    embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+    graph_algorithm: "networkx"
+    knowledge_graph_storage: "sqlite"
+    graph_quality_threshold: 0.90
+    node_embedding_dimension: 384
+
+  # 推理分析模块
+  reasoning:
+    enabled: true
+    name: "ReasoningEngine"
+    version: "2.0.0"
+    description: "中医古籍推理分析模块"
+    priority: "high"
+    timeout: 180
+    max_concurrent: 2
+    inference_engine: "rule_based"
+    knowledge_base: "sqlite"
+    reasoning_depth: 5
+    confidence_threshold: 0.85
+    academic_validation: true
+
+  # 输出生成模块
+  output_generation:
+    enabled: true
+    name: "OutputGenerator"
+    version: "2.0.0"
+    description: "中医古籍输出生成模块"
+    priority: "high"
+    timeout: 30
+    max_concurrent: 4
+    output_formats:
+      - "json"
+      - "xml"
+      - "pdf"
+      - "markdown"
+    academic_templates:
+      - "research_report"
+      - "academic_paper"
+      - "technical_document"
+    metadata_inclusion: true
+    quality_assurance: true
+
+  # 自我学习模块
+  self_learning:
+    enabled: true
+    name: "SelfLearningEngine"
+    version: "2.0.0"
+    description: "系统自我学习模块"
+    priority: "medium"
+    timeout: 300
+    max_concurrent: 1
+    learning_threshold: 0.7
+    min_performance_for_improvement: 0.8
+    learning_data_file: "./data/learning_data.pkl"
+    model_improvement_log: "./data/model_improvement.log"
+    auto_update: true
+    performance_monitoring: true
+
+  # 研究框架模块
+  research_framework:
+    enabled: true
+    name: "ResearchFramework"
+    version: "2.0.0"
+    description: "学术研究框架模块"
+    priority: "high"
+    timeout: 120
+    max_concurrent: 2
+    hypothesis_generation: true
+    experiment_design: true
+    insight_discovery: true
+    academic_validation: true
+    standard_compliance: true
+
+# 模型配置
+models:
+  # 大语言模型配置
+  llm:
+    name: "Qwen1.5-7B-Chat"
+    path: "./models/qwen1.5-7b-chat-q8_0.gguf"
+    temperature: 0.7
+    max_tokens: 2048
+    top_p: 0.9
+    frequency_penalty: 0.0
+    presence_penalty: 0.0
+    chat_mode: true
+    streaming: false
+    cache_enabled: true
+    cache_size: 1000
+
+  # 嵌入模型配置
+  embedding:
+    name: "all-MiniLM-L6-v2"
+    path: "./models/embedding"
+    dimension: 384
+    similarity_threshold: 0.8
+    batch_size: 32
+    max_sequence_length: 512
+    normalization: true
+
+  # 专用中医模型
+  traditional_chinese_medicine:
+    name: "TCM-BERT"
+    path: "./models/tcm-bert-base"
+    max_length: 512
+    num_labels: 10
+    fine_tuned: true
+    training_dataset: "tcm_corpus"
+    validation_dataset: "tcm_validation"
+
+# 数据库配置
+database:
+  type: "sqlite"
+  path: "./data/tcmautoresearch.db"
+  connection_pool_size: 10
+  connection_timeout: 30
+  max_overflow: 20
+  echo: false
+  backup_enabled: true
+  backup_frequency: "daily"
+  backup_retention_days: 30
+
+# 输入输出配置
+input:
+  directory: "./corpus"
+  file_extensions:
+    - ".txt"
+    - ".md"
+    - ".docx"
+    - ".pdf"
+    - ".epub"
+  max_file_size: 10485760  # 单位: 字节 (10MB)
+  encoding_detection: true
+  recursive_scan: true
+  exclude_patterns:
+    - "*.tmp"
+    - "*.bak"
+    - "__pycache__"
+    - ".git"
+
+output:
+  directory: "./output"
+  format: "json"
+  include_metadata: true
+  compression: true
+  backup_enabled: true
+  backup_directory: "./backup"
+  naming_convention: "timestamp"
+  file_prefix: "tcmautoresearch_"
+  file_suffix: "_results"
+  preserve_structure: true
+
+# 性能配置
+performance:
+  max_workers: 4  # 单位: 个
+  timeout: 600  # 单位: 秒
+  retry_attempts: 3  # 单位: 次
+  retry_delay: 1.0  # 单位: 秒
+  memory_limit_mb: 4096  # 单位: MB
+  cpu_threshold: 80  # 单位: 百分比
+  memory_threshold: 85  # 单位: 百分比
+  throughput_target: 1000  # 单位: 条/秒
+  concurrency_target: 10  # 单位: 个
+
+# 日志配置
+logging:
+  level: "INFO"
+  file: "./logs/tcmautoresearch.log"
+  max_file_size: 10485760  # 单位: 字节 (10MB)
+  backup_count: 5  # 单位: 个
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  console_output: true
+  file_output: true
+  log_to_db: false
+  log_rotation: "daily"
+
+# 监控配置
+monitoring:
+  enabled: true
+  interval_seconds: 60
+  metrics:
+    system_health: true
+    cpu_usage: true
+    memory_usage: true
+    disk_usage: true
+    network_usage: true
+    processing_time: true
+    throughput: true
+    error_rate: true
+    quality_metrics: true
+    academic_compliance: true
+  alerting:
+    enabled: true
+    thresholds:
+      cpu_usage: 80
+
+# ctext 标准语料采集配置
+ctext_corpus:
+  enabled: true
+  api_base: "https://api.ctext.org"
+  request_interval_sec: 0.2
+  retry_count: 2
+  timeout_sec: 20
+  whitelist:
+    enabled: true
+    path: "./data/ctext_whitelist.json"
+    default_groups:
+      - "four_books"
+      - "five_classics"
+      - "tcm_classics"
+  batch_manifest_output: "./output/ctext_batch_manifest.json"
+      memory_usage: 85
+      error_rate: 0.05
+      processing_time: 300
+    notification_channels:
+      - "email"
+      - "slack"
+      - "webhook"
+    email_recipients:
+      - "admin@example.com"
+      - "research-team@example.com"
+    webhook_url: "https://example.invalid/slack-webhook-placeholder"
+
+# 安全配置
+security:
+  data_encryption:
+    enabled: true
+    algorithm: "AES-256-GCM"
+    key_rotation: "monthly"
+    key_storage: "secure"
+  access_control:
+    enabled: true
+    authentication: "jwt"
+    authorization: "role-based"
+    session_timeout: 3600
+    rate_limiting: true
+    rate_limit_requests: 100
+    rate_limit_window: 60
+  audit_logging:
+    enabled: true
+    log_sensitive_data: false
+    log_level: "INFO"
+    retention_days: 90
+  data_privacy:
+    enabled: true
+    anonymization: true
+    consent_management: true
+    data_retention: "5 years"
+    compliance_check: true
+
+# 学术规范配置
+academic:
+  standards_compliance:
+    enabled: true
+    standards:
+      - "T/C IATCM 098-2023"
+      - "GB/T 15657"
+      - "ISO 21000"
+    compliance_score_threshold: 0.95
+    quality_assurance:
+      scientific_validity: 0.95
+      methodological_quality: 0.90
+      reproducibility: 0.95
+      standard_compliance: 0.98
+  research_quality:
+    quality_metrics:
+      completeness: 0.95
+      accuracy: 0.92
+      consistency: 0.90
+      reliability: 0.95
+    academic_relevance: 0.90
+    validation_methods:
+      - "peer_review"
+      - "cross_validation"
+      - "reproducibility_test"
+      - "standard_compliance_check"
+  citation_management:
+    enabled: true
+    format: "GB/T 7714-2015"
+    automatic_citation: true
+    reference_extraction: true
+    bibliography_generation: true
+
+# 迭代循环配置
+iteration_cycle:
+  enabled: true
+  max_iterations: 10
+  timeout_seconds: 300
+  enable_auto_repair: true
+  enable_performance_monitoring: true
+  enable_test_coverage: true
+  auto_retry_attempts: 3
+  confidence_threshold: 0.7
+  quality_assurance_level: "high"
+  parallel_execution: true
+  max_concurrent_tasks: 4
+  cycle_validation:
+    enabled: true
+    validation_frequency: "every_iteration"
+    quality_metrics:
+      - "completeness"
+      - "accuracy"
+      - "consistency"
+      - "scientific_validity"
+      - "methodological_quality"
+  academic_validation:
+    enabled: true
+    validation_level: "high"
+    academic_metrics:
+      - "scientific_validity"
+      - "methodological_rigor"
+      - "reproducibility"
+      - "standard_compliance"
+    compliance_threshold: 0.95
+
+# 系统资源配置
+resources:
+  cpu:
+    cores: 8  # 单位: 个
+    allocation: "dynamic"
+    scheduling: "round_robin"
+    priority: "high"
+  memory:
+    total_mb: 16384  # 单位: MB
+    allocation: "dynamic"
+    swap_enabled: true
+    swap_size_mb: 4096  # 单位: MB
+  storage:
+    total_gb: 100  # 单位: GB
+    allocation: "dynamic"
+    backup_storage: "./backup"
+    temp_storage: "./temp"
+  network:
+    bandwidth_limit: 1000Mbps  # 单位: Mbps
+    connection_timeout: 30  # 单位: 秒
+    retry_count: 3  # 单位: 次
+    retry_delay: 1.0  # 单位: 秒
+
+# 环境配置
+environment:
+  development:
+    name: "Development Environment"
+    description: "用于开发和测试的环境"
+    debug: true
+    # 日志级别策略：开发环境使用DEBUG，便于详细调试
+    logging_level: "DEBUG"
+    test_mode: true
+    performance_monitoring: true
+    data_privacy: false
+    security_level: "medium"
+  staging:
+    name: "Staging Environment"
+    description: "用于预生产测试的环境"
+    debug: false
+    # 日志级别策略：预生产环境使用INFO，记录关键信息
+    logging_level: "INFO"
+    test_mode: false
+    performance_monitoring: true
+    data_privacy: true
+    security_level: "high"
+  production:
+    name: "Production Environment"
+    description: "用于正式运行的环境"
+    debug: false
+    # 日志级别策略：生产环境使用WARN，仅记录警告及以上级别日志
+    logging_level: "WARN"
+    test_mode: false
+    performance_monitoring: true
+    data_privacy: true
+    security_level: "maximum"
+
+# 系统维护配置
+maintenance:
+  scheduled_tasks:
+    - name: "daily_backup"
+      schedule: "0 0 * * *"
+      enabled: true
+      type: "backup"
+      retention_days: 30
+    - name: "weekly_cleanup"
+      schedule: "0 0 * * 0"
+      enabled: true
+      type: "cleanup"
+      retention_days: 7
+    - name: "monthly_optimization"
+      schedule: "0 0 1 * *"
+      enabled: true
+      type: "optimization"
+      retention_days: 90
+  auto_updates:
+    enabled: true
+    check_frequency: "daily"
+    update_level: "patch"
+    rollback_enabled: true
+    backup_before_update: true
+  health_check:
+    enabled: true
+    interval_seconds: 300
+    timeout_seconds: 30
+    health_metrics:
+      - "cpu_usage"
+      - "memory_usage"
+      - "disk_space"
+      - "network_connectivity"
+      - "model_loading"
+      - "database_connection"
+    alert_thresholds:
+      cpu_usage: 85
+      memory_usage: 85
+      disk_space: 90
+
+# 高级配置
+advanced:
+  caching:
+    enabled: true
+    cache_size: 10000
+    cache_ttl: 3600
+    cache_strategy: "LRU"
+    cache_types:
+      - "preprocessing_results"
+      - "entity_extraction"
+      - "semantic_graph"
+      - "reasoning_results"
+  parallel_processing:
+    enabled: true
+    max_workers: 8
+    worker_pool_size: 4
+    task_queue_size: 100
+    priority_scheduling: true
+  batch_processing:
+    enabled: true
+    batch_size: 10
+    batch_timeout: 30
+    batch_strategy: "time_based"
+  async_processing:
+    enabled: true
+    event_loop: "asyncio"
+    enabled: false
+    # 配置分布式节点示例: 
+    # cluster_nodes:
+    #   - "192.168.1.101:8000"
+    #   - "192.168.1.102:8000"
+    cluster_nodes: []
+    load_balancing: "round_robin"
+    fault_tolerance: true
+    cluster_nodes: []
+    load_balancing: "round_robin"
+    fault_tolerance: true
+
+# 实验室配置（学术研究专用）
+lab:
+  research_mode: true
+  academic_validation:
+    enabled: true
+    validation_level: "strict"
+    peer_review_required: true
+    publication_ready: true
+  data_management:
+    version_control: true
+    data_provenance: true
+    experiment_tracking: true
+    result_archiving: true
+  collaboration:
+    enabled: true
+    shared_workspace: true
+    version_control_system: "git"
+    collaboration_platform: "github"
+  research_templates:
+    research_report: "./templates/research_report_template.md"
+    academic_paper: "./templates/academic_paper_template.md"
+    technical_document: "./templates/technical_document_template.md"
+  quality_control:
+    automated_testing: true
+    manual_review: true
+    peer_review: true
+    external_validation: true
+    compliance_check: true
