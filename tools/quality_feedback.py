@@ -24,7 +24,7 @@ from typing import Dict, List
 
 DIMENSION_OWNER_MAP = {
     "gate_stability": "quality-governance",
-    "test_reliability": "test-hardening",
+    "test_reliability": "qa-engineering",
     "logic_health": "architecture-maintainers",
     "code_health": "module-owners",
     "architecture_health": "architecture-maintainers",
