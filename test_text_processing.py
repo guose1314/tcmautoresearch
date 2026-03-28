@@ -41,7 +41,7 @@ print(result['processed_text'][:150])
 
 print('\n【处理步骤】:')
 for step in result['processing_steps']:
-    print(f'  ✓ {step}')
+    print(f'  [OK] {step}')
 
 print('\n【元数据统计】:')
 metadata = result['metadata']
@@ -66,4 +66,4 @@ words = preprocessor.segment_text(test_phrase)
 print(f'  输入: {test_phrase}')
 print(f'  分词: {" / ".join(words)}')
 
-print('\n✅ 所有测试完成！')
+print('\n[DONE] 所有测试完成！')
