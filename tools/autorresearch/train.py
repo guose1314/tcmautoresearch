@@ -19,7 +19,7 @@ from pathlib import Path
 
 def compute_val_bpb(lr: float, dropout: float, wd: float, grad_clip: float, batch_size: int) -> float:
     # Synthetic but smooth objective with a known optimum.
-    # Best region around: lr = 0.0028, dropout = 0.13, wd=0.015, grad_clip = 0.95, batch_size = 128
+    # Best region around: lr = 0.0025, dropout = 0.1, wd=0.015, grad_clip = 0.8, batch_size = 128
     score = 1.25
     score += 120.0 * (lr - 0.0025) ** 2
     score += 1.5 * (dropout - 0.10) ** 2
@@ -43,10 +43,10 @@ def main() -> int:
     args = parser.parse_args()
 
     # ===== Tunable hypers (AutoResearch edits this block) =====
-    lr = 0.0028
-    dropout = 0.13
-    weight_decay = 0.02
-    grad_clip = 0.95
+    lr = 0.0025
+    dropout = 0.1
+    weight_decay = 0.015
+    grad_clip = 0.8
     batch_size = 128
     seq_len = 256
     hidden_size = 512
