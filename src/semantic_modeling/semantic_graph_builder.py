@@ -4,8 +4,7 @@
 支持方剂结构、性味归经、类方比较、现代药理学分析
 基于T/C IATCM 098-2023标准
 """
-import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import networkx as nx
 

@@ -163,10 +163,10 @@ python tools/quality_improvement_archive.py
 # 生成质量反馈报告（分级反馈 + 优先行动）
 python tools/quality_feedback.py
 
-# 运行创新激励评估（按贡献档案生成评分与奖励建议）
+# 运行创新激励评估（无反馈基线评估：仅按贡献档案生成评分与奖励建议，适用于首次运行或尚无反馈评分时）
 python tools/innovation_incentives.py --input docs/templates/innovation-profile.template.json
 
-# 运行创新激励自适应学习（带反馈分自动调权）
+# 运行创新激励自适应学习（带反馈分自动调权：使用如 4.0 的历史反馈评分对权重进行调整，适用于已有评审/回顾结果后的迭代优化）
 python tools/innovation_incentives.py --input docs/templates/innovation-profile.template.json --feedback 4.0
 
 # CI 会在 PR 和 main 分支变更时自动重新生成依赖关系图，产物位于 docs/architecture/

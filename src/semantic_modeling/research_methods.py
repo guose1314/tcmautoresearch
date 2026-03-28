@@ -4,10 +4,11 @@
 超分子化学与物理化学、古典文献知识考古、复杂性非线性动力学
 """
 
-import math
+import copy
+import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Tuple
 
 import networkx as nx
 import numpy as np
@@ -527,86 +528,133 @@ class ModernPharmacologyDatabase:
 
 class IntegratedResearchAnalyzer:
     """集成研究分析器 - 多维度研究切入点"""
-    
+
+    _perspective_cache: Dict[str, Dict[str, Any]] = {}
+    _component_properties_cache: Dict[str, Dict[str, Any]] = {}
+    _similar_formulas_cache: Dict[str, List[str]] = {}
+    _pharmacology_profile_cache: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+    _network_cache: Dict[Tuple[str, Tuple[str, ...]], Dict[str, Any]] = {}
+    _supramolecular_cache: Dict[Tuple[str, Tuple[str, ...]], Dict[str, Any]] = {}
+    _knowledge_archaeology_cache: Dict[Tuple[str, Tuple[str, ...]], Dict[str, Any]] = {}
+    _complexity_cache: Dict[Tuple[str, Tuple[str, ...]], Dict[str, Any]] = {}
+
     @classmethod
     def generate_research_perspective(cls, formula_name: str) -> Dict:
         """生成综合研究视角"""
-        
+        cached = cls._perspective_cache.get(formula_name)
+        if cached is not None:
+            return copy.deepcopy(cached)
+
+        structure = FormulaStructureAnalyzer.analyze_formula_structure(formula_name)
+        component_properties = cls._get_component_properties(formula_name)
+        herbs = tuple(sorted(component_properties.keys()))
+
         analysis = {
             "formula_name": formula_name,
-            
-            # 维度1：方剂结构
-            "structure_analysis": FormulaStructureAnalyzer.analyze_formula_structure(formula_name),
-            
-            # 维度2：性味归经
-            "component_properties": {},
-            
-            # 维度3：类方比较
-            "similar_formulas": [],
-            
-            # 维度4：现代药理学
-            "pharmacological_profile": {},
-
-            # 维度5：网络药理学与系统生物学
-            "network_pharmacology": {},
-
-            # 维度6：超分子化学与物理化学
-            "supramolecular_physicochemical": {},
-
-            # 维度7：古典文献数字化与知识考古
-            "knowledge_archaeology": {},
-
-            # 维度8：复杂性科学与非线性动力学
-            "complexity_dynamics": {}
+            "structure_analysis": structure,
+            "component_properties": component_properties,
+            "similar_formulas": cls._get_similar_formulas(formula_name),
+            "pharmacological_profile": cls._get_pharmacological_profile(herbs),
+            "network_pharmacology": cls._get_network_pharmacology(formula_name, herbs),
+            "supramolecular_physicochemical": cls._get_supramolecular_physicochemical(formula_name, herbs),
+            "knowledge_archaeology": cls._get_knowledge_archaeology(formula_name, herbs),
+            "complexity_dynamics": cls._get_complexity_dynamics(formula_name, herbs),
         }
-        
-        # 收集组成药物的性味归经
+
+        cls._perspective_cache[formula_name] = copy.deepcopy(analysis)
+        return analysis
+
+    @classmethod
+    def _get_component_properties(cls, formula_name: str) -> Dict[str, Any]:
+        cached = cls._component_properties_cache.get(formula_name)
+        if cached is not None:
+            return copy.deepcopy(cached)
+
+        properties: Dict[str, Any] = {}
         composition = FormulaStructureAnalyzer.get_formula_composition(formula_name)
-        for role, herbs in composition.items():
+        for herbs in composition.values():
             for herb in herbs:
-                if herb not in analysis["component_properties"]:
-                    analysis["component_properties"][herb] = HerbPropertyDatabase.get_herb_property(herb)
-        
-        # 查找类方
-        for family_name, formulas in FormulaComparator.FORMULA_FAMILIES.items():
+                if herb not in properties:
+                    properties[herb] = HerbPropertyDatabase.get_herb_property(herb)
+
+        cls._component_properties_cache[formula_name] = copy.deepcopy(properties)
+        return properties
+
+    @classmethod
+    def _get_similar_formulas(cls, formula_name: str) -> List[str]:
+        cached = cls._similar_formulas_cache.get(formula_name)
+        if cached is not None:
+            return list(cached)
+
+        similar: List[str] = []
+        for formulas in FormulaComparator.FORMULA_FAMILIES.values():
             if formula_name in formulas:
-                analysis["similar_formulas"] = [f for f in formulas if f != formula_name]
+                similar = [f for f in formulas if f != formula_name]
                 break
-        
-        # 现代药理学数据
-        for herb in analysis["component_properties"].keys():
-            analysis["pharmacological_profile"][herb] = {
+
+        cls._similar_formulas_cache[formula_name] = list(similar)
+        return similar
+
+    @classmethod
+    def _get_pharmacological_profile(cls, herbs: Tuple[str, ...]) -> Dict[str, Any]:
+        cached = cls._pharmacology_profile_cache.get(herbs)
+        if cached is not None:
+            return copy.deepcopy(cached)
+
+        profile: Dict[str, Any] = {}
+        for herb in herbs:
+            profile[herb] = {
                 "components": ModernPharmacologyDatabase.get_active_components(herb),
                 "efficacy": ModernPharmacologyDatabase.get_clinical_efficacy(herb),
-                "safety": ModernPharmacologyDatabase.get_safety_info(herb)
+                "safety": ModernPharmacologyDatabase.get_safety_info(herb),
             }
 
-        # 网络药理学与系统生物学
-        herbs = list(analysis["component_properties"].keys())
-        analysis["network_pharmacology"] = NetworkPharmacologySystemBiologyAnalyzer.analyze_formula_network(
-            formula_name,
-            herbs,
-        )
+        cls._pharmacology_profile_cache[herbs] = copy.deepcopy(profile)
+        return profile
 
-        # 超分子化学与物理化学
-        analysis["supramolecular_physicochemical"] = SupramolecularPhysicochemicalAnalyzer.analyze_formula_physicochemical(
-            formula_name,
-            herbs,
-        )
+    @classmethod
+    def _get_network_pharmacology(cls, formula_name: str, herbs: Tuple[str, ...]) -> Dict[str, Any]:
+        key = (formula_name, herbs)
+        cached = cls._network_cache.get(key)
+        if cached is not None:
+            return copy.deepcopy(cached)
 
-        # 古典文献数字化与知识考古
-        analysis["knowledge_archaeology"] = ClassicalLiteratureArchaeologyAnalyzer.analyze_formula_knowledge_archaeology(
-            formula_name,
-            herbs,
-        )
+        value = NetworkPharmacologySystemBiologyAnalyzer.analyze_formula_network(formula_name, list(herbs))
+        cls._network_cache[key] = copy.deepcopy(value)
+        return value
 
-        # 复杂性科学与非线性动力学
-        analysis["complexity_dynamics"] = ComplexityNonlinearDynamicsAnalyzer.analyze_formula_complexity_dynamics(
-            formula_name,
-            herbs,
-        )
-        
-        return analysis
+    @classmethod
+    def _get_supramolecular_physicochemical(cls, formula_name: str, herbs: Tuple[str, ...]) -> Dict[str, Any]:
+        key = (formula_name, herbs)
+        cached = cls._supramolecular_cache.get(key)
+        if cached is not None:
+            return copy.deepcopy(cached)
+
+        value = SupramolecularPhysicochemicalAnalyzer.analyze_formula_physicochemical(formula_name, list(herbs))
+        cls._supramolecular_cache[key] = copy.deepcopy(value)
+        return value
+
+    @classmethod
+    def _get_knowledge_archaeology(cls, formula_name: str, herbs: Tuple[str, ...]) -> Dict[str, Any]:
+        key = (formula_name, herbs)
+        cached = cls._knowledge_archaeology_cache.get(key)
+        if cached is not None:
+            return copy.deepcopy(cached)
+
+        value = ClassicalLiteratureArchaeologyAnalyzer.analyze_formula_knowledge_archaeology(formula_name, list(herbs))
+        cls._knowledge_archaeology_cache[key] = copy.deepcopy(value)
+        return value
+
+    @classmethod
+    def _get_complexity_dynamics(cls, formula_name: str, herbs: Tuple[str, ...]) -> Dict[str, Any]:
+        key = (formula_name, herbs)
+        cached = cls._complexity_cache.get(key)
+        if cached is not None:
+            return copy.deepcopy(cached)
+
+        value = ComplexityNonlinearDynamicsAnalyzer.analyze_formula_complexity_dynamics(formula_name, list(herbs))
+        cls._complexity_cache[key] = copy.deepcopy(value)
+        return value
 
 
 # ============================================================================
@@ -997,6 +1045,15 @@ class ResearchScoringPanel:
 class SummaryAnalysisEngine:
     """总结分析：频率/卡方、关联规则、复杂网络、聚类与因子、强化剂量、隐结构、时间序列剂量反应、贝叶斯网络"""
 
+    _freq_chi_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    _association_cache: Dict[str, Dict[str, Any]] = {}
+    _network_cache: Dict[str, Dict[str, Any]] = {}
+    _cluster_factor_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    _reinforced_dosage_cache: Dict[str, Dict[str, Any]] = {}
+    _latent_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    _time_dose_cache: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    _bayes_cache: Dict[str, Dict[str, Any]] = {}
+
     DEFAULT_FORMULA_RECORDS: List[Dict[str, Any]] = [
         {
             "formula": "补中益气汤",
@@ -1041,22 +1098,61 @@ class SummaryAnalysisEngine:
     ]
 
     @classmethod
+    def _fingerprint(cls, value: Any) -> str:
+        """稳定序列化签名，用于细粒度缓存键。"""
+        try:
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        except TypeError:
+            return repr(value)
+
+    @classmethod
     def analyze(cls, context: Dict[str, Any]) -> Dict[str, Any]:
         records = context.get("summary_formula_records") or cls.DEFAULT_FORMULA_RECORDS
         transactions = [r.get("herbs", []) for r in records]
         herbs = sorted(list({h for t in transactions for h in t}))
 
-        result = {
-            "frequency_chi_square": cls._frequency_and_chi_square(records, herbs),
-            "association_rules": cls._association_rules(transactions),
-            "complex_network": cls._complex_network_analysis(records),
-            "clustering_factor": cls._clustering_and_factor_analysis(records, herbs),
-            "reinforced_dosage": cls._reinforced_dosage_analysis(records),
-            "latent_structure": cls._latent_structure_model(records, herbs),
-            "time_series_dose_response": cls._time_series_and_dose_response(records, context),
-            "bayesian_network": cls._bayesian_network_analysis(records),
+        records_fp = cls._fingerprint(records)
+        herbs_fp = cls._fingerprint(herbs)
+        tx_fp = cls._fingerprint(transactions)
+        ts_fp = cls._fingerprint(context.get("time_series_data"))
+        dr_fp = cls._fingerprint(context.get("dose_response_data"))
+
+        freq_key = (records_fp, herbs_fp)
+        assoc_key = tx_fp
+        network_key = records_fp
+        cluster_key = (records_fp, herbs_fp)
+        reinforced_key = "default"
+        latent_key = (records_fp, herbs_fp)
+        time_dose_key = (records_fp, ts_fp, dr_fp)
+        bayes_key = records_fp
+
+        if freq_key not in cls._freq_chi_cache:
+            cls._freq_chi_cache[freq_key] = cls._frequency_and_chi_square(records, herbs)
+        if assoc_key not in cls._association_cache:
+            cls._association_cache[assoc_key] = cls._association_rules(transactions)
+        if network_key not in cls._network_cache:
+            cls._network_cache[network_key] = cls._complex_network_analysis(records)
+        if cluster_key not in cls._cluster_factor_cache:
+            cls._cluster_factor_cache[cluster_key] = cls._clustering_and_factor_analysis(records, herbs)
+        if reinforced_key not in cls._reinforced_dosage_cache:
+            cls._reinforced_dosage_cache[reinforced_key] = cls._reinforced_dosage_analysis(records)
+        if latent_key not in cls._latent_cache:
+            cls._latent_cache[latent_key] = cls._latent_structure_model(records, herbs)
+        if time_dose_key not in cls._time_dose_cache:
+            cls._time_dose_cache[time_dose_key] = cls._time_series_and_dose_response(records, context)
+        if bayes_key not in cls._bayes_cache:
+            cls._bayes_cache[bayes_key] = cls._bayesian_network_analysis(records)
+
+        return {
+            "frequency_chi_square": copy.deepcopy(cls._freq_chi_cache[freq_key]),
+            "association_rules": copy.deepcopy(cls._association_cache[assoc_key]),
+            "complex_network": copy.deepcopy(cls._network_cache[network_key]),
+            "clustering_factor": copy.deepcopy(cls._cluster_factor_cache[cluster_key]),
+            "reinforced_dosage": copy.deepcopy(cls._reinforced_dosage_cache[reinforced_key]),
+            "latent_structure": copy.deepcopy(cls._latent_cache[latent_key]),
+            "time_series_dose_response": copy.deepcopy(cls._time_dose_cache[time_dose_key]),
+            "bayesian_network": copy.deepcopy(cls._bayes_cache[bayes_key]),
         }
-        return result
 
     @classmethod
     def _frequency_and_chi_square(cls, records: List[Dict[str, Any]], herbs: List[str]) -> Dict[str, Any]:
@@ -1238,7 +1334,7 @@ class SummaryAnalysisEngine:
                 )
         except Exception:
             # fallback SVD
-            u, s, vt = np.linalg.svd(X, full_matrices=False)
+            _, _, vt = np.linalg.svd(X, full_matrices=False)
             if vt.size > 0:
                 for idx in range(min(2, vt.shape[0])):
                     comp = vt[idx]
