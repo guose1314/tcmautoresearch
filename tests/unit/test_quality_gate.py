@@ -138,7 +138,7 @@ class TestQualityGate(unittest.TestCase):
             root = Path(tmp)
             (root / "output").mkdir(parents=True)
             (root / "output" / "quality-assessment.json").write_text(
-                "{\"overall_score\": 82, \"grade\": \"B\", \"failed_dimensions\": [\"code_health\"], \"dimension_scores\": {\"code_health\": 72}}",
+                "{\"overall_score\": 82, \"grade\": \"B\", \"failed_dimensions\": [], \"dimension_scores\": {\"code_health\": 72}}",
                 encoding="utf-8",
             )
             (root / "output" / "continuous-improvement.json").write_text(
