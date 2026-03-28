@@ -127,7 +127,14 @@ function Invoke-Step {
             else {
                 "[STEP] $name" | Tee-Object -FilePath $LogFile -Append | Out-Null
                 "[CMD ] $($Step.Command)" | Tee-Object -FilePath $LogFile -Append | Out-Null
-                & powershell -NoProfile -ExecutionPolicy Bypass -Command $Step.Command 2>&1 | Tee-Object -FilePath $LogFile -Append | Out-Null
+                $previousEap = $ErrorActionPreference
+                $ErrorActionPreference = "Continue"
+                try {
+                    & powershell -NoProfile -ExecutionPolicy Bypass -Command $Step.Command 2>&1 | Tee-Object -FilePath $LogFile -Append | Out-Null
+                }
+                finally {
+                    $ErrorActionPreference = $previousEap
+                }
                 if ($LASTEXITCODE -ne 0) {
                     $result.status = "failed"
                     $result.exit_code = $LASTEXITCODE
