@@ -100,18 +100,18 @@ function Invoke-Step {
                 $result.message = "DryRun: commit step skipped"
             }
             else {
-                git add -A
+                git add -A | Out-Null
                 if ($LASTEXITCODE -ne 0) {
                     throw "git add failed"
                 }
 
-                git diff --cached --quiet
+                git diff --cached --quiet | Out-Null
                 if ($LASTEXITCODE -eq 0) {
                     $result.status = "skipped"
                     $result.message = "No staged changes, commit skipped"
                 }
                 else {
-                    git commit -m $Step.Message
+                    git commit -m $Step.Message | Out-Null
                     if ($LASTEXITCODE -ne 0) {
                         throw "git commit failed"
                     }
