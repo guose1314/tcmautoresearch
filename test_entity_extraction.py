@@ -88,7 +88,7 @@ for word in test_words:
     found = lexicon.contains(word)
     print(f'  "{word}": 包含={found}, 类型={word_type}')
 
-print(f'\n✅ 实体抽取升级测试完成！')
+print(f'\n[DONE] 实体抽取升级测试完成！')
 print(f'\n【后续扩展】')
 print(f'  1. 可通过 extractor.load_external_lexicon(path) 加载 THUOCL 等外部词典')
 print(f'  2. 当前词汇规模 {vocab_size:,}，理论可扩展至 30,000+ （通过加载大规模词典）')
