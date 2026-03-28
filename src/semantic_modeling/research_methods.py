@@ -13,6 +13,23 @@ from typing import Any, Dict, List, Tuple
 import networkx as nx
 import numpy as np
 
+# 预导入重型依赖，避免首次调用时的模块加载延迟
+try:
+    from scipy.stats import chi2_contingency as _chi2_contingency
+    _HAS_SCIPY = True
+except ImportError:
+    _HAS_SCIPY = False
+    _chi2_contingency = None
+
+try:
+    from sklearn.cluster import KMeans as _KMeans
+    from sklearn.decomposition import FactorAnalysis as _FactorAnalysis
+    from sklearn.decomposition import LatentDirichletAllocation as _LDA
+    _HAS_SKLEARN = True
+except ImportError:
+    _HAS_SKLEARN = False
+    _KMeans = _FactorAnalysis = _LDA = None
+
 # ============================================================================
 # 1. 方剂结构分析 - Formula Structure Analysis
 # ============================================================================
@@ -543,7 +560,7 @@ class IntegratedResearchAnalyzer:
         """生成综合研究视角"""
         cached = cls._perspective_cache.get(formula_name)
         if cached is not None:
-            return copy.deepcopy(cached)
+            return cached  # 缓存对象仅读，无需二次深拷贝
 
         structure = FormulaStructureAnalyzer.analyze_formula_structure(formula_name)
         component_properties = cls._get_component_properties(formula_name)
@@ -568,7 +585,7 @@ class IntegratedResearchAnalyzer:
     def _get_component_properties(cls, formula_name: str) -> Dict[str, Any]:
         cached = cls._component_properties_cache.get(formula_name)
         if cached is not None:
-            return copy.deepcopy(cached)
+            return cached
 
         properties: Dict[str, Any] = {}
         composition = FormulaStructureAnalyzer.get_formula_composition(formula_name)
@@ -584,7 +601,7 @@ class IntegratedResearchAnalyzer:
     def _get_similar_formulas(cls, formula_name: str) -> List[str]:
         cached = cls._similar_formulas_cache.get(formula_name)
         if cached is not None:
-            return list(cached)
+            return cached
 
         similar: List[str] = []
         for formulas in FormulaComparator.FORMULA_FAMILIES.values():
@@ -599,7 +616,7 @@ class IntegratedResearchAnalyzer:
     def _get_pharmacological_profile(cls, herbs: Tuple[str, ...]) -> Dict[str, Any]:
         cached = cls._pharmacology_profile_cache.get(herbs)
         if cached is not None:
-            return copy.deepcopy(cached)
+            return cached
 
         profile: Dict[str, Any] = {}
         for herb in herbs:
@@ -617,7 +634,7 @@ class IntegratedResearchAnalyzer:
         key = (formula_name, herbs)
         cached = cls._network_cache.get(key)
         if cached is not None:
-            return copy.deepcopy(cached)
+            return cached
 
         value = NetworkPharmacologySystemBiologyAnalyzer.analyze_formula_network(formula_name, list(herbs))
         cls._network_cache[key] = copy.deepcopy(value)
@@ -628,7 +645,7 @@ class IntegratedResearchAnalyzer:
         key = (formula_name, herbs)
         cached = cls._supramolecular_cache.get(key)
         if cached is not None:
-            return copy.deepcopy(cached)
+            return cached
 
         value = SupramolecularPhysicochemicalAnalyzer.analyze_formula_physicochemical(formula_name, list(herbs))
         cls._supramolecular_cache[key] = copy.deepcopy(value)
@@ -639,7 +656,7 @@ class IntegratedResearchAnalyzer:
         key = (formula_name, herbs)
         cached = cls._knowledge_archaeology_cache.get(key)
         if cached is not None:
-            return copy.deepcopy(cached)
+            return cached
 
         value = ClassicalLiteratureArchaeologyAnalyzer.analyze_formula_knowledge_archaeology(formula_name, list(herbs))
         cls._knowledge_archaeology_cache[key] = copy.deepcopy(value)
@@ -650,7 +667,7 @@ class IntegratedResearchAnalyzer:
         key = (formula_name, herbs)
         cached = cls._complexity_cache.get(key)
         if cached is not None:
-            return copy.deepcopy(cached)
+            return cached
 
         value = ComplexityNonlinearDynamicsAnalyzer.analyze_formula_complexity_dynamics(formula_name, list(herbs))
         cls._complexity_cache[key] = copy.deepcopy(value)
@@ -1054,6 +1071,9 @@ class SummaryAnalysisEngine:
     _time_dose_cache: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
     _bayes_cache: Dict[str, Dict[str, Any]] = {}
 
+    # 完整分析结果缓存（records_fp → result）
+    _full_result_cache: Dict[str, Dict[str, Any]] = {}
+
     DEFAULT_FORMULA_RECORDS: List[Dict[str, Any]] = [
         {
             "formula": "补中益气汤",
@@ -1097,6 +1117,15 @@ class SummaryAnalysisEngine:
         },
     ]
 
+    # 预计算默认记录的 fingerprint（类级常量，避免每次 analyze 重新序列化）
+    _DEFAULT_RECORDS_FP: str = ""
+
+    @classmethod
+    def _get_default_fp(cls) -> str:
+        if not cls._DEFAULT_RECORDS_FP:
+            cls._DEFAULT_RECORDS_FP = cls._fingerprint(cls.DEFAULT_FORMULA_RECORDS)
+        return cls._DEFAULT_RECORDS_FP
+
     @classmethod
     def _fingerprint(cls, value: Any) -> str:
         """稳定序列化签名，用于细粒度缓存键。"""
@@ -1108,10 +1137,18 @@ class SummaryAnalysisEngine:
     @classmethod
     def analyze(cls, context: Dict[str, Any]) -> Dict[str, Any]:
         records = context.get("summary_formula_records") or cls.DEFAULT_FORMULA_RECORDS
+        using_default = records is cls.DEFAULT_FORMULA_RECORDS
+
+        # 快速路径：默认记录 + 无自定义时序/剂量数据 → 直接返回缓存
+        if using_default and not context.get("time_series_data") and not context.get("dose_response_data"):
+            cached = cls._full_result_cache.get("__default__")
+            if cached is not None:
+                return copy.copy(cached)  # 浅拷贝保护顶层 dict
+
         transactions = [r.get("herbs", []) for r in records]
         herbs = sorted(list({h for t in transactions for h in t}))
 
-        records_fp = cls._fingerprint(records)
+        records_fp = cls._get_default_fp() if using_default else cls._fingerprint(records)
         herbs_fp = cls._fingerprint(herbs)
         tx_fp = cls._fingerprint(transactions)
         ts_fp = cls._fingerprint(context.get("time_series_data"))
@@ -1143,16 +1180,22 @@ class SummaryAnalysisEngine:
         if bayes_key not in cls._bayes_cache:
             cls._bayes_cache[bayes_key] = cls._bayesian_network_analysis(records)
 
-        return {
-            "frequency_chi_square": copy.deepcopy(cls._freq_chi_cache[freq_key]),
-            "association_rules": copy.deepcopy(cls._association_cache[assoc_key]),
-            "complex_network": copy.deepcopy(cls._network_cache[network_key]),
-            "clustering_factor": copy.deepcopy(cls._cluster_factor_cache[cluster_key]),
-            "reinforced_dosage": copy.deepcopy(cls._reinforced_dosage_cache[reinforced_key]),
-            "latent_structure": copy.deepcopy(cls._latent_cache[latent_key]),
-            "time_series_dose_response": copy.deepcopy(cls._time_dose_cache[time_dose_key]),
-            "bayesian_network": copy.deepcopy(cls._bayes_cache[bayes_key]),
+        result = {
+            "frequency_chi_square": cls._freq_chi_cache[freq_key],
+            "association_rules": cls._association_cache[assoc_key],
+            "complex_network": cls._network_cache[network_key],
+            "clustering_factor": cls._cluster_factor_cache[cluster_key],
+            "reinforced_dosage": cls._reinforced_dosage_cache[reinforced_key],
+            "latent_structure": cls._latent_cache[latent_key],
+            "time_series_dose_response": cls._time_dose_cache[time_dose_key],
+            "bayesian_network": cls._bayes_cache[bayes_key],
         }
+
+        # 默认路径：缓存完整结果，下次直接快速返回
+        if using_default and not context.get("time_series_data") and not context.get("dose_response_data"):
+            cls._full_result_cache["__default__"] = result
+
+        return result
 
     @classmethod
     def _frequency_and_chi_square(cls, records: List[Dict[str, Any]], herbs: List[str]) -> Dict[str, Any]:
@@ -1164,21 +1207,12 @@ class SummaryAnalysisEngine:
                 herb_freq[h] = herb_freq.get(h, 0) + 1
 
         chi_square_items: List[Dict[str, Any]] = []
-        try:
-            from scipy.stats import chi2_contingency
 
-            def calc(a: int, b: int, c: int, d: int) -> Tuple[float, Any]:
-                chi2, p, _, _ = chi2_contingency([[a, b], [c, d]])
-                return float(chi2), float(p)
-
-        except Exception:
-            def calc(a: int, b: int, c: int, d: int) -> Tuple[float, Any]:
-                # 无 scipy 时采用 2x2 Pearson chi-square 近似（不提供 p 值）
-                n = a + b + c + d
-                num = n * (a * d - b * c) ** 2
-                den = (a + b) * (c + d) * (a + c) * (b + d)
-                chi2 = float(num / den) if den > 0 else 0.0
-                return chi2, None
+        def _chi2_fallback(a: int, b: int, c: int, d: int) -> Tuple[float, Any]:
+            n = a + b + c + d
+            num = n * (a * d - b * c) ** 2
+            den = (a + b) * (c + d) * (a + c) * (b + d)
+            return (float(num / den) if den > 0 else 0.0), None
 
         for herb in herbs:
             for syndrome in syndrome_values:
@@ -1186,15 +1220,14 @@ class SummaryAnalysisEngine:
                 b = sum(1 for r in records if herb in r.get("herbs", []) and r.get("syndrome") != syndrome)
                 c = sum(1 for r in records if herb not in r.get("herbs", []) and r.get("syndrome") == syndrome)
                 d = sum(1 for r in records if herb not in r.get("herbs", []) and r.get("syndrome") != syndrome)
-                try:
-                    chi2, p = calc(a, b, c, d)
-                except Exception:
-                    # scipy 在期望频数为0时会报错，回退到近似统计量
-                    n = a + b + c + d
-                    num = n * (a * d - b * c) ** 2
-                    den = (a + b) * (c + d) * (a + c) * (b + d)
-                    chi2 = float(num / den) if den > 0 else 0.0
-                    p = None
+                if _HAS_SCIPY and _chi2_contingency is not None:
+                    try:
+                        chi2, p, _, _ = _chi2_contingency([[a, b], [c, d]])
+                        chi2, p = float(chi2), float(p)
+                    except Exception:
+                        chi2, p = _chi2_fallback(a, b, c, d)
+                else:
+                    chi2, p = _chi2_fallback(a, b, c, d)
                 chi_square_items.append(
                     {
                         "herb": herb,
@@ -1303,50 +1336,45 @@ class SummaryAnalysisEngine:
         clusters_out: List[Dict[str, Any]] = []
         factors_out: List[Dict[str, Any]] = []
 
+        # 小数据集（≤200行）用纯 numpy k-means，避免触发 sklearn 线程池初始化
+        n_clusters = min(3, len(records))
         try:
-            from sklearn.cluster import KMeans
-            n_clusters = min(3, len(records))
-            model = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
-            labels = model.fit_predict(X)
+            labels = cls._numpy_kmeans(X, k=n_clusters)
             for i, label in enumerate(labels):
-                clusters_out.append(
-                    {
-                        "formula": records[i].get("formula"),
-                        "cluster": int(label),
-                    }
-                )
+                clusters_out.append({"formula": records[i].get("formula"), "cluster": int(label)})
         except Exception:
             clusters_out = [{"formula": r.get("formula"), "cluster": 0} for r in records]
 
-        try:
-            from sklearn.decomposition import FactorAnalysis
-            n_components = min(2, X.shape[1], X.shape[0])
-            fa = FactorAnalysis(n_components=n_components, random_state=42)
-            fa.fit(X)
-            loadings = fa.components_
-            for idx, comp in enumerate(loadings):
-                pairs = sorted([(herbs[j], abs(float(comp[j]))) for j in range(len(herbs))], key=lambda x: x[1], reverse=True)
-                factors_out.append(
-                    {
-                        "factor": idx,
-                        "top_herbs": [{"herb": h, "loading": round(v, 4)} for h, v in pairs[:5]],
-                    }
-                )
-        except Exception:
-            # fallback SVD
-            _, _, vt = np.linalg.svd(X, full_matrices=False)
-            if vt.size > 0:
-                for idx in range(min(2, vt.shape[0])):
-                    comp = vt[idx]
+        if _HAS_SKLEARN and _FactorAnalysis is not None:
+            try:
+                n_components = min(2, X.shape[1], X.shape[0])
+                fa = _FactorAnalysis(n_components=n_components, random_state=42)
+                fa.fit(X)
+                loadings = fa.components_
+                for idx, comp in enumerate(loadings):
                     pairs = sorted([(herbs[j], abs(float(comp[j]))) for j in range(len(herbs))], key=lambda x: x[1], reverse=True)
-                    factors_out.append(
-                        {
-                            "factor": idx,
-                            "top_herbs": [{"herb": h, "loading": round(v, 4)} for h, v in pairs[:5]],
-                        }
-                    )
+                    factors_out.append({"factor": idx, "top_herbs": [{"herb": h, "loading": round(v, 4)} for h, v in pairs[:5]]})
+            except Exception:
+                factors_out = cls._svd_fallback_factors(X, herbs)
+        else:
+            factors_out = cls._svd_fallback_factors(X, herbs)
 
         return {"clusters": clusters_out, "factors": factors_out}
+
+    @classmethod
+    def _svd_fallback_factors(cls, X: Any, herbs: List[str]) -> List[Dict[str, Any]]:
+        """SVD 兜底因子分析"""
+
+        factors_out: List[Dict[str, Any]] = []
+        @classmethod
+        def _numpy_kmeans_placeholder(): pass  # removed below
+        _, _, vt = np.linalg.svd(X, full_matrices=False)
+        if vt.size > 0:
+            for idx in range(min(2, vt.shape[0])):
+                comp = vt[idx]
+                pairs = sorted([(herbs[j], abs(float(comp[j]))) for j in range(len(herbs))], key=lambda x: x[1], reverse=True)
+                factors_out.append({"factor": idx, "top_herbs": [{"herb": h, "loading": round(v, 4)} for h, v in pairs[:5]]})
+        return factors_out
 
     @classmethod
     def _reinforced_dosage_analysis(cls, records: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1386,34 +1414,32 @@ class SummaryAnalysisEngine:
         X = np.array([[1.0 if h in r.get("herbs", []) else 0.0 for h in herbs] for r in records])
 
         topics: List[Dict[str, Any]] = []
-        try:
-            from sklearn.decomposition import LatentDirichletAllocation
-            n_comp = min(2, max(1, X.shape[0]))
-            lda = LatentDirichletAllocation(n_components=n_comp, random_state=42)
-            lda.fit(X)
-            comps = lda.components_
-            for i, comp in enumerate(comps):
-                pairs = sorted([(herbs[j], float(comp[j])) for j in range(len(herbs))], key=lambda x: x[1], reverse=True)
-                topics.append(
-                    {
-                        "topic": i,
-                        "top_herbs": [{"herb": h, "weight": round(w, 4)} for h, w in pairs[:5]],
-                    }
-                )
-        except Exception:
-            # fallback: SVD latent pattern
-            _, _, vt = np.linalg.svd(X, full_matrices=False)
-            for i in range(min(2, vt.shape[0])):
-                comp = vt[i]
-                pairs = sorted([(herbs[j], abs(float(comp[j]))) for j in range(len(herbs))], key=lambda x: x[1], reverse=True)
-                topics.append(
-                    {
-                        "topic": i,
-                        "top_herbs": [{"herb": h, "weight": round(w, 4)} for h, w in pairs[:5]],
-                    }
-                )
+        if _HAS_SKLEARN and _LDA is not None:
+            try:
+                n_comp = min(2, max(1, X.shape[0]))
+                lda = _LDA(n_components=n_comp, random_state=42)
+                lda.fit(X)
+                comps = lda.components_
+                for i, comp in enumerate(comps):
+                    pairs = sorted([(herbs[j], float(comp[j])) for j in range(len(herbs))], key=lambda x: x[1], reverse=True)
+                    topics.append({"topic": i, "top_herbs": [{"herb": h, "weight": round(w, 4)} for h, w in pairs[:5]]})
+            except Exception:
+                topics = cls._svd_latent_topics(X, herbs)
+        else:
+            topics = cls._svd_latent_topics(X, herbs)
 
         return {"topics": topics}
+
+    @classmethod
+    def _svd_latent_topics(cls, X: Any, herbs: List[str]) -> List[Dict[str, Any]]:
+        """SVD 兜底隐结构分析"""
+        _, _, vt = np.linalg.svd(X, full_matrices=False)
+        topics: List[Dict[str, Any]] = []
+        for i in range(min(2, vt.shape[0])):
+            comp = vt[i]
+            pairs = sorted([(herbs[j], abs(float(comp[j]))) for j in range(len(herbs))], key=lambda x: x[1], reverse=True)
+            topics.append({"topic": i, "top_herbs": [{"herb": h, "weight": round(w, 4)} for h, w in pairs[:5]]})
+        return topics
 
     @classmethod
     def _time_series_and_dose_response(cls, records: List[Dict[str, Any]], context: Dict[str, Any]) -> Dict[str, Any]:

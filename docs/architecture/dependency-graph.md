@@ -4,9 +4,9 @@ This document is generated from internal imports under src/.
 
 ## Summary
 
-- Module count: 43
-- Module edges: 45
-- Package count: 13
+- Module count: 54
+- Module edges: 59
+- Package count: 14
 - Package edges: 13
 
 ## Package Graph
@@ -25,6 +25,7 @@ flowchart LR
     src_reasoning["reasoning"]
     src_research["research"]
     src_semantic_modeling["semantic_modeling"]
+    src_storage["storage"]
     src_test["test"]
     src_cycle --> src_core
     src_extractors --> src_core
@@ -57,4 +58,5 @@ flowchart LR
 | src.reasoning | 0 | 1 |
 | src.research | 0 | 5 |
 | src.semantic_modeling | 1 | 1 |
+| src.storage | 0 | 0 |
 | src.test | 0 | 0 |

@@ -1,0 +1,428 @@
+# 存储系统部署指南
+
+## 前置要求
+
+### 1. PostgreSQL 安装
+
+#### Windows 安装
+
+**方式1：使用安装程序**
+- 下载PostgreSQL 14+: https://www.postgresql.org/download/windows/
+- 运行安装程序，记住root密码
+- 默认端口：5432
+
+**方式2：使用 Choco（如果已安装）**
+```powershell
+choco install postgresql14
+```
+
+**方式3：使用 Docker**
+```powershell
+docker run --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:14
+```
+
+#### PostgreSQL 初始化
+
+```powershell
+# 登录PostgreSQL
+psql -U postgres
+
+# 创建数据库
+CREATE DATABASE tcm_autoresearch;
+
+# 创建用户
+CREATE USER tcm_user WITH PASSWORD 'your_password';
+
+# 授予权限
+GRANT ALL PRIVILEGES ON DATABASE tcm_autoresearch TO tcm_user;
+ALTER DATABASE tcm_autoresearch OWNER TO tcm_user;
+
+# 退出
+\q
+```
+
+---
+
+### 2. Neo4j 安装
+
+#### Windows 安装
+
+**下载和安装 Neo4j**
+
+从你的D盘目录：`D:\neo4j-community-5.26.23-windows`
+
+**启动Neo4j**
+
+```powershell
+# 进入Neo4j目录
+cd D:\neo4j-community-5.26.23-windows\bin
+
+# 启动服务
+./neo4j.exe console
+
+# 或作为后台服务
+./neo4j.exe install-service
+./neo4j.exe start
+```
+
+**访问 Neo4j Browser**
+- URL: http://localhost:7474
+- 默认用户: neo4j
+- 默认密码: neo4j（首次登录需更改）
+
+#### 修改配置
+
+编辑 `D:\neo4j-community-5.26.23-windows\conf\neo4j.conf`
+
+```ini
+# 监听地址
+dbms.default_listen_address=0.0.0.0
+dbms.default_advertised_address=localhost
+
+# 连接器端口
+dbms.connector.bolt.listen_address=0.0.0.0:7687
+dbms.connector.http.listen_address=0.0.0.0:7474
+
+# 内存设置
+dbms.memory.heap.initial_size=1G
+dbms.memory.heap.max_size=2G
+```
+
+---
+
+## Python 环境配置
+
+### 1. 安装依赖
+
+```bash
+# 在虚拟环境中
+pip install psycopg2-binary>=2.9.0,<3.0
+pip install sqlalchemy>=2.0,<3.0
+pip install neo4j>=5.0,<6.0
+```
+
+### 2. 配置文件
+
+更新 `config.yml`：
+
+```yaml
+# 数据库配置
+databases:
+  postgresql:
+    enabled: true
+    driver: postgresql
+    host: localhost
+    port: 5432
+    database: tcm_autoresearch
+    user: tcm_user
+    password: ${DB_PASSWORD}  # 使用环境变量
+    pool_size: 10
+    max_overflow: 20
+    
+  neo4j:
+    enabled: true
+    uri: neo4j://localhost:7687
+    user: neo4j
+    password: ${NEO4J_PASSWORD}  # 使用环境变量
+    database: neo4j
+```
+
+### 3. 设置环境变量
+
+```powershell
+# PowerShell
+$env:DB_PASSWORD = "your_postgres_password"
+$env:NEO4J_PASSWORD = "your_neo4j_password"
+
+# 或添加到 .env 文件
+# 然后使用 python-dotenv 加载
+```
+
+---
+
+## 系统初始化脚本
+
+### 方式1：使用 Python API
+
+创建初始化脚本 `initialize_storage.py`：
+
+```python
+#!/usr/bin/env python3
+"""
+存储系统初始化脚本
+"""
+
+import os
+import sys
+from pathlib import Path
+
+# 添加项目根目录到路径
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.storage import UnifiedStorageDriver
+
+def main():
+    # 读取配置
+    pg_connection = os.getenv(
+        'DATABASE_URL',
+        'postgresql://tcm_user:password@localhost:5432/tcm_autoresearch'
+    )
+    neo4j_uri = os.getenv('NEO4J_URI', 'neo4j://localhost:7687')
+    neo4j_user = os.getenv('NEO4J_USER', 'neo4j')
+    neo4j_password = os.getenv('NEO4J_PASSWORD', 'neo4j')
+    
+    print("初始化存储系统...")
+    print(f"PostgreSQL: {pg_connection}")
+    print(f"Neo4j: {neo4j_uri}")
+    
+    try:
+        # 初始化存储驱动
+        storage = UnifiedStorageDriver(
+            pg_connection,
+            neo4j_uri,
+            (neo4j_user, neo4j_password)
+        )
+        storage.initialize()
+        
+        # 获取统计信息
+        stats = storage.get_storage_statistics()
+        print("\n存储系统初始化成功！")
+        print(f"统计信息: {stats}")
+        
+        storage.close()
+        
+    except Exception as e:
+        print(f"初始化失败: {e}")
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()
+```
+
+运行初始化：
+
+```bash
+python initialize_storage.py
+```
+
+### 方式2：使用 SQLAlchemy CLI
+
+```bash
+# 创建数据表
+alembic upgrade head
+
+# 或直接使用SQLAlchemy
+python -c "
+from src.storage import DatabaseManager, Base
+from sqlalchemy import create_engine
+
+engine = create_engine('postgresql://tcm_user:password@localhost:5432/tcm_autoresearch')
+Base.metadata.create_all(engine)
+print('数据表已创建')
+"
+```
+
+---
+
+## 验证安装
+
+### 1. PostgreSQL 验证
+
+```powershell
+# 连接测试
+psql -U tcm_user -d tcm_autoresearch -c "SELECT version();"
+
+# 检查表
+psql -U tcm_user -d tcm_autoresearch -c "\dt"
+```
+
+### 2. Neo4j 验证
+
+```python
+from src.storage import Neo4jDriver
+
+neo4j = Neo4jDriver(
+    'neo4j://localhost:7687',
+    ('neo4j', 'your_password')
+)
+neo4j.connect()
+stats = neo4j.get_graph_statistics()
+print(stats)
+neo4j.close()
+```
+
+---
+
+## 集成到现有系统
+
+### 1. 修改输出生成模块
+
+在 `src/output/output_generator.py` 中添加存储集成：
+
+```python
+from src.storage import UnifiedStorageDriver
+from uuid import UUID
+
+class OutputGenerator(BaseModule):
+    def __init__(self, config=None, storage_driver=None):
+        super().__init__("output_generator", config)
+        self.storage = storage_driver
+    
+    def _do_execute(self, context):
+        # ... 现有逻辑 ...
+        
+        # 新增：保存到数据库
+        if self.storage and 'document_id' in context:
+            self.storage.save_entities(
+                context['document_id'],
+                context.get('entities', [])
+            )
+            self.storage.save_relationships(
+                context['document_id'],
+                context.get('relationships', [])
+            )
+        
+        return output_data
+```
+
+### 2. 修改迭代循环
+
+在 `src/cycle/iteration_cycle.py` 中初始化存储驱动：
+
+```python
+from src.storage import UnifiedStorageDriver
+
+class IterationCycle:
+    def __init__(self, config=None):
+        super().__init__(config)
+        
+        # 初始化存储驱动
+        if config.get('storage', {}).get('enabled', False):
+            pg_url = config['storage']['postgresql']['url']
+            neo4j_uri = config['storage']['neo4j']['uri']
+            neo4j_auth = (
+                config['storage']['neo4j']['user'],
+                config['storage']['neo4j']['password']
+            )
+            
+            self.storage = UnifiedStorageDriver(pg_url, neo4j_uri, neo4j_auth)
+            self.storage.initialize()
+```
+
+---
+
+## 常见问题
+
+### Q1: PostgreSQL 连接被拒绝
+
+**问题**：`psycopg2.OperationalError: could not connect to server`
+
+**解决方案**：
+1. 检查PostgreSQL服务是否运行：`services.msc` → 搜索PostgreSQL
+2. 检查端口：`netstat -ano | findstr :5432`
+3. 检查防火墙规则
+4. 验证连接字符串中的主机、端口、用户名、密码
+
+### Q2: Neo4j 认证失败
+
+**问题**：`neo4j.exceptions.AuthError: The client is unauthorized`
+
+**解决方案**：
+1. 确认Neo4j正在运行
+2. 重置密码：访问 http://localhost:7474 → 重置
+3. 检查URI格式（bolt vs http）
+4. 防火墙是否开放7687端口
+
+### Q3: 内存不足
+
+**解决方案**：
+- PostgreSQL：增加 `shared_buffers`, `effective_cache_size`
+- Neo4j：增加 `dbms.memory.heap.max_size`
+
+### Q4: UUID冲突
+
+**解决方案**：
+- 使用 `uuid-ossp` 扩展（自动处理）
+- 或使用 `uuid.uuid4()` 生成唯一ID
+
+---
+
+## 备份和恢复
+
+### PostgreSQL 备份
+
+```bash
+# 备份单个数据库
+pg_dump -U tcm_user -d tcm_autoresearch > backup_20260328.sql
+
+# 恢复
+psql -U tcm_user -d tcm_autoresearch < backup_20260328.sql
+```
+
+### Neo4j 备份
+
+```bash
+# 使用Neo4j Admin
+neo4j-admin database dump neo4j backup_20260328.dump
+```
+
+---
+
+## 性能优化
+
+### 1. PostgreSQL 索引
+
+```sql
+-- 已在 db_models.py 中定义，但可以手动添加更多
+CREATE INDEX idx_entity_name_type ON entities(name, type);
+CREATE INDEX idx_relationship_confidence ON entity_relationships(confidence DESC);
+```
+
+### 2. Neo4j 索引
+
+```cypher
+-- 创建索引
+CREATE INDEX entity_id_idx FOR (n:Entity) ON (n.id);
+CREATE INDEX formula_name_idx FOR (n:Formula) ON (n.name);
+```
+
+### 3. 连接池优化
+
+在 `db_models.py` 中调整：
+
+```python
+engine = create_engine(
+    connection_string,
+    pool_size=20,           # 增加连接池大小
+    max_overflow=40,        # 允许更多溢出连接
+    pool_pre_ping=True,     # 检查连接有效性
+    echo=False
+)
+```
+
+---
+
+## 监控和维护
+
+### 定期任务
+
+```bash
+# 每周：数据库维护
+VACUUM ANALYZE;
+
+# 每月：检查日志
+SELECT COUNT(*) FROM processing_logs WHERE timestamp > NOW() - INTERVAL '30 days';
+
+# 定期清理旧数据（可选）
+DELETE FROM processing_logs WHERE timestamp < NOW() - INTERVAL '90 days';
+```
+
+---
+
+## 参考文档
+
+- PostgreSQL文档：https://www.postgresql.org/docs/
+- Neo4j文档：https://neo4j.com/docs/
+- SQLAlchemy文档：https://docs.sqlalchemy.org/
+- Neo4j Python驱动：https://neo4j.com/docs/driver-manual/current/
+

@@ -9,17 +9,38 @@ import json
 import logging
 import os
 import signal
+import subprocess
 import sys
 import time
 import traceback
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.extractors.advanced_entity_extractor import AdvancedEntityExtractor
 from src.output.output_generator import OutputGenerator
 from src.preprocessor.document_preprocessor import DocumentPreprocessor
 from src.reasoning.reasoning_engine import ReasoningEngine
+from src.research.arxiv_fine_translation import run_arxiv_fine_translation_docker
+from src.research.arxiv_quick_helper import (
+    ArxivQuickHelperResult,
+    run_arxiv_quick_helper,
+)
+from src.research.google_scholar_helper import (
+    GoogleScholarHelperResult,
+    run_google_scholar_related_works,
+)
+from src.research.markdown_translate import (
+    MarkdownTranslateResult,
+    run_markdown_translate,
+)
+from src.research.paper_plugin import run_paper_plugin
+from src.research.pdf_translation import (
+    PdfTranslationResult,
+    run_pdf_full_text_translation,
+)
 from src.semantic_modeling.semantic_graph_builder import SemanticGraphBuilder
+from src.storage import UnifiedStorageDriver
 
 # 配置日志
 logging.basicConfig(
@@ -580,6 +601,753 @@ def run_performance_demo():
         raise
 
 
+def run_autorresearch_workflow(
+    instruction: str,
+    instruction_file: str,
+    max_iters: int,
+    timeout_seconds: int,
+    strategy: str,
+    rollback_mode: str,
+    python_exe: str,
+) -> Dict[str, Any]:
+    """在主流程后触发 AutoResearch 循环。"""
+    logger.info("=== 开始 AutoResearch 研究范式循环 ===")
+
+    repo_root = Path(__file__).resolve().parent
+    runner = repo_root / "tools" / "autorresearch" / "autorresearch_runner.py"
+    if not runner.exists():
+        raise FileNotFoundError(f"AutoResearch runner 不存在: {runner}")
+
+    cmd = [
+        python_exe,
+        str(runner),
+        "--max-iters",
+        str(max_iters),
+        "--timeout-seconds",
+        str(timeout_seconds),
+        "--python-exe",
+        python_exe,
+        "--strategy",
+        strategy,
+        "--rollback-mode",
+        rollback_mode,
+    ]
+
+    if instruction_file:
+        cmd.extend(["--instruction-file", instruction_file])
+    else:
+        cmd.extend(["--instruction", instruction])
+
+    started = time.time()
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    duration = time.time() - started
+
+    output_text = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    best_val_bpb = None
+    report_path = None
+    for line in output_text.splitlines():
+        line = line.strip()
+        if line.startswith("best_val_bpb="):
+            try:
+                best_val_bpb = float(line.split("=", 1)[1])
+            except Exception:
+                best_val_bpb = None
+        if line.startswith("report="):
+            report_path = line.split("=", 1)[1]
+
+    result = {
+        "status": "completed" if proc.returncode == 0 else "failed",
+        "return_code": proc.returncode,
+        "duration": duration,
+        "best_val_bpb": best_val_bpb,
+        "report_path": report_path,
+        "stdout": proc.stdout,
+        "stderr": proc.stderr,
+    }
+
+    if proc.returncode == 0:
+        logger.info(f"AutoResearch 完成，best_val_bpb={best_val_bpb}")
+        if report_path:
+            logger.info(f"AutoResearch 报告: {report_path}")
+    else:
+        logger.error("AutoResearch 运行失败")
+        logger.error(proc.stderr)
+
+    return result
+
+
+def run_paper_plugin_workflow(
+    source_path: str,
+    output_dir: str,
+    translate_lang: str,
+    summary_lang: str,
+    use_llm: bool,
+    persist_storage: bool,
+    pg_url: str,
+    neo4j_uri: str,
+    neo4j_user: str,
+    neo4j_password: str,
+) -> Dict[str, Any]:
+    """在主流程后触发论文读取/翻译/摘要插件。"""
+    logger.info("=== 开始论文插件流程 ===")
+    result = run_paper_plugin(
+        source_path=source_path,
+        output_dir=output_dir,
+        summary_lang=summary_lang,
+        translate_to=translate_lang,
+        use_llm=use_llm,
+    )
+
+    logger.info(f"论文插件状态: {result.status}")
+    if result.status == "completed":
+        logger.info(f"论文来源类型: {result.source_type}")
+        logger.info(f"提取字符数: {result.char_count}")
+        logger.info(f"JSON 报告: {result.output_json}")
+        logger.info(f"Markdown 报告: {result.output_markdown}")
+
+        storage_result = {"status": "skipped", "document_id": "", "error": ""}
+        if persist_storage:
+            storage_result = persist_paper_result_to_dual_storage(
+                source_path=source_path,
+                result_payload={
+                    "source_type": result.source_type,
+                    "char_count": result.char_count,
+                    "summary": result.summary,
+                    "translation_excerpt": result.translation_excerpt,
+                    "output_json": result.output_json,
+                    "output_markdown": result.output_markdown,
+                    "translated": result.translated,
+                },
+                pg_url=pg_url,
+                neo4j_uri=neo4j_uri,
+                neo4j_user=neo4j_user,
+                neo4j_password=neo4j_password,
+            )
+            if storage_result.get("status") == "completed":
+                logger.info(f"论文插件双库存档完成，document_id={storage_result.get('document_id')}")
+            else:
+                logger.error(f"论文插件双库存档失败: {storage_result.get('error')}")
+                return {
+                    "status": "failed",
+                    "source_type": result.source_type,
+                    "char_count": result.char_count,
+                    "translated": result.translated,
+                    "output_json": result.output_json,
+                    "output_markdown": result.output_markdown,
+                    "error": f"storage_failed: {storage_result.get('error')}",
+                    "storage": storage_result,
+                }
+    else:
+        logger.error(f"论文插件失败: {result.error}")
+
+    return {
+        "status": result.status,
+        "source_type": result.source_type,
+        "char_count": result.char_count,
+        "translated": result.translated,
+        "output_json": result.output_json,
+        "output_markdown": result.output_markdown,
+        "error": result.error,
+        "storage": storage_result if result.status == "completed" else {"status": "skipped"},
+    }
+
+
+def run_arxiv_fine_translation_workflow(
+    arxiv_input: str,
+    daas_url: str,
+    output_dir: str,
+    advanced_arg: str,
+    timeout_sec: int,
+    persist_storage: bool,
+    pg_url: str,
+    neo4j_uri: str,
+    neo4j_user: str,
+    neo4j_password: str,
+) -> Dict[str, Any]:
+    """触发 Arxiv 精细翻译（Docker/DaaS）并可选双库存档。"""
+    logger.info("=== 开始 Arxiv 精细翻译（Docker）流程 ===")
+    result = run_arxiv_fine_translation_docker(
+        arxiv_input=arxiv_input,
+        server_url=daas_url,
+        output_dir=output_dir,
+        advanced_arg=advanced_arg,
+        timeout_sec=timeout_sec,
+    )
+
+    logger.info(f"Arxiv 精细翻译状态: {result.status}")
+    if result.status != "completed":
+        logger.error(f"Arxiv 精细翻译失败: {result.error}")
+        return {
+            "status": "failed",
+            "arxiv_id": result.arxiv_id,
+            "output_json": result.output_json,
+            "output_markdown": result.output_markdown,
+            "output_files": result.output_files,
+            "error": result.error,
+            "storage": {"status": "skipped"},
+        }
+
+    storage_result = {"status": "skipped", "document_id": "", "error": ""}
+    if persist_storage:
+        storage_result = persist_paper_result_to_dual_storage(
+            source_path=f"arxiv:{result.arxiv_id}",
+            result_payload={
+                "source_type": "arxiv_docker",
+                "char_count": len(result.server_message),
+                "summary": result.summary,
+                "translation_excerpt": result.translation_excerpt,
+                "output_json": result.output_json,
+                "output_markdown": result.output_markdown,
+                "translated": True,
+            },
+            pg_url=pg_url,
+            neo4j_uri=neo4j_uri,
+            neo4j_user=neo4j_user,
+            neo4j_password=neo4j_password,
+        )
+
+    return {
+        "status": "completed",
+        "arxiv_id": result.arxiv_id,
+        "output_json": result.output_json,
+        "output_markdown": result.output_markdown,
+        "output_files": result.output_files,
+        "error": "",
+        "storage": storage_result,
+    }
+
+
+def run_md_translate_workflow(
+    input_path: str,
+    language: str,
+    output_dir: str,
+    additional_prompt: str,
+    max_workers: int,
+    use_llm: bool,
+    persist_storage: bool,
+    pg_url: str,
+    neo4j_uri: str,
+    neo4j_user: str,
+    neo4j_password: str,
+) -> Dict[str, Any]:
+    """触发 Markdown 中英互译并可选双库存档。"""
+    logger.info("=== 开始 Markdown 中英互译流程 ===")
+    result: MarkdownTranslateResult = run_markdown_translate(
+        input_path=input_path,
+        language=language,
+        output_dir=output_dir,
+        additional_prompt=additional_prompt,
+        max_workers=max_workers,
+        use_llm=use_llm,
+    )
+
+    logger.info("Markdown 翻译状态: %s | %s", result.status, result.summary)
+    if result.status == "failed":
+        logger.error("Markdown 翻译失败: %s", result.error)
+        return {
+            "status": "failed",
+            "output_json": result.output_json,
+            "output_markdown": result.output_markdown,
+            "output_files": result.output_files,
+            "error": result.error,
+            "storage": {"status": "skipped"},
+        }
+
+    storage_result: Dict[str, Any] = {"status": "skipped", "document_id": "", "error": ""}
+    if persist_storage:
+        storage_result = persist_paper_result_to_dual_storage(
+            source_path=f"md_translate:{input_path}",
+            result_payload={
+                "source_type": "markdown_translate",
+                "language": language,
+                "fragment_total": result.fragment_total,
+                "fragment_ok": result.fragment_ok,
+                "summary": result.summary,
+                "output_json": result.output_json,
+                "output_markdown": result.output_markdown,
+                "translated": True,
+                "char_count": sum(
+                    fr.get("char_count", 0) for fr in result.file_results
+                ),
+            },
+            pg_url=pg_url,
+            neo4j_uri=neo4j_uri,
+            neo4j_user=neo4j_user,
+            neo4j_password=neo4j_password,
+        )
+
+    return {
+        "status": result.status,
+        "language": language,
+        "output_json": result.output_json,
+        "output_markdown": result.output_markdown,
+        "output_files": result.output_files,
+        "summary": result.summary,
+        "error": "",
+        "storage": storage_result,
+    }
+
+
+def run_pdf_translation_workflow(
+    pdf_path: str,
+    target_language: str,
+    output_dir: str,
+    additional_prompt: str,
+    max_tokens_per_fragment: int,
+    max_workers: int,
+    use_llm: bool,
+    persist_storage: bool,
+    pg_url: str,
+    neo4j_uri: str,
+    neo4j_user: str,
+    neo4j_password: str,
+) -> Dict[str, Any]:
+    """触发 PDF 论文全文翻译并可选双库存档。"""
+    logger.info("=== 开始 PDF 论文全文翻译流程 ===")
+    result: PdfTranslationResult = run_pdf_full_text_translation(
+        pdf_path=pdf_path,
+        target_language=target_language,
+        output_dir=output_dir,
+        additional_prompt=additional_prompt,
+        max_tokens_per_fragment=max_tokens_per_fragment,
+        max_workers=max_workers,
+        use_llm=use_llm,
+    )
+
+    logger.info("PDF翻译状态: %s | %s", result.status, result.summary)
+    if result.status == "failed":
+        logger.error("PDF翻译失败: %s", result.error)
+        return {
+            "status": "failed",
+            "pdf_path": pdf_path,
+            "output_json": result.output_json,
+            "output_markdown": result.output_markdown,
+            "output_html": result.output_html,
+            "error": result.error,
+            "storage": {"status": "skipped"},
+        }
+
+    storage_result: Dict[str, Any] = {"status": "skipped", "document_id": "", "error": ""}
+    if persist_storage:
+        storage_result = persist_paper_result_to_dual_storage(
+            source_path=f"pdf_translate:{pdf_path}",
+            result_payload={
+                "source_type": "pdf_full_text_translation",
+                "title": result.title,
+                "title_translated": result.abstract_translated,
+                "abstract": result.abstract,
+                "abstract_translated": result.abstract_translated,
+                "fragment_total": result.fragment_total,
+                "fragment_ok": result.fragment_ok,
+                "summary": result.summary,
+                "output_json": result.output_json,
+                "output_markdown": result.output_markdown,
+                "output_html": result.output_html,
+                "translated": True,
+                "char_count": result.char_count,
+            },
+            pg_url=pg_url,
+            neo4j_uri=neo4j_uri,
+            neo4j_user=neo4j_user,
+            neo4j_password=neo4j_password,
+        )
+
+    return {
+        "status": result.status,
+        "pdf_path": pdf_path,
+        "title": result.title,
+        "title_translated": result.abstract_translated,
+        "char_count": result.char_count,
+        "fragment_total": result.fragment_total,
+        "fragment_ok": result.fragment_ok,
+        "output_json": result.output_json,
+        "output_markdown": result.output_markdown,
+        "output_html": result.output_html,
+        "summary": result.summary,
+        "error": "",
+        "storage": storage_result,
+    }
+
+
+def run_arxiv_quick_helper_workflow(
+    arxiv_url: str,
+    output_dir: str,
+    target_lang: str,
+    enable_translation: bool,
+    persist_storage: bool,
+    pg_url: str,
+    neo4j_uri: str,
+    neo4j_user: str,
+    neo4j_password: str,
+) -> Dict[str, Any]:
+    """触发 Arxiv 快速助手（下载 PDF + 翻译摘要）并可选双库存档。"""
+    logger.info("=== 开始 Arxiv 快速助手流程 ===")
+    
+    # 构建 LLM 引擎（如果启用翻译）
+    llm_engine = None
+    if enable_translation:
+        try:
+            from src.llm.llm_engine import LLMEngine
+            llm_engine = LLMEngine()
+        except Exception as e:
+            logger.warning(f"LLM 引擎初始化失败，将跳过摘要翻译: {e}")
+            enable_translation = False
+    
+    result: ArxivQuickHelperResult = run_arxiv_quick_helper(
+        arxiv_url=arxiv_url,
+        output_dir=output_dir,
+        target_lang=target_lang,
+        enable_translation=enable_translation,
+        llm_engine=llm_engine,
+    )
+
+    logger.info("Arxiv 助手状态: %s | 论文 ID: %s", result.status, result.arxiv_id)
+    if result.status == "error":
+        logger.error("Arxiv 助手处理失败: %s", result.error)
+        return {
+            "status": "error",
+            "arxiv_id": result.arxiv_id,
+            "url": arxiv_url,
+            "pdf_path": result.pdf_path,
+            "error": result.error,
+            "storage": {"status": "skipped"},
+        }
+
+    storage_result: Dict[str, Any] = {"status": "skipped", "document_id": "", "error": ""}
+    if persist_storage:
+        storage_result = persist_paper_result_to_dual_storage(
+            source_path=f"arxiv_helper:{result.arxiv_id}",
+            result_payload={
+                "source_type": "arxiv_quick_helper",
+                "arxiv_id": result.arxiv_id,
+                "title": result.title,
+                "authors": result.authors,
+                "publish_date": result.publish_date,
+                "abstract_en": result.abstract_en,
+                "abstract_zh": result.abstract_zh,
+                "pdf_path": result.pdf_path,
+                "pdf_size_mb": result.pdf_size_mb,
+                "translated": enable_translation,
+                "target_language": target_lang,
+            },
+            pg_url=pg_url,
+            neo4j_uri=neo4j_uri,
+            neo4j_user=neo4j_user,
+            neo4j_password=neo4j_password,
+        )
+
+    return {
+        "status": result.status,
+        "arxiv_id": result.arxiv_id,
+        "url": arxiv_url,
+        "title": result.title,
+        "authors": result.authors,
+        "publish_date": result.publish_date,
+        "abstract_en": result.abstract_en,
+        "abstract_zh": result.abstract_zh,
+        "pdf_path": result.pdf_path,
+        "pdf_size_mb": result.pdf_size_mb,
+        "error": result.error,
+        "storage": storage_result,
+    }
+
+
+def run_google_scholar_helper_workflow(
+    scholar_url: str,
+    output_dir: str,
+    topic_hint: str,
+    target_lang: str,
+    max_papers: int,
+    use_llm: bool,
+    additional_prompt: str,
+    persist_storage: bool,
+    pg_url: str,
+    neo4j_uri: str,
+    neo4j_user: str,
+    neo4j_password: str,
+) -> Dict[str, Any]:
+    """触发 Google Scholar 统合小助手并可选双库存档。"""
+    logger.info("=== 开始 Google Scholar 统合小助手流程 ===")
+
+    llm_engine = None
+    if use_llm:
+        try:
+            from src.llm.llm_engine import LLMEngine
+            llm_engine = LLMEngine()
+        except Exception as e:
+            logger.warning(f"LLM 引擎初始化失败，将使用 fallback 相关工作草稿: {e}")
+            use_llm = False
+
+    result: GoogleScholarHelperResult = run_google_scholar_related_works(
+        scholar_url=scholar_url,
+        output_dir=output_dir,
+        max_papers=max_papers,
+        topic_hint=topic_hint,
+        target_lang=target_lang,
+        use_llm=use_llm,
+        llm_engine=llm_engine,
+        additional_prompt=additional_prompt,
+    )
+
+    logger.info("Scholar 助手状态: %s | 文献条目: %d", result.status, result.total_papers)
+    if result.status == "error":
+        logger.error("Scholar 助手处理失败: %s", result.error)
+        return {
+            "status": "error",
+            "url": scholar_url,
+            "total_papers": result.total_papers,
+            "output_markdown": result.output_markdown,
+            "output_json": result.output_json,
+            "error": result.error,
+            "storage": {"status": "skipped"},
+        }
+
+    storage_result: Dict[str, Any] = {"status": "skipped", "document_id": "", "error": ""}
+    if persist_storage:
+        storage_result = persist_paper_result_to_dual_storage(
+            source_path=f"google_scholar_helper:{scholar_url}",
+            result_payload={
+                "source_type": "google_scholar_helper",
+                "title": "Google Scholar Related Works",
+                "authors": "",
+                "publish_date": "",
+                "abstract_en": "",
+                "abstract_zh": result.related_works_md,
+                "summary": f"parsed_papers={result.total_papers}",
+                "pdf_path": "",
+                "pdf_size_mb": 0,
+                "translated": use_llm,
+                "target_language": target_lang,
+                "output_json": result.output_json,
+                "output_markdown": result.output_markdown,
+                "char_count": len(result.related_works_md or ""),
+            },
+            pg_url=pg_url,
+            neo4j_uri=neo4j_uri,
+            neo4j_user=neo4j_user,
+            neo4j_password=neo4j_password,
+        )
+
+    return {
+        "status": result.status,
+        "url": scholar_url,
+        "total_papers": result.total_papers,
+        "output_markdown": result.output_markdown,
+        "output_json": result.output_json,
+        "related_works_md": result.related_works_md,
+        "error": result.error,
+        "storage": storage_result,
+    }
+
+
+def build_storage_connection_from_args(args: argparse.Namespace) -> Dict[str, str]:
+    """构建论文插件持久化所需的双库连接参数。"""
+    db_password = args.paper_db_password or os.getenv("DB_PASSWORD", "")
+    db_host = args.paper_db_host or os.getenv("DB_HOST", "localhost")
+    db_port = args.paper_db_port or os.getenv("DB_PORT", "5432")
+    db_user = args.paper_db_user or os.getenv("DB_USER", "tcm_user")
+    db_name = args.paper_db_name or os.getenv("DB_NAME", "tcm_autoresearch")
+
+    neo4j_password = args.paper_neo4j_password or os.getenv("NEO4J_PASSWORD", "")
+    neo4j_host = args.paper_neo4j_host or os.getenv("NEO4J_HOST", "localhost")
+    neo4j_port = args.paper_neo4j_port or os.getenv("NEO4J_PORT", "7687")
+    neo4j_user = args.paper_neo4j_user or os.getenv("NEO4J_USER", "neo4j")
+    neo4j_scheme = args.paper_neo4j_scheme or os.getenv("NEO4J_SCHEME", "neo4j")
+
+    pg_url = args.paper_pg_url or f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+    neo4j_uri = args.paper_neo4j_uri or f"{neo4j_scheme}://{neo4j_host}:{neo4j_port}"
+
+    return {
+        "pg_url": pg_url,
+        "neo4j_uri": neo4j_uri,
+        "neo4j_user": neo4j_user,
+        "neo4j_password": neo4j_password,
+    }
+
+
+def persist_paper_result_to_dual_storage(
+    source_path: str,
+    result_payload: Dict[str, Any],
+    pg_url: str,
+    neo4j_uri: str,
+    neo4j_user: str,
+    neo4j_password: str,
+) -> Dict[str, str]:
+    """将论文插件输出写入 PostgreSQL + Neo4j。"""
+    storage = None
+    doc_id = None
+    try:
+        if not neo4j_password:
+            return {
+                "status": "failed",
+                "document_id": "",
+                "error": "NEO4J_PASSWORD 未提供，无法完成双库存档",
+            }
+        if "://@" in pg_url:
+            return {
+                "status": "failed",
+                "document_id": "",
+                "error": "PostgreSQL 连接字符串缺少密码",
+            }
+
+        storage = UnifiedStorageDriver(pg_url, neo4j_uri, (neo4j_user, neo4j_password))
+        storage.initialize()
+
+        doc_id = storage.save_document(
+            source_file=source_path,
+            objective="paper_plugin_archive",
+            raw_text_size=int(result_payload.get("char_count", 0)),
+        )
+        if not doc_id:
+            return {
+                "status": "failed",
+                "document_id": "",
+                "error": "保存文档失败",
+            }
+
+        storage.update_document_status(doc_id, "processing")
+        storage.log_module_execution(
+            document_id=doc_id,
+            module_name="paper_plugin",
+            status="start",
+            message="论文插件结果开始双库存档",
+        )
+
+        source_name = Path(source_path).name
+        entities = [
+            {
+                "name": source_name,
+                "type": "other",
+                "confidence": 0.99,
+                "position": 0,
+                "length": len(source_name),
+                "description": "论文来源文件",
+                "metadata": {
+                    "source_type": result_payload.get("source_type", "unknown"),
+                    "source_path": source_path,
+                },
+            },
+            {
+                "name": "论文摘要",
+                "type": "other",
+                "confidence": 0.95,
+                "position": 0,
+                "length": len(result_payload.get("summary", "")),
+                "description": result_payload.get("summary", ""),
+                "metadata": {
+                    "summary_lang": "中文",
+                    "generated_by": "paper_plugin",
+                },
+            },
+            {
+                "name": "翻译节选",
+                "type": "other",
+                "confidence": 0.90,
+                "position": 0,
+                "length": len(result_payload.get("translation_excerpt", "")),
+                "description": result_payload.get("translation_excerpt", ""),
+                "metadata": {
+                    "translated": bool(result_payload.get("translated", False)),
+                    "generated_by": "paper_plugin",
+                },
+            },
+        ]
+        entity_ids = storage.save_entities(doc_id, entities)
+        if len(entity_ids) < 3:
+            storage.update_document_status(doc_id, "failed")
+            return {
+                "status": "failed",
+                "document_id": str(doc_id),
+                "error": "保存实体失败",
+            }
+
+        relationships = [
+            {
+                "source_entity_id": entity_ids[0],
+                "target_entity_id": entity_ids[1],
+                "relationship_type": "CONTAINS",
+                "confidence": 0.95,
+                "created_by_module": "paper_plugin",
+                "evidence": "论文包含摘要内容",
+                "metadata": {"semantic_role": "summary"},
+            },
+            {
+                "source_entity_id": entity_ids[0],
+                "target_entity_id": entity_ids[2],
+                "relationship_type": "CONTAINS",
+                "confidence": 0.90,
+                "created_by_module": "paper_plugin",
+                "evidence": "论文包含翻译节选内容",
+                "metadata": {"semantic_role": "translation_excerpt"},
+            },
+        ]
+        rel_ids = storage.save_relationships(doc_id, relationships)
+
+        storage.save_statistics(
+            doc_id,
+            {
+                "formulas_count": 0,
+                "herbs_count": 0,
+                "syndromes_count": 0,
+                "efficacies_count": 0,
+                "relationships_count": len(rel_ids),
+                "graph_nodes_count": len(entity_ids),
+                "graph_edges_count": len(rel_ids),
+                "graph_density": 0.0,
+                "connected_components": 1,
+                "source_modules": ["paper_plugin"],
+                "processing_time_ms": 0,
+            },
+        )
+
+        storage.save_research_analysis(
+            doc_id,
+            {
+                "summary_analysis": {
+                    "paper_summary": result_payload.get("summary", ""),
+                    "translation_excerpt": result_payload.get("translation_excerpt", ""),
+                    "paper_source_type": result_payload.get("source_type", "unknown"),
+                    "paper_output_json": result_payload.get("output_json", ""),
+                    "paper_output_markdown": result_payload.get("output_markdown", ""),
+                }
+            },
+        )
+
+        storage.log_module_execution(
+            document_id=doc_id,
+            module_name="paper_plugin",
+            status="success",
+            message="论文插件结果已完成双库存档",
+        )
+        storage.update_document_status(doc_id, "completed")
+        return {
+            "status": "completed",
+            "document_id": str(doc_id),
+            "error": "",
+        }
+    except Exception as exc:
+        if storage and doc_id:
+            try:
+                storage.log_module_execution(
+                    document_id=doc_id,
+                    module_name="paper_plugin",
+                    status="failure",
+                    message="论文插件双库存档失败",
+                    error_details=str(exc),
+                )
+                storage.update_document_status(doc_id, "failed")
+            except Exception:
+                pass
+        return {
+            "status": "failed",
+            "document_id": str(doc_id) if doc_id else "",
+            "error": str(exc),
+        }
+    finally:
+        if storage:
+            storage.close()
+
+
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='中医古籍全自动研究系统迭代循环演示')
@@ -587,6 +1355,142 @@ def main():
                        default='full', help='演示类型')
     parser.add_argument('--iterations', type=int, default=3, help='迭代次数')
     parser.add_argument('--verbose', action='store_true', help='详细输出模式')
+    parser.add_argument('--enable-autorresearch', action='store_true', help='在主流程后运行 AutoResearch 循环')
+    parser.add_argument('--autorresearch-instruction', type=str,
+                        default='请自动优化训练脚本，降低 val_bpb 并控制显存占用。',
+                        help='AutoResearch 中文研究指令')
+    parser.add_argument('--autorresearch-instruction-file', type=str, default='',
+                        help='AutoResearch 中文研究指令文件路径（UTF-8）')
+    parser.add_argument('--autorresearch-iters', type=int, default=3,
+                        help='AutoResearch 最大迭代轮次')
+    parser.add_argument('--autorresearch-timeout', type=int, default=300,
+                        help='AutoResearch 每轮训练时限（秒）')
+    parser.add_argument('--autorresearch-strategy', choices=['heuristic', 'llm'], default='heuristic',
+                        help='AutoResearch 假设生成策略')
+    parser.add_argument('--autorresearch-rollback-mode', choices=['restore', 'reset'], default='restore',
+                        help='AutoResearch 回滚模式')
+    parser.add_argument('--autorresearch-python-exe', type=str, default=sys.executable,
+                        help='AutoResearch 运行 Python 解释器路径')
+    parser.add_argument('--enable-paper-plugin', action='store_true',
+                        help='在主流程后运行论文读取/翻译/摘要插件')
+    parser.add_argument('--paper-input', type=str, default='',
+                        help='论文输入路径（.pdf/.tex 文件或目录）')
+    parser.add_argument('--paper-output-dir', type=str, default='./output/paper_plugin',
+                        help='论文插件输出目录')
+    parser.add_argument('--paper-translate-lang', type=str, default='中文',
+                        help='论文翻译目标语言')
+    parser.add_argument('--paper-summary-lang', type=str, default='中文',
+                        help='论文摘要输出语言')
+    parser.add_argument('--paper-no-llm', action='store_true',
+                        help='禁用LLM，仅做抽取式摘要')
+    parser.add_argument('--paper-persist-storage', action='store_true',
+                        help='将论文插件结果写入 PostgreSQL+Neo4j')
+    parser.add_argument('--paper-pg-url', type=str, default='',
+                        help='PostgreSQL 完整连接串，优先级高于拆分参数')
+    parser.add_argument('--paper-db-host', type=str, default='',
+                        help='PostgreSQL 主机，默认读取 DB_HOST 或 localhost')
+    parser.add_argument('--paper-db-port', type=str, default='',
+                        help='PostgreSQL 端口，默认读取 DB_PORT 或 5432')
+    parser.add_argument('--paper-db-user', type=str, default='',
+                        help='PostgreSQL 用户，默认读取 DB_USER 或 tcm_user')
+    parser.add_argument('--paper-db-password', type=str, default='',
+                        help='PostgreSQL 密码，默认读取 DB_PASSWORD')
+    parser.add_argument('--paper-db-name', type=str, default='',
+                        help='PostgreSQL 数据库名，默认读取 DB_NAME 或 tcm_autoresearch')
+    parser.add_argument('--paper-neo4j-uri', type=str, default='',
+                        help='Neo4j URI，优先级高于拆分参数')
+    parser.add_argument('--paper-neo4j-scheme', type=str, default='',
+                        help='Neo4j 协议，默认读取 NEO4J_SCHEME 或 neo4j')
+    parser.add_argument('--paper-neo4j-host', type=str, default='',
+                        help='Neo4j 主机，默认读取 NEO4J_HOST 或 localhost')
+    parser.add_argument('--paper-neo4j-port', type=str, default='',
+                        help='Neo4j 端口，默认读取 NEO4J_PORT 或 7687')
+    parser.add_argument('--paper-neo4j-user', type=str, default='',
+                        help='Neo4j 用户，默认读取 NEO4J_USER 或 neo4j')
+    parser.add_argument('--paper-neo4j-password', type=str, default='',
+                        help='Neo4j 密码，默认读取 NEO4J_PASSWORD')
+    parser.add_argument('--enable-arxiv-fine-translation', action='store_true',
+                        help='启用 Arxiv 论文精细翻译（Docker 插件适配）')
+    parser.add_argument('--arxiv-input', type=str, default='',
+                        help='Arxiv ID 或 URL，例如 2301.00234')
+    parser.add_argument('--arxiv-daas-url', type=str, default=os.getenv('ARXIV_DAAS_URL', ''),
+                        help='DaaS 服务 URL，例如 http://localhost:18000/stream')
+    parser.add_argument('--arxiv-output-dir', type=str, default='./output/arxiv_fine_translation',
+                        help='Arxiv 精细翻译输出目录')
+    parser.add_argument('--arxiv-advanced-arg', type=str, default='',
+                        help='附加翻译提示词，传递给插件命令')
+    parser.add_argument('--arxiv-timeout', type=int, default=1800,
+                        help='Arxiv 精细翻译请求超时（秒）')
+    parser.add_argument('--arxiv-persist-storage', action='store_true',
+                        help='将 Arxiv 精细翻译结果写入 PostgreSQL+Neo4j')
+    # ── Markdown 中英互译参数 ──────────────────────────────────────────
+    parser.add_argument('--enable-md-translate', action='store_true',
+                        help='启用 Markdown 中英互译插件')
+    parser.add_argument('--md-input', type=str, default='',
+                        help='翻译输入：本地 .md 文件/目录，或 GitHub URL')
+    parser.add_argument('--md-lang', type=str, default='en->zh',
+                        help="翻译方向：'en->zh'（默认）/ 'zh->en' / 任意语言名，如 Japanese")
+    parser.add_argument('--md-output-dir', type=str, default='./output/md_translate',
+                        help='Markdown 翻译输出目录')
+    parser.add_argument('--md-additional-prompt', type=str, default='',
+                        help='附加翻译指令，追加到系统提示词')
+    parser.add_argument('--md-max-workers', type=int, default=1,
+                        help='并行翻译片段线程数（本地 LLM 建议保持 1）')
+    parser.add_argument('--md-no-llm', action='store_true',
+                        help='跳过 LLM 调用，原样输出（用于调试）')
+    parser.add_argument('--md-persist-storage', action='store_true',
+                        help='将翻译结果写入 PostgreSQL+Neo4j')
+    # ── PDF 论文全文翻译参数 ─────────────────────────────────────────────
+    parser.add_argument('--enable-pdf-translation', action='store_true',
+                        help='启用 PDF 论文全文翻译（提取标题&摘要+多线程翻译全文）')
+    parser.add_argument('--pdf-input', type=str, default='',
+                        help='PDF 文件路径')
+    parser.add_argument('--pdf-target-lang', type=str, default='Chinese',
+                        help='翻译目标语言（默认 Chinese）')
+    parser.add_argument('--pdf-output-dir', type=str, default='./output/pdf_translation',
+                        help='PDF 翻译输出目录')
+    parser.add_argument('--pdf-additional-prompt', type=str, default='',
+                        help='附加翻译指令，追加到系统提示词')
+    parser.add_argument('--pdf-max-tokens-per-fragment', type=int, default=1024,
+                        help='每个翻译片段最大 Token 数')
+    parser.add_argument('--pdf-max-workers', type=int, default=3,
+                        help='并行翻译片段线程数')
+    parser.add_argument('--pdf-no-llm', action='store_true',
+                        help='跳过 LLM 调用，原样输出（用于调试）')
+    parser.add_argument('--pdf-persist-storage', action='store_true',
+                        help='将翻译结果写入 PostgreSQL+Neo4j')
+    # ── Arxiv 快速助手参数 ──────────────────────────────────────────────
+    parser.add_argument('--enable-arxiv-helper', action='store_true',
+                        help='启用 Arxiv 快速助手（下载 PDF + 翻译摘要）')
+    parser.add_argument('--arxiv-helper-url', type=str, default='',
+                        help='Arxiv 论文 URL 或 ID（如 2301.00234 或 https://arxiv.org/abs/2301.00234）')
+    parser.add_argument('--arxiv-helper-dir', type=str, default='./output/arxiv_quick_helper',
+                        help='PDF 下载输出目录')
+    parser.add_argument('--arxiv-helper-lang', type=str, default='Chinese',
+                        help='摘要翻译目标语言（默认 Chinese）')
+    parser.add_argument('--arxiv-helper-no-translation', action='store_true',
+                        help='跳过摘要翻译，仅下载 PDF 和获取元信息')
+    parser.add_argument('--arxiv-helper-persist-storage', action='store_true',
+                        help='将处理结果写入 PostgreSQL+Neo4j')
+    # ── Google Scholar 统合小助手参数 ─────────────────────────────────────
+    parser.add_argument('--enable-scholar-helper', action='store_true',
+                        help='启用谷歌学术统合小助手（输入 Scholar 搜索页 URL 生成 related works）')
+    parser.add_argument('--scholar-url', type=str, default='',
+                        help='Google Scholar 搜索页 URL')
+    parser.add_argument('--scholar-output-dir', type=str, default='./output/google_scholar_helper',
+                        help='Google Scholar helper 输出目录')
+    parser.add_argument('--scholar-topic-hint', type=str, default='',
+                        help='related works 主题提示（可选）')
+    parser.add_argument('--scholar-target-lang', type=str, default='Chinese',
+                        help='related works 输出语言（默认 Chinese）')
+    parser.add_argument('--scholar-max-papers', type=int, default=20,
+                        help='最多解析的 Scholar 条目数（默认 20）')
+    parser.add_argument('--scholar-no-llm', action='store_true',
+                        help='跳过 LLM 生成，输出 fallback 相关工作草稿')
+    parser.add_argument('--scholar-additional-prompt', type=str, default='',
+                        help='附加 related works 写作指令')
+    parser.add_argument('--scholar-persist-storage', action='store_true',
+                        help='将 Scholar helper 结果写入 PostgreSQL+Neo4j')
     
     args = parser.parse_args()
     
@@ -597,6 +1501,14 @@ def main():
     logger.info("中医古籍全自动研究系统迭代循环演示启动")
     logger.info(f"演示类型: {args.demo_type}")
     logger.info(f"迭代次数: {args.iterations}")
+    logger.info(f"AutoResearch 启用: {args.enable_autorresearch}")
+    logger.info(f"论文插件启用: {args.enable_paper_plugin}")
+    logger.info(f"论文插件双库存档: {args.paper_persist_storage}")
+    logger.info(f"Arxiv精细翻译启用: {args.enable_arxiv_fine_translation}")
+    logger.info(f"Markdown翻译启用: {args.enable_md_translate}")
+    logger.info(f"PDF全文翻译启用: {args.enable_pdf_translation}")
+    logger.info(f"Arxiv快速助手启用: {args.enable_arxiv_helper}")
+    logger.info(f"Scholar统合助手启用: {args.enable_scholar_helper}")
     
     try:
         setup_signal_handlers()
@@ -627,7 +1539,167 @@ def main():
             # 运行性能演示
             logger.info("\n3. 性能演示:")
             run_performance_demo()
-        
+
+        if args.enable_autorresearch:
+            logger.info("\n4. AutoResearch 演示:")
+            ar_result = run_autorresearch_workflow(
+                instruction=args.autorresearch_instruction,
+                instruction_file=args.autorresearch_instruction_file,
+                max_iters=args.autorresearch_iters,
+                timeout_seconds=args.autorresearch_timeout,
+                strategy=args.autorresearch_strategy,
+                rollback_mode=args.autorresearch_rollback_mode,
+                python_exe=args.autorresearch_python_exe,
+            )
+            if ar_result.get("status") != "completed":
+                logger.error("AutoResearch 子流程失败，主流程返回非零状态")
+                return 1
+
+        if args.enable_paper_plugin:
+            if not args.paper_input:
+                logger.error("启用论文插件时必须提供 --paper-input")
+                return 1
+
+            logger.info("\n5. 论文插件演示:")
+            storage_conn = build_storage_connection_from_args(args)
+            paper_result = run_paper_plugin_workflow(
+                source_path=args.paper_input,
+                output_dir=args.paper_output_dir,
+                translate_lang=args.paper_translate_lang,
+                summary_lang=args.paper_summary_lang,
+                use_llm=not args.paper_no_llm,
+                persist_storage=args.paper_persist_storage,
+                pg_url=storage_conn["pg_url"],
+                neo4j_uri=storage_conn["neo4j_uri"],
+                neo4j_user=storage_conn["neo4j_user"],
+                neo4j_password=storage_conn["neo4j_password"],
+            )
+            if paper_result.get("status") != "completed":
+                logger.error("论文插件子流程失败，主流程返回非零状态")
+                return 1
+
+        if args.enable_arxiv_fine_translation:
+            if not args.arxiv_input:
+                logger.error("启用 Arxiv 精细翻译时必须提供 --arxiv-input")
+                return 1
+            if not args.arxiv_daas_url:
+                logger.error("启用 Arxiv 精细翻译时必须提供 --arxiv-daas-url 或环境变量 ARXIV_DAAS_URL")
+                return 1
+
+            logger.info("\n6. Arxiv 精细翻译（Docker）演示:")
+            storage_conn = build_storage_connection_from_args(args)
+            arxiv_result = run_arxiv_fine_translation_workflow(
+                arxiv_input=args.arxiv_input,
+                daas_url=args.arxiv_daas_url,
+                output_dir=args.arxiv_output_dir,
+                advanced_arg=args.arxiv_advanced_arg,
+                timeout_sec=args.arxiv_timeout,
+                persist_storage=args.arxiv_persist_storage,
+                pg_url=storage_conn["pg_url"],
+                neo4j_uri=storage_conn["neo4j_uri"],
+                neo4j_user=storage_conn["neo4j_user"],
+                neo4j_password=storage_conn["neo4j_password"],
+            )
+            if arxiv_result.get("status") != "completed":
+                logger.error("Arxiv 精细翻译子流程失败，主流程返回非零状态")
+                return 1
+
+        if args.enable_md_translate:
+            if not args.md_input:
+                logger.error("启用 Markdown 翻译时必须提供 --md-input")
+                return 1
+
+            logger.info("\n7. Markdown 中英互译演示:")
+            storage_conn = build_storage_connection_from_args(args)
+            md_result = run_md_translate_workflow(
+                input_path=args.md_input,
+                language=args.md_lang,
+                output_dir=args.md_output_dir,
+                additional_prompt=args.md_additional_prompt,
+                max_workers=args.md_max_workers,
+                use_llm=not args.md_no_llm,
+                persist_storage=args.md_persist_storage,
+                pg_url=storage_conn["pg_url"],
+                neo4j_uri=storage_conn["neo4j_uri"],
+                neo4j_user=storage_conn["neo4j_user"],
+                neo4j_password=storage_conn["neo4j_password"],
+            )
+            if md_result.get("status") == "failed":
+                logger.error("Markdown 翻译子流程失败，主流程返回非零状态")
+                return 1
+
+        if args.enable_pdf_translation:
+            if not args.pdf_input:
+                logger.error("启用 PDF 翻译时必须提供 --pdf-input")
+                return 1
+
+            logger.info("\n8. PDF 论文全文翻译演示:")
+            storage_conn = build_storage_connection_from_args(args)
+            pdf_result = run_pdf_translation_workflow(
+                pdf_path=args.pdf_input,
+                target_language=args.pdf_target_lang,
+                output_dir=args.pdf_output_dir,
+                additional_prompt=args.pdf_additional_prompt,
+                max_tokens_per_fragment=args.pdf_max_tokens_per_fragment,
+                max_workers=args.pdf_max_workers,
+                use_llm=not args.pdf_no_llm,
+                persist_storage=args.pdf_persist_storage,
+                pg_url=storage_conn["pg_url"],
+                neo4j_uri=storage_conn["neo4j_uri"],
+                neo4j_user=storage_conn["neo4j_user"],
+                neo4j_password=storage_conn["neo4j_password"],
+            )
+            if pdf_result.get("status") == "failed":
+                logger.error("PDF 翻译子流程失败，主流程返回非零状态")
+                return 1
+
+        if args.enable_arxiv_helper:
+            if not args.arxiv_helper_url:
+                logger.error("启用 Arxiv 快速助手时必须提供 --arxiv-helper-url")
+                return 1
+
+            logger.info("\n9. Arxiv 快速助手演示:")
+            storage_conn = build_storage_connection_from_args(args)
+            arxiv_result = run_arxiv_quick_helper_workflow(
+                arxiv_url=args.arxiv_helper_url,
+                output_dir=args.arxiv_helper_dir,
+                target_lang=args.arxiv_helper_lang,
+                enable_translation=not args.arxiv_helper_no_translation,
+                persist_storage=args.arxiv_helper_persist_storage,
+                pg_url=storage_conn["pg_url"],
+                neo4j_uri=storage_conn["neo4j_uri"],
+                neo4j_user=storage_conn["neo4j_user"],
+                neo4j_password=storage_conn["neo4j_password"],
+            )
+            if arxiv_result.get("status") == "error":
+                logger.error("Arxiv 快速助手子流程失败，主流程返回非零状态")
+                return 1
+
+        if args.enable_scholar_helper:
+            if not args.scholar_url:
+                logger.error("启用 Scholar 统合助手时必须提供 --scholar-url")
+                return 1
+
+            logger.info("\n10. Google Scholar 统合小助手演示:")
+            storage_conn = build_storage_connection_from_args(args)
+            scholar_result = run_google_scholar_helper_workflow(
+                scholar_url=args.scholar_url,
+                output_dir=args.scholar_output_dir,
+                topic_hint=args.scholar_topic_hint,
+                target_lang=args.scholar_target_lang,
+                max_papers=args.scholar_max_papers,
+                use_llm=not args.scholar_no_llm,
+                additional_prompt=args.scholar_additional_prompt,
+                persist_storage=args.scholar_persist_storage,
+                pg_url=storage_conn["pg_url"],
+                neo4j_uri=storage_conn["neo4j_uri"],
+                neo4j_user=storage_conn["neo4j_user"],
+                neo4j_password=storage_conn["neo4j_password"],
+            )
+            if scholar_result.get("status") == "error":
+                logger.error("Scholar 统合助手子流程失败，主流程返回非零状态")
+                return 1
+
         logger.info("=== 演示完成 ===")
         return 0
         

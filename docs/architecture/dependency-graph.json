@@ -1,7 +1,7 @@
 {
-  "module_count": 43,
-  "module_edge_count": 45,
-  "package_count": 13,
+  "module_count": 54,
+  "module_edge_count": 59,
+  "package_count": 14,
   "package_edge_count": 13,
   "modules": [
     {
@@ -150,6 +150,16 @@
       "package": "src.research"
     },
     {
+      "module": "src.research.arxiv_fine_translation",
+      "file_path": "src/research/arxiv_fine_translation.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.arxiv_quick_helper",
+      "file_path": "src/research/arxiv_quick_helper.py",
+      "package": "src.research"
+    },
+    {
       "module": "src.research.ctext_corpus_collector",
       "file_path": "src/research/ctext_corpus_collector.py",
       "package": "src.research"
@@ -160,8 +170,18 @@
       "package": "src.research"
     },
     {
+      "module": "src.research.google_scholar_helper",
+      "file_path": "src/research/google_scholar_helper.py",
+      "package": "src.research"
+    },
+    {
       "module": "src.research.literature_retriever",
       "file_path": "src/research/literature_retriever.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.markdown_translate",
+      "file_path": "src/research/markdown_translate.py",
       "package": "src.research"
     },
     {
@@ -172,6 +192,16 @@
     {
       "module": "src.research.multimodal_fusion",
       "file_path": "src/research/multimodal_fusion.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.paper_plugin",
+      "file_path": "src/research/paper_plugin.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.pdf_translation",
+      "file_path": "src/research/pdf_translation.py",
       "package": "src.research"
     },
     {
@@ -203,6 +233,31 @@
       "module": "src.semantic_modeling.tcm_relationships",
       "file_path": "src/semantic_modeling/tcm_relationships.py",
       "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.storage",
+      "file_path": "src/storage/__init__.py",
+      "package": "src.storage"
+    },
+    {
+      "module": "src.storage.database_schema",
+      "file_path": "src/storage/database_schema.py",
+      "package": "src.storage"
+    },
+    {
+      "module": "src.storage.db_models",
+      "file_path": "src/storage/db_models.py",
+      "package": "src.storage"
+    },
+    {
+      "module": "src.storage.neo4j_driver",
+      "file_path": "src/storage/neo4j_driver.py",
+      "package": "src.storage"
+    },
+    {
+      "module": "src.storage.storage_driver",
+      "file_path": "src/storage/storage_driver.py",
+      "package": "src.storage"
     },
     {
       "module": "src.test",
@@ -319,6 +374,14 @@
     },
     {
       "source": "src.research",
+      "target": "src.research.arxiv_fine_translation"
+    },
+    {
+      "source": "src.research",
+      "target": "src.research.arxiv_quick_helper"
+    },
+    {
+      "source": "src.research",
       "target": "src.research.ctext_corpus_collector"
     },
     {
@@ -327,7 +390,15 @@
     },
     {
       "source": "src.research",
+      "target": "src.research.google_scholar_helper"
+    },
+    {
+      "source": "src.research",
       "target": "src.research.literature_retriever"
+    },
+    {
+      "source": "src.research",
+      "target": "src.research.markdown_translate"
     },
     {
       "source": "src.research",
@@ -336,6 +407,10 @@
     {
       "source": "src.research",
       "target": "src.research.multimodal_fusion"
+    },
+    {
+      "source": "src.research",
+      "target": "src.research.pdf_translation"
     },
     {
       "source": "src.research",
@@ -352,6 +427,18 @@
     {
       "source": "src.research.ctext_corpus_collector",
       "target": "src.research.ctext_whitelist"
+    },
+    {
+      "source": "src.research.markdown_translate",
+      "target": "src.llm.llm_engine"
+    },
+    {
+      "source": "src.research.paper_plugin",
+      "target": "src.llm.llm_engine"
+    },
+    {
+      "source": "src.research.pdf_translation",
+      "target": "src.llm.llm_engine"
     },
     {
       "source": "src.research.research_pipeline",
@@ -392,6 +479,30 @@
     {
       "source": "src.semantic_modeling.semantic_graph_builder",
       "target": "src.semantic_modeling.tcm_relationships"
+    },
+    {
+      "source": "src.storage",
+      "target": "src.storage.database_schema"
+    },
+    {
+      "source": "src.storage",
+      "target": "src.storage.db_models"
+    },
+    {
+      "source": "src.storage",
+      "target": "src.storage.neo4j_driver"
+    },
+    {
+      "source": "src.storage",
+      "target": "src.storage.storage_driver"
+    },
+    {
+      "source": "src.storage.storage_driver",
+      "target": "src.storage.db_models"
+    },
+    {
+      "source": "src.storage.storage_driver",
+      "target": "src.storage.neo4j_driver"
     },
     {
       "source": "src.test",
@@ -462,6 +573,11 @@
       "package": "src.semantic_modeling",
       "in_degree": 1,
       "out_degree": 1
+    },
+    {
+      "package": "src.storage",
+      "in_degree": 0,
+      "out_degree": 0
     },
     {
       "package": "src.test",

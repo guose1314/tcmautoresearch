@@ -52,6 +52,10 @@ sqlalchemy>=2.0,<3.0
 # celery           # 未使用
 # rq               # 未使用
 
+# PDF处理和文档解析
+pymupdf>=1.23,<2.0                  # PDF读取（用于PDF论文翻译插件）
+# tiktoken>=0.5,<1.0                # Token计数（可选，用于更精确的Token限制）
+
 # 网络分析和图计算
 networkx>=3.0,<4.0
 pyvis>=0.3,<1.0

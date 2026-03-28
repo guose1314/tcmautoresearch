@@ -1,0 +1,75 @@
+{
+  "timestamp": "2026-03-28T14:12:02.179550",
+  "rounds": {
+    "1000": {
+      "entity_count": 1000,
+      "relationship_count": 1997,
+      "total_ms": 4535.5,
+      "entity_throughput_per_sec": 220.48,
+      "relationship_throughput_per_sec": 440.3,
+      "rel_phase_pct": 71.19,
+      "ent_phase_pct": 28.16,
+      "phases": [
+        {
+          "name": "save_document",
+          "duration_ms": 8.66,
+          "count": 1,
+          "throughput_per_sec": 115.41
+        },
+        {
+          "name": "save_entities",
+          "duration_ms": 1277.16,
+          "count": 1000,
+          "throughput_per_sec": 782.99
+        },
+        {
+          "name": "save_relationships",
+          "duration_ms": 3228.61,
+          "count": 1997,
+          "throughput_per_sec": 618.53
+        },
+        {
+          "name": "save_statistics",
+          "duration_ms": 3.04,
+          "count": 1,
+          "throughput_per_sec": 329.48
+        }
+      ]
+    },
+    "2000": {
+      "entity_count": 2000,
+      "relationship_count": 3997,
+      "total_ms": 10283.32,
+      "entity_throughput_per_sec": 194.49,
+      "relationship_throughput_per_sec": 388.69,
+      "rel_phase_pct": 79.03,
+      "ent_phase_pct": 20.87,
+      "phases": [
+        {
+          "name": "save_document",
+          "duration_ms": 2.37,
+          "count": 1,
+          "throughput_per_sec": 422.58
+        },
+        {
+          "name": "save_entities",
+          "duration_ms": 2146.54,
+          "count": 2000,
+          "throughput_per_sec": 931.73
+        },
+        {
+          "name": "save_relationships",
+          "duration_ms": 8127.01,
+          "count": 3997,
+          "throughput_per_sec": 491.82
+        },
+        {
+          "name": "save_statistics",
+          "duration_ms": 2.46,
+          "count": 1,
+          "throughput_per_sec": 406.72
+        }
+      ]
+    }
+  }
+}

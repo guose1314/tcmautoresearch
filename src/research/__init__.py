@@ -8,9 +8,22 @@ __author__ = "中医古籍全自动研究团队"
 __description__ = "基于AI的中医古籍研究理论框架与科研流程管理系统"
 
 # 导入主要类和函数
+from .arxiv_fine_translation import (
+    ArxivFineTranslationResult,
+    run_arxiv_fine_translation_docker,
+)
+from .arxiv_quick_helper import (
+    ArxivQuickHelperResult,
+    run_arxiv_quick_helper,
+)
 from .ctext_corpus_collector import CTextCorpusCollector
 from .ctext_whitelist import build_batch_manifest, load_whitelist
+from .google_scholar_helper import (
+    GoogleScholarHelperResult,
+    run_google_scholar_related_works,
+)
 from .literature_retriever import LiteratureRecord, LiteratureRetriever
+from .markdown_translate import MarkdownTranslateResult, run_markdown_translate
 from .multi_source_corpus import (
     SourceWitness,
     build_source_collection_plan,
@@ -20,6 +33,10 @@ from .multi_source_corpus import (
     recognize_classical_format,
 )
 from .multimodal_fusion import FusionStrategy, MultimodalFusionEngine
+from .pdf_translation import (
+    PdfTranslationResult,
+    run_pdf_full_text_translation,
+)
 from .research_pipeline import ResearchCycle, ResearchPhase, ResearchPipeline
 from .theoretical_framework import (
     ResearchExperiment,
@@ -37,6 +54,16 @@ __all__ = [
     'ResearchPipeline',
     'ResearchCycle',
     'ResearchPhase',
+    'ArxivFineTranslationResult',
+    'run_arxiv_fine_translation_docker',
+    'MarkdownTranslateResult',
+    'run_markdown_translate',
+    'PdfTranslationResult',
+    'run_pdf_full_text_translation',
+    'ArxivQuickHelperResult',
+    'run_arxiv_quick_helper',
+    'GoogleScholarHelperResult',
+    'run_google_scholar_related_works',
     'CTextCorpusCollector',
     'LiteratureRetriever',
     'LiteratureRecord',
