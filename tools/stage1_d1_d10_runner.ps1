@@ -127,17 +127,34 @@ function Invoke-Step {
             else {
                 "[STEP] $name" | Tee-Object -FilePath $LogFile -Append | Out-Null
                 "[CMD ] $($Step.Command)" | Tee-Object -FilePath $LogFile -Append | Out-Null
-                $previousEap = $ErrorActionPreference
-                $ErrorActionPreference = "Continue"
+                $tmpStdout = [System.IO.Path]::GetTempFileName()
+                $tmpStderr = [System.IO.Path]::GetTempFileName()
                 try {
-                    & powershell -NoProfile -ExecutionPolicy Bypass -Command $Step.Command 2>&1 | Tee-Object -FilePath $LogFile -Append | Out-Null
+                    $proc = Start-Process -FilePath "powershell" `
+                        -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $Step.Command) `
+                        -PassThru -Wait -NoNewWindow `
+                        -RedirectStandardOutput $tmpStdout `
+                        -RedirectStandardError $tmpStderr
+
+                    if (Test-Path $tmpStdout) {
+                        Get-Content -Path $tmpStdout -Raw | Tee-Object -FilePath $LogFile -Append | Out-Null
+                    }
+                    if (Test-Path $tmpStderr) {
+                        Get-Content -Path $tmpStderr -Raw | Tee-Object -FilePath $LogFile -Append | Out-Null
+                    }
+
+                    $result.exit_code = $proc.ExitCode
                 }
                 finally {
-                    $ErrorActionPreference = $previousEap
+                    if (Test-Path $tmpStdout) {
+                        Remove-Item $tmpStdout -Force -ErrorAction SilentlyContinue
+                    }
+                    if (Test-Path $tmpStderr) {
+                        Remove-Item $tmpStderr -Force -ErrorAction SilentlyContinue
+                    }
                 }
-                if ($LASTEXITCODE -ne 0) {
+                if ($result.exit_code -ne 0) {
                     $result.status = "failed"
-                    $result.exit_code = $LASTEXITCODE
                     $result.message = "Command returned non-zero exit code"
                 }
             }
