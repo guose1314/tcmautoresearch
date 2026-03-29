@@ -100,7 +100,7 @@ class AlgorithmOptimizer:
             "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
             "persist_failed_operations": self.config.get("persist_failed_operations", True),
             "minimum_stable_quality": float(self.config.get("minimum_stable_quality", 0.8)),
-            "export_contract_version": self.config.get("export_contract_version", "d25.v1"),
+            "export_contract_version": self.config.get("export_contract_version", "d38.v1"),
         }
 
     def _start_phase(self, phase_name: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -139,10 +139,21 @@ class AlgorithmOptimizer:
                 {
                     "operation": phase_name,
                     "error": error,
+                    "details": self._serialize_value(phase_entry.get("context", {})),
                     "timestamp": datetime.now().isoformat(),
                     "duration_seconds": round(duration, 6),
                 }
             )
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        return {
+            "phase_history": self._serialize_value(self._metadata.get("phase_history", [])),
+            "phase_timings": self._serialize_value(self._metadata.get("phase_timings", {})),
+            "completed_phases": list(self._metadata.get("completed_phases", [])),
+            "failed_phase": self._metadata.get("failed_phase"),
+            "final_status": self._metadata.get("final_status", "initialized"),
+            "last_completed_phase": self._metadata.get("last_completed_phase"),
+        }
 
     def _serialize_value(self, value: Any) -> Any:
         if isinstance(value, Enum):
@@ -195,6 +206,7 @@ class AlgorithmOptimizer:
             "completed_phases": list(self._metadata.get("completed_phases", [])),
             "failed_phase": self._metadata.get("failed_phase"),
             "failed_operation_count": len(self._failed_operations),
+            "final_status": self._metadata.get("final_status", "initialized"),
             "last_completed_phase": self._metadata.get("last_completed_phase"),
         }
 
@@ -232,7 +244,7 @@ class AlgorithmOptimizer:
             "failed_operations": self._serialize_value(self._failed_operations),
             "analysis_summary": self._build_analysis_summary(),
             "report_metadata": self._build_report_metadata(),
-            "metadata": self._serialize_value(self._metadata),
+            "metadata": self._build_runtime_metadata(),
         }
 
     def export_optimization_data(self, output_path: str) -> bool:
@@ -404,7 +416,7 @@ class AlgorithmOptimizer:
                 "phase_timings": {},
                 "completed_phases": [],
                 "failed_phase": None,
-                "final_status": "terminated",
+                "final_status": "cleaned",
                 "last_completed_phase": None,
             }
             return True

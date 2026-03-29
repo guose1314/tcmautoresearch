@@ -51,6 +51,31 @@ class MarkdownTranslateResult:
     file_results: List[Dict] = field(default_factory=list)
 
 
+@dataclass
+class MarkdownArtifactBundle:
+    out_dir: Path
+    ts: str
+    language: str
+    input_path: str
+    input_files: List[str]
+    output_files: List[str]
+    fragment_total: int
+    fragment_ok: int
+    error: str = ""
+    file_results: List[Dict] = field(default_factory=list)
+
+
+@dataclass
+class MarkdownTranslationJob:
+    out_dir: Path
+    ts: str
+    language: str
+    max_chars_per_fragment: int
+    additional_prompt: str
+    engine: object
+    max_workers: int
+
+
 # ────────────────────────────── 工具函数 ──────────────────────────────
 
 def _lang_label(language: str) -> str:
@@ -97,6 +122,71 @@ def _split_text(text: str, max_chars: int = _DEFAULT_MAX_CHARS) -> List[str]:
     return [f for f in fragments if f.strip()]
 
 
+def _resolve_github_markdown_url(txt: str, proxies: Optional[dict]) -> Optional[str]:
+    if "github.com/" not in txt:
+        return txt
+
+    logger.info("检测到 GitHub URL，正在获取资源...")
+    if txt.endswith(".md"):
+        return txt.replace("https://github.com/", "https://raw.githubusercontent.com/").replace(
+            "/blob/", "/"
+        )
+
+    api_url = txt.replace("https://github.com/", "https://api.github.com/repos/")
+    api_url = api_url.rstrip("/") + "/readme"
+    try:
+        resp = requests.get(api_url, proxies=proxies, timeout=30)
+        resp.raise_for_status()
+        download_url = resp.json().get("download_url", "")
+    except Exception as exc:
+        logger.error("GitHub API 请求失败: %s", exc)
+        return None
+
+    if not download_url:
+        logger.error("GitHub API 未返回 download_url: %s", api_url)
+        return None
+    return download_url
+
+
+def _download_remote_markdown(txt: str, proxies: Optional[dict]) -> Tuple[bool, List[str], str]:
+    import tempfile
+
+    resolved_url = _resolve_github_markdown_url(txt, proxies)
+    if not resolved_url:
+        return False, [], ""
+
+    try:
+        response = requests.get(resolved_url, proxies=proxies, timeout=60)
+        response.raise_for_status()
+    except Exception as exc:
+        logger.error("下载 Markdown 文件失败: %s", exc)
+        return False, [], ""
+
+    tmp_dir = tempfile.mkdtemp(prefix="md_translate_")
+    filename = re.sub(r"[^a-zA-Z0-9._-]", "_", resolved_url.split("/")[-1].split("?")[0]) or "readme.md"
+    if not filename.lower().endswith(".md"):
+        filename += ".md"
+    local_path = os.path.join(tmp_dir, filename)
+    with open(local_path, "wb") as fh:
+        fh.write(response.content)
+    logger.info("已下载 %d 字节 → %s", len(response.content), local_path)
+    return True, [local_path], tmp_dir
+
+
+def _resolve_local_markdown_input(txt: str) -> Tuple[bool, List[str], str]:
+    import glob
+
+    if txt.lower().endswith(".md") and os.path.isfile(txt):
+        return True, [txt], os.path.dirname(txt)
+
+    if os.path.isdir(txt):
+        manifest = sorted(glob.glob(os.path.join(txt, "**", "*.md"), recursive=True))
+        return bool(manifest), manifest, txt
+
+    logger.error("无法识别输入路径/链接: %s", txt)
+    return False, [], ""
+
+
 def _resolve_input(txt: str) -> Tuple[bool, List[str], str]:
     """
     把各类输入解析为 (success, file_manifest, project_folder)。
@@ -108,65 +198,15 @@ def _resolve_input(txt: str) -> Tuple[bool, List[str], str]:
       - 本地 .md 文件 → 直接使用
       - 本地目录 → 递归搜索 .md
     """
-    import glob
-    import tempfile
-
     if not txt:
         return False, [], ""
 
     txt = txt.strip()
 
     if txt.startswith("http"):
-        proxies = _get_proxies()
-        if "github.com/" in txt:
-            logger.info("检测到 GitHub URL，正在获取资源...")
-            if not txt.endswith(".md"):
-                # 项目主页 → 调 API 获取 README download_url
-                api_url = txt.replace("https://github.com/", "https://api.github.com/repos/")
-                api_url = api_url.rstrip("/") + "/readme"
-                try:
-                    resp = requests.get(api_url, proxies=proxies, timeout=30)
-                    resp.raise_for_status()
-                    download_url: str = resp.json().get("download_url", "")
-                    if not download_url:
-                        logger.error("GitHub API 未返回 download_url: %s", api_url)
-                        return False, [], ""
-                    txt = download_url
-                except Exception as exc:
-                    logger.error("GitHub API 请求失败: %s", exc)
-                    return False, [], ""
-            else:
-                # /blob/ 文件链接 → 转 raw URL
-                txt = txt.replace("https://github.com/", "https://raw.githubusercontent.com/")
-                txt = txt.replace("/blob/", "/")
+        return _download_remote_markdown(txt, _get_proxies())
 
-        # 下载远程文件到临时目录
-        try:
-            r = requests.get(txt, proxies=proxies, timeout=60)
-            r.raise_for_status()
-        except Exception as exc:
-            logger.error("下载 Markdown 文件失败: %s", exc)
-            return False, [], ""
-
-        tmp_dir = tempfile.mkdtemp(prefix="md_translate_")
-        filename = re.sub(r"[^a-zA-Z0-9._-]", "_", txt.split("/")[-1].split("?")[0]) or "readme.md"
-        if not filename.lower().endswith(".md"):
-            filename += ".md"
-        local_path = os.path.join(tmp_dir, filename)
-        with open(local_path, "wb") as fh:
-            fh.write(r.content)
-        logger.info("已下载 %d 字节 → %s", len(r.content), local_path)
-        return True, [local_path], tmp_dir
-
-    if txt.lower().endswith(".md") and os.path.isfile(txt):
-        return True, [txt], os.path.dirname(txt)
-
-    if os.path.isdir(txt):
-        manifest = sorted(glob.glob(os.path.join(txt, "**", "*.md"), recursive=True))
-        return bool(manifest), manifest, txt
-
-    logger.error("无法识别输入路径/链接: %s", txt)
-    return False, [], ""
+    return _resolve_local_markdown_input(txt)
 
 
 def _get_proxies() -> Optional[dict]:
@@ -196,6 +236,136 @@ def _translate_fragment_with_llm(
 
     # 无 LLM 时原样返回（供测试用）
     return fragment
+
+
+def _load_markdown_engine(use_llm: bool):
+    if not use_llm:
+        return None
+
+    try:
+        from src.llm.llm_engine import LLMEngine
+
+        engine = LLMEngine(temperature=0.1, max_tokens=2048)
+        engine.load()
+        logger.info("LLM 已加载，开始翻译。")
+        return engine
+    except Exception as exc:
+        logger.warning("LLM 加载失败，片段将原样输出: %s", exc)
+        return None
+
+
+def _read_markdown_file(file_path: str) -> Optional[str]:
+    try:
+        with open(file_path, encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except Exception as exc:
+        logger.error("读取文件失败 %s: %s", file_path, exc)
+        return None
+
+
+def _translate_markdown_file(
+    file_path: str,
+    job: MarkdownTranslationJob,
+) -> Tuple[Optional[Dict], int, int]:
+    content = _read_markdown_file(file_path)
+    if content is None:
+        return {"file": file_path, "status": "failed", "error": "read_failed"}, 0, 0
+
+    fragments = _split_text(content, max_chars=job.max_chars_per_fragment)
+    logger.info("  文件 %s → %d 片段", Path(file_path).name, len(fragments))
+    translated_frags = _translate_all_fragments(
+        fragments,
+        job.language,
+        job.additional_prompt,
+        job.engine,
+        job.max_workers,
+    )
+
+    translated_text = "\n\n".join(trans for (_orig, trans) in translated_frags)
+    out_name = f"{job.ts}-{Path(file_path).stem}.translated.md"
+    out_path = job.out_dir / out_name
+    with open(out_path, "w", encoding="utf-8") as fh:
+        fh.write(translated_text)
+    logger.info("  → 已写出: %s", out_path)
+
+    return (
+        {
+            "source_file": file_path,
+            "output_file": str(out_path),
+            "status": "completed",
+            "fragment_count": len(fragments),
+            "char_count": len(content),
+        },
+        len(fragments),
+        len(translated_frags),
+    )
+
+
+def _translate_markdown_manifest(
+    file_manifest: List[str],
+    job: MarkdownTranslationJob,
+) -> Tuple[List[str], List[Dict], int, int]:
+    output_files: List[str] = []
+    file_results: List[Dict] = []
+    total_frags = 0
+    ok_frags = 0
+
+    for file_path in file_manifest:
+        file_result, fragment_total, fragment_ok = _translate_markdown_file(file_path, job)
+        total_frags += fragment_total
+        ok_frags += fragment_ok
+        if file_result is None:
+            continue
+        file_results.append(file_result)
+        output_file = file_result.get("output_file")
+        if output_file:
+            output_files.append(output_file)
+
+    return output_files, file_results, total_frags, ok_frags
+
+
+def _unload_engine(engine) -> None:
+    if engine is None:
+        return
+    try:
+        engine.unload()
+    except Exception:
+        pass
+
+
+def _build_failed_markdown_result(
+    out_dir: Path,
+    ts: str,
+    language: str,
+    input_path: str,
+    error: str,
+) -> MarkdownTranslateResult:
+    json_path, md_path = _write_artifacts(
+        MarkdownArtifactBundle(
+            out_dir=out_dir,
+            ts=ts,
+            language=language,
+            input_path=input_path,
+            input_files=[],
+            output_files=[],
+            fragment_total=0,
+            fragment_ok=0,
+            error=error,
+        )
+    )
+    return MarkdownTranslateResult(
+        status="failed",
+        language=language,
+        input_path=input_path,
+        input_files=[],
+        output_files=[],
+        fragment_total=0,
+        fragment_ok=0,
+        summary=error,
+        output_json=json_path,
+        output_markdown=md_path,
+        error=error,
+    )
 
 
 # ────────────────────────────── 主函数 ──────────────────────────────
@@ -228,97 +398,46 @@ def run_markdown_translate(
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # 1. 解析输入
     success, file_manifest, _project_folder = _resolve_input(input_path)
     if not success or not file_manifest:
         err = f"找不到任何 .md 文件: {input_path}"
-        _write_artifacts(out_dir, ts, language, input_path, [], [], 0, 0, err)
-        return MarkdownTranslateResult(
-            status="failed",
-            language=language,
-            input_path=input_path,
-            input_files=[],
-            output_files=[],
-            fragment_total=0,
-            fragment_ok=0,
-            summary=err,
-            output_json=str(out_dir / f"{ts}-result.json"),
-            output_markdown=str(out_dir / f"{ts}-report.md"),
-            error=err,
-        )
+        return _build_failed_markdown_result(out_dir, ts, language, input_path, err)
 
     logger.info("共找到 %d 个 Markdown 文件，翻译方向: %s", len(file_manifest), language)
-
-    # 2. 加载 LLM（可选）
-    engine = None
-    if use_llm:
-        try:
-            from src.llm.llm_engine import LLMEngine
-            engine = LLMEngine(temperature=0.1, max_tokens=2048)
-            engine.load()
-            logger.info("LLM 已加载，开始翻译。")
-        except Exception as exc:
-            logger.warning("LLM 加载失败，片段将原样输出: %s", exc)
-            engine = None
-
-    # 3. 逐文件翻译
-    output_files: List[str] = []
-    file_results: List[Dict] = []
-    total_frags = 0
-    ok_frags = 0
+    engine = _load_markdown_engine(use_llm)
+    job = MarkdownTranslationJob(
+        out_dir=out_dir,
+        ts=ts,
+        language=language,
+        max_chars_per_fragment=max_chars_per_fragment,
+        additional_prompt=additional_prompt,
+        engine=engine,
+        max_workers=max_workers,
+    )
 
     try:
-        for fp in file_manifest:
-            try:
-                with open(fp, encoding="utf-8", errors="replace") as fh:
-                    content = fh.read()
-            except Exception as exc:
-                logger.error("读取文件失败 %s: %s", fp, exc)
-                file_results.append({"file": fp, "status": "failed", "error": str(exc)})
-                continue
-
-            fragments = _split_text(content, max_chars=max_chars_per_fragment)
-            total_frags += len(fragments)
-            logger.info("  文件 %s → %d 片段", Path(fp).name, len(fragments))
-
-            translated_frags = _translate_all_fragments(
-                fragments, language, additional_prompt, engine, max_workers
-            )
-            ok_frags += len(translated_frags)  # 每片段都算完成（失败时原样保留）
-
-            translated_text = "\n\n".join(trans for (_orig, trans) in translated_frags)
-
-            # 写出译文文件
-            out_name = f"{ts}-{Path(fp).stem}.translated.md"
-            out_path = out_dir / out_name
-            with open(out_path, "w", encoding="utf-8") as fh:
-                fh.write(translated_text)
-            output_files.append(str(out_path))
-            logger.info("  → 已写出: %s", out_path)
-
-            file_results.append({
-                "source_file": fp,
-                "output_file": str(out_path),
-                "status": "completed",
-                "fragment_count": len(fragments),
-                "char_count": len(content),
-            })
+        output_files, file_results, total_frags, ok_frags = _translate_markdown_manifest(file_manifest, job)
 
     finally:
-        if engine is not None:
-            try:
-                engine.unload()
-            except Exception:
-                pass
+        _unload_engine(engine)
 
-    # 4. 写产物
     summary = (
         f"翻译方向: {language} | 文件数: {len(file_manifest)} | "
         f"片段总数: {total_frags} | 输出文件: {len(output_files)}"
     )
     json_path, md_path = _write_artifacts(
-        out_dir, ts, language, input_path, file_manifest, output_files,
-        total_frags, ok_frags, "", file_results
+        MarkdownArtifactBundle(
+            out_dir=out_dir,
+            ts=ts,
+            language=language,
+            input_path=input_path,
+            input_files=file_manifest,
+            output_files=output_files,
+            fragment_total=total_frags,
+            fragment_ok=ok_frags,
+            error="",
+            file_results=file_results,
+        )
     )
 
     status = "completed" if output_files else "failed"
@@ -374,52 +493,43 @@ def _translate_all_fragments(
 
 
 def _write_artifacts(
-    out_dir: Path,
-    ts: str,
-    language: str,
-    input_path: str,
-    input_files: List[str],
-    output_files: List[str],
-    total_frags: int,
-    ok_frags: int,
-    error: str,
-    file_results: Optional[List[Dict]] = None,
+    bundle: MarkdownArtifactBundle,
 ) -> Tuple[str, str]:
     """写 JSON + Markdown 结果档案，返回 (json_path, md_path)。"""
     import json
 
     payload = {
-        "timestamp": ts,
-        "language": language,
-        "input_path": input_path,
-        "input_files": input_files,
-        "output_files": output_files,
-        "fragment_total": total_frags,
-        "fragment_ok": ok_frags,
-        "error": error,
-        "file_results": file_results or [],
+        "timestamp": bundle.ts,
+        "language": bundle.language,
+        "input_path": bundle.input_path,
+        "input_files": bundle.input_files,
+        "output_files": bundle.output_files,
+        "fragment_total": bundle.fragment_total,
+        "fragment_ok": bundle.fragment_ok,
+        "error": bundle.error,
+        "file_results": bundle.file_results,
     }
-    json_path = str(out_dir / f"{ts}-result.json")
+    json_path = str(bundle.out_dir / f"{bundle.ts}-result.json")
     with open(json_path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
 
     md_lines = [
         "# Markdown 翻译报告",
         "",
-        f"**时间**: {ts}",
-        f"**翻译方向**: {language}",
-        f"**输入**: {input_path}",
-        f"**文件数**: {len(input_files)}",
-        f"**片段总数**: {total_frags}",
-        f"**输出文件数**: {len(output_files)}",
+        f"**时间**: {bundle.ts}",
+        f"**翻译方向**: {bundle.language}",
+        f"**输入**: {bundle.input_path}",
+        f"**文件数**: {len(bundle.input_files)}",
+        f"**片段总数**: {bundle.fragment_total}",
+        f"**输出文件数**: {len(bundle.output_files)}",
     ]
-    if error:
-        md_lines += ["", f"**错误**: {error}"]
-    if output_files:
+    if bundle.error:
+        md_lines += ["", f"**错误**: {bundle.error}"]
+    if bundle.output_files:
         md_lines += ["", "## 输出文件", ""]
-        for fp in output_files:
+        for fp in bundle.output_files:
             md_lines.append(f"- {fp}")
-    md_path = str(out_dir / f"{ts}-report.md")
+    md_path = str(bundle.out_dir / f"{bundle.ts}-report.md")
     with open(md_path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(md_lines))
 

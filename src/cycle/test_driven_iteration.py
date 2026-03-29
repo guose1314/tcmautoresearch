@@ -80,9 +80,16 @@ class TestDrivenIterationManager:
     
     def __init__(self, config: Dict[str, Any] | None = None):
         self.config = config or {}
+        self.governance_config = {
+            "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
+            "persist_failed_operations": self.config.get("persist_failed_operations", True),
+            "minimum_stable_pass_rate": float(self.config.get("minimum_stable_pass_rate", 0.85)),
+            "export_contract_version": self.config.get("export_contract_version", "d33.v1"),
+        }
         self.test_suites = {}
         self.iteration_history: List[TestDrivenIteration] = []
         self.failed_iterations: List[TestDrivenIteration] = []
+        self.failed_operations: List[Dict[str, Any]] = []
         self.performance_metrics = {
             "total_iterations": 0,
             "successful_iterations": 0,
@@ -91,6 +98,14 @@ class TestDrivenIterationManager:
             "total_test_execution_time": 0.0,
             "test_coverage_rate": 0.0,
             "quality_assurance_score": 0.0
+        }
+        self.iteration_metadata = {
+            "phase_history": [],
+            "phase_timings": {},
+            "completed_phases": [],
+            "failed_phase": None,
+            "final_status": "initialized",
+            "last_completed_phase": None,
         }
         self.logger = logging.getLogger(__name__)
         
@@ -103,6 +118,79 @@ class TestDrivenIterationManager:
         iteration.metadata["phase_history"] = []
         iteration.metadata["phase_timings"] = {}
         iteration.metadata["completed_phases"] = []
+        iteration.metadata["failed_phase"] = None
+        iteration.metadata["final_status"] = iteration.status
+        iteration.metadata["last_completed_phase"] = None
+        iteration.metadata["failed_operations"] = []
+
+    def _record_failed_operation(
+        self,
+        container: List[Dict[str, Any]],
+        operation: str,
+        error: str,
+        duration: float,
+    ) -> None:
+        if not self.governance_config["persist_failed_operations"]:
+            return
+        container.append(
+            {
+                "operation": operation,
+                "error": error,
+                "timestamp": datetime.now().isoformat(),
+                "duration_seconds": round(duration, 6),
+            }
+        )
+
+    def _serialize_value(self, value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {str(key): self._serialize_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._serialize_value(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._serialize_value(item) for item in value]
+        if hasattr(value, "__dataclass_fields__"):
+            return {
+                field_name: self._serialize_value(getattr(value, field_name))
+                for field_name in value.__dataclass_fields__
+            }
+        if callable(value):
+            return getattr(value, "__name__", "callable")
+        return value
+
+    def _start_manager_phase(self, phase_name: str, context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        phase_entry = {
+            "phase": phase_name,
+            "status": "in_progress",
+            "started_at": datetime.now().isoformat(),
+            "context": self._serialize_value(context or {}),
+        }
+        if self.governance_config["enable_phase_tracking"]:
+            self.iteration_metadata["phase_history"].append(phase_entry)
+        return phase_entry
+
+    def _complete_manager_phase(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float) -> None:
+        duration = time.perf_counter() - start_time
+        phase_entry["status"] = "completed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        self.iteration_metadata["phase_timings"][phase_name] = round(duration, 6)
+        if phase_name not in self.iteration_metadata["completed_phases"]:
+            self.iteration_metadata["completed_phases"].append(phase_name)
+        self.iteration_metadata["last_completed_phase"] = phase_name
+        self.iteration_metadata["final_status"] = "completed"
+
+    def _fail_manager_phase(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float, error: str) -> None:
+        duration = time.perf_counter() - start_time
+        phase_entry["status"] = "failed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        phase_entry["error"] = error
+        self.iteration_metadata["phase_timings"][phase_name] = round(duration, 6)
+        self.iteration_metadata["failed_phase"] = phase_name
+        self.iteration_metadata["final_status"] = "failed"
+        self._record_failed_operation(self.failed_operations, phase_name, error, duration)
 
     def _execute_phase(
         self,
@@ -111,10 +199,10 @@ class TestDrivenIterationManager:
         status: str,
         operation: Callable[[], Any],
     ) -> Any:
-        phase_start = time.time()
+        phase_start = time.perf_counter()
         phase_entry: Dict[str, Any] = {
             "phase": phase_name,
-            "status": "running",
+            "status": "in_progress",
             "started_at": datetime.now().isoformat(),
         }
         iteration.metadata["phase_history"].append(phase_entry)
@@ -123,22 +211,27 @@ class TestDrivenIterationManager:
         try:
             result = operation()
         except Exception as exc:
-            duration = time.time() - phase_start
+            duration = time.perf_counter() - phase_start
             phase_entry["status"] = "failed"
             phase_entry["ended_at"] = datetime.now().isoformat()
-            phase_entry["duration"] = duration
+            phase_entry["duration_seconds"] = round(duration, 6)
             phase_entry["error"] = str(exc)
-            iteration.metadata["phase_timings"][phase_name] = duration
+            iteration.metadata["phase_timings"][phase_name] = round(duration, 6)
             iteration.metadata["failed_phase"] = phase_name
+            iteration.metadata["final_status"] = "failed"
+            self._record_failed_operation(iteration.metadata["failed_operations"], phase_name, str(exc), duration)
+            self._record_failed_operation(self.failed_operations, phase_name, str(exc), duration)
             raise
 
-        duration = time.time() - phase_start
+        duration = time.perf_counter() - phase_start
         phase_entry["status"] = "completed"
         phase_entry["ended_at"] = datetime.now().isoformat()
-        phase_entry["duration"] = duration
-        iteration.metadata["phase_timings"][phase_name] = duration
-        iteration.metadata["completed_phases"].append(phase_name)
+        phase_entry["duration_seconds"] = round(duration, 6)
+        iteration.metadata["phase_timings"][phase_name] = round(duration, 6)
+        if phase_name not in iteration.metadata["completed_phases"]:
+            iteration.metadata["completed_phases"].append(phase_name)
         iteration.metadata["last_completed_phase"] = phase_name
+        iteration.metadata["final_status"] = "completed"
         return result
 
     def _finalize_iteration(
@@ -149,7 +242,7 @@ class TestDrivenIterationManager:
     ) -> None:
         iteration.status = "completed" if success else "failed"
         iteration.end_time = datetime.now().isoformat()
-        iteration.duration = time.time() - start_time
+        iteration.duration = time.perf_counter() - start_time
         iteration.metadata["final_status"] = iteration.status
 
     def _build_analysis_summary(
@@ -163,7 +256,7 @@ class TestDrivenIterationManager:
         failed_tests = [result for result in test_results if result.status == "failed"]
         pass_rate = float(validation_results.get("test_summary", {}).get("pass_rate", 0.0))
         overall_confidence = float(confidence_scores.get("overall", 0.0))
-        minimum_pass_rate = float(self.config.get("minimum_stable_pass_rate", 0.85))
+        minimum_pass_rate = self.governance_config["minimum_stable_pass_rate"]
 
         return {
             "total_tests": len(test_results),
@@ -173,10 +266,14 @@ class TestDrivenIterationManager:
             "academic_insight_count": len(academic_insights),
             "recommendation_count": len(recommendations),
             "iteration_status": "stable" if pass_rate >= minimum_pass_rate and not failed_tests else "needs_followup",
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.iteration_metadata.get("failed_phase"),
+            "last_completed_phase": self.iteration_metadata.get("last_completed_phase"),
+            "final_status": self.iteration_metadata.get("final_status", "initialized"),
         }
 
     def _serialize_test_result(self, test_result: TestResult) -> Dict[str, Any]:
-        return {
+        return self._serialize_value({
             "test_id": test_result.test_id,
             "test_name": test_result.test_name,
             "test_type": test_result.test_type,
@@ -190,10 +287,10 @@ class TestDrivenIterationManager:
             "metrics": test_result.metrics,
             "confidence_score": test_result.confidence_score,
             "academic_relevance": test_result.academic_relevance,
-        }
+        })
 
     def _serialize_iteration(self, iteration: TestDrivenIteration) -> Dict[str, Any]:
-        return {
+        return self._serialize_value({
             "iteration_id": iteration.iteration_id,
             "cycle_number": iteration.cycle_number,
             "status": iteration.status,
@@ -207,7 +304,7 @@ class TestDrivenIterationManager:
             "recommendations": iteration.recommendations,
             "confidence_scores": iteration.confidence_scores,
             "metadata": iteration.metadata,
-        }
+        })
 
     def _serialize_test_case(self, test_case: Dict[str, Any]) -> Dict[str, Any]:
         serialized_case = {key: value for key, value in test_case.items() if key != "function"}
@@ -226,14 +323,17 @@ class TestDrivenIterationManager:
 
     def _build_report_metadata(self) -> Dict[str, Any]:
         return {
-            "contract_version": "d17.v1",
+            "contract_version": self.governance_config["export_contract_version"],
             "generated_at": datetime.now().isoformat(),
             "result_schema": "test_driven_iteration_report",
             "latest_iteration_id": self.iteration_history[-1].iteration_id if self.iteration_history else "",
+            "failed_operation_count": len(self.failed_operations),
+            "final_status": self.iteration_metadata.get("final_status", "initialized"),
+            "last_completed_phase": self.iteration_metadata.get("last_completed_phase"),
         }
 
     def _build_export_payload(self, output_path: str) -> Dict[str, Any]:
-        return {
+        return self._serialize_value({
             "report_metadata": {
                 **self._build_report_metadata(),
                 "output_path": output_path,
@@ -248,8 +348,10 @@ class TestDrivenIterationManager:
             "test_suites": self._serialize_test_suites(),
             "iteration_history": [self._serialize_iteration(iteration) for iteration in self.iteration_history],
             "failed_iterations": [self._serialize_iteration(iteration) for iteration in self.failed_iterations],
+            "failed_operations": self.failed_operations,
+            "metadata": self.iteration_metadata,
             "test_performance_report": self.get_test_performance_report(),
-        }
+        })
     
     def _initialize_test_framework(self):
         """初始化测试框架"""
@@ -325,7 +427,20 @@ class TestDrivenIterationManager:
         Returns:
             TestDrivenIteration: 测试驱动迭代结果
         """
-        start_time = time.time()
+        start_time = time.perf_counter()
+        manager_phase_start = time.perf_counter()
+        self.iteration_metadata = {
+            "phase_history": [],
+            "phase_timings": {},
+            "completed_phases": [],
+            "failed_phase": None,
+            "final_status": "running",
+            "last_completed_phase": None,
+        }
+        manager_phase_entry = self._start_manager_phase(
+            "run_test_driven_iteration",
+            {"context_keys": sorted(context.keys()), "suite_count": len(self.test_suites)},
+        )
         
         iteration = TestDrivenIteration(
             iteration_id=f"test_iter_{int(time.time())}",
@@ -355,6 +470,8 @@ class TestDrivenIterationManager:
             self._analyze_and_update_iteration(iteration, test_results, validation_results)
 
             self._finalize_iteration(iteration, start_time, success=True)
+            self._complete_manager_phase("run_test_driven_iteration", manager_phase_entry, manager_phase_start)
+            self._sync_analysis_summary(iteration)
             self._update_performance_metrics(iteration)
 
             self._save_iteration_results(iteration)
@@ -363,6 +480,8 @@ class TestDrivenIterationManager:
             return iteration
             
         except Exception as e:
+            self.iteration_metadata["failed_phase"] = iteration.metadata.get("failed_phase")
+            self._fail_manager_phase("run_test_driven_iteration", manager_phase_entry, manager_phase_start, str(e))
             self._handle_iteration_failure(iteration, e, start_time)
             raise
 
@@ -671,11 +790,27 @@ class TestDrivenIterationManager:
     ) -> None:
         self._finalize_iteration(iteration, start_time, success=False)
         iteration.validation_results = {"error": str(exception)}
+        self._sync_analysis_summary(iteration)
         self.logger.error(f"测试驱动迭代失败: {exception}")
         self.logger.error(traceback.format_exc())
         self._update_performance_metrics(iteration)
         self._save_iteration_results(iteration)
         self.failed_iterations.append(iteration)
+
+    def _sync_analysis_summary(self, iteration: TestDrivenIteration) -> None:
+        analysis_summary = iteration.metadata.get("analysis_summary") or {}
+        analysis_summary["failed_operation_count"] = len(self.failed_operations)
+        analysis_summary["failed_phase"] = iteration.metadata.get("failed_phase") or self.iteration_metadata.get("failed_phase")
+        analysis_summary["last_completed_phase"] = iteration.metadata.get("last_completed_phase")
+        analysis_summary["final_status"] = iteration.status
+        analysis_summary.setdefault(
+            "iteration_status",
+            "stable"
+            if iteration.status == "completed"
+            and float(iteration.validation_results.get("test_summary", {}).get("pass_rate", 0.0)) >= self.governance_config["minimum_stable_pass_rate"]
+            else "needs_followup",
+        )
+        iteration.metadata["analysis_summary"] = analysis_summary
     
     def _calculate_comprehensive_confidence(self, test_results: List[TestResult], 
                                          validation_results: Dict[str, Any]) -> Dict[str, float]:
@@ -819,7 +954,18 @@ class TestDrivenIterationManager:
             "failed_iterations": len(failed_iterations),
             "average_execution_time": avg_execution_time,
             "average_confidence_score": avg_confidence_score,
-            "performance_metrics": self.performance_metrics,
+            "performance_metrics": self._serialize_value(self.performance_metrics),
+            "analysis_summary": {
+                "status": "stable"
+                if len(failed_iterations) == 0 and avg_confidence_score >= self.governance_config["minimum_stable_pass_rate"]
+                else "needs_followup",
+                "failed_operation_count": len(self.failed_operations),
+                "failed_phase": self.iteration_metadata.get("failed_phase"),
+                "last_completed_phase": self.iteration_metadata.get("last_completed_phase"),
+                "final_status": self.iteration_metadata.get("final_status", "initialized"),
+            },
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._serialize_value(self.iteration_metadata),
             "latest_results": [self._serialize_iteration(i) for i in self.iteration_history[-3:]] if self.iteration_history else [],
             "failed_iterations_details": [self._serialize_iteration(i) for i in failed_iterations],
             "report_metadata": self._build_report_metadata(),
@@ -847,6 +993,24 @@ class TestDrivenIterationManager:
             self.test_suites.clear()
             self.iteration_history.clear()
             self.failed_iterations.clear()
+            self.failed_operations.clear()
+            self.iteration_metadata = {
+                "phase_history": [],
+                "phase_timings": {},
+                "completed_phases": [],
+                "failed_phase": None,
+                "final_status": "cleaned",
+                "last_completed_phase": None,
+            }
+            self.performance_metrics = {
+                "total_iterations": 0,
+                "successful_iterations": 0,
+                "failed_iterations": 0,
+                "average_test_duration": 0.0,
+                "total_test_execution_time": 0.0,
+                "test_coverage_rate": 0.0,
+                "quality_assurance_score": 0.0,
+            }
             
             self.logger.info("测试驱动迭代管理器资源清理完成")
             return True

@@ -132,7 +132,7 @@ class IntegrationTester:
             "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
             "persist_failed_operations": self.config.get("persist_failed_operations", True),
             "minimum_stable_pass_rate": float(self.config.get("minimum_stable_pass_rate", 0.85)),
-            "export_contract_version": self.config.get("export_contract_version", "d24.v1"),
+            "export_contract_version": self.config.get("export_contract_version", "d36.v1"),
         }
         
         # 初始化测试环境
@@ -202,7 +202,7 @@ class IntegrationTester:
         self.phase_timings[phase_name] = round(duration, 6)
         self.failed_phase = phase_name
         self.final_status = "failed"
-        self._record_failed_operation(phase_name, error, details)
+        self._record_failed_operation(phase_name, error, details, duration)
 
         if not self.governance_config.get("enable_phase_tracking", True):
             return
@@ -222,6 +222,7 @@ class IntegrationTester:
         operation_name: str,
         error: Exception,
         details: Optional[Dict[str, Any]] = None,
+        duration_seconds: Optional[float] = None,
     ) -> None:
         if not self.governance_config.get("persist_failed_operations", True):
             return
@@ -231,7 +232,18 @@ class IntegrationTester:
             "error": str(error),
             "details": self._serialize_value(details or {}),
             "timestamp": datetime.now().isoformat(),
+            "duration_seconds": round(duration_seconds or 0.0, 6),
         })
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        return {
+            "phase_history": self._serialize_value(self.phase_history),
+            "phase_timings": self._serialize_value(self.phase_timings),
+            "completed_phases": list(self.completed_phases),
+            "failed_phase": self.failed_phase,
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
 
     def _serialize_value(self, value: Any) -> Any:
         if isinstance(value, Enum):
@@ -292,15 +304,18 @@ class IntegrationTester:
             "failed_operation_count": len(self.failed_operations),
             "failed_phase": self.failed_phase,
             "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
         }
 
     def _build_report_metadata(self) -> Dict[str, Any]:
         return {
             "contract_version": self.governance_config["export_contract_version"],
             "generated_at": datetime.now().isoformat(),
+            "result_schema": "integration_tester_report",
             "completed_phases": list(self.completed_phases),
             "failed_phase": self.failed_phase,
             "failed_operation_count": len(self.failed_operations),
+            "final_status": self.final_status,
             "last_completed_phase": self.last_completed_phase,
         }
     
@@ -1311,15 +1326,9 @@ class IntegrationTester:
             ],
             "latest_results": [self._serialize_integration_test(test) for test in self.test_history[-10:]] if self.test_history else [],
             "analysis_summary": self._build_analysis_summary(),
+            "failed_operations": self._serialize_value(self.failed_operations),
             "report_metadata": self._build_report_metadata(),
-            "metadata": {
-                "phase_history": self._serialize_value(self.phase_history),
-                "phase_timings": self._serialize_value(self.phase_timings),
-                "completed_phases": list(self.completed_phases),
-                "failed_phase": self.failed_phase,
-                "final_status": self.final_status,
-                "last_completed_phase": self.last_completed_phase,
-            },
+            "metadata": self._build_runtime_metadata(),
         }
     
     def cleanup(self) -> bool:
@@ -1339,7 +1348,7 @@ class IntegrationTester:
             self.completed_phases.clear()
             self.failed_phase = None
             self.last_completed_phase = None
-            self.final_status = "terminated"
+            self.final_status = "cleaned"
             
             self._complete_phase("cleanup", phase_started_at)
             self.logger.info("集成测试框架资源清理完成")

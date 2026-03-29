@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,26 @@ class PdfTranslationResult:
     output_json: str = ""
     error: str = ""
     fragment_results: List[Dict] = field(default_factory=list)
+
+
+@dataclass
+class PdfTranslationArtifacts:
+    markdown_file: str
+    html_file: str
+    json_file: str
+
+
+@dataclass
+class PdfJsonPayload:
+    ts: str
+    pdf_path: str
+    title: str
+    title_translated: str
+    abstract: str
+    abstract_translated: str
+    fragment_total: int
+    fragment_ok: int
+    char_count: int
 
 
 # ────────────────────────────── PDF 工具函数 ──────────────────────────────
@@ -212,6 +232,139 @@ def _extract_pdf_metadata_with_llm(
     return translated_title, translated_abstract
 
 
+def _build_failed_pdf_result(out_dir: Path, ts: str, pdf_path: str, error: str) -> PdfTranslationResult:
+    return PdfTranslationResult(
+        status="failed",
+        pdf_path=pdf_path,
+        summary=error,
+        output_json=str(out_dir / f"{ts}-result.json"),
+        output_markdown=str(out_dir / f"{ts}-report.md"),
+        error=error,
+    )
+
+
+def _load_pdf_engine(use_llm: bool):
+    if not use_llm:
+        return None
+
+    try:
+        from src.llm.llm_engine import LLMEngine
+
+        engine = LLMEngine(temperature=0.1, max_tokens=2048)
+        engine.load()
+        logger.info("LLM已加载，开始翻译。")
+        return engine
+    except Exception as exc:
+        logger.warning(f"LLM加载失败，将跳过翻译: {exc}")
+        return None
+
+
+def _translate_pdf_fragments(
+    fragments: List[str],
+    target_language: str,
+    additional_prompt: str,
+    engine,
+    max_workers: int,
+) -> Tuple[List[str], int]:
+    if not fragments:
+        return [], 0
+
+    fragment_results: List[Optional[str]] = [None] * len(fragments)
+    fragment_ok = 0
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {
+            executor.submit(
+                _translate_fragment_with_llm,
+                frag,
+                target_language,
+                additional_prompt,
+                engine,
+            ): idx
+            for idx, frag in enumerate(fragments)
+        }
+
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                fragment_results[idx] = future.result()
+                fragment_ok += 1
+                if (idx + 1) % max(1, len(fragments) // 5) == 0:
+                    logger.info(f"翻译进度: {idx + 1}/{len(fragments)} 片段完成")
+            except Exception as exc:
+                logger.error(f"片段 {idx} 翻译失败: {exc}")
+                fragment_results[idx] = fragments[idx]
+
+    return [item or fragments[i] for i, item in enumerate(fragment_results)], fragment_ok
+
+
+def _build_pdf_artifact_paths(out_dir: Path, ts: str) -> PdfTranslationArtifacts:
+    return PdfTranslationArtifacts(
+        markdown_file=str(out_dir / f"{ts}-report.md"),
+        html_file=str(out_dir / f"{ts}-report.html"),
+        json_file=str(out_dir / f"{ts}-result.json"),
+    )
+
+
+def _write_pdf_artifacts(
+    artifacts: PdfTranslationArtifacts,
+    title: str,
+    abstract: str,
+    abstract_translated: str,
+    fragments: List[str],
+    translated_fragments: List[str],
+    char_count: int,
+) -> None:
+    _write_markdown_output(
+        artifacts.markdown_file,
+        title,
+        abstract,
+        abstract_translated,
+        fragments,
+        translated_fragments,
+        char_count,
+    )
+    _write_html_output(
+        artifacts.html_file,
+        title,
+        abstract,
+        abstract_translated,
+        fragments,
+        translated_fragments,
+    )
+
+
+def _write_pdf_json_output(
+    artifacts: PdfTranslationArtifacts,
+    payload: PdfJsonPayload,
+) -> None:
+    result_dict = {
+        "timestamp": payload.ts,
+        "pdf_path": payload.pdf_path,
+        "title": payload.title,
+        "title_translated": payload.title_translated,
+        "abstract": payload.abstract,
+        "abstract_translated": payload.abstract_translated,
+        "fragment_total": payload.fragment_total,
+        "fragment_ok": payload.fragment_ok,
+        "char_count": payload.char_count,
+        "output_markdown": artifacts.markdown_file,
+        "output_html": artifacts.html_file,
+    }
+
+    with open(artifacts.json_file, "w", encoding="utf-8") as fh:
+        json.dump(result_dict, fh, indent=2, ensure_ascii=False)
+
+
+def _unload_pdf_engine(engine) -> None:
+    if engine is None:
+        return
+    try:
+        engine.unload()
+    except Exception:
+        pass
+
+
 # ────────────────────────────── 输出生成 ──────────────────────────────
 
 def _write_markdown_output(
@@ -349,21 +502,13 @@ def run_pdf_full_text_translation(
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    artifacts = _build_pdf_artifact_paths(out_dir, ts)
 
-    # 1. 校验输入文件
     if not os.path.isfile(pdf_path):
         err = f"找不到PDF文件: {pdf_path}"
         logger.error(err)
-        return PdfTranslationResult(
-            status="failed",
-            pdf_path=pdf_path,
-            summary=err,
-            output_json=str(out_dir / f"{ts}-result.json"),
-            output_markdown=str(out_dir / f"{ts}-report.md"),
-            error=err,
-        )
+        return _build_failed_pdf_result(out_dir, ts, pdf_path, err)
 
-    # 2. 读取 PDF 内容
     try:
         title, abstract, full_text = _read_pdf_with_fitz(pdf_path)
         char_count = len(full_text)
@@ -373,101 +518,56 @@ def run_pdf_full_text_translation(
     except Exception as exc:
         err = f"PDF读取失败: {exc}"
         logger.error(err)
-        return PdfTranslationResult(
-            status="failed",
-            pdf_path=pdf_path,
-            summary=err,
-            output_json=str(out_dir / f"{ts}-result.json"),
-            output_markdown=str(out_dir / f"{ts}-report.md"),
-            error=err,
-        )
+        return _build_failed_pdf_result(out_dir, ts, pdf_path, err)
 
-    # 3. 拆分 PDF 内容为翻译片段
     fragments = _split_pdf_content(full_text, max_tokens=max_tokens_per_fragment)
     logger.info(f"PDF拆分成 {len(fragments)} 个翻译片段")
+    engine = _load_pdf_engine(use_llm)
 
-    # 4. 加载 LLM（可选）
-    engine = None
-    if use_llm:
-        try:
-            from src.llm.llm_engine import LLMEngine
-            engine = LLMEngine(temperature=0.1, max_tokens=2048)
-            engine.load()
-            logger.info("LLM已加载，开始翻译。")
-        except Exception as exc:
-            logger.warning(f"LLM加载失败，将跳过翻译: {exc}")
-
-    # 5. 翻译元数据（标题/摘要）
-    title_trans, abstract_trans = _extract_pdf_metadata_with_llm(
-        title, abstract, engine
-    )
-    logger.info("元数据翻译完成")
-
-    # 6. 多线程翻译所有片段
-    fragments_trans: List[str] = [None] * len(fragments)  # type: ignore
-    fragment_ok = 0
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_idx = {
-            executor.submit(
-                _translate_fragment_with_llm,
-                frag,
-                target_language,
-                additional_prompt,
-                engine,
-            ): idx
-            for idx, frag in enumerate(fragments)
-        }
-
-        for future in as_completed(future_to_idx):
-            idx = future_to_idx[future]
-            try:
-                trans_frag = future.result()
-                fragments_trans[idx] = trans_frag
-                fragment_ok += 1
-                if (idx + 1) % max(1, len(fragments) // 5) == 0:
-                    logger.info(
-                        f"翻译进度: {idx + 1}/{len(fragments)} 片段完成"
-                    )
-            except Exception as exc:
-                logger.error(f"片段 {idx} 翻译失败: {exc}")
-                fragments_trans[idx] = fragments[idx]  # 回退原文
-
-    # Cast to List[str] after filling
-    fragments_trans_final: List[str] = [f or fragments[i] for i, f in enumerate(fragments_trans)]
+    try:
+        title_trans, abstract_trans = _extract_pdf_metadata_with_llm(title, abstract, engine)
+        logger.info("元数据翻译完成")
+        fragments_trans_final, fragment_ok = _translate_pdf_fragments(
+            fragments,
+            target_language,
+            additional_prompt,
+            engine,
+            max_workers,
+        )
+    finally:
+        _unload_pdf_engine(engine)
 
     logger.info(f"翻译完成: {fragment_ok}/{len(fragments)} 片段成功")
 
-    # 7. 生成输出文件
-    md_file = str(out_dir / f"{ts}-report.md")
-    html_file = str(out_dir / f"{ts}-report.html")
-    json_file = str(out_dir / f"{ts}-result.json")
-
     try:
-        _write_markdown_output(md_file, title, abstract, abstract_trans, fragments, fragments_trans_final, char_count)
-        _write_html_output(html_file, title, abstract, abstract_trans, fragments, fragments_trans_final)
-        logger.info(f"已生成报告: {md_file}, {html_file}")
+        _write_pdf_artifacts(
+            artifacts,
+            title,
+            abstract,
+            abstract_trans,
+            fragments,
+            fragments_trans_final,
+            char_count,
+        )
+        logger.info(f"已生成报告: {artifacts.markdown_file}, {artifacts.html_file}")
     except Exception as exc:
         logger.error(f"输出文件生成失败: {exc}")
 
-    # 8. 生成 JSON 三档案
-    result_dict = {
-        "timestamp": ts,
-        "pdf_path": pdf_path,
-        "title": title,
-        "title_translated": title_trans,
-        "abstract": abstract,
-        "abstract_translated": abstract_trans,
-        "fragment_total": len(fragments),
-        "fragment_ok": fragment_ok,
-        "char_count": char_count,
-        "output_markdown": md_file,
-        "output_html": html_file,
-    }
-
     try:
-        with open(json_file, "w", encoding="utf-8") as fh:
-            json.dump(result_dict, fh, indent=2, ensure_ascii=False)
+        _write_pdf_json_output(
+            artifacts,
+            PdfJsonPayload(
+                ts=ts,
+                pdf_path=pdf_path,
+                title=title,
+                title_translated=title_trans,
+                abstract=abstract,
+                abstract_translated=abstract_trans,
+                fragment_total=len(fragments),
+                fragment_ok=fragment_ok,
+                char_count=char_count,
+            ),
+        )
     except Exception as exc:
         logger.error(f"JSON 输出失败: {exc}")
 
@@ -482,9 +582,9 @@ def run_pdf_full_text_translation(
         fragment_total=len(fragments),
         fragment_ok=fragment_ok,
         char_count=char_count,
-        output_markdown=md_file,
-        output_html=html_file,
+        output_markdown=artifacts.markdown_file,
+        output_html=artifacts.html_file,
         summary=summary,
-        output_json=json_file,
+        output_json=artifacts.json_file,
         error="",
     )

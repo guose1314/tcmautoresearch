@@ -12,7 +12,7 @@ from src.test.integration_tester import (
 
 class TestIntegrationTesterQuality(unittest.TestCase):
     def test_integration_tester_tracks_phase_history_and_analysis_summary(self):
-        tester = IntegrationTester({"minimum_stable_pass_rate": 0.8, "export_contract_version": "d24.v1"})
+        tester = IntegrationTester({"minimum_stable_pass_rate": 0.8, "export_contract_version": "d36.v1"})
         integration_test = tester.add_integration_test(
             test_name="module-link",
             test_type=IntegrationTestType.MODULE_INTEGRATION,
@@ -33,10 +33,12 @@ class TestIntegrationTesterQuality(unittest.TestCase):
             ["add_integration_test", "run_integration_test"],
         )
         self.assertEqual(report["metadata"]["completed_phases"][-1], "run_integration_test")
-        self.assertEqual(report["report_metadata"]["contract_version"], "d24.v1")
+        self.assertEqual(report["analysis_summary"]["last_completed_phase"], "run_integration_test")
+        self.assertEqual(report["report_metadata"]["contract_version"], "d36.v1")
+        self.assertEqual(report["report_metadata"]["final_status"], "completed")
 
     def test_integration_tester_export_uses_json_safe_contract(self):
-        tester = IntegrationTester({"export_contract_version": "d24.v1"})
+        tester = IntegrationTester({"export_contract_version": "d36.v1"})
         integration_test = tester.add_integration_test(
             test_name="academic-link",
             test_type=IntegrationTestType.ACADEMIC_INTEGRATION,
@@ -56,13 +58,13 @@ class TestIntegrationTesterQuality(unittest.TestCase):
             with open(output_path, "r", encoding="utf-8") as file_obj:
                 payload = json.load(file_obj)
 
-        self.assertEqual(payload["report_metadata"]["contract_version"], "d24.v1")
+        self.assertEqual(payload["report_metadata"]["contract_version"], "d36.v1")
         self.assertEqual(payload["detailed_results"][0]["test_type"], "academic_integration")
         self.assertEqual(payload["detailed_results"][0]["status"], "passed")
         self.assertIn("analysis_summary", payload)
 
     def test_integration_tester_failure_tracks_failed_phase(self):
-        tester = IntegrationTester({"export_contract_version": "d24.v1"})
+        tester = IntegrationTester({"export_contract_version": "d36.v1"})
 
         with self.assertRaises(ValueError):
             tester.run_integration_test("missing-test")
@@ -71,9 +73,10 @@ class TestIntegrationTesterQuality(unittest.TestCase):
         self.assertEqual(report["metadata"]["failed_phase"], "run_integration_test")
         self.assertEqual(report["analysis_summary"]["failed_operation_count"], 1)
         self.assertEqual(report["metadata"]["phase_history"][-1]["status"], "failed")
+        self.assertIn("duration_seconds", report["failed_operations"][0])
 
     def test_integration_tester_cleanup_keeps_shared_executor_available(self):
-        tester1 = IntegrationTester()
+        tester1 = IntegrationTester({"export_contract_version": "d36.v1"})
         tester2 = IntegrationTester()
 
         self.assertIs(tester1.executor, tester2.executor)
@@ -83,6 +86,7 @@ class TestIntegrationTesterQuality(unittest.TestCase):
 
         self.assertTrue(cleaned)
         self.assertFalse(getattr(executor, "_shutdown", False))
+        self.assertEqual(tester1.get_integration_performance_report()["metadata"]["final_status"], "cleaned")
 
 
 if __name__ == "__main__":

@@ -148,7 +148,7 @@ class ResearchPipeline:
             "minimum_stable_completion_rate": float(
                 self.config.get("minimum_stable_completion_rate", 0.8)
             ),
-            "export_contract_version": self.config.get("export_contract_version", "d26.v1"),
+            "export_contract_version": self.config.get("export_contract_version", "d44.v1"),
         }
         
         # 初始化质量控制指标
@@ -228,7 +228,13 @@ class ResearchPipeline:
         metadata.setdefault("phase_timings", {})[phase_name] = round(duration, 6)
         metadata["failed_phase"] = phase_name
         metadata["final_status"] = "failed"
-        self._record_failed_operation(failed_operations, phase_name, error, duration)
+        self._record_failed_operation(
+            failed_operations,
+            phase_name,
+            error,
+            duration,
+            phase_entry.get("context", {}),
+        )
 
     def _record_failed_operation(
         self,
@@ -236,6 +242,7 @@ class ResearchPipeline:
         operation: str,
         error: str,
         duration: float,
+        details: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not self._governance_config.get("persist_failed_operations", True):
             return
@@ -243,10 +250,21 @@ class ResearchPipeline:
             {
                 "operation": operation,
                 "error": error,
+                "details": self._serialize_value(details or {}),
                 "timestamp": datetime.now().isoformat(),
                 "duration_seconds": round(duration, 6),
             }
         )
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        return {
+            "phase_history": self._serialize_value(self._metadata.get("phase_history", [])),
+            "phase_timings": self._serialize_value(self._metadata.get("phase_timings", {})),
+            "completed_phases": list(self._metadata.get("completed_phases", [])),
+            "failed_phase": self._metadata.get("failed_phase"),
+            "final_status": self._metadata.get("final_status", "initialized"),
+            "last_completed_phase": self._metadata.get("last_completed_phase"),
+        }
 
     def _serialize_value(self, value: Any) -> Any:
         if isinstance(value, Enum):
@@ -287,6 +305,12 @@ class ResearchPipeline:
             phase_name,
             error,
             cycle.duration,
+            {
+                "cycle_id": cycle.cycle_id,
+                "cycle_name": cycle.cycle_name,
+                "status": cycle.status.value,
+                "failed_phase": phase_name,
+            },
         )
 
     def _build_cycle_analysis_summary(self, cycle: ResearchCycle) -> Dict[str, Any]:
@@ -379,15 +403,17 @@ class ResearchPipeline:
         }
 
     def _build_report_metadata(self) -> Dict[str, Any]:
+        runtime_metadata = self._build_runtime_metadata()
         return {
             "contract_version": self._governance_config["export_contract_version"],
             "generated_at": datetime.now().isoformat(),
             "result_schema": "research_pipeline_report",
             "active_cycle_count": len(self.active_cycles),
-            "completed_phases": list(self._metadata.get("completed_phases", [])),
-            "failed_phase": self._metadata.get("failed_phase"),
+            "completed_phases": list(runtime_metadata.get("completed_phases", [])),
+            "failed_phase": runtime_metadata.get("failed_phase"),
             "failed_operation_count": len(self._failed_operations),
-            "last_completed_phase": self._metadata.get("last_completed_phase"),
+            "final_status": runtime_metadata.get("final_status", "initialized"),
+            "last_completed_phase": runtime_metadata.get("last_completed_phase"),
         }
     
     def create_research_cycle(self, cycle_name: str, 
@@ -601,6 +627,18 @@ class ResearchPipeline:
                 research_cycle = self.research_cycles[cycle_id]
                 history = research_cycle.metadata.get("phase_history", [])
                 if history and history[-1].get("phase") == phase.value:
+                    failure_details = {
+                        "cycle_id": research_cycle.cycle_id,
+                        "cycle_name": research_cycle.cycle_name,
+                        "status": research_cycle.status.value,
+                        "phase": phase.value,
+                    }
+                    history[-1]["context"] = self._serialize_value(
+                        {
+                            **(history[-1].get("context") or {}),
+                            **failure_details,
+                        }
+                    )
                     self._fail_phase(
                         research_cycle.metadata,
                         research_cycle.metadata.setdefault("failed_operations", []),
@@ -611,6 +649,13 @@ class ResearchPipeline:
                     )
                     history[-1]["completed_at"] = datetime.now().isoformat()
                     history[-1]["duration"] = time.time() - start_time
+                    self._record_failed_operation(
+                        self._failed_operations,
+                        phase.value,
+                        str(e),
+                        time.time() - start_time,
+                        failure_details,
+                    )
                 self._mark_cycle_failed(research_cycle, phase.value, str(e))
                 research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
                 self.execution_history.append({
@@ -1667,7 +1712,7 @@ class ResearchPipeline:
                 "analysis_summary": self._build_pipeline_analysis_summary(),
                 "report_metadata": self._build_report_metadata(),
                 "failed_operations": self._serialize_value(self._failed_operations),
-                "metadata": self._serialize_value(self._metadata),
+                "metadata": self._build_runtime_metadata(),
             }
         }
     
@@ -1700,6 +1745,8 @@ class ResearchPipeline:
                 "execution_history": self._serialize_value(self.execution_history),
                 "quality_metrics": self._serialize_value(self.quality_metrics),
                 "resource_usage": self._serialize_value(self.resource_usage),
+                "failed_operations": self._serialize_value(self._failed_operations),
+                "metadata": self._build_runtime_metadata(),
             }
             
             with open(output_path, 'w', encoding='utf-8') as f:

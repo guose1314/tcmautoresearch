@@ -12,7 +12,7 @@ import traceback
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 # 全局线程池管理
 _global_executor = None
@@ -50,6 +50,12 @@ class BaseModule(ABC):
     def __init__(self, module_name: str, config: Dict[str, Any] | None = None):
         self.module_name = module_name
         self.config = config or {}
+        self.governance_config = {
+            "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
+            "persist_failed_operations": self.config.get("persist_failed_operations", True),
+            "minimum_stable_success_rate": float(self.config.get("minimum_stable_success_rate", 0.8)),
+            "export_contract_version": self.config.get("export_contract_version", "d46.v1"),
+        }
         self.logger = logging.getLogger(f"{__name__}.{module_name}")
         self.initialized = False
         self.status = "created"
@@ -69,8 +75,178 @@ class BaseModule(ABC):
         self.performance_history = []
         self.academic_insights = []
         self.recommendations = []
+        self.phase_history: List[Dict[str, Any]] = []
+        self.phase_timings: Dict[str, float] = {}
+        self.completed_phases: List[str] = []
+        self.failed_phase: Optional[str] = None
+        self.failed_operations: List[Dict[str, Any]] = []
+        self.final_status = self.status
+        self.last_completed_phase: Optional[str] = None
         
         self.logger.info(f"模块 {module_name} 基类初始化完成")
+
+    def _start_phase(self, phase_name: str, details: Optional[Dict[str, Any]] = None) -> float:
+        started_at = time.time()
+        if self.governance_config.get("enable_phase_tracking", True):
+            self.phase_history.append(
+                {
+                    "phase": phase_name,
+                    "status": "in_progress",
+                    "started_at": datetime.now().isoformat(),
+                    "details": self._serialize_value(details or {}),
+                }
+            )
+        return started_at
+
+    def _complete_phase(
+        self,
+        phase_name: str,
+        phase_started_at: float,
+        details: Optional[Dict[str, Any]] = None,
+        final_status: Optional[str] = None,
+    ) -> None:
+        duration = max(0.0, time.time() - phase_started_at)
+        self.phase_timings[phase_name] = round(duration, 6)
+        if phase_name not in self.completed_phases:
+            self.completed_phases.append(phase_name)
+        self.last_completed_phase = phase_name
+        self.failed_phase = None
+        self.final_status = final_status or self.final_status
+
+        if not self.governance_config.get("enable_phase_tracking", True):
+            return
+
+        for phase in reversed(self.phase_history):
+            if phase.get("phase") == phase_name and phase.get("status") == "in_progress":
+                phase["status"] = "completed"
+                phase["ended_at"] = datetime.now().isoformat()
+                phase["duration_seconds"] = round(duration, 6)
+                if details:
+                    phase["details"] = self._serialize_value({**phase.get("details", {}), **details})
+                break
+
+    def _fail_phase(
+        self,
+        phase_name: str,
+        phase_started_at: float,
+        error: Exception,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        duration = max(0.0, time.time() - phase_started_at)
+        self.phase_timings[phase_name] = round(duration, 6)
+        self.failed_phase = phase_name
+        self.final_status = "failed"
+        self._record_failed_operation(phase_name, error, details, duration)
+
+        if not self.governance_config.get("enable_phase_tracking", True):
+            return
+
+        for phase in reversed(self.phase_history):
+            if phase.get("phase") == phase_name and phase.get("status") == "in_progress":
+                phase["status"] = "failed"
+                phase["ended_at"] = datetime.now().isoformat()
+                phase["duration_seconds"] = round(duration, 6)
+                phase["error"] = str(error)
+                if details:
+                    phase["details"] = self._serialize_value({**phase.get("details", {}), **details})
+                break
+
+    def _record_failed_operation(
+        self,
+        operation_name: str,
+        error: Exception,
+        details: Optional[Dict[str, Any]] = None,
+        duration_seconds: Optional[float] = None,
+    ) -> None:
+        if not self.governance_config.get("persist_failed_operations", True):
+            return
+
+        self.failed_operations.append(
+            {
+                "operation": operation_name,
+                "error": str(error),
+                "details": self._serialize_value(details or {}),
+                "timestamp": datetime.now().isoformat(),
+                "duration_seconds": round(duration_seconds or 0.0, 6),
+            }
+        )
+
+    def _serialize_value(self, value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {str(key): self._serialize_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._serialize_value(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._serialize_value(item) for item in value]
+        if callable(value):
+            return getattr(value, "__name__", "callable")
+        return value
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        return {
+            "phase_history": self._serialize_value(self.phase_history),
+            "phase_timings": self._serialize_value(self.phase_timings),
+            "completed_phases": list(self.completed_phases),
+            "failed_phase": self.failed_phase,
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
+
+    def _build_analysis_summary(self) -> Dict[str, Any]:
+        total_executions = len(self.performance_history)
+        success_count = sum(1 for item in self.performance_history if item.get("success"))
+        success_rate = success_count / total_executions if total_executions else 0.0
+
+        status = "idle"
+        if total_executions or self.failed_operations:
+            status = (
+                "stable"
+                if self.failed_phase is None
+                and success_rate >= self.governance_config["minimum_stable_success_rate"]
+                else "needs_followup"
+            )
+        if self.final_status == "cleaned":
+            status = "idle"
+
+        return {
+            "status": status,
+            "total_executions": total_executions,
+            "successful_executions": success_count,
+            "failed_executions": total_executions - success_count,
+            "success_rate": success_rate,
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.failed_phase,
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
+
+    def _build_report_metadata(self) -> Dict[str, Any]:
+        return {
+            "contract_version": self.governance_config["export_contract_version"],
+            "generated_at": datetime.now().isoformat(),
+            "result_schema": "base_module_report",
+            "module_name": self.module_name,
+            "failed_operation_count": len(self.failed_operations),
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
+
+    def _build_export_payload(self, output_path: str) -> Dict[str, Any]:
+        return {
+            "report_metadata": {
+                **self._build_report_metadata(),
+                "output_path": output_path,
+            },
+            "module_info": self._serialize_value(self.get_module_info()),
+            "performance_report": self._serialize_value(self.get_performance_report()),
+            "metrics_history": self._serialize_value(self.performance_history),
+            "academic_insights": self._serialize_value(self.academic_insights),
+            "recommendations": self._serialize_value(self.recommendations),
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+        }
     
     def initialize(self, config: Dict[str, Any] | None = None) -> bool:
         """
@@ -83,6 +259,7 @@ class BaseModule(ABC):
             bool: 初始化是否成功
         """
         start_time = time.time()
+        phase_started_at = self._start_phase("initialize", {"config_keys": sorted((config or {}).keys())})
         self.logger.info(f"开始初始化模块: {self.module_name}")
         
         try:
@@ -95,11 +272,30 @@ class BaseModule(ABC):
                 self.initialized = True
                 self.status = "initialized"
                 self.metrics["last_execution_time"] = time.time() - start_time
+                self.final_status = "initialized"
+                self._complete_phase(
+                    "initialize",
+                    phase_started_at,
+                    {"initialized": True},
+                    final_status="initialized",
+                )
                 self.logger.info(f"模块 {self.module_name} 初始化成功")
                 return True
+            self._fail_phase(
+                "initialize",
+                phase_started_at,
+                RuntimeError("module initialization returned False"),
+                {"config_keys": sorted((config or {}).keys())},
+            )
                 
         except Exception as e:
             self.status = "error"
+            self._fail_phase(
+                "initialize",
+                phase_started_at,
+                e,
+                {"config_keys": sorted((config or {}).keys())},
+            )
             self.logger.error(f"模块 {self.module_name} 初始化失败: {e}")
             self.logger.error(traceback.format_exc())
             
@@ -129,6 +325,10 @@ class BaseModule(ABC):
             raise RuntimeError(f"模块 {self.module_name} 未初始化")
         
         start_time = time.time()
+        phase_started_at = self._start_phase(
+            "execute",
+            {"module_name": self.module_name, "context_keys": sorted(context.keys())},
+        )
         self.module_start_time = start_time
         self.logger.info(f"开始执行模块: {self.module_name}")
         
@@ -149,6 +349,13 @@ class BaseModule(ABC):
             
             # 生成改进建议
             self._generate_recommendations(result)
+            self.final_status = "completed"
+            self._complete_phase(
+                "execute",
+                phase_started_at,
+                {"context_keys": sorted(context.keys())},
+                final_status="completed",
+            )
             
             self.logger.info(f"模块 {self.module_name} 执行成功，耗时: {execution_time:.2f}s")
             return result
@@ -164,6 +371,12 @@ class BaseModule(ABC):
             
             # 记录错误执行历史
             self._record_execution_history({"error": str(e)}, execution_time)
+            self._fail_phase(
+                "execute",
+                phase_started_at,
+                e,
+                {"module_name": self.module_name, "context_keys": sorted(context.keys())},
+            )
             
             raise
     
@@ -188,13 +401,31 @@ class BaseModule(ABC):
             bool: 清理是否成功
         """
         start_time = time.time()
+        phase_started_at = self._start_phase("cleanup", {"module_name": self.module_name})
         self.logger.info(f"开始清理模块资源: {self.module_name}")
         
         try:
             if self._do_cleanup():
                 self.initialized = False
-                self.status = "terminated"
+                self.status = "cleaned"
                 self.metrics["last_execution_time"] = time.time() - start_time
+                self.metrics["execution_count"] = 0
+                self.metrics["total_execution_time"] = 0.0
+                self.metrics["last_success"] = False
+                self.metrics["quality_score"] = 0.0
+                self.metrics["performance_score"] = 0.0
+                self.metrics["academic_relevance"] = 0.0
+                self.metrics["resource_utilization"] = 0.0
+                self.performance_history.clear()
+                self.academic_insights.clear()
+                self.recommendations.clear()
+                self.phase_history.clear()
+                self.phase_timings.clear()
+                self.completed_phases.clear()
+                self.failed_operations.clear()
+                self.failed_phase = None
+                self.last_completed_phase = None
+                self.final_status = "cleaned"
                 self.logger.info(f"模块 {self.module_name} 资源清理完成")
                 
                 # 不关闭全局线程池
@@ -203,6 +434,7 @@ class BaseModule(ABC):
                 
         except Exception as e:
             self.status = "error"
+            self._fail_phase("cleanup", phase_started_at, e, {"module_name": self.module_name})
             self.logger.error(f"模块 {self.module_name} 资源清理失败: {e}")
             self.logger.error(traceback.format_exc())
             
@@ -229,12 +461,15 @@ class BaseModule(ABC):
             "module_name": self.module_name,
             "status": self.status,
             "initialized": self.initialized,
-            "metrics": self.metrics,
+            "metrics": self._serialize_value(self.metrics),
             "last_execution_time": self.metrics["last_execution_time"],
             "last_success": self.metrics["last_success"],
             "quality_score": self.metrics["quality_score"],
             "performance_score": self.metrics["performance_score"],
-            "academic_relevance": self.metrics["academic_relevance"]
+            "academic_relevance": self.metrics["academic_relevance"],
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+            "report_metadata": self._build_report_metadata(),
         }
     
     def get_module_info(self) -> Dict[str, Any]:
@@ -251,11 +486,13 @@ class BaseModule(ABC):
             "type": self.config.get("type", "generic"),
             "status": self.status,
             "initialized": self.initialized,
-            "config": self.config,
-            "metrics": self.metrics,
-            "performance_history": self.performance_history[-10:],  # 最近10次
-            "academic_insights": self.academic_insights[-5:],  # 最近5个洞察
-            "recommendations": self.recommendations[-5:],  # 最近5个建议
+            "config": self._serialize_value(self.config),
+            "metrics": self._serialize_value(self.metrics),
+            "performance_history": self._serialize_value(self.performance_history[-10:]),  # 最近10次
+            "academic_insights": self._serialize_value(self.academic_insights[-5:]),  # 最近5个洞察
+            "recommendations": self._serialize_value(self.recommendations[-5:]),  # 最近5个建议
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
             "last_execution": self.module_start_time
         }
     
@@ -399,7 +636,13 @@ class BaseModule(ABC):
             Dict[str, Any]: 性能报告
         """
         if not self.performance_history:
-            return {"message": "没有执行历史记录"}
+            return {
+                "message": "没有执行历史记录",
+                "analysis_summary": self._build_analysis_summary(),
+                "failed_operations": self._serialize_value(self.failed_operations),
+                "metadata": self._build_runtime_metadata(),
+                "report_metadata": self._build_report_metadata(),
+            }
         
         # 计算平均性能指标
         execution_times = [h["execution_time"] for h in self.performance_history]
@@ -417,10 +660,14 @@ class BaseModule(ABC):
             "failed_executions": total_count - success_count,
             "success_rate": success_rate,
             "average_execution_time": avg_execution_time,
-            "metrics": self.metrics,
-            "performance_history": self.performance_history[-10:],  # 最近10次
-            "academic_insights": self.academic_insights[-5:],  # 最近5个洞察
-            "recommendations": self.recommendations[-5:]  # 最近5个建议
+            "metrics": self._serialize_value(self.metrics),
+            "performance_history": self._serialize_value(self.performance_history[-10:]),  # 最近10次
+            "academic_insights": self._serialize_value(self.academic_insights[-5:]),  # 最近5个洞察
+            "recommendations": self._serialize_value(self.recommendations[-5:]),  # 最近5个建议
+            "analysis_summary": self._build_analysis_summary(),
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+            "report_metadata": self._build_report_metadata(),
         }
     
     def export_module_data(self, output_path: str) -> bool:
@@ -433,14 +680,17 @@ class BaseModule(ABC):
         Returns:
             bool: 导出是否成功
         """
+        phase_started_at = self._start_phase("export_module_data", {"output_path": output_path})
+
         try:
-            module_data = {
-                "module_info": self.get_module_info(),
-                "performance_report": self.get_performance_report(),
-                "metrics_history": self.performance_history,
-                "academic_insights": self.academic_insights,
-                "recommendations": self.recommendations
-            }
+            self.final_status = "completed"
+            self._complete_phase(
+                "export_module_data",
+                phase_started_at,
+                {"output_path": output_path},
+                final_status="completed",
+            )
+            module_data = self._build_export_payload(output_path)
             
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(module_data, f, ensure_ascii=False, indent=2)
@@ -449,6 +699,7 @@ class BaseModule(ABC):
             return True
             
         except Exception as e:
+            self._fail_phase("export_module_data", phase_started_at, e, {"output_path": output_path})
             self.logger.error(f"模块数据导出失败: {e}")
             return False
     
@@ -464,9 +715,13 @@ class BaseModule(ABC):
             "status": self.status,
             "initialized": self.initialized,
             "health_score": self._calculate_health_score(),
-            "performance_metrics": self.metrics,
+            "performance_metrics": self._serialize_value(self.metrics),
             "resource_usage": self._get_resource_usage(),
-            "quality_assessment": self._get_quality_assessment()
+            "quality_assessment": self._get_quality_assessment(),
+            "analysis_summary": self._build_analysis_summary(),
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+            "report_metadata": self._build_report_metadata(),
         }
     
     def _calculate_health_score(self) -> float:
@@ -543,6 +798,10 @@ class AsyncBaseModule(BaseModule):
             raise RuntimeError(f"模块 {self.module_name} 未初始化")
         
         start_time = time.time()
+        phase_started_at = self._start_phase(
+            "async_execute",
+            {"module_name": self.module_name, "context_keys": sorted(context.keys())},
+        )
         self.module_start_time = start_time
         self.logger.info(f"开始异步执行模块: {self.module_name}")
         
@@ -565,6 +824,13 @@ class AsyncBaseModule(BaseModule):
             
             # 生成改进建议
             self._generate_recommendations(result)
+            self.final_status = "completed"
+            self._complete_phase(
+                "async_execute",
+                phase_started_at,
+                {"context_keys": sorted(context.keys())},
+                final_status="completed",
+            )
             
             self.logger.info(f"模块 {self.module_name} 异步执行成功，耗时: {execution_time:.2f}s")
             return result
@@ -580,6 +846,12 @@ class AsyncBaseModule(BaseModule):
             
             # 记录错误执行历史
             self._record_execution_history({"error": str(e)}, execution_time)
+            self._fail_phase(
+                "async_execute",
+                phase_started_at,
+                e,
+                {"module_name": self.module_name, "context_keys": sorted(context.keys())},
+            )
             
             raise
 

@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,6 +6,7 @@ from pathlib import Path
 from tools.quality_gate import (
     GateResult,
     build_report,
+    export_quality_gate_report,
     run_code_quality_gate,
     run_continuous_improvement_gate,
     run_dependency_graph_gate,
@@ -26,6 +28,48 @@ class TestQualityGate(unittest.TestCase):
         )
         self.assertFalse(report["overall_success"])
         self.assertEqual(len(report["results"]), 2)
+        self.assertIn("metadata", report)
+        self.assertIn("report_metadata", report)
+        self.assertIn("analysis_summary", report)
+        self.assertIn("failed_operations", report)
+        self.assertEqual(report["report_metadata"]["contract_version"], "d57.v1")
+        self.assertEqual(report["analysis_summary"]["failed_gate_count"], 1)
+
+    def test_export_quality_gate_report_updates_export_phase(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report = build_report(
+                [
+                    GateResult(name="logic_checks", success=True),
+                    GateResult(name="code_quality", success=False),
+                ],
+                governance_config={"export_contract_version": "d57.v1"},
+                runtime_metadata={
+                    "phase_history": [],
+                    "phase_timings": {},
+                    "completed_phases": ["assemble_quality_gate_report"],
+                    "failed_phase": None,
+                    "final_status": "failed",
+                    "last_completed_phase": "assemble_quality_gate_report",
+                },
+                failed_operations=[
+                    {
+                        "operation": "code_quality",
+                        "error": "Gate reported unsuccessful result",
+                        "details": {},
+                        "timestamp": "2026-03-29T00:00:00+00:00",
+                        "duration_seconds": 0.0,
+                    }
+                ],
+            )
+
+            output_path = root / "output" / "quality-gate.json"
+            exported = export_quality_gate_report(report, output_path)
+
+            self.assertTrue(output_path.exists())
+            self.assertEqual(exported["metadata"]["last_completed_phase"], "export_quality_gate_report")
+            self.assertEqual(exported["report_metadata"]["contract_version"], "d57.v1")
+            self.assertEqual(exported["analysis_summary"]["failed_gate_count"], 1)
 
     def test_run_logic_gate_detects_errors(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -84,7 +128,12 @@ class TestQualityGate(unittest.TestCase):
     def test_run_quality_assessment_gate_generates_report(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "config.yml").write_text("quality_assessment:\n  min_overall_score: 80\n", encoding="utf-8")
+            (root / "config.yml").write_text(
+                "quality_assessment:\n"
+                "  min_overall_score: 80\n"
+                "  export_contract_version: \"d49.v1\"\n",
+                encoding="utf-8",
+            )
             gates = [
                 GateResult(name="logic_checks", success=True, metrics={"issue_count": 0, "error_count": 0}),
                 GateResult(name="dependency_graph", success=True, metrics={}),
@@ -96,11 +145,20 @@ class TestQualityGate(unittest.TestCase):
             self.assertIn("overall_score", result.metrics)
             report_path = root / result.details["assessment_report"]
             self.assertTrue(report_path.exists())
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["report_metadata"]["contract_version"], "d49.v1")
+            self.assertEqual(report["metadata"]["last_completed_phase"], "export_assessment_report")
 
     def test_run_continuous_improvement_gate_generates_history(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "output").mkdir(parents=True)
+            (root / "config.yml").write_text(
+                "governance:\n"
+                "  continuous_improvement:\n"
+                "    export_contract_version: \"d50.v1\"\n",
+                encoding="utf-8",
+            )
             (root / "output" / "quality-assessment.json").write_text(
                 "{\"overall_score\": 90, \"grade\": \"A\", \"passed\": true, \"dimension_scores\": {\"code_health\": 88}, \"failed_dimensions\": []}",
                 encoding="utf-8",
@@ -111,11 +169,20 @@ class TestQualityGate(unittest.TestCase):
             self.assertIn("history_points", result.metrics)
             self.assertTrue((root / result.details["continuous_report"]).exists())
             self.assertTrue((root / result.details["history_file"]).exists())
+            report = json.loads((root / result.details["continuous_report"]).read_text(encoding="utf-8"))
+            self.assertEqual(report["report_metadata"]["contract_version"], "d50.v1")
+            self.assertEqual(report["metadata"]["last_completed_phase"], "export_continuous_improvement_report")
 
     def test_run_quality_improvement_archive_gate_generates_dossier(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "output").mkdir(parents=True)
+            (root / "config.yml").write_text(
+                "governance:\n"
+                "  quality_improvement_archive:\n"
+                "    export_contract_version: \"d51.v1\"\n",
+                encoding="utf-8",
+            )
             (root / "output" / "quality-assessment.json").write_text(
                 "{\"overall_score\": 90, \"grade\": \"A\", \"passed\": true, \"failed_dimensions\": [], \"dimension_scores\": {\"code_health\": 88}}",
                 encoding="utf-8",
@@ -132,11 +199,20 @@ class TestQualityGate(unittest.TestCase):
             self.assertTrue((root / result.details["history_file"]).exists())
             self.assertTrue((root / result.details["dossier_file"]).exists())
             self.assertTrue((root / result.details["latest_file"]).exists())
+            latest_payload = json.loads((root / result.details["latest_file"]).read_text(encoding="utf-8"))
+            self.assertEqual(latest_payload["report_metadata"]["contract_version"], "d51.v1")
+            self.assertEqual(latest_payload["metadata"]["last_completed_phase"], "export_quality_improvement_archive")
 
     def test_run_quality_feedback_gate_generates_feedback_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "output").mkdir(parents=True)
+            (root / "config.yml").write_text(
+                "governance:\n"
+                "  quality_feedback:\n"
+                "    export_contract_version: \"d52.v1\"\n",
+                encoding="utf-8",
+            )
             (root / "output" / "quality-assessment.json").write_text(
                 "{\"overall_score\": 82, \"grade\": \"B\", \"failed_dimensions\": [\"code_health\"], \"dimension_scores\": {\"code_health\": 72}}",
                 encoding="utf-8",
@@ -158,6 +234,9 @@ class TestQualityGate(unittest.TestCase):
             self.assertTrue((root / result.details["feedback_issue_index"]).exists())
             self.assertTrue((root / result.details["feedback_issue_dir"]).exists())
             self.assertGreaterEqual(result.metrics["owner_count"], 1)
+            feedback = json.loads((root / result.details["feedback_json"]).read_text(encoding="utf-8"))
+            self.assertEqual(feedback["report_metadata"]["contract_version"], "d52.v1")
+            self.assertEqual(feedback["metadata"]["last_completed_phase"], "export_quality_feedback_report")
             self.assertGreaterEqual(result.metrics["issue_draft_count"], 1)
 
 

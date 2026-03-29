@@ -17,6 +17,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+try:
+    import yaml
+except ImportError:  # pragma: no cover
+    yaml = None
+
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -28,6 +33,13 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_CYCLE_DEMO_GOVERNANCE = {
+    "enable_phase_tracking": True,
+    "persist_failed_operations": True,
+    "minimum_stable_quality_score": 0.85,
+    "export_contract_version": "d58.v1",
+}
 
 _ORIGINAL_SUBPROCESS_RUN = subprocess.run
 
@@ -63,6 +75,225 @@ subprocess.run = _safe_subprocess_run
 os.makedirs('./output', exist_ok=True)
 os.makedirs('./logs', exist_ok=True)
 os.makedirs('./data', exist_ok=True)
+
+
+def _load_cycle_demo_section(config_path: Optional[Path]) -> Dict[str, Any]:
+    if config_path is None or not config_path.exists() or yaml is None:
+        return {}
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding='utf-8')) or {}
+    except Exception:
+        return {}
+    governance = data.get('governance') or {}
+    section = governance.get('cycle_demo') or {}
+    return section if isinstance(section, dict) else {}
+
+
+def _load_cycle_demo_governance_config(config_path: Optional[Path]) -> Dict[str, Any]:
+    section = _load_cycle_demo_section(config_path)
+    return {
+        'enable_phase_tracking': bool(section.get('enable_phase_tracking', DEFAULT_CYCLE_DEMO_GOVERNANCE['enable_phase_tracking'])),
+        'persist_failed_operations': bool(section.get('persist_failed_operations', DEFAULT_CYCLE_DEMO_GOVERNANCE['persist_failed_operations'])),
+        'minimum_stable_quality_score': float(section.get('minimum_stable_quality_score', DEFAULT_CYCLE_DEMO_GOVERNANCE['minimum_stable_quality_score'])),
+        'export_contract_version': str(section.get('export_contract_version', DEFAULT_CYCLE_DEMO_GOVERNANCE['export_contract_version'])),
+    }
+
+
+def _serialize_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _serialize_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_serialize_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_serialize_value(item) for item in value]
+    return value
+
+
+def _start_phase(runtime_metadata: Dict[str, Any], phase_name: str, details: Optional[Dict[str, Any]] = None) -> float:
+    started_at = time.time()
+    runtime_metadata.setdefault('phase_history', []).append(
+        {
+            'phase': phase_name,
+            'status': 'in_progress',
+            'started_at': datetime.now().isoformat(),
+            'details': _serialize_value(details or {}),
+        }
+    )
+    return started_at
+
+
+def _complete_phase(
+    runtime_metadata: Dict[str, Any],
+    phase_name: str,
+    phase_started_at: float,
+    details: Optional[Dict[str, Any]] = None,
+    final_status: Optional[str] = None,
+) -> None:
+    duration = max(0.0, time.time() - phase_started_at)
+    runtime_metadata.setdefault('phase_timings', {})[phase_name] = round(duration, 6)
+    completed_phases = runtime_metadata.setdefault('completed_phases', [])
+    if phase_name not in completed_phases:
+        completed_phases.append(phase_name)
+    runtime_metadata['last_completed_phase'] = phase_name
+    runtime_metadata['failed_phase'] = None
+    if final_status is not None:
+        runtime_metadata['final_status'] = final_status
+
+    for phase in reversed(runtime_metadata.get('phase_history', [])):
+        if phase.get('phase') == phase_name and phase.get('status') == 'in_progress':
+            phase['status'] = 'completed'
+            phase['ended_at'] = datetime.now().isoformat()
+            phase['duration_seconds'] = round(duration, 6)
+            if details:
+                phase['details'] = _serialize_value({**phase.get('details', {}), **details})
+            break
+
+
+def _record_failed_operation(
+    failed_operations: List[Dict[str, Any]],
+    governance_config: Dict[str, Any],
+    operation_name: str,
+    error: str,
+    details: Optional[Dict[str, Any]] = None,
+    duration_seconds: Optional[float] = None,
+) -> None:
+    if not governance_config.get('persist_failed_operations', True):
+        return
+    failed_operations.append(
+        {
+            'operation': operation_name,
+            'error': error,
+            'details': _serialize_value(details or {}),
+            'timestamp': datetime.now().isoformat(),
+            'duration_seconds': round(duration_seconds or 0.0, 6),
+        }
+    )
+
+
+def _fail_phase(
+    runtime_metadata: Dict[str, Any],
+    failed_operations: List[Dict[str, Any]],
+    governance_config: Dict[str, Any],
+    phase_name: str,
+    phase_started_at: float,
+    error: Exception,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    duration = max(0.0, time.time() - phase_started_at)
+    runtime_metadata.setdefault('phase_timings', {})[phase_name] = round(duration, 6)
+    runtime_metadata['failed_phase'] = phase_name
+    runtime_metadata['final_status'] = 'failed'
+    _record_failed_operation(failed_operations, governance_config, phase_name, str(error), details, duration)
+
+    for phase in reversed(runtime_metadata.get('phase_history', [])):
+        if phase.get('phase') == phase_name and phase.get('status') == 'in_progress':
+            phase['status'] = 'failed'
+            phase['ended_at'] = datetime.now().isoformat()
+            phase['duration_seconds'] = round(duration, 6)
+            phase['error'] = str(error)
+            if details:
+                phase['details'] = _serialize_value({**phase.get('details', {}), **details})
+            break
+
+
+def _build_runtime_metadata(runtime_metadata: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        'phase_history': _serialize_value(runtime_metadata.get('phase_history', [])),
+        'phase_timings': _serialize_value(runtime_metadata.get('phase_timings', {})),
+        'completed_phases': list(runtime_metadata.get('completed_phases', [])),
+        'failed_phase': runtime_metadata.get('failed_phase'),
+        'final_status': runtime_metadata.get('final_status', 'initialized'),
+        'last_completed_phase': runtime_metadata.get('last_completed_phase'),
+    }
+
+
+def _build_iteration_analysis_summary(iteration_results: Dict[str, Any]) -> Dict[str, Any]:
+    modules = iteration_results.get('modules', [])
+    module_count = len(modules)
+    completed_modules = sum(1 for item in modules if item.get('status') == 'completed')
+    failed_modules = sum(1 for item in modules if item.get('status') != 'completed')
+    average_quality_score = 0.0
+    quality_scores: List[float] = []
+    for module in modules:
+        quality_metrics = module.get('quality_metrics', {})
+        if quality_metrics:
+            values = [float(v) for v in quality_metrics.values() if isinstance(v, (int, float))]
+            if values:
+                quality_scores.append(sum(values) / len(values))
+    if quality_scores:
+        average_quality_score = sum(quality_scores) / len(quality_scores)
+
+    return {
+        'module_count': module_count,
+        'completed_module_count': completed_modules,
+        'failed_module_count': failed_modules,
+        'average_quality_score': round(average_quality_score, 6),
+        'insight_count': len(iteration_results.get('academic_insights', [])),
+        'recommendation_count': len(iteration_results.get('recommendations', [])),
+        'final_status': iteration_results.get('status', 'unknown'),
+    }
+
+
+def _build_cycle_demo_analysis_summary(cycle_results: Dict[str, Any], governance_config: Dict[str, Any]) -> Dict[str, Any]:
+    iterations = cycle_results.get('iterations', [])
+    successful_iterations = sum(1 for item in iterations if item.get('status') == 'completed')
+    failed_iterations = len(iterations) - successful_iterations
+    quality_score = float(cycle_results.get('academic_analysis', {}).get('quality_assessment', {}).get('overall_quality_score', 0.0) or 0.0)
+    status = 'idle'
+    if iterations or cycle_results.get('failed_operations'):
+        status = (
+            'stable'
+            if failed_iterations == 0 and quality_score >= float(governance_config.get('minimum_stable_quality_score', 0.85))
+            else 'needs_followup'
+        )
+
+    return {
+        'status': status,
+        'iteration_count': len(iterations),
+        'successful_iteration_count': successful_iterations,
+        'failed_iteration_count': failed_iterations,
+        'average_execution_time': float(cycle_results.get('performance_metrics', {}).get('average_execution_time', 0.0) or 0.0),
+        'overall_quality_score': quality_score,
+        'failed_operation_count': len(cycle_results.get('failed_operations', [])),
+        'failed_phase': cycle_results.get('metadata', {}).get('failed_phase'),
+        'final_status': cycle_results.get('metadata', {}).get('final_status', 'initialized'),
+        'last_completed_phase': cycle_results.get('metadata', {}).get('last_completed_phase'),
+    }
+
+
+def _build_cycle_demo_report_metadata(
+    governance_config: Dict[str, Any],
+    metadata: Dict[str, Any],
+    failed_operations: List[Dict[str, Any]],
+    output_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    report_metadata = {
+        'contract_version': governance_config['export_contract_version'],
+        'generated_at': datetime.now().isoformat(),
+        'result_schema': 'cycle_demo_report',
+        'failed_operation_count': len(failed_operations),
+        'final_status': metadata.get('final_status', 'initialized'),
+        'last_completed_phase': metadata.get('last_completed_phase'),
+    }
+    if output_path is not None:
+        report_metadata['output_path'] = str(output_path)
+    return report_metadata
+
+
+def export_cycle_demo_report(cycle_results: Dict[str, Any], output_path: Path, governance_config: Dict[str, Any]) -> Dict[str, Any]:
+    payload = json.loads(json.dumps(cycle_results, ensure_ascii=False, default=str))
+    metadata = payload.setdefault('metadata', _build_runtime_metadata({}))
+    failed_operations = payload.setdefault('failed_operations', [])
+    export_started_at = _start_phase(metadata, 'export_cycle_demo_report', {'output_path': str(output_path)})
+    _complete_phase(metadata, 'export_cycle_demo_report', export_started_at, {'output_path': str(output_path)}, final_status=metadata.get('final_status', 'completed'))
+    payload['metadata'] = _build_runtime_metadata(metadata)
+    payload['analysis_summary'] = _build_cycle_demo_analysis_summary(payload, governance_config)
+    payload['report_metadata'] = _build_cycle_demo_report_metadata(governance_config, metadata, failed_operations, output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+    return payload
 
 
 def setup_signal_handlers():
@@ -275,6 +506,7 @@ def run_iteration_cycle(
     input_data: Dict[str, Any],
     max_iterations: int = 5,
     shared_modules: Optional[List[tuple[str, Any]]] = None,
+    governance_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     运行单次迭代循环
@@ -290,6 +522,16 @@ def run_iteration_cycle(
     logger.info(f"开始第 {iteration_number} 次迭代循环")
     
     start_time = time.time()
+    governance = governance_config or dict(DEFAULT_CYCLE_DEMO_GOVERNANCE)
+    iteration_metadata: Dict[str, Any] = {
+        'phase_history': [],
+        'phase_timings': {},
+        'completed_phases': [],
+        'failed_phase': None,
+        'final_status': 'running',
+        'last_completed_phase': None,
+    }
+    iteration_failed_operations: List[Dict[str, Any]] = []
     
     iteration_results = {
         "iteration_id": f"iter_{iteration_number}",
@@ -303,12 +545,19 @@ def run_iteration_cycle(
         "recommendations": [],
         "metadata": {
             "max_iterations": max_iterations,
-            "input_data": input_data
-        }
+            "input_data": input_data,
+        },
+        "failed_operations": [],
+        "analysis_summary": {},
     }
     
     try:
         # 依次执行每个模块
+        execution_phase_started_at = _start_phase(
+            iteration_metadata,
+            'execute_real_module_pipeline',
+            {'iteration_number': iteration_number, 'module_chain_size': len(shared_modules or [])},
+        )
         for module_result in execute_real_module_pipeline(
             input_data,
             modules=shared_modules,
@@ -322,6 +571,22 @@ def run_iteration_cycle(
                     if key not in iteration_results["quality_metrics"]:
                         iteration_results["quality_metrics"][key] = []
                     iteration_results["quality_metrics"][key].append(value)
+
+            if module_result.get('status') != 'completed':
+                _record_failed_operation(
+                    iteration_failed_operations,
+                    governance,
+                    'module_execution',
+                    'Module execution returned non-completed status',
+                    {'iteration_number': iteration_number, 'module': module_result.get('module'), 'status': module_result.get('status')},
+                )
+
+        _complete_phase(
+            iteration_metadata,
+            'execute_real_module_pipeline',
+            execution_phase_started_at,
+            {'module_count': len(iteration_results['modules'])},
+        )
         
         # 计算平均质量指标
         average_quality_metrics = {
@@ -361,11 +626,34 @@ def run_iteration_cycle(
             }
         ]
         iteration_results["recommendations"] = recommendations
+
+        assemble_phase_started_at = _start_phase(
+            iteration_metadata,
+            'assemble_iteration_cycle_summary',
+            {'iteration_number': iteration_number},
+        )
         
         # 计算迭代总时间
         iteration_results["end_time"] = datetime.now().isoformat()
         iteration_results["duration"] = time.time() - start_time
         iteration_results["status"] = "completed"
+        iteration_metadata['final_status'] = 'completed'
+        _complete_phase(
+            iteration_metadata,
+            'assemble_iteration_cycle_summary',
+            assemble_phase_started_at,
+            {'iteration_status': iteration_results['status'], 'module_count': len(iteration_results['modules'])},
+            final_status='completed',
+        )
+        iteration_results['failed_operations'] = _serialize_value(iteration_failed_operations)
+        iteration_results['metadata'] = {
+            **iteration_results['metadata'],
+            **_build_runtime_metadata(iteration_metadata),
+        }
+        iteration_results['analysis_summary'] = _build_iteration_analysis_summary(iteration_results)
+        iteration_results['analysis_summary']['failed_operation_count'] = len(iteration_failed_operations)
+        iteration_results['analysis_summary']['failed_phase'] = iteration_results['metadata'].get('failed_phase')
+        iteration_results['analysis_summary']['last_completed_phase'] = iteration_results['metadata'].get('last_completed_phase')
         
         logger.info(f"第 {iteration_number} 次迭代循环完成，耗时: {iteration_results['duration']:.2f}秒")
         
@@ -376,11 +664,34 @@ def run_iteration_cycle(
         iteration_results["error"] = str(e)
         iteration_results["end_time"] = datetime.now().isoformat()
         iteration_results["duration"] = time.time() - start_time
+        _fail_phase(
+            iteration_metadata,
+            iteration_failed_operations,
+            governance,
+            'execute_real_module_pipeline',
+            start_time,
+            e,
+            {'iteration_number': iteration_number},
+        )
+        iteration_results['failed_operations'] = _serialize_value(iteration_failed_operations)
+        iteration_results['metadata'] = {
+            **iteration_results['metadata'],
+            **_build_runtime_metadata(iteration_metadata),
+        }
+        iteration_results['analysis_summary'] = _build_iteration_analysis_summary(iteration_results)
+        iteration_results['analysis_summary']['failed_operation_count'] = len(iteration_failed_operations)
+        iteration_results['analysis_summary']['failed_phase'] = iteration_results['metadata'].get('failed_phase')
+        iteration_results['analysis_summary']['last_completed_phase'] = iteration_results['metadata'].get('last_completed_phase')
         logger.error(f"第 {iteration_number} 次迭代循环失败: {e}")
         logger.error(traceback.format_exc())
         return iteration_results
 
-def run_full_cycle_demo(max_iterations: int=3, sample_data: Optional[List[str]]=None):
+def run_full_cycle_demo(
+    max_iterations: int = 3,
+    sample_data: Optional[List[str]] = None,
+    config_path: Optional[str] = 'config.yml',
+    output_path: Optional[str] = None,
+):
     """
     运行完整循环演示
     
@@ -389,6 +700,17 @@ def run_full_cycle_demo(max_iterations: int=3, sample_data: Optional[List[str]]=
         sample_data (List[str]): 示例数据列表
     """
     logger.info("=== 开始中医古籍全自动研究系统迭代循环演示 ===")
+    demo_started_at = time.time()
+    governance_config = _load_cycle_demo_governance_config(Path(config_path).resolve() if config_path else None)
+    cycle_metadata: Dict[str, Any] = {
+        'phase_history': [],
+        'phase_timings': {},
+        'completed_phases': [],
+        'failed_phase': None,
+        'final_status': 'running',
+        'last_completed_phase': None,
+    }
+    cycle_failed_operations: List[Dict[str, Any]] = []
     
     if sample_data is None:
         sample_data = create_sample_data()
@@ -422,13 +744,21 @@ def run_full_cycle_demo(max_iterations: int=3, sample_data: Optional[List[str]]=
             "insights": [],
             "recommendations": [],
             "quality_assessment": {}
-        }
+        },
+        "failed_operations": [],
+        "metadata": _build_runtime_metadata(cycle_metadata),
+        "analysis_summary": {},
+        "report_metadata": {},
     }
     
     try:
         # 全循环复用模块，减少每轮初始化/清理开销
+        init_phase_started_at = _start_phase(cycle_metadata, 'initialize_cycle_demo_modules', {'max_iterations': max_iterations})
         shared_modules = build_real_modules()
         initialize_real_modules(shared_modules)
+        _complete_phase(cycle_metadata, 'initialize_cycle_demo_modules', init_phase_started_at, {'module_count': len(shared_modules)})
+
+        iteration_phase_started_at = _start_phase(cycle_metadata, 'run_cycle_demo_iterations', {'max_iterations': max_iterations})
 
         # 运行迭代循环
         for i in range(max_iterations):
@@ -443,6 +773,7 @@ def run_full_cycle_demo(max_iterations: int=3, sample_data: Optional[List[str]]=
                 input_data,
                 max_iterations,
                 shared_modules=shared_modules,
+                governance_config=governance_config,
             )
             
             # 记录迭代结果
@@ -454,6 +785,13 @@ def run_full_cycle_demo(max_iterations: int=3, sample_data: Optional[List[str]]=
                 cycle_results["performance_metrics"]["successful_iterations"] += 1
             else:
                 cycle_results["performance_metrics"]["failed_iterations"] += 1
+                _record_failed_operation(
+                    cycle_failed_operations,
+                    governance_config,
+                    'iteration_cycle',
+                    'Iteration returned failed status',
+                    {'iteration_id': iteration_result.get('iteration_id'), 'iteration_number': iteration_result.get('iteration_number')},
+                )
             
             cycle_results["performance_metrics"]["total_execution_time"] += iteration_result.get("duration", 0.0)
             
@@ -471,6 +809,13 @@ def run_full_cycle_demo(max_iterations: int=3, sample_data: Optional[List[str]]=
             # 模拟迭代间隔
             if i < max_iterations - 1:  # 最后一次不需要等待
                 time.sleep(0.5)
+
+        _complete_phase(
+            cycle_metadata,
+            'run_cycle_demo_iterations',
+            iteration_phase_started_at,
+            {'iteration_count': len(cycle_results['iterations'])},
+        )
         
         # 计算平均执行时间
         if cycle_results["performance_metrics"]["total_iterations"] > 0:
@@ -490,11 +835,22 @@ def run_full_cycle_demo(max_iterations: int=3, sample_data: Optional[List[str]]=
         
         # 记录结束时间
         cycle_results["end_time"] = datetime.now().isoformat()
+        cycle_metadata['final_status'] = 'completed' if cycle_results['performance_metrics']['failed_iterations'] == 0 else 'failed'
+        assemble_phase_started_at = _start_phase(cycle_metadata, 'assemble_cycle_demo_summary', {'iteration_count': len(cycle_results['iterations'])})
+        _complete_phase(
+            cycle_metadata,
+            'assemble_cycle_demo_summary',
+            assemble_phase_started_at,
+            {'successful_iterations': cycle_results['performance_metrics']['successful_iterations'], 'failed_iterations': cycle_results['performance_metrics']['failed_iterations']},
+            final_status=cycle_metadata['final_status'],
+        )
+        cycle_results['failed_operations'] = _serialize_value(cycle_failed_operations)
+        cycle_results['metadata'] = _build_runtime_metadata(cycle_metadata)
+        cycle_results['analysis_summary'] = _build_cycle_demo_analysis_summary(cycle_results, governance_config)
         
         # 保存结果
-        output_file = f"./output/cycle_demo_results_{int(time.time())}.json"
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(cycle_results, f, ensure_ascii=False, indent=2)
+        output_file = output_path or f"./output/cycle_demo_results_{int(time.time())}.json"
+        cycle_results = export_cycle_demo_report(cycle_results, Path(output_file), governance_config)
         
         logger.info(f"演示完成，结果已保存到: {output_file}")
         
@@ -510,6 +866,10 @@ def run_full_cycle_demo(max_iterations: int=3, sample_data: Optional[List[str]]=
         return cycle_results
         
     except Exception as e:
+        _fail_phase(cycle_metadata, cycle_failed_operations, governance_config, 'run_cycle_demo_iterations', demo_started_at, e, {'max_iterations': max_iterations})
+        cycle_results['failed_operations'] = _serialize_value(cycle_failed_operations)
+        cycle_results['metadata'] = _build_runtime_metadata(cycle_metadata)
+        cycle_results['analysis_summary'] = _build_cycle_demo_analysis_summary(cycle_results, governance_config)
         logger.error(f"演示执行失败: {e}")
         logger.error(traceback.format_exc())
         raise

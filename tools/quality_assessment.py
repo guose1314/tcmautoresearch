@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import yaml
 
@@ -25,6 +27,13 @@ DEFAULT_WEIGHTS = {
     "logic_health": 0.20,
     "code_health": 0.20,
     "architecture_health": 0.15,
+}
+
+DEFAULT_GOVERNANCE_CONFIG = {
+    "enable_phase_tracking": True,
+    "persist_failed_operations": True,
+    "minimum_stable_overall_score": 85.0,
+    "export_contract_version": "d49.v1",
 }
 
 
@@ -49,22 +58,214 @@ def _normalize_weights(weights: Dict[str, float]) -> Dict[str, float]:
     return {k: v / total for k, v in merged.items()}
 
 
-def _load_thresholds_from_config(config_path: Path) -> AssessmentThresholds:
+def _load_quality_assessment_section(config_path: Path) -> Dict[str, Any]:
     if not config_path.exists():
-        return AssessmentThresholds()
+        return {}
 
     try:
         data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     except Exception:
         # Some repositories keep partially-edited YAML during development.
         # Do not block quality assessment due to config parse issues.
-        return AssessmentThresholds()
+        return {}
 
-    section = (data.get("quality_assessment") or {})
+    section = data.get("quality_assessment") or {}
+    return section if isinstance(section, dict) else {}
+
+
+def _load_thresholds_from_config(config_path: Path) -> AssessmentThresholds:
+    section = _load_quality_assessment_section(config_path)
     return AssessmentThresholds(
         min_overall_score=float(section.get("min_overall_score", 85.0)),
         min_dimension_score=float(section.get("min_dimension_score", 70.0)),
     )
+
+
+def _load_governance_config(config_path: Path) -> Dict[str, Any]:
+    section = _load_quality_assessment_section(config_path)
+    return {
+        "enable_phase_tracking": bool(section.get("enable_phase_tracking", DEFAULT_GOVERNANCE_CONFIG["enable_phase_tracking"])),
+        "persist_failed_operations": bool(section.get("persist_failed_operations", DEFAULT_GOVERNANCE_CONFIG["persist_failed_operations"])),
+        "minimum_stable_overall_score": float(
+            section.get("minimum_stable_overall_score", section.get("min_overall_score", DEFAULT_GOVERNANCE_CONFIG["minimum_stable_overall_score"]))
+        ),
+        "export_contract_version": str(section.get("export_contract_version", DEFAULT_GOVERNANCE_CONFIG["export_contract_version"])),
+    }
+
+
+def _serialize_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _serialize_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_serialize_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_serialize_value(item) for item in value]
+    return value
+
+
+def _start_phase(runtime_metadata: Dict[str, Any], phase_name: str, details: Dict[str, Any] | None = None) -> float:
+    started_at = time.time()
+    runtime_metadata.setdefault("phase_history", []).append(
+        {
+            "phase": phase_name,
+            "status": "in_progress",
+            "started_at": datetime.now().isoformat(),
+            "details": _serialize_value(details or {}),
+        }
+    )
+    return started_at
+
+
+def _complete_phase(
+    runtime_metadata: Dict[str, Any],
+    phase_name: str,
+    phase_started_at: float,
+    details: Dict[str, Any] | None = None,
+    final_status: str | None = None,
+) -> None:
+    duration = max(0.0, time.time() - phase_started_at)
+    runtime_metadata.setdefault("phase_timings", {})[phase_name] = round(duration, 6)
+    completed_phases = runtime_metadata.setdefault("completed_phases", [])
+    if phase_name not in completed_phases:
+        completed_phases.append(phase_name)
+    runtime_metadata["last_completed_phase"] = phase_name
+    runtime_metadata["failed_phase"] = None
+    if final_status is not None:
+        runtime_metadata["final_status"] = final_status
+
+    for phase in reversed(runtime_metadata.get("phase_history", [])):
+        if phase.get("phase") == phase_name and phase.get("status") == "in_progress":
+            phase["status"] = "completed"
+            phase["ended_at"] = datetime.now().isoformat()
+            phase["duration_seconds"] = round(duration, 6)
+            if details:
+                phase["details"] = _serialize_value({**phase.get("details", {}), **details})
+            break
+
+
+def _record_failed_operation(
+    failed_operations: List[Dict[str, Any]],
+    governance_config: Dict[str, Any],
+    operation_name: str,
+    error: Exception,
+    details: Dict[str, Any] | None = None,
+    duration_seconds: float | None = None,
+) -> None:
+    if not governance_config.get("persist_failed_operations", True):
+        return
+
+    failed_operations.append(
+        {
+            "operation": operation_name,
+            "error": str(error),
+            "details": _serialize_value(details or {}),
+            "timestamp": datetime.now().isoformat(),
+            "duration_seconds": round(duration_seconds or 0.0, 6),
+        }
+    )
+
+
+def _fail_phase(
+    runtime_metadata: Dict[str, Any],
+    failed_operations: List[Dict[str, Any]],
+    governance_config: Dict[str, Any],
+    phase_name: str,
+    phase_started_at: float,
+    error: Exception,
+    details: Dict[str, Any] | None = None,
+) -> None:
+    duration = max(0.0, time.time() - phase_started_at)
+    runtime_metadata.setdefault("phase_timings", {})[phase_name] = round(duration, 6)
+    runtime_metadata["failed_phase"] = phase_name
+    runtime_metadata["final_status"] = "failed"
+    _record_failed_operation(failed_operations, governance_config, phase_name, error, details, duration)
+
+    for phase in reversed(runtime_metadata.get("phase_history", [])):
+        if phase.get("phase") == phase_name and phase.get("status") == "in_progress":
+            phase["status"] = "failed"
+            phase["ended_at"] = datetime.now().isoformat()
+            phase["duration_seconds"] = round(duration, 6)
+            phase["error"] = str(error)
+            if details:
+                phase["details"] = _serialize_value({**phase.get("details", {}), **details})
+            break
+
+
+def _build_runtime_metadata(runtime_metadata: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "phase_history": _serialize_value(runtime_metadata.get("phase_history", [])),
+        "phase_timings": _serialize_value(runtime_metadata.get("phase_timings", {})),
+        "completed_phases": list(runtime_metadata.get("completed_phases", [])),
+        "failed_phase": runtime_metadata.get("failed_phase"),
+        "final_status": runtime_metadata.get("final_status", "initialized"),
+        "last_completed_phase": runtime_metadata.get("last_completed_phase"),
+    }
+
+
+def _build_analysis_summary(
+    assessment: Dict[str, Any],
+    governance_config: Dict[str, Any],
+    runtime_metadata: Dict[str, Any],
+    failed_operations: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    overall_score = float(assessment.get("overall_score", 0.0) or 0.0)
+    passed = bool(assessment.get("passed", False))
+    status = "idle"
+    if runtime_metadata.get("completed_phases") or failed_operations:
+        status = (
+            "stable"
+            if passed and overall_score >= float(governance_config.get("minimum_stable_overall_score", 85.0))
+            else "needs_followup"
+        )
+
+    return {
+        "status": status,
+        "overall_score": overall_score,
+        "passed": passed,
+        "failed_dimension_count": len(assessment.get("failed_dimensions", [])),
+        "failed_operation_count": len(failed_operations),
+        "failed_phase": runtime_metadata.get("failed_phase"),
+        "final_status": runtime_metadata.get("final_status", "initialized"),
+        "last_completed_phase": runtime_metadata.get("last_completed_phase"),
+    }
+
+
+def _build_report_metadata(
+    governance_config: Dict[str, Any],
+    runtime_metadata: Dict[str, Any],
+    failed_operations: List[Dict[str, Any]],
+    output_path: Path | None = None,
+) -> Dict[str, Any]:
+    report_metadata = {
+        "contract_version": governance_config["export_contract_version"],
+        "generated_at": datetime.now().isoformat(),
+        "result_schema": "quality_assessment_report",
+        "failed_operation_count": len(failed_operations),
+        "final_status": runtime_metadata.get("final_status", "initialized"),
+        "last_completed_phase": runtime_metadata.get("last_completed_phase"),
+    }
+    if output_path is not None:
+        report_metadata["output_path"] = str(output_path)
+    return report_metadata
+
+
+def _assemble_assessment_report(
+    assessment: Dict[str, Any],
+    metrics: Dict[str, float],
+    governance_config: Dict[str, Any],
+    runtime_metadata: Dict[str, Any],
+    failed_operations: List[Dict[str, Any]],
+    output_path: Path | None = None,
+) -> Dict[str, Any]:
+    report = dict(assessment)
+    report["derived_metrics"] = metrics
+    report["analysis_summary"] = _build_analysis_summary(report, governance_config, runtime_metadata, failed_operations)
+    report["failed_operations"] = _serialize_value(failed_operations)
+    report["metadata"] = _build_runtime_metadata(runtime_metadata)
+    report["report_metadata"] = _build_report_metadata(governance_config, runtime_metadata, failed_operations, output_path)
+    return report
 
 
 def _index_gates(gate_results: List[Dict[str, object]]) -> Dict[str, Dict[str, object]]:
@@ -91,7 +292,8 @@ def metrics_from_gate_results(gate_results: List[Dict[str, object]]) -> Dict[str
         code_health = 1.0
     else:
         error_penalty = code_errors / code_issues
-        warning_penalty = min(0.4, code_warnings / 150.0)
+        warning_density = code_warnings / code_issues
+        warning_penalty = min(0.25, warning_density * 0.25)
         code_health = _clamp(1.0 - error_penalty - warning_penalty)
 
     test_gate = indexed.get("quality_unit_tests", {})
@@ -172,11 +374,104 @@ def assess_from_gate_results(
     gate_results: List[Dict[str, object]],
     config_path: Path,
 ) -> Dict[str, object]:
+    governance_config = _load_governance_config(config_path)
+    runtime_metadata: Dict[str, Any] = {
+        "phase_history": [],
+        "phase_timings": {},
+        "completed_phases": [],
+        "failed_phase": None,
+        "final_status": "initialized",
+        "last_completed_phase": None,
+    }
+    failed_operations: List[Dict[str, Any]] = []
+
+    config_phase_started_at = _start_phase(runtime_metadata, "load_quality_assessment_config", {"config_path": str(config_path)})
     thresholds = _load_thresholds_from_config(config_path)
-    metrics = metrics_from_gate_results(gate_results)
-    assessment = assess_quality_metrics(metrics, thresholds)
-    assessment["derived_metrics"] = metrics
-    return assessment
+    _complete_phase(
+        runtime_metadata,
+        "load_quality_assessment_config",
+        config_phase_started_at,
+        {
+            "config_path": str(config_path),
+            "min_overall_score": thresholds.min_overall_score,
+            "min_dimension_score": thresholds.min_dimension_score,
+        },
+    )
+
+    metrics_phase_started_at = _start_phase(runtime_metadata, "derive_quality_metrics", {"gate_count": len(gate_results)})
+    try:
+        metrics = metrics_from_gate_results(gate_results)
+        _complete_phase(
+            runtime_metadata,
+            "derive_quality_metrics",
+            metrics_phase_started_at,
+            {"gate_count": len(gate_results)},
+        )
+
+        assessment_phase_started_at = _start_phase(runtime_metadata, "assess_quality_metrics", {"dimension_count": len(metrics)})
+        assessment = assess_quality_metrics(metrics, thresholds)
+        runtime_metadata["final_status"] = "completed"
+        _complete_phase(
+            runtime_metadata,
+            "assess_quality_metrics",
+            assessment_phase_started_at,
+            {
+                "overall_score": assessment.get("overall_score", 0.0),
+                "passed": assessment.get("passed", False),
+            },
+            final_status="completed",
+        )
+        return _assemble_assessment_report(assessment, metrics, governance_config, runtime_metadata, failed_operations)
+    except Exception as error:
+        _fail_phase(
+            runtime_metadata,
+            failed_operations,
+            governance_config,
+            "derive_quality_metrics",
+            metrics_phase_started_at,
+            error,
+            {"gate_count": len(gate_results)},
+        )
+        assessment = {
+            "passed": False,
+            "overall_score": 0.0,
+            "grade": "D",
+            "dimension_scores": {},
+            "failed_dimensions": ["gate_stability"],
+            "thresholds": asdict(thresholds),
+            "weights": _normalize_weights(DEFAULT_WEIGHTS),
+            "recommendations": ["质量评估执行失败，需优先修复评估链路后再继续治理。"],
+            "error": str(error),
+        }
+        return _assemble_assessment_report(assessment, {}, governance_config, runtime_metadata, failed_operations)
+
+
+def export_assessment_report(assessment: Dict[str, object], output_path: Path) -> Dict[str, object]:
+    report = json.loads(json.dumps(assessment, ensure_ascii=False))
+    metadata = report.setdefault("metadata", _build_runtime_metadata({}))
+    report_metadata = report.setdefault("report_metadata", {})
+    failed_operations = report.setdefault("failed_operations", [])
+    governance_config = {
+        "export_contract_version": report_metadata.get("contract_version", DEFAULT_GOVERNANCE_CONFIG["export_contract_version"]),
+        "persist_failed_operations": True,
+        "minimum_stable_overall_score": report.get("thresholds", {}).get("min_overall_score", DEFAULT_GOVERNANCE_CONFIG["minimum_stable_overall_score"]),
+    }
+
+    export_started_at = _start_phase(metadata, "export_assessment_report", {"output_path": str(output_path)})
+    _complete_phase(
+        metadata,
+        "export_assessment_report",
+        export_started_at,
+        {"output_path": str(output_path)},
+        final_status="completed" if metadata.get("final_status") != "cleaned" else metadata.get("final_status"),
+    )
+    report["metadata"] = _build_runtime_metadata(metadata)
+    report["analysis_summary"] = _build_analysis_summary(report, governance_config, metadata, failed_operations)
+    report["report_metadata"] = _build_report_metadata(governance_config, metadata, failed_operations, output_path)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    return report
 
 
 def main() -> int:
@@ -193,9 +488,7 @@ def main() -> int:
     gate_report = json.loads(gate_report_path.read_text(encoding="utf-8"))
     gate_results = gate_report.get("results", [])
     assessment = assess_from_gate_results(gate_results, config_path)
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(assessment, ensure_ascii=False, indent=2), encoding="utf-8")
+    assessment = export_assessment_report(assessment, output_path)
 
     print("[quality-assessment] passed={passed}".format(passed=assessment["passed"]))
     print("[quality-assessment] overall_score={score} grade={grade}".format(score=assessment["overall_score"], grade=assessment["grade"]))

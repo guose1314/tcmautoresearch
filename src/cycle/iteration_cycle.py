@@ -69,6 +69,10 @@ class IterationConfig:
     optimization_quality_threshold: float = 0.8
     optimization_confidence_threshold: float = 0.8
     max_optimization_actions: int = 3
+    enable_phase_tracking: bool = True
+    persist_failed_operations: bool = True
+    minimum_stable_quality: float = 0.8
+    export_contract_version: str = "d40.v1"
 
 class IterationCycle:
     """
@@ -92,10 +96,19 @@ class IterationCycle:
         self.current_iteration = 0
         self.results: List[IterationResult] = []
         self.failed_iterations: List[IterationResult] = []
+        self.failed_operations: List[Dict[str, Any]] = []
         self.iteration_lock = False
         self.start_time: datetime | None = None
         self.end_time: datetime | None = None
         self.total_duration = 0.0
+        self.cycle_metadata = {
+            "phase_history": [],
+            "phase_timings": {},
+            "completed_phases": [],
+            "failed_phase": None,
+            "final_status": "initialized",
+            "last_completed_phase": None,
+        }
         # 使用全局共享线程池，避免每个实例各自创建线程池导致资源泄漏
         self.executor = get_global_executor(self.config.max_concurrent_tasks)
         self.logger = logging.getLogger(__name__)
@@ -112,6 +125,98 @@ class IterationCycle:
         }
         
         self.logger.info("迭代循环管理器初始化完成")
+
+    def _start_cycle_phase(self, phase_name: str, context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        phase_entry: Dict[str, Any] = {
+            "phase": phase_name,
+            "status": "in_progress",
+            "started_at": datetime.now().isoformat(),
+            "context": self._serialize_value(context or {}),
+        }
+        if self.config.enable_phase_tracking:
+            self.cycle_metadata["phase_history"].append(phase_entry)
+        return phase_entry
+
+    def _complete_cycle_phase(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float) -> None:
+        duration = time.perf_counter() - start_time
+        phase_entry["status"] = "completed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        self.cycle_metadata["phase_timings"][phase_name] = round(duration, 6)
+        if phase_name not in self.cycle_metadata["completed_phases"]:
+            self.cycle_metadata["completed_phases"].append(phase_name)
+        self.cycle_metadata["last_completed_phase"] = phase_name
+        self.cycle_metadata["final_status"] = "completed"
+
+    def _fail_cycle_phase(
+        self,
+        phase_name: str,
+        phase_entry: Dict[str, Any],
+        start_time: float,
+        error: str,
+        details: Dict[str, Any] | None = None,
+    ) -> None:
+        duration = time.perf_counter() - start_time
+        phase_entry["status"] = "failed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        phase_entry["error"] = error
+        self.cycle_metadata["phase_timings"][phase_name] = round(duration, 6)
+        self.cycle_metadata["failed_phase"] = phase_name
+        self.cycle_metadata["final_status"] = "failed"
+        self._record_failed_operation(self.failed_operations, phase_name, error, duration, details)
+
+    def _record_failed_operation(
+        self,
+        container: List[Dict[str, Any]],
+        operation: str,
+        error: str,
+        duration: float,
+        details: Dict[str, Any] | None = None,
+    ) -> None:
+        if not self.config.persist_failed_operations:
+            return
+        failure_entry = {
+            "operation": operation,
+            "error": error,
+            "timestamp": datetime.now().isoformat(),
+            "duration_seconds": round(duration, 6),
+        }
+        if details:
+            failure_entry["details"] = self._serialize_value(details)
+        container.append(failure_entry)
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        return self._serialize_value(
+            {
+                "phase_history": self.cycle_metadata.get("phase_history", []),
+                "phase_timings": self.cycle_metadata.get("phase_timings", {}),
+                "completed_phases": self.cycle_metadata.get("completed_phases", []),
+                "failed_phase": self.cycle_metadata.get("failed_phase"),
+                "final_status": self.cycle_metadata.get("final_status", "initialized"),
+                "last_completed_phase": self.cycle_metadata.get("last_completed_phase"),
+            }
+        )
+
+    def _serialize_value(self, value: Any) -> Any:
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {str(key): self._serialize_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._serialize_value(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._serialize_value(item) for item in value]
+        if hasattr(value, "__dataclass_fields__"):
+            return {
+                field_name: self._serialize_value(getattr(value, field_name))
+                for field_name in value.__dataclass_fields__
+            }
+        if callable(value):
+            return getattr(value, "__name__", "callable")
+        return value
     
     def start_cycle(self) -> bool:
         """启动迭代循环"""
@@ -120,6 +225,15 @@ class IterationCycle:
             self.current_iteration = 0
             self.results.clear()
             self.failed_iterations.clear()
+            self.failed_operations.clear()
+            self.cycle_metadata = {
+                "phase_history": [],
+                "phase_timings": {},
+                "completed_phases": [],
+                "failed_phase": None,
+                "final_status": "running",
+                "last_completed_phase": None,
+            }
             self.performance_metrics = {
                 "total_iterations": 0,
                 "successful_iterations": 0,
@@ -449,6 +563,10 @@ class IterationCycle:
         iteration_result.metadata["phase_history"] = []
         iteration_result.metadata["phase_timings"] = {}
         iteration_result.metadata["completed_phases"] = []
+        iteration_result.metadata["failed_phase"] = None
+        iteration_result.metadata["final_status"] = iteration_result.status.value
+        iteration_result.metadata["last_completed_phase"] = None
+        iteration_result.metadata["failed_operations"] = []
 
     def _execute_phase(
         self,
@@ -458,10 +576,10 @@ class IterationCycle:
         operation: Callable[[], Any],
     ) -> Any:
         phase_started_at = datetime.now().isoformat()
-        phase_start_time = time.time()
+        phase_start_time = time.perf_counter()
         phase_entry: Dict[str, Any] = {
             "phase": phase_name,
-            "status": "running",
+            "status": "in_progress",
             "started_at": phase_started_at,
         }
         iteration_result.metadata["phase_history"].append(phase_entry)
@@ -470,22 +588,32 @@ class IterationCycle:
         try:
             result = operation()
         except Exception as exc:
-            duration = time.time() - phase_start_time
+            duration = time.perf_counter() - phase_start_time
             phase_entry["status"] = "failed"
             phase_entry["ended_at"] = datetime.now().isoformat()
-            phase_entry["duration"] = duration
+            phase_entry["duration_seconds"] = round(duration, 6)
             phase_entry["error"] = str(exc)
-            iteration_result.metadata["phase_timings"][phase_name] = duration
+            iteration_result.metadata["phase_timings"][phase_name] = round(duration, 6)
             iteration_result.metadata["failed_phase"] = phase_name
+            iteration_result.metadata["final_status"] = "failed"
+            failure_details = {
+                "iteration_id": iteration_result.iteration_id,
+                "cycle_number": iteration_result.cycle_number,
+                "status": status.value,
+            }
+            self._record_failed_operation(iteration_result.metadata["failed_operations"], phase_name, str(exc), duration, failure_details)
+            self._record_failed_operation(self.failed_operations, phase_name, str(exc), duration, failure_details)
             raise
 
-        duration = time.time() - phase_start_time
+        duration = time.perf_counter() - phase_start_time
         phase_entry["status"] = "completed"
         phase_entry["ended_at"] = datetime.now().isoformat()
-        phase_entry["duration"] = duration
-        iteration_result.metadata["phase_timings"][phase_name] = duration
-        iteration_result.metadata["completed_phases"].append(phase_name)
+        phase_entry["duration_seconds"] = round(duration, 6)
+        iteration_result.metadata["phase_timings"][phase_name] = round(duration, 6)
+        if phase_name not in iteration_result.metadata["completed_phases"]:
+            iteration_result.metadata["completed_phases"].append(phase_name)
         iteration_result.metadata["last_completed_phase"] = phase_name
+        iteration_result.metadata["final_status"] = "completed"
         return result
 
     def _finalize_iteration_result(
@@ -496,7 +624,7 @@ class IterationCycle:
     ) -> None:
         iteration_result.status = CycleStatus.COMPLETED if success else CycleStatus.FAILED
         iteration_result.end_time = datetime.now().isoformat()
-        iteration_result.duration = time.time() - iteration_start
+        iteration_result.duration = time.perf_counter() - iteration_start
         iteration_result.metadata["final_status"] = iteration_result.status.value
 
     def _build_analysis_summary(
@@ -517,6 +645,10 @@ class IterationCycle:
             "recommendation_count": len(recommendations),
             "quality_score": quality_score,
             "iteration_status": "stable" if failed_tests == 0 and quality_score >= self.config.confidence_threshold else "needs_followup",
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.cycle_metadata.get("failed_phase"),
+            "last_completed_phase": self.cycle_metadata.get("last_completed_phase"),
+            "final_status": self.cycle_metadata.get("final_status", "initialized"),
         }
     
     def execute_iteration(self, context: Dict[str, Any]) -> IterationResult:
@@ -525,7 +657,15 @@ class IterationCycle:
             raise RuntimeError("迭代循环正在执行中")
         
         self.iteration_lock = True
-        iteration_start = time.time()
+        iteration_start = time.perf_counter()
+        cycle_phase_start = time.perf_counter()
+        cycle_phase_entry = self._start_cycle_phase(
+            "execute_iteration",
+            {
+                "iteration_index": self.current_iteration,
+                "context_keys": sorted(context.keys()),
+            },
+        )
         iteration_result = IterationResult(
             iteration_id=f"iter_{self.current_iteration}_{int(time.time())}",
             cycle_number=self.current_iteration,
@@ -597,6 +737,8 @@ class IterationCycle:
                 iteration_result.performance_metrics = test_results["metrics"]
             
             self._finalize_iteration_result(iteration_result, iteration_start, success=True)
+            self._complete_cycle_phase("execute_iteration", cycle_phase_entry, cycle_phase_start)
+            self._sync_analysis_summary(iteration_result)
             
             self._update_performance_metrics(iteration_result)
             
@@ -609,6 +751,19 @@ class IterationCycle:
         except Exception as e:
             iteration_result.issues_found.append(str(e))
             self._finalize_iteration_result(iteration_result, iteration_start, success=False)
+            self.cycle_metadata["failed_phase"] = iteration_result.metadata.get("failed_phase")
+            self._fail_cycle_phase(
+                "execute_iteration",
+                cycle_phase_entry,
+                cycle_phase_start,
+                str(e),
+                {
+                    "iteration_id": iteration_result.iteration_id,
+                    "cycle_number": iteration_result.cycle_number,
+                    "failed_phase": iteration_result.metadata.get("failed_phase"),
+                },
+            )
+            self._sync_analysis_summary(iteration_result)
             self.logger.error(f"第 {self.current_iteration} 次迭代失败: {e}")
             self.logger.error(traceback.format_exc())
             
@@ -618,6 +773,21 @@ class IterationCycle:
             raise
         finally:
             self.iteration_lock = False
+
+    def _sync_analysis_summary(self, iteration_result: IterationResult) -> None:
+        analysis_summary = iteration_result.metadata.get("analysis_summary") or {}
+        analysis_summary["failed_operation_count"] = len(self.failed_operations)
+        analysis_summary["failed_phase"] = iteration_result.metadata.get("failed_phase") or self.cycle_metadata.get("failed_phase")
+        analysis_summary["last_completed_phase"] = iteration_result.metadata.get("last_completed_phase")
+        analysis_summary["final_status"] = iteration_result.status.value
+        analysis_summary.setdefault(
+            "iteration_status",
+            "stable"
+            if iteration_result.status == CycleStatus.COMPLETED
+            and float(iteration_result.quality_assessment.get("quality_score", iteration_result.quality_assessment.get("overall_quality", 0.0))) >= self.config.minimum_stable_quality
+            else "needs_followup",
+        )
+        iteration_result.metadata["analysis_summary"] = analysis_summary
     
     def _update_performance_metrics(self, iteration_result: IterationResult):
         """更新性能指标"""
@@ -740,31 +910,57 @@ class IterationCycle:
             if confidence_scores:
                 avg_confidence_score = sum(confidence_scores) / len(confidence_scores)
         
+        stable_iterations = len(
+            [
+                result
+                for result in self.results
+                if result.metadata.get("analysis_summary", {}).get("iteration_status") == "stable"
+            ]
+        )
+        cycle_status = (
+            "stable"
+            if failed_iterations == 0 and avg_quality_score >= self.config.minimum_stable_quality
+            else "needs_followup"
+        )
+
         return {
             "total_iterations": completed_iterations,
             "failed_iterations": failed_iterations,
             "successful_iterations": completed_iterations - failed_iterations,
+            "stable_iterations": stable_iterations,
             "total_duration_seconds": total_duration,
             "average_iteration_time": avg_execution_time,
             "average_memory_usage_mb": avg_memory_usage,
             "average_quality_score": avg_quality_score,
             "average_confidence_score": avg_confidence_score,
+            "analysis_summary": {
+                "status": cycle_status,
+                "failed_operation_count": len(self.failed_operations),
+                "failed_phase": self.cycle_metadata.get("failed_phase"),
+                "last_completed_phase": self.cycle_metadata.get("last_completed_phase"),
+                "final_status": self.cycle_metadata.get("final_status", "initialized"),
+            },
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
             "latest_results": [self._serialize_iteration_result(r) for r in self.results[-3:]],
             "failed_iterations_details": [self._serialize_iteration_result(r) for r in self.failed_iterations],
             "report_metadata": self._build_report_metadata(),
-            "performance_metrics": self.performance_metrics
+            "performance_metrics": self._serialize_value(self.performance_metrics)
         }
 
     def _build_report_metadata(self) -> Dict[str, Any]:
         return {
-            "contract_version": "d15.v1",
+            "contract_version": self.config.export_contract_version,
             "generated_at": datetime.now().isoformat(),
             "result_schema": "iteration_cycle_report",
             "latest_iteration_id": self.results[-1].iteration_id if self.results else "",
+            "failed_operation_count": len(self.failed_operations),
+            "final_status": self.cycle_metadata.get("final_status", "initialized"),
+            "last_completed_phase": self.cycle_metadata.get("last_completed_phase"),
         }
 
     def _serialize_iteration_result(self, iteration_result: IterationResult) -> Dict[str, Any]:
-        return {
+        return self._serialize_value({
             "iteration_id": iteration_result.iteration_id,
             "cycle_number": iteration_result.cycle_number,
             "status": iteration_result.status.value,
@@ -781,10 +977,10 @@ class IterationCycle:
             "academic_insights": iteration_result.academic_insights,
             "quality_assessment": iteration_result.quality_assessment,
             "recommendations": iteration_result.recommendations,
-        }
+        })
 
     def _build_export_payload(self, output_path: str) -> Dict[str, Any]:
-        return {
+        return self._serialize_value({
             "report_metadata": {
                 **self._build_report_metadata(),
                 "output_path": output_path,
@@ -793,9 +989,11 @@ class IterationCycle:
             "cycle_summary": self.get_cycle_summary(),
             "iteration_results": [self._serialize_iteration_result(r) for r in self.results],
             "failed_iterations": [self._serialize_iteration_result(r) for r in self.failed_iterations],
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
             "configuration": self.config.__dict__,
             "performance_metrics": self.performance_metrics,
-        }
+        })
     
     def export_results(self, output_path: str = "iteration_results.json"):
         """导出结果"""
@@ -970,6 +1168,28 @@ class IterationCycle:
             # 清理数据结构
             self.results.clear()
             self.failed_iterations.clear()
+            self.failed_operations.clear()
+            self.current_iteration = 0
+            self.start_time = None
+            self.end_time = None
+            self.total_duration = 0.0
+            self.cycle_metadata = {
+                "phase_history": [],
+                "phase_timings": {},
+                "completed_phases": [],
+                "failed_phase": None,
+                "final_status": "cleaned",
+                "last_completed_phase": None,
+            }
+            self.performance_metrics = {
+                "total_iterations": 0,
+                "successful_iterations": 0,
+                "failed_iterations": 0,
+                "average_duration": 0.0,
+                "total_processing_time": 0.0,
+                "quality_score": 0.0,
+                "confidence_score": 0.0,
+            }
             
             self.logger.info("迭代循环管理器资源清理完成")
             return True

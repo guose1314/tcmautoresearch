@@ -82,8 +82,10 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertEqual(summary["total_cycles"], 1)
         self.assertEqual(summary["completed_cycles"], 1)
         self.assertIn("report_metadata", summary)
-        self.assertEqual(summary["report_metadata"]["contract_version"], "d26.v1")
+        self.assertEqual(summary["report_metadata"]["contract_version"], "d44.v1")
+        self.assertEqual(summary["report_metadata"]["final_status"], "completed")
         self.assertIn("analysis_summary", summary)
+        self.assertEqual(summary["metadata"]["final_status"], "completed")
         all_cycles = self.pipeline.get_all_cycles()
         self.assertEqual(len(all_cycles), 1)
 
@@ -350,11 +352,14 @@ class TestResearchPipelineQuality(unittest.TestCase):
             self.assertTrue(self.pipeline.export_pipeline_data(output_path))
             with open(output_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self.assertEqual(data["report_metadata"]["contract_version"], "d26.v1")
+            self.assertEqual(data["report_metadata"]["contract_version"], "d44.v1")
             self.assertIn("pipeline_info", data)
             self.assertIn("research_cycles", data)
+            self.assertIn("metadata", data)
+            self.assertIn("failed_operations", data)
             self.assertIn("report_metadata", data["pipeline_info"]["pipeline_summary"]["pipeline_summary"])
             self.assertIn("failed_operations", data["pipeline_info"]["pipeline_summary"]["pipeline_summary"])
+            self.assertEqual(data["metadata"]["final_status"], "completed")
             history = self.pipeline.get_cycle_history(cycle.cycle_id)
             self.assertTrue(len(history) >= 2)
         finally:
@@ -391,6 +396,11 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertEqual(status["metadata"]["phase_history"][-1]["status"], "failed")
         self.assertEqual(status["metadata"]["analysis_summary"]["status"], "needs_followup")
         self.assertEqual(status["metadata"]["failed_operations"][-1]["operation"], ResearchPhase.OBSERVE.value)
+        self.assertIn("details", status["metadata"]["failed_operations"][-1])
+        self.assertEqual(status["metadata"]["failed_operations"][-1]["details"]["cycle_id"], cycle.cycle_id)
+        summary = self.pipeline.get_pipeline_summary()["pipeline_summary"]
+        self.assertEqual(summary["failed_operations"][-1]["operation"], ResearchPhase.OBSERVE.value)
+        self.assertEqual(summary["failed_operations"][-1]["details"]["cycle_id"], cycle.cycle_id)
         self.assertEqual(len(self.pipeline.failed_cycles), 1)
 
     def test_cleanup_keeps_shared_executor_available(self):

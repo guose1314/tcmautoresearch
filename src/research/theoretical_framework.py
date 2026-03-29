@@ -417,7 +417,7 @@ class TheoreticalFramework:
             "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
             "persist_failed_operations": self.config.get("persist_failed_operations", True),
             "minimum_validation_rate": float(self.config.get("minimum_validation_rate", 0.5)),
-            "export_contract_version": self.config.get("export_contract_version", "d27.v1"),
+            "export_contract_version": self.config.get("export_contract_version", "d37.v1"),
         }
         self.knowledge_graph = nx.MultiDiGraph()
         self.logger = logging.getLogger(__name__)
@@ -473,10 +473,21 @@ class TheoreticalFramework:
                 {
                     "operation": phase_name,
                     "error": error,
+                    "details": self._serialize_value(phase_entry.get("context", {})),
                     "timestamp": datetime.now().isoformat(),
                     "duration_seconds": round(duration, 6),
                 }
             )
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        return {
+            "phase_history": self._serialize_value(self.framework_metadata.get("phase_history", [])),
+            "phase_timings": self._serialize_value(self.framework_metadata.get("phase_timings", {})),
+            "completed_phases": list(self.framework_metadata.get("completed_phases", [])),
+            "failed_phase": self.framework_metadata.get("failed_phase"),
+            "final_status": self.framework_metadata.get("final_status", "initialized"),
+            "last_completed_phase": self.framework_metadata.get("last_completed_phase"),
+        }
 
     def _serialize_value(self, value: Any) -> Any:
         if isinstance(value, Enum):
@@ -535,6 +546,7 @@ class TheoreticalFramework:
             "completed_phases": list(self.framework_metadata.get("completed_phases", [])),
             "failed_phase": self.framework_metadata.get("failed_phase"),
             "failed_operation_count": len(self.failed_operations),
+            "final_status": self.framework_metadata.get("final_status", "initialized"),
             "last_completed_phase": self.framework_metadata.get("last_completed_phase"),
         }
     
@@ -944,7 +956,8 @@ class TheoreticalFramework:
             "failed_operations": self._serialize_value(self.failed_operations),
             "analysis_summary": self._build_analysis_summary(),
             "report_metadata": self._build_report_metadata(),
-            "framework_metadata": self._serialize_value(self.framework_metadata),
+            "metadata": self._build_runtime_metadata(),
+            "framework_metadata": self._build_runtime_metadata(),
         }
     
     def get_hypothesis_by_id(self, hypothesis_id: str) -> Optional[ResearchHypothesis]:
@@ -1130,6 +1143,7 @@ class TheoreticalFramework:
                 "insights": [i.to_dict() for i in self.insights.values()],
                 "research_history": self._serialize_value(self.research_history),
                 "failed_operations": self._serialize_value(self.failed_operations),
+                "metadata": self._build_runtime_metadata(),
                 "research_summary": self.get_research_summary(),
                 "knowledge_graph": self._serialize_value(self.build_knowledge_graph())
             }

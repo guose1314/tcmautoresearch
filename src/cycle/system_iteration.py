@@ -70,7 +70,7 @@ class SystemIterationCycle:
             "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
             "persist_failed_operations": self.config.get("persist_failed_operations", True),
             "minimum_stable_quality": float(self.config.get("minimum_stable_quality", 0.85)),
-            "export_contract_version": self.config.get("export_contract_version", "d28.v1"),
+            "export_contract_version": self.config.get("export_contract_version", "d42.v1"),
         }
         self.performance_metrics = {
             "total_iterations": 0,
@@ -96,6 +96,18 @@ class SystemIterationCycle:
         iteration_result.metadata["last_completed_phase"] = None
         iteration_result.metadata["failed_operations"] = []
 
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        return self._serialize_value(
+            {
+                "phase_history": self.system_metadata.get("phase_history", []),
+                "phase_timings": self.system_metadata.get("phase_timings", {}),
+                "completed_phases": self.system_metadata.get("completed_phases", []),
+                "failed_phase": self.system_metadata.get("failed_phase"),
+                "final_status": self.system_metadata.get("final_status", "initialized"),
+                "last_completed_phase": self.system_metadata.get("last_completed_phase"),
+            }
+        )
+
     def _start_system_phase(self, phase_name: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         phase_entry = {
             "phase": phase_name,
@@ -118,7 +130,14 @@ class SystemIterationCycle:
         self.system_metadata["last_completed_phase"] = phase_name
         self.system_metadata["final_status"] = "completed"
 
-    def _fail_system_phase(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float, error: str) -> None:
+    def _fail_system_phase(
+        self,
+        phase_name: str,
+        phase_entry: Dict[str, Any],
+        start_time: float,
+        error: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
         duration = time.perf_counter() - start_time
         phase_entry["status"] = "failed"
         phase_entry["ended_at"] = datetime.now().isoformat()
@@ -127,7 +146,7 @@ class SystemIterationCycle:
         self.system_metadata["phase_timings"][phase_name] = round(duration, 6)
         self.system_metadata["failed_phase"] = phase_name
         self.system_metadata["final_status"] = "failed"
-        self._record_failed_operation(self.failed_operations, phase_name, error, duration)
+        self._record_failed_operation(self.failed_operations, phase_name, error, duration, details)
 
     def _record_failed_operation(
         self,
@@ -135,17 +154,19 @@ class SystemIterationCycle:
         operation: str,
         error: str,
         duration: float,
+        details: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not self.governance_config.get("persist_failed_operations", True):
             return
-        container.append(
-            {
-                "operation": operation,
-                "error": error,
-                "timestamp": datetime.now().isoformat(),
-                "duration_seconds": round(duration, 6),
-            }
-        )
+        failure_entry = {
+            "operation": operation,
+            "error": error,
+            "timestamp": datetime.now().isoformat(),
+            "duration_seconds": round(duration, 6),
+        }
+        if details:
+            failure_entry["details"] = self._serialize_value(details)
+        container.append(failure_entry)
 
     def _serialize_value(self, value: Any) -> Any:
         if isinstance(value, Enum):
@@ -194,8 +215,13 @@ class SystemIterationCycle:
             iteration_result.metadata["phase_timings"][phase_name] = round(duration, 6)
             iteration_result.metadata["failed_phase"] = phase_name
             iteration_result.metadata["final_status"] = "failed"
-            self._record_failed_operation(iteration_result.metadata["failed_operations"], phase_name, str(exc), duration)
-            self._record_failed_operation(self.failed_operations, phase_name, str(exc), duration)
+            failure_details = {
+                "iteration_id": iteration_result.iteration_id,
+                "cycle_number": iteration_result.cycle_number,
+                "status": status,
+            }
+            self._record_failed_operation(iteration_result.metadata["failed_operations"], phase_name, str(exc), duration, failure_details)
+            self._record_failed_operation(self.failed_operations, phase_name, str(exc), duration, failure_details)
             raise
 
         duration = time.perf_counter() - phase_start
@@ -219,6 +245,21 @@ class SystemIterationCycle:
         iteration_result.end_time = datetime.now().isoformat()
         iteration_result.duration = time.perf_counter() - start_time
         iteration_result.metadata["final_status"] = iteration_result.status
+
+    def _sync_analysis_summary(self, iteration_result: SystemIterationResult) -> None:
+        analysis_summary = iteration_result.metadata.get("analysis_summary") or {}
+        analysis_summary["failed_operation_count"] = len(self.failed_operations)
+        analysis_summary["failed_phase"] = iteration_result.metadata.get("failed_phase") or self.system_metadata.get("failed_phase")
+        analysis_summary["last_completed_phase"] = iteration_result.metadata.get("last_completed_phase") or self.system_metadata.get("last_completed_phase")
+        analysis_summary["final_status"] = iteration_result.status
+        analysis_summary.setdefault(
+            "status",
+            "stable"
+            if iteration_result.status == "completed"
+            and float(iteration_result.quality_assessment.get("overall_quality", 0.0)) >= self.governance_config["minimum_stable_quality"]
+            else "needs_followup",
+        )
+        iteration_result.metadata["analysis_summary"] = analysis_summary
     
     def execute_system_iteration(self, context: Dict[str, Any]) -> SystemIterationResult:
         """
@@ -231,6 +272,14 @@ class SystemIterationCycle:
             SystemIterationResult: 系统迭代结果
         """
         start_time = time.perf_counter()
+        self.system_metadata = {
+            "phase_history": [],
+            "phase_timings": {},
+            "completed_phases": [],
+            "failed_phase": None,
+            "final_status": "running",
+            "last_completed_phase": None,
+        }
         system_phase_entry = self._start_system_phase("execute_system_iteration", {"context_keys": sorted((context or {}).keys())})
         
         iteration_result = SystemIterationResult(
@@ -273,8 +322,7 @@ class SystemIterationCycle:
             
             self._finalize_iteration_result(iteration_result, start_time, success=True)
             self._complete_system_phase("execute_system_iteration", system_phase_entry, start_time)
-            iteration_result.metadata["analysis_summary"]["final_status"] = self.system_metadata.get("final_status", iteration_result.status)
-            iteration_result.metadata["analysis_summary"]["last_completed_phase"] = self.system_metadata.get("last_completed_phase")
+            self._sync_analysis_summary(iteration_result)
             
             self._update_performance_metrics(iteration_result)
             
@@ -285,7 +333,18 @@ class SystemIterationCycle:
             
         except Exception as e:
             self._finalize_iteration_result(iteration_result, start_time, success=False)
-            self._fail_system_phase("execute_system_iteration", system_phase_entry, start_time, str(e))
+            self._fail_system_phase(
+                "execute_system_iteration",
+                system_phase_entry,
+                start_time,
+                str(e),
+                {
+                    "iteration_id": iteration_result.iteration_id,
+                    "cycle_number": iteration_result.cycle_number,
+                    "failed_phase": iteration_result.metadata.get("failed_phase"),
+                },
+            )
+            self._sync_analysis_summary(iteration_result)
             self._update_performance_metrics(iteration_result)
             self.system_iterations.append(iteration_result)
             self.failed_iterations.append(iteration_result)
@@ -776,20 +835,22 @@ class SystemIterationCycle:
             "failed_iterations_details": [self._serialize_system_iteration_result(i) for i in failed_iterations],
             "analysis_summary": self._build_system_analysis_summary(),
             "failed_operations": self._serialize_value(self.failed_operations),
-            "metadata": self._serialize_value(self.system_metadata),
+            "metadata": self._build_runtime_metadata(),
             "report_metadata": self._build_system_report_metadata(),
         }
 
     def _build_system_report_metadata(self) -> Dict[str, Any]:
+        runtime_metadata = self._build_runtime_metadata()
         return {
             "contract_version": self.governance_config["export_contract_version"],
             "generated_at": datetime.now().isoformat(),
             "result_schema": "system_iteration_report",
             "latest_iteration_id": self.system_iterations[-1].iteration_id if self.system_iterations else "",
-            "completed_phases": list(self.system_metadata.get("completed_phases", [])),
-            "failed_phase": self.system_metadata.get("failed_phase"),
+            "completed_phases": list(runtime_metadata.get("completed_phases", [])),
+            "failed_phase": runtime_metadata.get("failed_phase"),
             "failed_operation_count": len(self.failed_operations),
-            "last_completed_phase": self.system_metadata.get("last_completed_phase"),
+            "final_status": runtime_metadata.get("final_status", "initialized"),
+            "last_completed_phase": runtime_metadata.get("last_completed_phase"),
         }
 
     def _serialize_system_iteration_result(self, iteration_result: SystemIterationResult) -> Dict[str, Any]:
@@ -827,6 +888,7 @@ class SystemIterationCycle:
             "system_iterations": [self._serialize_system_iteration_result(i) for i in self.system_iterations],
             "failed_iterations": [self._serialize_system_iteration_result(i) for i in self.failed_iterations],
             "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
             "knowledge_graph": self._serialize_value(self.get_system_knowledge_graph()),
             "module_cycles": self._serialize_value({name: cycle.get_module_performance_report() for name, cycle in self.module_cycles.items()}),
         }

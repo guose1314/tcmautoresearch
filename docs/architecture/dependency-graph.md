@@ -5,9 +5,9 @@ This document is generated from internal imports under src/.
 ## Summary
 
 - Module count: 54
-- Module edges: 59
+- Module edges: 61
 - Package count: 14
-- Package edges: 13
+- Package edges: 14
 
 ## Package Graph
 
@@ -40,6 +40,7 @@ flowchart LR
     src_research --> src_preprocessor
     src_research --> src_semantic_modeling
     src_semantic_modeling --> src_core
+    src_test --> src_core
 ```
 
 ## Packages
@@ -47,7 +48,7 @@ flowchart LR
 | Package | In Degree | Out Degree |
 |---|---:|---:|
 | src | 0 | 0 |
-| src.core | 8 | 0 |
+| src.core | 9 | 0 |
 | src.cycle | 0 | 1 |
 | src.data | 1 | 0 |
 | src.extractors | 1 | 2 |
@@ -59,4 +60,4 @@ flowchart LR
 | src.research | 0 | 5 |
 | src.semantic_modeling | 1 | 1 |
 | src.storage | 0 | 0 |
-| src.test | 0 | 0 |
+| src.test | 0 | 1 |

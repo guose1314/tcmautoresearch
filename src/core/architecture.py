@@ -450,7 +450,7 @@ class SystemArchitecture:
             "enable_phase_tracking": config.get("enable_phase_tracking", True),
             "persist_failed_operations": config.get("persist_failed_operations", True),
             "minimum_stable_health_score": float(config.get("minimum_stable_health_score", 0.8)),
-            "export_contract_version": config.get("export_contract_version", "d22.v1"),
+            "export_contract_version": config.get("export_contract_version", "d45.v1"),
         }
         
         self.logger.info("系统架构初始化完成")
@@ -472,6 +472,7 @@ class SystemArchitecture:
         phase_name: str,
         phase_started_at: float,
         details: Optional[Dict[str, Any]] = None,
+        final_status: Optional[str] = None,
     ) -> None:
         """记录阶段完成状态。"""
         duration = max(0.0, time.time() - phase_started_at)
@@ -479,7 +480,7 @@ class SystemArchitecture:
         if phase_name not in self.completed_phases:
             self.completed_phases.append(phase_name)
         self.last_completed_phase = phase_name
-        self.final_status = self.system_status
+        self.final_status = final_status or self.system_status
 
         if not self.architecture_metadata.get("enable_phase_tracking", True):
             return
@@ -505,7 +506,7 @@ class SystemArchitecture:
         self.phase_timings[phase_name] = round(duration, 6)
         self.failed_phase = phase_name
         self.final_status = "failed"
-        self._record_failed_operation(phase_name, error, details)
+        self._record_failed_operation(phase_name, error, details, duration)
 
         if not self.architecture_metadata.get("enable_phase_tracking", True):
             return
@@ -525,6 +526,7 @@ class SystemArchitecture:
         operation_name: str,
         error: Exception,
         details: Optional[Dict[str, Any]] = None,
+        duration_seconds: Optional[float] = None,
     ) -> None:
         """沉淀失败操作信息。"""
         if not self.architecture_metadata.get("persist_failed_operations", True):
@@ -535,7 +537,18 @@ class SystemArchitecture:
             "error": str(error),
             "details": self._serialize_value(details or {}),
             "timestamp": datetime.now().isoformat(),
+            "duration_seconds": round(duration_seconds or 0.0, 6),
         })
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        return {
+            "phase_history": self._serialize_value(self.phase_history),
+            "phase_timings": self._serialize_value(self.phase_timings),
+            "completed_phases": list(self.completed_phases),
+            "failed_phase": self.failed_phase,
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
 
     def _serialize_value(self, value: Any) -> Any:
         """将复杂对象转换为 JSON 安全结构。"""
@@ -592,6 +605,7 @@ class SystemArchitecture:
             "failed_modules": failed_modules,
             "failed_phase": self.failed_phase,
             "health_score": health_score,
+            "last_completed_phase": self.last_completed_phase,
         }
 
     def _build_report_metadata(self) -> Dict[str, Any]:
@@ -599,10 +613,53 @@ class SystemArchitecture:
         return {
             "contract_version": self.architecture_metadata["export_contract_version"],
             "generated_at": datetime.now().isoformat(),
+            "result_schema": "system_architecture_report",
             "completed_phases": list(self.completed_phases),
             "failed_phase": self.failed_phase,
             "failed_operation_count": len(self.failed_operations),
+            "final_status": self.final_status,
             "last_completed_phase": self.last_completed_phase,
+        }
+
+    def _build_pipeline_result(
+        self,
+        pipeline_id: str,
+        started_at: str,
+        ended_at: str,
+        duration: float,
+        execution_results: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """构建统一流水线结果，确保状态字段基于最新 runtime metadata。"""
+        return {
+            "pipeline_id": pipeline_id,
+            "start_time": started_at,
+            "end_time": ended_at,
+            "duration": duration,
+            "system_status": self.system_status,
+            "modules_executed": len(execution_results),
+            "execution_results": self._serialize_value(execution_results),
+            "performance_metrics": self._serialize_value(self.performance_metrics),
+            "quality_assessment": self._serialize_value(self._assess_quality(execution_results)),
+            "analysis_summary": self._build_analysis_summary(execution_results),
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+            "report_metadata": self._build_report_metadata(),
+        }
+
+    def _build_system_export_payload(self) -> Dict[str, Any]:
+        """构建统一系统导出结构。"""
+        return {
+            "system_config": self._serialize_value(self.config),
+            "module_registry": {
+                "modules": [self._module_to_dict(m) for m in self.module_registry.modules.values()],
+                "module_graph": self._serialize_value(list(self.module_registry.get_module_graph().edges()))
+            },
+            "performance_metrics": self._serialize_value(self.performance_metrics),
+            "system_status": self.get_system_status(),
+            "architecture_summary": self.get_architecture_summary(),
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+            "report_metadata": self._build_report_metadata(),
         }
 
     def get_architecture_summary(self) -> Dict[str, Any]:
@@ -612,14 +669,7 @@ class SystemArchitecture:
             "performance_metrics": self._serialize_value(self.performance_metrics),
             "analysis_summary": self._build_analysis_summary(),
             "failed_operations": self._serialize_value(self.failed_operations),
-            "metadata": {
-                "phase_history": self._serialize_value(self.phase_history),
-                "phase_timings": self._serialize_value(self.phase_timings),
-                "completed_phases": list(self.completed_phases),
-                "failed_phase": self.failed_phase,
-                "final_status": self.final_status,
-                "last_completed_phase": self.last_completed_phase,
-            },
+            "metadata": self._build_runtime_metadata(),
             "report_metadata": self._build_report_metadata(),
         }
     
@@ -766,6 +816,7 @@ class SystemArchitecture:
                         "initialize_module",
                         e,
                         {"module_id": module_info.module_id},
+                        0.0,
                     )
                     initialization_results.append({
                         "module_id": module_info.module_id,
@@ -907,6 +958,7 @@ class SystemArchitecture:
             Dict[str, Any]: 执行结果
         """
         start_time = time.time()
+        pipeline_started_at = datetime.now().isoformat()
         phase_started_at = self._start_phase(
             "execute_pipeline",
             {"context_keys": sorted(context.keys())},
@@ -959,6 +1011,7 @@ class SystemArchitecture:
                         "execute_module",
                         e,
                         {"module_id": module_info.module_id, "module_name": module_info.module_name},
+                        0.0,
                     )
                     execution_results.append({
                         "module_id": module_info.module_id,
@@ -976,19 +1029,6 @@ class SystemArchitecture:
             self.final_status = "pipeline_completed"
             
             # 构造最终结果
-            final_result = {
-                "pipeline_id": f"pipeline_{int(time.time())}",
-                "start_time": datetime.now().isoformat(),
-                "end_time": datetime.now().isoformat(),
-                "duration": time.time() - start_time,
-                "system_status": self.system_status,
-                "modules_executed": len(execution_results),
-                "execution_results": execution_results,
-                "performance_metrics": self.performance_metrics,
-                "quality_assessment": self._assess_quality(execution_results),
-                "analysis_summary": self._build_analysis_summary(execution_results),
-                "report_metadata": self._build_report_metadata(),
-            }
             self.failed_phase = None if not self.failed_operations else self.failed_phase
             self._complete_phase(
                 "execute_pipeline",
@@ -997,6 +1037,14 @@ class SystemArchitecture:
                     "executed_module_count": len(execution_results),
                     "failed_module_count": sum(1 for item in execution_results if item.get("status") == "failed"),
                 },
+                final_status="pipeline_completed",
+            )
+            final_result = self._build_pipeline_result(
+                pipeline_id=f"pipeline_{int(time.time())}",
+                started_at=pipeline_started_at,
+                ended_at=datetime.now().isoformat(),
+                duration=time.time() - start_time,
+                execution_results=execution_results,
             )
             
             self.logger.info("系统流水线执行完成")
@@ -1151,14 +1199,7 @@ class SystemArchitecture:
             },
             "analysis_summary": self._build_analysis_summary(),
             "failed_operations": self._serialize_value(self.failed_operations),
-            "metadata": {
-                "phase_history": self._serialize_value(self.phase_history),
-                "phase_timings": self._serialize_value(self.phase_timings),
-                "completed_phases": list(self.completed_phases),
-                "failed_phase": self.failed_phase,
-                "final_status": self.final_status,
-                "last_completed_phase": self.last_completed_phase,
-            },
+            "metadata": self._build_runtime_metadata(),
             "report_metadata": self._build_report_metadata(),
         }
     
@@ -1211,25 +1252,15 @@ class SystemArchitecture:
         phase_started_at = self._start_phase("export_system_info", {"output_path": output_path})
 
         try:
-            system_info = {
-                "system_config": self._serialize_value(self.config),
-                "module_registry": {
-                    "modules": [self._module_to_dict(m) for m in self.module_registry.modules.values()],
-                    "module_graph": self._serialize_value(list(self.module_registry.get_module_graph().edges()))
-                },
-                "performance_metrics": self._serialize_value(self.performance_metrics),
-                "system_status": self.get_system_status(),
-                "architecture_summary": self.get_architecture_summary(),
-                "failed_operations": self._serialize_value(self.failed_operations),
-                "report_metadata": self._build_report_metadata(),
-            }
-            
-            with open(output_path, 'w', encoding='utf-8') as f:
-                json.dump(system_info, f, ensure_ascii=False, indent=2)
-            
             self.failed_phase = None
             self.final_status = self.system_status
             self._complete_phase("export_system_info", phase_started_at, {"output_path": output_path})
+
+            system_info = self._build_system_export_payload()
+
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(system_info, f, ensure_ascii=False, indent=2)
+
             self.logger.info(f"系统信息已导出到: {output_path}")
             return True
             
@@ -1248,7 +1279,7 @@ class SystemArchitecture:
             self.module_registry.module_graph.clear()
             
             # 重置系统状态
-            self.system_status = "terminated"
+            self.system_status = "cleaned"
             self.start_time = None
             self.performance_metrics = {
                 "total_modules": 0,
@@ -1263,7 +1294,7 @@ class SystemArchitecture:
             self.failed_operations.clear()
             self.failed_phase = None
             self.last_completed_phase = None
-            self.final_status = self.system_status
+            self.final_status = "cleaned"
             
             self._complete_phase("cleanup", phase_started_at)
             self.logger.info("系统资源清理完成")

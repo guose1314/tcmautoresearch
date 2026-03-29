@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25", "D26", "D27", "D28")]
+    [ValidateSet("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25", "D26", "D27", "D28", "D29", "D30", "D31", "D32", "D33", "D34", "D35", "D36", "D37", "D38", "D39", "D40", "D41", "D42", "D43", "D44", "D45", "D46", "D47", "D48", "D49", "D50", "D51", "D52", "D53", "D54", "D55", "D56")]
     [string]$Day,
     [switch]$All,
     [switch]$DryRun,
@@ -35,6 +35,249 @@ function Resolve-Python {
     }
 
     return "python"
+}
+
+function Convert-YamlScalarValue {
+    param([string]$Text)
+
+    if ($null -eq $Text) {
+        return $null
+    }
+
+    $value = $Text.Trim()
+    if ($value -match '^(.*?)(\s+#.*)?$') {
+        $value = $Matches[1].Trim()
+    }
+
+    if ($value.Length -ge 2) {
+        if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+            return $value.Substring(1, $value.Length - 2)
+        }
+    }
+
+    if ($value -match '^(true|false)$') {
+        return [System.Convert]::ToBoolean($value)
+    }
+    if ($value -match '^-?\d+$') {
+        return [int]$value
+    }
+    if ($value -match '^-?\d+\.\d+$') {
+        return [double]$value
+    }
+
+    return $value
+}
+
+function Get-Stage1RunnerGovernanceConfig {
+    param([string]$ConfigPath)
+
+    $config = [ordered]@{
+        enable_phase_tracking      = $true
+        persist_failed_operations  = $true
+        minimum_stable_pass_rate   = 85.0
+        export_contract_version    = "d55.v1"
+    }
+
+    if (-not (Test-Path $ConfigPath)) {
+        return $config
+    }
+
+    $lines = Get-Content -Path $ConfigPath -Encoding UTF8
+    $inGovernance = $false
+    $inSection = $false
+
+    foreach ($line in $lines) {
+        if (-not $inGovernance) {
+            if ($line -match '^governance:\s*$') {
+                $inGovernance = $true
+            }
+            continue
+        }
+
+        if (-not $inSection) {
+            if ($line -match '^  stage1_runner:\s*$') {
+                $inSection = $true
+            }
+            elseif ($line -match '^\S') {
+                break
+            }
+            continue
+        }
+
+        if ($line -match '^  \S') {
+            break
+        }
+
+        if ($line -match '^    ([A-Za-z0-9_]+):\s*(.*?)\s*$') {
+            $config[$Matches[1]] = Convert-YamlScalarValue -Text $Matches[2]
+        }
+    }
+
+    return $config
+}
+
+function New-RunnerMetadata {
+    return [ordered]@{
+        phase_history     = @()
+        phase_timings     = [ordered]@{}
+        completed_phases  = @()
+        failed_phase      = $null
+        final_status      = "completed"
+        last_completed_phase = $null
+    }
+}
+
+function Start-RunnerPhase {
+    param(
+        $Metadata,
+        [string]$PhaseName
+    )
+
+    $timestamp = (Get-Date).ToString("o")
+    $Metadata.phase_history += [ordered]@{
+        phase = $PhaseName
+        event = "started"
+        timestamp = $timestamp
+    }
+    $Metadata.phase_timings[$PhaseName] = [ordered]@{
+        started_at = $timestamp
+    }
+}
+
+function Complete-RunnerPhase {
+    param(
+        $Metadata,
+        [string]$PhaseName
+    )
+
+    $timestamp = (Get-Date).ToString("o")
+    $Metadata.phase_history += [ordered]@{
+        phase = $PhaseName
+        event = "completed"
+        timestamp = $timestamp
+    }
+
+    if (-not $Metadata.phase_timings.Contains($PhaseName)) {
+        $Metadata.phase_timings[$PhaseName] = [ordered]@{}
+    }
+
+    $Metadata.phase_timings[$PhaseName]["completed_at"] = $timestamp
+    $Metadata.completed_phases += $PhaseName
+    $Metadata.last_completed_phase = $PhaseName
+}
+
+function Add-FailedOperation {
+    param(
+        [System.Collections.ArrayList]$FailedOperations,
+        [string]$Operation,
+        [string]$Error,
+        [object]$Details,
+        [double]$DurationSeconds = 0.0
+    )
+
+    if ($null -eq $FailedOperations) {
+        return
+    }
+
+    [void]$FailedOperations.Add([ordered]@{
+        operation = $Operation
+        error = $Error
+        details = if ($null -ne $Details) { $Details } else { [ordered]@{} }
+        timestamp = (Get-Date).ToString("o")
+        duration_seconds = [math]::Round($DurationSeconds, 2)
+    })
+}
+
+function Fail-RunnerPhase {
+    param(
+        $Metadata,
+        [System.Collections.ArrayList]$FailedOperations,
+        [string]$PhaseName,
+        [string]$Error,
+        [object]$Details,
+        [double]$DurationSeconds = 0.0
+    )
+
+    $Metadata.phase_history += [ordered]@{
+        phase = $PhaseName
+        event = "failed"
+        timestamp = (Get-Date).ToString("o")
+    }
+    $Metadata.failed_phase = $PhaseName
+    $Metadata.final_status = "failed"
+    Add-FailedOperation -FailedOperations $FailedOperations -Operation $PhaseName -Error $Error -Details $Details -DurationSeconds $DurationSeconds
+}
+
+function Get-DayAnalysisSummary {
+    param(
+        [array]$Steps,
+        [double]$PassRate,
+        [int]$RollbackTipCount,
+        [int]$StrictRollbackStepCount,
+        [bool]$ThresholdBreached
+    )
+
+    $commandSteps = @($Steps | Where-Object { $_.type -eq "cmd" }).Count
+    $branchSteps = @($Steps | Where-Object { $_.type -eq "branch" }).Count
+    $commitSteps = @($Steps | Where-Object { $_.type -eq "commit" }).Count
+    $failedSteps = @($Steps | Where-Object { $_.status -eq "failed" }).Count
+    $passRateBand = if ($PassRate -ge 100) { "perfect" } elseif ($PassRate -ge 85) { "stable" } elseif ($PassRate -ge 60) { "watch" } else { "critical" }
+
+    return [ordered]@{
+        command_step_count = $commandSteps
+        branch_step_count = $branchSteps
+        commit_step_count = $commitSteps
+        actionable_failure_count = $failedSteps
+        rollback_tip_count = $RollbackTipCount
+        strict_rollback_step_count = $StrictRollbackStepCount
+        threshold_breached = $ThresholdBreached
+        pass_rate_band = $passRateBand
+    }
+}
+
+function Get-GlobalAnalysisSummary {
+    param(
+        [array]$Days,
+        [bool]$AbortedByThreshold
+    )
+
+    $dayCount = @($Days).Count
+    $failedDays = @($Days | Where-Object { $_["failed"] }).Count
+    $thresholdDays = @($Days | Where-Object { $_["threshold_breached"] }).Count
+    $passRates = @($Days | ForEach-Object { [double]($_["pass_rate_percent"]) })
+    $averagePassRate = if ($passRates.Count -gt 0) {
+        [math]::Round((($passRates | Measure-Object -Average).Average), 2)
+    }
+    else {
+        0.0
+    }
+
+    return [ordered]@{
+        day_count = $dayCount
+        failed_day_count = $failedDays
+        threshold_breached_day_count = $thresholdDays
+        average_pass_rate_percent = $averagePassRate
+        aborted_by_threshold = $AbortedByThreshold
+        failed_day_codes = @($Days | Where-Object { $_["failed"] } | ForEach-Object { $_["day"] })
+    }
+}
+
+function New-ReportMetadata {
+    param(
+        $GovernanceConfig,
+        $Metadata,
+        [array]$FailedOperations,
+        [string]$ResultSchema
+    )
+
+    return [ordered]@{
+        contract_version = $GovernanceConfig.export_contract_version
+        generated_at = (Get-Date).ToString("o")
+        result_schema = $ResultSchema
+        failed_operation_count = @($FailedOperations).Count
+        final_status = $Metadata.final_status
+        last_completed_phase = $Metadata.last_completed_phase
+    }
 }
 
 function Ensure-Branch {
@@ -471,6 +714,273 @@ function Get-Plan {
         @{ Type = "commit"; Name = "Commit system iteration refresh"; Message = "stage1 D28 system iteration refresh" }
     )
 
+    $plans["D29"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d29-iteration-cycle-refresh" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run theoretical framework quality tests"; Command = "& '$Py' -m unittest tests.test_theoretical_framework_quality" },
+        @{ Type = "cmd"; Name = "Run research pipeline quality tests"; Command = "& '$Py' -m unittest tests.test_research_pipeline_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run iteration cycle regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings" },
+        @{ Type = "commit"; Name = "Commit iteration cycle refresh"; Message = "stage1 D29 iteration cycle refresh" }
+    )
+
+    $plans["D30"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d30-fixing-stage-refresh" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality tests.unit.test_fixing_stage_classification" },
+        @{ Type = "cmd"; Name = "Run theoretical framework quality tests"; Command = "& '$Py' -m unittest tests.test_theoretical_framework_quality" },
+        @{ Type = "cmd"; Name = "Run research pipeline quality tests"; Command = "& '$Py' -m unittest tests.test_research_pipeline_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run fixing stage regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings" },
+        @{ Type = "commit"; Name = "Commit fixing stage refresh"; Message = "stage1 D30 fixing stage refresh" }
+    )
+
+    $plans["D31"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d31-module-iteration-refresh" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run theoretical framework quality tests"; Command = "& '$Py' -m unittest tests.test_theoretical_framework_quality" },
+        @{ Type = "cmd"; Name = "Run research pipeline quality tests"; Command = "& '$Py' -m unittest tests.test_research_pipeline_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run module iteration regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings" },
+        @{ Type = "commit"; Name = "Commit module iteration refresh"; Message = "stage1 D31 module iteration refresh" }
+    )
+
+    $plans["D32"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d32-system-iteration-refresh" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run theoretical framework quality tests"; Command = "& '$Py' -m unittest tests.test_theoretical_framework_quality" },
+        @{ Type = "cmd"; Name = "Run research pipeline quality tests"; Command = "& '$Py' -m unittest tests.test_research_pipeline_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run system iteration regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings" },
+        @{ Type = "commit"; Name = "Commit system iteration refresh"; Message = "stage1 D32 system iteration refresh" }
+    )
+
+    $plans["D33"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d33-test-driven-iteration-refresh" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run theoretical framework quality tests"; Command = "& '$Py' -m unittest tests.test_theoretical_framework_quality" },
+        @{ Type = "cmd"; Name = "Run research pipeline quality tests"; Command = "& '$Py' -m unittest tests.test_research_pipeline_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run test-driven iteration regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings" },
+        @{ Type = "commit"; Name = "Commit test-driven iteration refresh"; Message = "stage1 D33 test-driven iteration refresh" }
+    )
+
+    $plans["D34"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d34-system-architecture-refresh" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run theoretical framework quality tests"; Command = "& '$Py' -m unittest tests.test_theoretical_framework_quality" },
+        @{ Type = "cmd"; Name = "Run research pipeline quality tests"; Command = "& '$Py' -m unittest tests.test_research_pipeline_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run architecture regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings" },
+        @{ Type = "commit"; Name = "Commit system architecture refresh"; Message = "stage1 D34 system architecture refresh" }
+    )
+
+    $plans["D35"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d35-automated-tester-refresh" },
+        @{ Type = "cmd"; Name = "Run automated tester quality tests"; Command = "& '$Py' -m unittest tests.unit.test_automated_tester_quality" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run automated tester regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/unit/test_automated_tester_quality.py" },
+        @{ Type = "commit"; Name = "Commit automated tester refresh"; Message = "stage1 D35 automated tester refresh" }
+    )
+
+    $plans["D36"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d36-integration-tester-refresh" },
+        @{ Type = "cmd"; Name = "Run integration tester quality tests"; Command = "& '$Py' -m unittest tests.unit.test_integration_tester_quality" },
+        @{ Type = "cmd"; Name = "Run automated tester quality tests"; Command = "& '$Py' -m unittest tests.unit.test_automated_tester_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run integration tester regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/unit/test_integration_tester_quality.py" },
+        @{ Type = "commit"; Name = "Commit integration tester refresh"; Message = "stage1 D36 integration tester refresh" }
+    )
+
+    $plans["D37"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d37-theoretical-framework-refresh" },
+        @{ Type = "cmd"; Name = "Run theoretical framework quality tests"; Command = "& '$Py' -m unittest tests.test_theoretical_framework_quality" },
+        @{ Type = "cmd"; Name = "Run research pipeline quality tests"; Command = "& '$Py' -m unittest tests.test_research_pipeline_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run theoretical framework regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/test_theoretical_framework_quality.py" },
+        @{ Type = "commit"; Name = "Commit theoretical framework refresh"; Message = "stage1 D37 theoretical framework refresh" }
+    )
+
+    $plans["D38"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d38-algorithm-optimizer-refresh" },
+        @{ Type = "cmd"; Name = "Run optimization quality tests"; Command = "& '$Py' -m unittest tests.unit.test_learning_optimization_features" },
+        @{ Type = "cmd"; Name = "Run theoretical framework quality tests"; Command = "& '$Py' -m unittest tests.test_theoretical_framework_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run optimizer regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/unit/test_learning_optimization_features.py" },
+        @{ Type = "commit"; Name = "Commit algorithm optimizer refresh"; Message = "stage1 D38 algorithm optimizer refresh" }
+    )
+
+    $plans["D39"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d39-research-pipeline-refresh" },
+        @{ Type = "cmd"; Name = "Run research pipeline quality tests"; Command = "& '$Py' -m unittest tests.test_research_pipeline_quality tests.test_research_pipeline_observe tests.test_research_pipeline_ingestion tests.test_research_pipeline_literature tests.test_research_pipeline_clinical_gap" },
+        @{ Type = "cmd"; Name = "Run theoretical framework quality tests"; Command = "& '$Py' -m unittest tests.test_theoretical_framework_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run research pipeline regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/test_research_pipeline_quality.py" },
+        @{ Type = "commit"; Name = "Commit research pipeline refresh"; Message = "stage1 D39 research pipeline refresh" }
+    )
+
+    $plans["D40"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d40-iteration-cycle-refresh" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run iteration cycle regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/unit/test_architecture_cycle_quality.py" },
+        @{ Type = "commit"; Name = "Commit iteration cycle D40 refresh"; Message = "stage1 D40 iteration cycle refresh" }
+    )
+
+    $plans["D41"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d41-fixing-stage-refresh" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality tests.unit.test_fixing_stage_classification" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run fixing stage regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/unit/test_architecture_cycle_quality.py tests/unit/test_fixing_stage_classification.py" },
+        @{ Type = "commit"; Name = "Commit fixing stage D41 refresh"; Message = "stage1 D41 fixing stage refresh" }
+    )
+
+    $plans["D42"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d42-system-iteration-refresh" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run system iteration regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/unit/test_architecture_cycle_quality.py" },
+        @{ Type = "commit"; Name = "Commit system iteration D42 refresh"; Message = "stage1 D42 system iteration refresh" }
+    )
+
+    $plans["D43"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d43-module-iteration-refresh" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run module iteration regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/unit/test_architecture_cycle_quality.py" },
+        @{ Type = "commit"; Name = "Commit module iteration D43 refresh"; Message = "stage1 D43 module iteration refresh" }
+    )
+
+    $plans["D44"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d44-research-pipeline-refresh" },
+        @{ Type = "cmd"; Name = "Run research pipeline quality tests"; Command = "& '$Py' -m unittest tests.test_research_pipeline_quality tests.test_research_pipeline_observe tests.test_research_pipeline_ingestion tests.test_research_pipeline_literature tests.test_research_pipeline_clinical_gap" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run research pipeline regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/test_research_pipeline_quality.py" },
+        @{ Type = "commit"; Name = "Commit research pipeline D44 refresh"; Message = "stage1 D44 research pipeline refresh" }
+    )
+
+    $plans["D45"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d45-system-architecture-refresh" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run architecture regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/unit/test_architecture_cycle_quality.py" },
+        @{ Type = "commit"; Name = "Commit system architecture D45 refresh"; Message = "stage1 D45 system architecture refresh" }
+    )
+
+    $plans["D46"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d46-module-base-refresh" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run module base regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/unit/test_architecture_cycle_quality.py" },
+        @{ Type = "commit"; Name = "Commit module base D46 refresh"; Message = "stage1 D46 module base refresh" }
+    )
+
+    $plans["D47"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d47-module-interface-refresh" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run module interface regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/unit/test_architecture_cycle_quality.py" },
+        @{ Type = "commit"; Name = "Commit module interface D47 refresh"; Message = "stage1 D47 module interface refresh" }
+    )
+
+    $plans["D48"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d48-interface-consistency-refresh" },
+        @{ Type = "cmd"; Name = "Run interface consistency tests"; Command = "& '$Py' -m unittest tests.test_interface_consistency" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run interface consistency regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/test_interface_consistency.py" },
+        @{ Type = "commit"; Name = "Commit interface consistency D48 refresh"; Message = "stage1 D48 interface consistency refresh" }
+    )
+
+    $plans["D49"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d49-quality-assessment-refresh" },
+        @{ Type = "cmd"; Name = "Run quality assessment unit tests"; Command = "& '$Py' -m unittest tests.unit.test_quality_assessment tests.unit.test_quality_gate" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run quality assessment regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/unit/test_quality_assessment.py tests/unit/test_quality_gate.py" },
+        @{ Type = "commit"; Name = "Commit quality assessment D49 refresh"; Message = "stage1 D49 quality assessment refresh" }
+    )
+
+    $plans["D50"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d50-continuous-improvement-refresh" },
+        @{ Type = "cmd"; Name = "Run continuous improvement unit tests"; Command = "& '$Py' -m unittest tests.unit.test_continuous_improvement_loop tests.unit.test_quality_gate" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run continuous improvement regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/unit/test_continuous_improvement_loop.py tests/unit/test_quality_gate.py" },
+        @{ Type = "commit"; Name = "Commit continuous improvement D50 refresh"; Message = "stage1 D50 continuous improvement refresh" }
+    )
+
+    $plans["D51"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d51-quality-archive-refresh" },
+        @{ Type = "cmd"; Name = "Run quality archive unit tests"; Command = "& '$Py' -m unittest tests.unit.test_quality_improvement_archive tests.unit.test_quality_gate" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run quality archive regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/unit/test_quality_improvement_archive.py tests/unit/test_quality_gate.py" },
+        @{ Type = "commit"; Name = "Commit quality archive D51 refresh"; Message = "stage1 D51 quality archive refresh" }
+    )
+
+    $plans["D52"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d52-quality-feedback-refresh" },
+        @{ Type = "cmd"; Name = "Run quality feedback unit tests"; Command = "& '$Py' -m unittest tests.unit.test_quality_feedback tests.unit.test_quality_gate" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run quality feedback regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings tests/unit/test_quality_feedback.py tests/unit/test_quality_gate.py" },
+        @{ Type = "commit"; Name = "Commit quality feedback D52 refresh"; Message = "stage1 D52 quality feedback refresh" }
+    )
+
+    $plans["D53"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d53-quality-chain-doc-refresh" },
+        @{ Type = "cmd"; Name = "Review governance chain doc"; Command = ('& ''{0}'' -c "from pathlib import Path; print(Path(''''docs/quality-governance/refactor-quality-templates.md'''').read_text(encoding=''''utf-8'''')[:2000])"' -f $Py) },
+        @{ Type = "commit"; Name = "Commit quality chain D53 refresh"; Message = "stage1 D53 quality chain doc refresh" }
+    )
+
+    $plans["D54"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d54-quality-consumer-inventory" },
+        @{ Type = "cmd"; Name = "Run quality consumer inventory unit tests"; Command = "& '$Py' -m unittest tests.unit.test_quality_consumer_inventory" },
+        @{ Type = "cmd"; Name = "Run quality consumer inventory"; Command = "& '$Py' tools/quality_consumer_inventory.py --root . --config config.yml" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "commit"; Name = "Commit quality consumer inventory D54 refresh"; Message = "stage1 D54 quality consumer inventory refresh" }
+    )
+
+    $plans["D55"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d55-stage1-runner-contract" },
+        @{ Type = "cmd"; Name = "Run stage1 runner contract unit tests"; Command = "& '$Py' -m unittest tests.unit.test_stage1_runner_contract" },
+        @{ Type = "cmd"; Name = "Run stage1 runner dry-run contract smoke"; Command = "powershell -NoProfile -ExecutionPolicy Bypass -File tools/stage1_d1_d10_runner.ps1 -Day D1 -DryRun -PythonExe '$Py'" },
+        @{ Type = "cmd"; Name = "Run quality consumer inventory"; Command = "& '$Py' tools/quality_consumer_inventory.py --root . --config config.yml" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "commit"; Name = "Commit stage1 runner D55 refresh"; Message = "stage1 D55 stage1 runner contract refresh" }
+    )
+
+    $plans["D56"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d56-stage2-runner-contract" },
+        @{ Type = "cmd"; Name = "Run stage2 runner contract unit tests"; Command = "& '$Py' -m unittest tests.unit.test_stage2_runner_contract" },
+        @{ Type = "cmd"; Name = "Run stage2 runner dry-run contract smoke"; Command = "powershell -NoProfile -ExecutionPolicy Bypass -File tools/stage2_s2_1_s2_6_runner.ps1 -Stage S2-1 -DryRun -PythonExe '$Py'" },
+        @{ Type = "cmd"; Name = "Run quality consumer inventory"; Command = "& '$Py' tools/quality_consumer_inventory.py --root . --config config.yml" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "commit"; Name = "Commit stage2 runner D56 refresh"; Message = "stage1 D56 stage2 runner contract refresh" }
+    )
+
     return $plans[$DayCode]
 }
 
@@ -590,6 +1100,120 @@ function Get-RollbackTips {
         "git restore src/cycle/system_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
+    $tips["D29"] = @(
+        "git restore src/cycle/iteration_cycle.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
+    )
+    $tips["D30"] = @(
+        "git restore src/cycle/fixing_stage.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality tests.unit.test_fixing_stage_classification"
+    )
+    $tips["D31"] = @(
+        "git restore src/cycle/module_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
+    )
+    $tips["D32"] = @(
+        "git restore src/cycle/system_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
+    )
+    $tips["D33"] = @(
+        "git restore src/cycle/test_driven_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
+    )
+    $tips["D34"] = @(
+        "git restore src/core/architecture.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
+    )
+    $tips["D35"] = @(
+        "git restore src/test/automated_tester.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_automated_tester_quality.py",
+        "& <python> -m unittest tests.unit.test_automated_tester_quality"
+    )
+    $tips["D36"] = @(
+        "git restore src/test/integration_tester.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_integration_tester_quality.py",
+        "& <python> -m unittest tests.unit.test_integration_tester_quality"
+    )
+    $tips["D37"] = @(
+        "git restore src/research/theoretical_framework.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/test_theoretical_framework_quality.py",
+        "& <python> -m unittest tests.test_theoretical_framework_quality"
+    )
+    $tips["D38"] = @(
+        "git restore src/core/algorithm_optimizer.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_learning_optimization_features.py",
+        "& <python> -m unittest tests.unit.test_learning_optimization_features"
+    )
+    $tips["D39"] = @(
+        "git restore src/research/research_pipeline.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/test_research_pipeline_quality.py",
+        "& <python> -m unittest tests.test_research_pipeline_quality tests.test_research_pipeline_observe tests.test_research_pipeline_ingestion tests.test_research_pipeline_literature tests.test_research_pipeline_clinical_gap"
+    )
+
+    $tips["D40"] = @(
+        "git restore src/cycle/iteration_cycle.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
+    )
+
+    $tips["D41"] = @(
+        "git restore src/cycle/fixing_stage.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py tests/unit/test_fixing_stage_classification.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality tests.unit.test_fixing_stage_classification"
+    )
+    $tips["D42"] = @(
+        "git restore src/cycle/system_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
+    )
+    $tips["D43"] = @(
+        "git restore src/cycle/module_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
+    )
+    $tips["D44"] = @(
+        "git restore src/research/research_pipeline.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/test_research_pipeline_quality.py",
+        "& <python> -m unittest tests.test_research_pipeline_quality tests.test_research_pipeline_observe tests.test_research_pipeline_ingestion tests.test_research_pipeline_literature tests.test_research_pipeline_clinical_gap"
+    )
+    $tips["D45"] = @(
+        "git restore src/core/architecture.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
+    )
+    $tips["D46"] = @(
+        "git restore src/core/module_base.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
+    )
+    $tips["D47"] = @(
+        "git restore src/core/module_interface.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
+    )
+    $tips["D48"] = @(
+        "git restore tests/test_interface_consistency.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md",
+        "& <python> -m unittest tests.test_interface_consistency"
+    )
+    $tips["D49"] = @(
+        "git restore tools/quality_assessment.py tools/quality_gate.py tests/unit/test_quality_assessment.py tests/unit/test_quality_gate.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md",
+        "& <python> -m unittest tests.unit.test_quality_assessment tests.unit.test_quality_gate"
+    )
+    $tips["D50"] = @(
+        "git restore tools/continuous_improvement_loop.py tools/quality_gate.py tests/unit/test_continuous_improvement_loop.py tests/unit/test_quality_gate.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md",
+        "& <python> -m unittest tests.unit.test_continuous_improvement_loop tests.unit.test_quality_gate"
+    )
+    $tips["D51"] = @(
+        "git restore tools/quality_improvement_archive.py tools/quality_gate.py tests/unit/test_quality_improvement_archive.py tests/unit/test_quality_gate.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md",
+        "& <python> -m unittest tests.unit.test_quality_improvement_archive tests.unit.test_quality_gate"
+    )
+    $tips["D52"] = @(
+        "git restore tools/quality_feedback.py tools/quality_gate.py tests/unit/test_quality_feedback.py tests/unit/test_quality_gate.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md",
+        "& <python> -m unittest tests.unit.test_quality_feedback tests.unit.test_quality_gate"
+    )
+    $tips["D53"] = @(
+        "git restore docs/quality-governance/refactor-quality-templates.md tools/stage1_d1_d10_runner.ps1",
+        "git diff -- docs/quality-governance/refactor-quality-templates.md"
+    )
+    $tips["D54"] = @(
+        "git restore tools/quality_consumer_inventory.py tests/unit/test_quality_consumer_inventory.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md",
+        "& <python> -m unittest tests.unit.test_quality_consumer_inventory"
+    )
+    $tips["D55"] = @(
+        "git restore tools/stage1_d1_d10_runner.ps1 tests/unit/test_stage1_runner_contract.py config.yml docs/quality-governance/refactor-quality-templates.md",
+        "& <python> -m unittest tests.unit.test_stage1_runner_contract"
+    )
+    $tips["D56"] = @(
+        "git restore tools/stage2_s2_1_s2_6_runner.ps1 tests/unit/test_stage2_runner_contract.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md",
+        "& <python> -m unittest tests.unit.test_stage2_runner_contract"
+    )
 
     return $tips[$DayCode]
 }
@@ -623,18 +1247,28 @@ function Get-StrictRollbackFlow {
 function Write-Summary {
     param(
         [string]$ReportPath,
-        [hashtable]$Summary
+        $Summary,
+        [string]$ResultSchema,
+        $GovernanceConfig,
+        [string]$ExportPhaseName
     )
-    $Summary | ConvertTo-Json -Depth 8 | Set-Content -Path $ReportPath -Encoding UTF8
+
+    Start-RunnerPhase -Metadata $Summary.metadata -PhaseName $ExportPhaseName
+    Complete-RunnerPhase -Metadata $Summary.metadata -PhaseName $ExportPhaseName
+    $Summary.report_metadata = New-ReportMetadata -GovernanceConfig $GovernanceConfig -Metadata $Summary.metadata -FailedOperations $Summary.failed_operations -ResultSchema $ResultSchema
+    $Summary | ConvertTo-Json -Depth 12 | Set-Content -Path $ReportPath -Encoding UTF8
+    return $Summary
 }
 
 # ---- Main ----
 
 $repo = Resolve-RepoRoot -InputPath $RepoPath
 $python = Resolve-Python -Repo $repo -InputPython $PythonExe
+$configPath = Join-Path $repo "config.yml"
+$runnerGovernanceConfig = Get-Stage1RunnerGovernanceConfig -ConfigPath $configPath
 
 if (-not $Day -and -not $All) {
-    throw "Please provide -Day D1..D28 or -All"
+    throw "Please provide -Day D1..D56 or -All"
 }
 if ($Day -and $All) {
     throw "Use either -Day or -All, not both"
@@ -649,7 +1283,7 @@ $targetPassRateEnabled = $TargetPassRate -ne -1
 Set-Location $repo
 
 $runDays = if ($All) {
-    @("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25", "D26", "D27", "D28")
+    @("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25", "D26", "D27", "D28", "D29", "D30", "D31", "D32", "D33", "D34", "D35", "D36", "D37", "D38", "D39", "D40", "D41", "D42", "D43", "D44", "D45", "D46", "D47", "D48", "D49", "D50", "D51", "D52", "D53", "D54", "D55", "D56")
 }
 else {
     @($Day)
@@ -669,7 +1303,11 @@ $globalSummary = [ordered]@{
     continue_on_error        = [bool]$ContinueOnError
     target_pass_rate_percent = if ($targetPassRateEnabled) { $TargetPassRate } else { $null }
     days                     = @()
+    metadata                 = New-RunnerMetadata
+    failed_operations        = [System.Collections.ArrayList]::new()
 }
+
+Start-RunnerPhase -Metadata $globalSummary.metadata -PhaseName "run_stage1_days"
 
 $abortedByThreshold = $false
 $abortReason = ""
@@ -685,6 +1323,10 @@ foreach ($d in $runDays) {
 
     $results = @()
     $failed = $false
+    $dayMetadata = New-RunnerMetadata
+    $dayFailedOperations = [System.Collections.ArrayList]::new()
+
+    Start-RunnerPhase -Metadata $dayMetadata -PhaseName "execute_stage1_day"
 
     Write-Host ""
     Write-Host "=== Running $d ===" -ForegroundColor Cyan
@@ -698,6 +1340,7 @@ foreach ($d in $runDays) {
 
         if ($r.status -eq "failed") {
             $failed = $true
+            Fail-RunnerPhase -Metadata $dayMetadata -FailedOperations $dayFailedOperations -PhaseName "execute_stage1_day" -Error $r.message -Details ([ordered]@{ day = $d; step = $r.name; command = $r.command; exit_code = $r.exit_code }) -DurationSeconds $r.duration_seconds
             Write-Host ("[FAIL] {0} :: {1}" -f $r.name, $r.message) -ForegroundColor Red
             if (-not $ContinueOnError) {
                 break
@@ -723,6 +1366,11 @@ foreach ($d in $runDays) {
     if ($targetPassRateEnabled -and $passRate -lt $TargetPassRate) {
         $thresholdBreached = $true
         $failed = $true
+        Fail-RunnerPhase -Metadata $dayMetadata -FailedOperations $dayFailedOperations -PhaseName "execute_stage1_day" -Error "Pass rate below target" -Details ([ordered]@{ day = $d; actual_pass_rate = $passRate; target_pass_rate = $TargetPassRate })
+    }
+
+    if ($dayMetadata.final_status -ne "failed") {
+        Complete-RunnerPhase -Metadata $dayMetadata -PhaseName "execute_stage1_day"
     }
 
     $strictRollbackFlow = if ($thresholdBreached) {
@@ -732,6 +1380,7 @@ foreach ($d in $runDays) {
         @()
     }
 
+    Start-RunnerPhase -Metadata $dayMetadata -PhaseName "assemble_stage1_day_summary"
     $daySummary = [ordered]@{
         day                      = $d
         started_at               = ($results | Select-Object -First 1).started_at
@@ -748,12 +1397,25 @@ foreach ($d in $runDays) {
         rollback_tips            = $rollbackTips
         strict_rollback_flow     = $strictRollbackFlow
         steps                    = $results
+        metadata                 = $dayMetadata
+        analysis_summary         = Get-DayAnalysisSummary -Steps $results -PassRate $passRate -RollbackTipCount @($rollbackTips).Count -StrictRollbackStepCount @($strictRollbackFlow).Count -ThresholdBreached $thresholdBreached
+        failed_operations        = @($dayFailedOperations)
     }
 
-    Write-Summary -ReportPath $reportFile -Summary $daySummary
+    if ($failed -and $dayMetadata.final_status -ne "failed") {
+        $dayMetadata.final_status = "failed"
+    }
+    Complete-RunnerPhase -Metadata $dayMetadata -PhaseName "assemble_stage1_day_summary"
+
+    $daySummary = Write-Summary -ReportPath $reportFile -Summary $daySummary -ResultSchema "stage1_day_execution_report" -GovernanceConfig $runnerGovernanceConfig -ExportPhaseName "export_stage1_day_summary"
     $daySummary["report_file"] = $reportFile
 
     $globalSummary.days += $daySummary
+
+    if ($failed) {
+        Add-FailedOperation -FailedOperations $globalSummary.failed_operations -Operation "stage1_day" -Error "Day execution failed" -Details ([ordered]@{ day = $d; report_file = $reportFile; pass_rate_percent = $passRate; threshold_breached = $thresholdBreached })
+        $globalSummary.metadata.final_status = "failed"
+    }
 
     Write-Host ("Summary {0}: pass_rate={1}% (pass={2}, fail={3}, skip={4})" -f $d, $passRate, $passed, $failedCount, $skipped)
     Write-Host ("Report: {0}" -f $reportFile)
@@ -782,11 +1444,21 @@ foreach ($d in $runDays) {
     }
 }
 
+Complete-RunnerPhase -Metadata $globalSummary.metadata -PhaseName "run_stage1_days"
+
+Start-RunnerPhase -Metadata $globalSummary.metadata -PhaseName "assemble_stage1_global_summary"
+
 $globalSummary["ended_at"] = (Get-Date).ToString("o")
 $globalSummary["aborted_by_threshold"] = $abortedByThreshold
 $globalSummary["abort_reason"] = $abortReason
+$globalSummary["analysis_summary"] = Get-GlobalAnalysisSummary -Days $globalSummary.days -AbortedByThreshold $abortedByThreshold
+$globalSummary["failed_operations"] = @($globalSummary.failed_operations)
+if (-not $globalSummary.metadata.last_completed_phase) {
+    $globalSummary.metadata.final_status = "completed"
+}
+Complete-RunnerPhase -Metadata $globalSummary.metadata -PhaseName "assemble_stage1_global_summary"
 $globalReport = Join-Path $logDir ("stage1_all_{0}.json" -f $stamp)
-Write-Summary -ReportPath $globalReport -Summary $globalSummary
+$globalSummary = Write-Summary -ReportPath $globalReport -Summary $globalSummary -ResultSchema "stage1_global_execution_report" -GovernanceConfig $runnerGovernanceConfig -ExportPhaseName "export_stage1_global_summary"
 
 Write-Host ""
 Write-Host ("Global report: {0}" -f $globalReport) -ForegroundColor Cyan

@@ -392,6 +392,8 @@ iteration_cycle:
     failed_module_attention_threshold: 1
     minimum_stable_quality: 0.85
     enable_phase_tracking: true
+    persist_failed_operations: true
+    export_contract_version: "d42.v1"
   orchestration:
     enable_phase_tracking: true
     persist_failed_iterations: true
@@ -403,52 +405,123 @@ iteration_cycle:
   module_iteration:
     enable_phase_tracking: true
     minimum_stable_quality: 0.85
-    export_contract_version: "d16.v1"
+    persist_failed_operations: true
+    export_contract_version: "d43.v1"
   test_driven_iteration:
     enable_phase_tracking: true
     minimum_stable_pass_rate: 0.85
-    export_contract_version: "d17.v1"
+    persist_failed_operations: true
+    export_contract_version: "d33.v1"
   fixing_stage:
     enable_phase_tracking: true
     minimum_stable_success_rate: 0.8
-    export_contract_version: "d18.v1"
+    export_contract_version: "d41.v1"
     persist_failed_stages: true
+    persist_failed_operations: true
   research_pipeline:
     enable_phase_tracking: true
     persist_failed_cycles: true
     persist_failed_operations: true
     minimum_stable_completion_rate: 0.8
-    export_contract_version: "d26.v1"
+    export_contract_version: "d44.v1"
   theoretical_framework:
     enable_phase_tracking: true
     persist_failed_operations: true
     minimum_validation_rate: 0.5
-    export_contract_version: "d27.v1"
-  system_iteration:
+    export_contract_version: "d37.v1"
+  iteration_cycle:
     enable_phase_tracking: true
     persist_failed_operations: true
-    minimum_stable_quality: 0.85
-    export_contract_version: "d28.v1"
+    minimum_stable_quality: 0.8
+    export_contract_version: "d40.v1"
   algorithm_optimizer:
     enable_phase_tracking: true
     persist_failed_operations: true
     minimum_stable_quality: 0.8
-    export_contract_version: "d25.v1"
+    export_contract_version: "d38.v1"
   system_architecture:
     enable_phase_tracking: true
     persist_failed_operations: true
     minimum_stable_health_score: 0.8
-    export_contract_version: "d22.v1"
+    export_contract_version: "d45.v1"
+  module_base:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_success_rate: 0.8
+    export_contract_version: "d46.v1"
+  module_interface:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_success_rate: 0.8
+    export_contract_version: "d47.v1"
+  interface_consistency_test:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_compliance_score: 0.85
+    export_contract_version: "d48.v1"
+  quality_assessment:
+    min_overall_score: 85.0
+    min_dimension_score: 70.0
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_overall_score: 85.0
+    export_contract_version: "d49.v1"
+  continuous_improvement:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_overall_score: 85.0
+    export_contract_version: "d50.v1"
+  quality_improvement_archive:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_quality_score: 85.0
+    export_contract_version: "d51.v1"
+  quality_feedback:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_overall_score: 85.0
+    export_contract_version: "d52.v1"
+  quality_gate:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_success_rate: 1.0
+    export_contract_version: "d57.v1"
+  cycle_demo:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_quality_score: 0.85
+    export_contract_version: "d58.v1"
+  autorresearch_runner:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_improvement_count: 1
+    export_contract_version: "d61.v1"
+  quality_consumer_inventory:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    include_root_scripts: true
+    minimum_candidate_score: 40
+    export_contract_version: "d62.v1"
+  stage1_runner:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_pass_rate: 85.0
+    export_contract_version: "d55.v1"
+  stage2_runner:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_pass_rate: 85.0
+    export_contract_version: "d56.v1"
   automated_tester:
     enable_phase_tracking: true
     persist_failed_operations: true
     minimum_stable_pass_rate: 0.85
-    export_contract_version: "d23.v1"
+    export_contract_version: "d35.v1"
   integration_tester:
     enable_phase_tracking: true
     persist_failed_operations: true
     minimum_stable_pass_rate: 0.85
-    export_contract_version: "d24.v1"
+    export_contract_version: "d36.v1"
 
 # 系统资源配置
 resources:
