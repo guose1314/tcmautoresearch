@@ -515,3 +515,25 @@ python tools/quality_improvement_archive.py --output output/quality-improvement-
 - [ ] 模块级与循环级 cleanup 仅清理自身状态
 - [ ] 共享执行器不会在局部 cleanup 中被关闭
 - [ ] D16 变更未破坏既有 cycle 回归测试
+
+## 13. D17 测试驱动迭代补充检查项
+
+本章节用于 D17 类测试驱动迭代重构，强调测试阶段轨迹、分析摘要与导出契约统一。
+
+### 13.1 测试迭代契约一致性
+
+- [ ] 测试驱动迭代输出 `analysis_summary`
+- [ ] 失败测试数量、通过率与总体状态可稳定追踪
+- [ ] 失败路径进入 `failed_iterations` 明细
+
+### 13.2 测试阶段可观测性
+
+- [ ] 测试驱动迭代记录 `phase_history` 与 `phase_timings`
+- [ ] 失败阶段写入 `failed_phase`
+- [ ] 导出报告包含统一 `report_metadata`
+
+### 13.3 导出与资源安全
+
+- [ ] 导出测试套件时不会直接暴露函数对象
+- [ ] 导出文件可被 `json.load` 直接回读
+- [ ] cleanup 会同时清理历史与失败记录

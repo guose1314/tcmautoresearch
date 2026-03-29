@@ -404,6 +404,10 @@ iteration_cycle:
     enable_phase_tracking: true
     minimum_stable_quality: 0.85
     export_contract_version: "d16.v1"
+  test_driven_iteration:
+    enable_phase_tracking: true
+    minimum_stable_pass_rate: 0.85
+    export_contract_version: "d17.v1"
 
 # 系统资源配置
 resources:

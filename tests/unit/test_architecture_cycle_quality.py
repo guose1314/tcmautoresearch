@@ -34,6 +34,84 @@ class TestCoreAndCycleQuality(unittest.TestCase):
         if has_pytest:
             self.assertIn("pytest", manager.test_frameworks)
 
+    def test_test_driven_iteration_tracks_phase_history_and_analysis_summary(self):
+        manager = TestDrivenIterationManager({"minimum_stable_pass_rate": 0.85})
+        manager.add_test_suite(
+            "core-suite",
+            [
+                {
+                    "name": "smoke-test",
+                    "type": "academic_test",
+                    "framework": "custom",
+                    "function": lambda context: {"ok": True},
+                }
+            ],
+        )
+
+        iteration = manager.run_test_driven_iteration({})
+
+        self.assertEqual(iteration.status, "completed")
+        self.assertEqual([phase["phase"] for phase in iteration.metadata["phase_history"]], ["execute_tests", "validate_results", "analyze_results"])
+        self.assertEqual(iteration.metadata["analysis_summary"]["iteration_status"], "stable")
+        self.assertGreaterEqual(iteration.confidence_scores["overall"], 0.0)
+
+    def test_test_driven_iteration_export_uses_json_safe_contract(self):
+        manager = TestDrivenIterationManager()
+        manager.add_test_suite(
+            "export-suite",
+            [
+                {
+                    "name": "json-safe",
+                    "type": "validation_test",
+                    "framework": "custom",
+                    "function": lambda context: {"value": 1},
+                }
+            ],
+        )
+        manager.run_test_driven_iteration({})
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "test-iteration.json")
+            exported = manager.export_test_data(output_path)
+
+            self.assertTrue(exported)
+            with open(output_path, "r", encoding="utf-8") as file_obj:
+                payload = json.load(file_obj)
+
+        self.assertEqual(payload["report_metadata"]["contract_version"], "d17.v1")
+        self.assertEqual(payload["test_suites"]["export-suite"]["test_cases"][0]["function_name"], "<lambda>")
+        self.assertIn("report_metadata", payload["test_performance_report"])
+
+    def test_test_driven_iteration_failure_tracks_failed_phase(self):
+        manager = TestDrivenIterationManager()
+        manager.add_test_suite(
+            "failure-suite",
+            [
+                {
+                    "name": "will-fail",
+                    "type": "validation_test",
+                    "framework": "custom",
+                    "function": lambda context: {"value": 0},
+                }
+            ],
+        )
+
+        original_validate = manager._validate_test_results
+
+        def raise_validation_error(test_results):
+            raise RuntimeError("validation phase failed")
+
+        manager._validate_test_results = raise_validation_error
+
+        with self.assertRaises(RuntimeError):
+            manager.run_test_driven_iteration({})
+
+        manager._validate_test_results = original_validate
+        self.assertEqual(len(manager.failed_iterations), 1)
+        failed_iteration = manager.failed_iterations[0]
+        self.assertEqual(failed_iteration.metadata["failed_phase"], "validate_results")
+        self.assertEqual(failed_iteration.metadata["phase_history"][-1]["status"], "failed")
+
     def test_iteration_cycle_optimization_generates_ranked_actions(self):
         cycle = IterationCycle(
             IterationConfig(
