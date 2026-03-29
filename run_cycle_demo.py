@@ -22,7 +22,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('tcmautoresearch_demo.log', encoding='utf-8'),
+        logging.FileHandler('tcmautoresearch_demo.log', encoding='utf-8', delay=True),
         logging.StreamHandler(sys.stdout)
     ]
 )

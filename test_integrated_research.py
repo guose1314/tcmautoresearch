@@ -3,7 +3,6 @@
 展示如何在一个统一框架中使用四大研究方法
 """
 
-import json
 import sys
 from pathlib import Path
 
@@ -378,16 +377,16 @@ def test_integrated_semantic_modeling():
     print("  - Formula innovation based on structure analysis")
     print("  - Safety and efficacy assessment")
     print("  - Clinical decision support system")
-    
-    return True
+
+    assert isinstance(graph_result, dict)
+    assert "summary_analysis" in graph_result
 
 
 if __name__ == "__main__":
     try:
-        success = test_integrated_semantic_modeling()
-        if success:
-            print("\n[Integration complete - all research methods operational]")
-            sys.exit(0)
+        test_integrated_semantic_modeling()
+        print("\n[Integration complete - all research methods operational]")
+        sys.exit(0)
     except Exception as e:
         print(f"\n[ERROR] Demonstration failed: {e}")
         import traceback

@@ -4,8 +4,6 @@ PDF 论文全文翻译插件 - 集成测试
 验证：导入 + 工作流函数 + CLI 集成
 """
 
-import json
-import os
 import sys
 from pathlib import Path
 
@@ -23,24 +21,26 @@ def test_imports():
             PdfTranslationResult,
             run_pdf_full_text_translation,
         )
+        assert PdfTranslationResult is not None
+        assert callable(run_pdf_full_text_translation)
         print("✅ 直接导入成功")
     except Exception as e:
         print(f"❌ 直接导入失败: {e}")
-        return False
+        raise AssertionError("直接导入失败") from e
     
     try:
         from src.research import (
-            PdfTranslationResult as PdfResult2,
+            PdfTranslationResult as exported_result_class,
         )
         from src.research import (
-            run_pdf_full_text_translation as run_pdf2,
+            run_pdf_full_text_translation as exported_run_pdf,
         )
+        assert exported_result_class is not None
+        assert callable(exported_run_pdf)
         print("✅ 从 research/__init__.py 导出成功")
     except Exception as e:
         print(f"❌ 导出导入失败: {e}")
-        return False
-    
-    return True
+        raise AssertionError("research/__init__.py 导出失败") from e
 
 
 def test_result_class():
@@ -76,8 +76,6 @@ def test_result_class():
     assert result.status == "completed"
     assert result.fragment_total == 10
     print(f"✅ 字段验证通过")
-    
-    return True
 
 
 def test_workflow_function():
@@ -108,8 +106,8 @@ def test_workflow_function():
         print(f"✅ 参数列表完整")
     else:
         print(f"⚠️  参数不完全匹配")
-    
-    return True
+
+    assert params == expected_params
 
 
 def test_cli_integration():
@@ -118,10 +116,7 @@ def test_cli_integration():
     print("测试 4: CLI 参数集成")
     print("=" * 60)
     
-    import argparse
     import subprocess
-
-    from run_cycle_demo import main
     
     # 执行 --help，检查 PDF 相关参数
     result = subprocess.run(
@@ -155,10 +150,10 @@ def test_cli_integration():
     
     if found_count == len(pdf_params):
         print(f"\n✅ 所有 {len(pdf_params)} 个 CLI 参数已集成")
-        return True
     else:
         print(f"\n⚠️  仅找到 {found_count}/{len(pdf_params)} 个参数")
-        return False
+
+    assert found_count == len(pdf_params)
 
 
 def test_utils():
@@ -185,8 +180,8 @@ def test_utils():
     
     if "Chinese" in user and "test fragment" in user:
         print(f"✅ Prompt 内容正确")
-    
-    return True
+
+    assert "Chinese" in user and "test fragment" in user
 
 
 def main_test():
@@ -204,7 +199,8 @@ def main_test():
     results = {}
     for name, test_func in tests:
         try:
-            results[name] = test_func()
+            test_func()
+            results[name] = True
         except Exception as e:
             print(f"\n❌ 测试异常: {e}")
             import traceback

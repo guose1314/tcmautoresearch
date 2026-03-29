@@ -83,7 +83,6 @@ def test_semantic_modeling_simple():
     context["entities"] = entities
     graph_result = graph_builder.execute(context)
     
-    semantic_graph = graph_result.get("semantic_graph", {})
     stats = graph_result.get("graph_statistics", {})
     
     print(f"[OK] Semantic graph constructed")
@@ -117,9 +116,6 @@ def test_semantic_modeling_simple():
     # Step 5: Formula composition validation
     print("\n[STEP 5] Formula Composition Validation")
     print("-" * 80)
-    
-    formulas = ["Buzhongyiqi Tang", "Sijunzi Tang (Four Gentlemen Decoction)", 
-                "Liuwei Dihuang Wan"]
     
     formula_names_cn = {
         "Buzhongyiqi Tang": "补中益气汤",
@@ -165,16 +161,16 @@ def test_semantic_modeling_simple():
     print("  1. Integrate Qwen LLM for hypothesis generation")
     print("  2. Add statistical analysis (frequency, chi-square test)")
     print("  3. Implement relationship path queries and knowledge graph export")
-    
-    return True
+
+    assert isinstance(graph_result, dict)
+    assert "graph_statistics" in graph_result
 
 
 if __name__ == "__main__":
     try:
-        success = test_semantic_modeling_simple()
-        if success:
-            print("\n[All tests passed!]")
-            sys.exit(0)
+        test_semantic_modeling_simple()
+        print("\n[All tests passed!]")
+        sys.exit(0)
     except Exception as e:
         print(f"\n[ERROR] Test failed: {e}")
         import traceback

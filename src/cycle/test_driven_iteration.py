@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TestResult:
     """测试结果数据结构"""
+    __test__ = False
+
     test_id: str
     test_name: str
     test_type: str
@@ -41,6 +43,8 @@ class TestResult:
 @dataclass
 class TestDrivenIteration:
     """测试驱动迭代数据结构"""
+    __test__ = False
+
     iteration_id: str
     cycle_number: int
     status: str
@@ -71,6 +75,7 @@ class TestDrivenIterationManager:
     5. 知识沉淀与传承
     6. 持续改进机制
     """
+    __test__ = False
     
     def __init__(self, config: Dict[str, Any] | None = None):
         self.config = config or {}

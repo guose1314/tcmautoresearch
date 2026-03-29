@@ -5,12 +5,10 @@ SQLAlchemy ORM模型定义 - PostgreSQL对象映射
 
 import enum
 from datetime import datetime
-from typing import List, Optional
 from uuid import uuid4
 
 from sqlalchemy import (
     ARRAY,
-    JSON,
     CheckConstraint,
     Column,
     DateTime,
@@ -20,14 +18,11 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    UniqueConstraint,
     create_engine,
-    event,
 )
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 Base = declarative_base()
 

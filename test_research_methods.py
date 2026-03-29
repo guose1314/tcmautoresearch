@@ -323,16 +323,16 @@ def test_research_methods():
     print("  - Formula differentiation using comparison")
     print("  - Evidence-based practice using pharmacology data")
     print("  - Comprehensive formula assessment via integration")
-    
-    return True
+
+    assert dynamics_result.get('complexity_score', 0) >= 0
+    assert scoring.get('total_score', 0) >= 0
 
 
 if __name__ == "__main__":
     try:
-        success = test_research_methods()
-        if success:
-            print("\n[All research methods loaded successfully!]")
-            sys.exit(0)
+        test_research_methods()
+        print("\n[All research methods loaded successfully!]")
+        sys.exit(0)
     except Exception as e:
         print(f"\n[ERROR] Test failed: {e}")
         import traceback

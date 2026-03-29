@@ -8,9 +8,9 @@ import sys
 
 # 设置 UTF-8 编码
 os.environ['PYTHONIOENCODING'] = 'utf-8'
-sys.stdout.reconfigure(encoding='utf-8')
-
-from pprint import pprint
+stdout_reconfigure = getattr(sys.stdout, "reconfigure", None)
+if callable(stdout_reconfigure):
+    stdout_reconfigure(encoding='utf-8')
 
 from src.extractors.advanced_entity_extractor import AdvancedEntityExtractor
 
@@ -172,10 +172,10 @@ def test_semantic_modeling():
     for node in nodes[:10]:
         node_id = node.get('id', '')
         data = node.get('data', {})
-        node_type = data.get('type', '')
         name = data.get('name', '')
         confidence = data.get('confidence', 0)
-        print(f"    {node_id:30s} | {name:20s} | 置信度: {confidence:.2%}")
+        node_type = data.get('type', '')
+        print(f"    {node_id:30s} | {name:20s} | 类型: {node_type:10s} | 置信度: {confidence:.2%}")
     
     print("\n  【边样本】（前15个）:")
     for edge in edges[:15]:
@@ -204,13 +204,14 @@ def test_semantic_modeling():
     print("  2. 实现图的可视化导出（GraphML/JSON格式）")
     print("  3. 支持关系聚合和路径查询")
     print("  4. 集成频率分析和统计学检验")
-    
-    return graph_result
+
+    assert isinstance(graph_result, dict)
+    assert "graph_statistics" in graph_result
 
 
 if __name__ == "__main__":
     try:
-        result = test_semantic_modeling()
+        test_semantic_modeling()
     except Exception as e:
         print(f"\n[ERROR] Test failed: {e}")
         import traceback
