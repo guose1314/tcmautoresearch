@@ -416,7 +416,9 @@ iteration_cycle:
   research_pipeline:
     enable_phase_tracking: true
     persist_failed_cycles: true
-    export_contract_version: "d19.v1"
+    persist_failed_operations: true
+    minimum_stable_completion_rate: 0.8
+    export_contract_version: "d26.v1"
   theoretical_framework:
     enable_phase_tracking: true
     persist_failed_operations: true

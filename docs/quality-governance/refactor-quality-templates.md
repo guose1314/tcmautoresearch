@@ -713,3 +713,25 @@ python tools/quality_improvement_archive.py --output output/quality-improvement-
 - [ ] 优化器导出不会暴露不可序列化对象
 - [ ] 导出文件可被 `json.load` 直接回读
 - [ ] cleanup 后运行态元数据与画像统计重置为稳定空状态
+
+## 22. D26 研究流程二次治理补充检查项
+
+本章节用于 D26 类 research pipeline 二次治理对齐，强调 pipeline 级失败操作、cycle 级状态摘要、导出版本刷新与 cleanup 重置一致性。
+
+### 22.1 研究流程契约一致性
+
+- [ ] pipeline 摘要输出 `analysis_summary` 与 `final_status`
+- [ ] cycle 摘要输出稳定状态语义，并保留 `final_status`
+- [ ] 导出结果与流程摘要输出统一 `report_metadata`
+
+### 22.2 流程与阶段可观测性
+
+- [ ] 创建、启动、完成、暂停、恢复、导出记录 pipeline 级 `phase_history`
+- [ ] 单个研究阶段异常写入 cycle 级 `failed_phase`
+- [ ] 失败操作以稳定 `failed_operations` 列表输出，字段使用 `operation`
+
+### 22.3 导出与清理安全
+
+- [ ] 导出不会暴露枚举、dataclass 或 callable 原始对象
+- [ ] 导出文件可被 `json.load` 直接回读
+- [ ] cleanup 后实例状态重置，但共享执行器保持可用

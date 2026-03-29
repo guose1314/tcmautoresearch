@@ -75,12 +75,15 @@ class TestResearchPipelineQuality(unittest.TestCase):
                 ResearchPhase.REFLECT.value,
             ],
         )
-        self.assertEqual(status["metadata"]["analysis_summary"]["status"], ResearchCycleStatus.COMPLETED.value)
+        self.assertEqual(status["metadata"]["analysis_summary"]["status"], "stable")
+        self.assertEqual(status["metadata"]["analysis_summary"]["final_status"], ResearchCycleStatus.COMPLETED.value)
 
         summary = self.pipeline.get_pipeline_summary()["pipeline_summary"]
         self.assertEqual(summary["total_cycles"], 1)
         self.assertEqual(summary["completed_cycles"], 1)
         self.assertIn("report_metadata", summary)
+        self.assertEqual(summary["report_metadata"]["contract_version"], "d26.v1")
+        self.assertIn("analysis_summary", summary)
         all_cycles = self.pipeline.get_all_cycles()
         self.assertEqual(len(all_cycles), 1)
 
@@ -347,10 +350,11 @@ class TestResearchPipelineQuality(unittest.TestCase):
             self.assertTrue(self.pipeline.export_pipeline_data(output_path))
             with open(output_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self.assertEqual(data["report_metadata"]["contract_version"], "d19.v1")
+            self.assertEqual(data["report_metadata"]["contract_version"], "d26.v1")
             self.assertIn("pipeline_info", data)
             self.assertIn("research_cycles", data)
             self.assertIn("report_metadata", data["pipeline_info"]["pipeline_summary"]["pipeline_summary"])
+            self.assertIn("failed_operations", data["pipeline_info"]["pipeline_summary"]["pipeline_summary"])
             history = self.pipeline.get_cycle_history(cycle.cycle_id)
             self.assertTrue(len(history) >= 2)
         finally:
@@ -385,6 +389,8 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertEqual(status["status"], ResearchCycleStatus.FAILED.value)
         self.assertEqual(status["metadata"]["failed_phase"], ResearchPhase.OBSERVE.value)
         self.assertEqual(status["metadata"]["phase_history"][-1]["status"], "failed")
+        self.assertEqual(status["metadata"]["analysis_summary"]["status"], "needs_followup")
+        self.assertEqual(status["metadata"]["failed_operations"][-1]["operation"], ResearchPhase.OBSERVE.value)
         self.assertEqual(len(self.pipeline.failed_cycles), 1)
 
     def test_cleanup_keeps_shared_executor_available(self):
@@ -392,6 +398,8 @@ class TestResearchPipelineQuality(unittest.TestCase):
         executor = pipeline.executor
         self.assertTrue(pipeline.cleanup())
         self.assertFalse(getattr(executor, "_shutdown", False))
+        self.assertEqual(pipeline._metadata["final_status"], "cleaned")
+        self.assertEqual(pipeline.get_pipeline_summary()["pipeline_summary"]["analysis_summary"]["status"], "idle")
 
 
 if __name__ == "__main__":
