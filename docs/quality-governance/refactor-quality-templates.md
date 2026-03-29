@@ -581,3 +581,25 @@ python tools/quality_improvement_archive.py --output output/quality-improvement-
 - [ ] 流程 cleanup 仅清理自身状态，不关闭共享执行器
 - [ ] 导出研究循环时不会暴露枚举对象
 - [ ] 导出文件可被 `json.load` 直接回读
+
+## 16. D20 理论框架补充检查项
+
+本章节用于 D20 类 theoretical framework 重构，强调研究操作轨迹、失败操作沉淀、摘要契约与导出一致性统一。
+
+### 16.1 理论框架契约一致性
+
+- [ ] 理论框架摘要输出 `analysis_summary`
+- [ ] 失败操作以稳定 `failed_operations` 列表输出
+- [ ] 框架摘要与导出结果输出统一 `report_metadata`
+
+### 16.2 研究操作可观测性
+
+- [ ] 假设、实验、洞察、验证、知识图谱构建记录 `phase_history`
+- [ ] 失败操作写入 `failed_phase`
+- [ ] 成功操作刷新 `completed_phases` 与 `last_completed_phase`
+
+### 16.3 导出与知识安全
+
+- [ ] 假设、实验、洞察导出不会暴露枚举对象
+- [ ] 导出文件可被 `json.load` 直接回读
+- [ ] 知识图谱导出与研究摘要保持同一契约版本
