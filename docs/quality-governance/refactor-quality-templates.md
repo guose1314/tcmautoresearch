@@ -559,3 +559,25 @@ python tools/quality_improvement_archive.py --output output/quality-improvement-
 - [ ] 导出修复行动时不会直接暴露枚举对象
 - [ ] 导出文件可被 `json.load` 直接回读
 - [ ] 修复指标不会重复累计成功数与失败数
+
+## 15. D19 研究流程补充检查项
+
+本章节用于 D19 类 research pipeline 重构，强调研究阶段轨迹、失败循环治理、导出契约与共享资源安全统一。
+
+### 15.1 研究流程契约一致性
+
+- [ ] 研究循环状态输出 `analysis_summary`
+- [ ] 研究循环导出包含稳定 `failed_cycles` 列表
+- [ ] 流程摘要与导出结果输出统一 `report_metadata`
+
+### 15.2 研究阶段可观测性
+
+- [ ] 研究循环记录 `phase_history` 与 `phase_timings`
+- [ ] 阶段异常写入 `failed_phase`
+- [ ] 完成、暂停、恢复会同步刷新 `final_status`
+
+### 15.3 资源与导出安全
+
+- [ ] 流程 cleanup 仅清理自身状态，不关闭共享执行器
+- [ ] 导出研究循环时不会暴露枚举对象
+- [ ] 导出文件可被 `json.load` 直接回读

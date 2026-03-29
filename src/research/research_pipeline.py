@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
@@ -101,6 +101,7 @@ class ResearchCycle:
     # 标签和分类
     tags: List[str] = field(default_factory=list)
     categories: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 class ResearchPipeline:
     """
@@ -124,6 +125,7 @@ class ResearchPipeline:
         self.config = config or {}
         self.research_cycles = {}
         self.active_cycles = {}
+        self.failed_cycles: List[ResearchCycle] = []
         self.execution_history = []
         # 使用全局共享线程池，与 BaseModule 保持一致
         self.executor = get_global_executor(max_workers=4)
@@ -146,6 +148,84 @@ class ResearchPipeline:
         }
         
         self.logger.info("研究流程管理器初始化完成")
+
+    def _initialize_cycle_tracking(self, cycle: ResearchCycle) -> None:
+        cycle.metadata["phase_history"] = []
+        cycle.metadata["phase_timings"] = {}
+        cycle.metadata["completed_phases"] = []
+
+    def _mark_cycle_failed(self, cycle: ResearchCycle, phase_name: str, error: str) -> None:
+        cycle.status = ResearchCycleStatus.FAILED
+        cycle.metadata["failed_phase"] = phase_name
+        cycle.metadata["error"] = error
+        cycle.metadata["final_status"] = cycle.status.value
+        cycle.completed_at = datetime.now().isoformat()
+        if cycle.started_at:
+            cycle.duration = (
+                datetime.fromisoformat(cycle.completed_at) - datetime.fromisoformat(cycle.started_at)
+            ).total_seconds()
+        if cycle.cycle_id in self.active_cycles:
+            del self.active_cycles[cycle.cycle_id]
+        if all(existing.cycle_id != cycle.cycle_id for existing in self.failed_cycles):
+            self.failed_cycles.append(cycle)
+
+    def _build_cycle_analysis_summary(self, cycle: ResearchCycle) -> Dict[str, Any]:
+        completed_phases = cycle.metadata.get("completed_phases", [])
+        total_outcomes = len(cycle.outcomes)
+        total_deliverables = len(cycle.deliverables)
+        summary_status = cycle.status.value
+        if cycle.status == ResearchCycleStatus.ACTIVE and completed_phases:
+            summary_status = "in_progress"
+
+        return {
+            "status": summary_status,
+            "completed_phase_count": len(completed_phases),
+            "completed_phases": completed_phases,
+            "outcome_count": total_outcomes,
+            "deliverable_count": total_deliverables,
+            "last_phase": cycle.metadata.get("last_completed_phase", cycle.current_phase.value),
+            "failed_phase": cycle.metadata.get("failed_phase", ""),
+        }
+
+    def _serialize_phase_executions(self, cycle: ResearchCycle) -> Dict[str, Any]:
+        return {phase.value: execution for phase, execution in cycle.phase_executions.items()}
+
+    def _serialize_cycle(self, cycle: ResearchCycle) -> Dict[str, Any]:
+        return {
+            "cycle_id": cycle.cycle_id,
+            "cycle_name": cycle.cycle_name,
+            "description": cycle.description,
+            "status": cycle.status.value,
+            "current_phase": cycle.current_phase.value,
+            "started_at": cycle.started_at,
+            "completed_at": cycle.completed_at,
+            "duration": cycle.duration,
+            "research_objective": cycle.research_objective,
+            "research_scope": cycle.research_scope,
+            "target_audience": cycle.target_audience,
+            "researchers": cycle.researchers,
+            "advisors": cycle.advisors,
+            "resources": cycle.resources,
+            "budget": cycle.budget,
+            "timeline": cycle.timeline,
+            "phase_executions": self._serialize_phase_executions(cycle),
+            "outcomes": cycle.outcomes,
+            "deliverables": cycle.deliverables,
+            "quality_metrics": cycle.quality_metrics,
+            "risk_assessment": cycle.risk_assessment,
+            "expert_reviews": cycle.expert_reviews,
+            "tags": cycle.tags,
+            "categories": cycle.categories,
+            "metadata": cycle.metadata,
+        }
+
+    def _build_report_metadata(self) -> Dict[str, Any]:
+        return {
+            "contract_version": self.config.get("export_contract_version", "d19.v1"),
+            "generated_at": datetime.now().isoformat(),
+            "result_schema": "research_pipeline_report",
+            "active_cycle_count": len(self.active_cycles),
+        }
     
     def create_research_cycle(self, cycle_name: str, 
                             description: str,
@@ -185,6 +265,8 @@ class ResearchPipeline:
                 resources=resources or {},
                 tags=["created", "automated", "tcmautoresearch"]
             )
+            self._initialize_cycle_tracking(research_cycle)
+            research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
             
             # 存储循环
             self.research_cycles[cycle_id] = research_cycle
@@ -225,6 +307,7 @@ class ResearchPipeline:
             research_cycle.status = ResearchCycleStatus.ACTIVE
             research_cycle.started_at = datetime.now().isoformat()
             research_cycle.current_phase = ResearchPhase.OBSERVE
+            research_cycle.metadata["final_status"] = research_cycle.status.value
             
             # 记录活动
             self.active_cycles[cycle_id] = research_cycle
@@ -271,6 +354,14 @@ class ResearchPipeline:
             if research_cycle.status != ResearchCycleStatus.ACTIVE:
                 self.logger.warning(f"研究循环 {cycle_id} 不处于活跃状态")
                 return {"error": "循环未激活"}
+
+            phase_entry = {
+                "phase": phase.value,
+                "status": "running",
+                "started_at": datetime.now().isoformat(),
+                "context": phase_context or {},
+            }
+            research_cycle.metadata.setdefault("phase_history", []).append(phase_entry)
             
             # 执行阶段
             phase_result = self._execute_phase_internal(phase, research_cycle, phase_context or {})
@@ -292,7 +383,7 @@ class ResearchPipeline:
             # 记录阶段执行信息
             phase_execution = {
                 "phase": phase.value,
-                "started_at": datetime.now().isoformat(),
+                "started_at": phase_entry["started_at"],
                 "completed_at": datetime.now().isoformat(),
                 "duration": time.time() - start_time,
                 "context": phase_context or {},
@@ -300,6 +391,21 @@ class ResearchPipeline:
             }
             
             research_cycle.phase_executions[phase] = phase_execution
+            phase_entry["status"] = "completed"
+            phase_entry["completed_at"] = phase_execution["completed_at"]
+            phase_entry["duration"] = phase_execution["duration"]
+            research_cycle.metadata.setdefault("phase_timings", {})[phase.value] = phase_execution["duration"]
+            research_cycle.metadata.setdefault("completed_phases", []).append(phase.value)
+            research_cycle.metadata["last_completed_phase"] = phase.value
+
+            if isinstance(phase_result, dict):
+                research_cycle.outcomes.append({"phase": phase.value, "result": phase_result})
+                if phase == ResearchPhase.PUBLISH:
+                    research_cycle.deliverables = phase_result.get("deliverables", [])
+                if phase == ResearchPhase.ANALYZE:
+                    research_cycle.quality_metrics = phase_result.get("results", {})
+
+            research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
             
             # 记录历史
             self.execution_history.append({
@@ -315,6 +421,24 @@ class ResearchPipeline:
             
         except Exception as e:
             self.logger.error(f"研究阶段执行失败: {e}")
+            if cycle_id in self.research_cycles:
+                research_cycle = self.research_cycles[cycle_id]
+                history = research_cycle.metadata.get("phase_history", [])
+                if history:
+                    history[-1]["status"] = "failed"
+                    history[-1]["completed_at"] = datetime.now().isoformat()
+                    history[-1]["duration"] = time.time() - start_time
+                    history[-1]["error"] = str(e)
+                    research_cycle.metadata.setdefault("phase_timings", {})[phase.value] = history[-1]["duration"]
+                self._mark_cycle_failed(research_cycle, phase.value, str(e))
+                research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
+                self.execution_history.append({
+                    "timestamp": datetime.now().isoformat(),
+                    "action": "phase_failed",
+                    "cycle_id": cycle_id,
+                    "phase": phase.value,
+                    "error": str(e),
+                })
             return {"error": str(e)}
     
     def _execute_phase_internal(self, phase: ResearchPhase, 
@@ -1136,6 +1260,8 @@ class ResearchPipeline:
             # 从活跃循环中移除
             if cycle_id in self.active_cycles:
                 del self.active_cycles[cycle_id]
+            research_cycle.metadata["final_status"] = research_cycle.status.value
+            research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
             
             # 记录历史
             self.execution_history.append({
@@ -1175,6 +1301,8 @@ class ResearchPipeline:
             # 从活跃循环中移除
             if cycle_id in self.active_cycles:
                 del self.active_cycles[cycle_id]
+            research_cycle.metadata["final_status"] = research_cycle.status.value
+            research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
             
             # 记录历史
             self.execution_history.append({
@@ -1212,6 +1340,8 @@ class ResearchPipeline:
             
             # 添加到活跃循环
             self.active_cycles[cycle_id] = research_cycle
+            research_cycle.metadata["final_status"] = research_cycle.status.value
+            research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
             
             # 记录历史
             self.execution_history.append({
@@ -1252,7 +1382,8 @@ class ResearchPipeline:
             "duration": cycle.duration,
             "research_objective": cycle.research_objective,
             "research_scope": cycle.research_scope,
-            "phase_executions": {k.value: v for k, v in cycle.phase_executions.items()}
+            "phase_executions": self._serialize_phase_executions(cycle),
+            "metadata": cycle.metadata,
         }
     
     def get_all_cycles(self) -> List[Dict[str, Any]]:
@@ -1269,7 +1400,8 @@ class ResearchPipeline:
                 "status": cycle.status.value,
                 "current_phase": cycle.current_phase.value,
                 "started_at": cycle.started_at,
-                "research_objective": cycle.research_objective
+                "research_objective": cycle.research_objective,
+                "analysis_summary": cycle.metadata.get("analysis_summary", {}),
             } for cycle in self.research_cycles.values()
         ]
     
@@ -1297,6 +1429,7 @@ class ResearchPipeline:
         active_cycles = len(self.active_cycles)
         completed_cycles = sum(1 for c in self.research_cycles.values() 
                              if c.status == ResearchCycleStatus.COMPLETED)
+        failed_cycles = sum(1 for c in self.research_cycles.values() if c.status == ResearchCycleStatus.FAILED)
         
         # 计算质量指标
         if total_cycles > 0:
@@ -1309,10 +1442,12 @@ class ResearchPipeline:
                 "total_cycles": total_cycles,
                 "active_cycles": active_cycles,
                 "completed_cycles": completed_cycles,
+                "failed_cycles": failed_cycles,
                 "completion_rate": round(completion_rate, 4),
                 "quality_metrics": self.quality_metrics,
                 "resource_usage": self.resource_usage,
-                "recent_activities": self.execution_history[-10:] if self.execution_history else []
+                "recent_activities": self.execution_history[-10:] if self.execution_history else [],
+                "report_metadata": self._build_report_metadata(),
             }
         }
     
@@ -1327,24 +1462,22 @@ class ResearchPipeline:
             bool: 导出是否成功
         """
         try:
-            serialized_cycles: List[Dict[str, Any]] = []
-            for cycle in self.research_cycles.values():
-                cycle_dict = asdict(cycle)
-                cycle_dict["status"] = cycle.status.value
-                cycle_dict["current_phase"] = cycle.current_phase.value
-                cycle_dict["phase_executions"] = {k.value: v for k, v in cycle.phase_executions.items()}
-                serialized_cycles.append(cycle_dict)
-
             pipeline_data = {
+                "report_metadata": {
+                    **self._build_report_metadata(),
+                    "output_path": output_path,
+                    "exported_file": os.path.basename(output_path),
+                },
                 "pipeline_info": {
                     "version": "2.0.0",
                     "generated_at": datetime.now().isoformat(),
                     "pipeline_summary": self.get_pipeline_summary()
                 },
-                "research_cycles": serialized_cycles,
+                "research_cycles": [self._serialize_cycle(cycle) for cycle in self.research_cycles.values()],
+                "failed_cycles": [self._serialize_cycle(cycle) for cycle in self.failed_cycles],
                 "execution_history": self.execution_history,
                 "quality_metrics": self.quality_metrics,
-                "resource_usage": self.resource_usage
+                "resource_usage": self.resource_usage,
             }
             
             with open(output_path, 'w', encoding='utf-8') as f:
@@ -1365,12 +1498,10 @@ class ResearchPipeline:
             bool: 清理是否成功
         """
         try:
-            # 关闭线程池
-            self.executor.shutdown(wait=True)
-            
             # 清空数据结构
             self.research_cycles.clear()
             self.active_cycles.clear()
+            self.failed_cycles.clear()
             self.execution_history.clear()
             
             self.logger.info("研究流程管理器资源清理完成")

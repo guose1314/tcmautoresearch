@@ -413,6 +413,10 @@ iteration_cycle:
     minimum_stable_success_rate: 0.8
     export_contract_version: "d18.v1"
     persist_failed_stages: true
+  research_pipeline:
+    enable_phase_tracking: true
+    persist_failed_cycles: true
+    export_contract_version: "d19.v1"
 
 # 系统资源配置
 resources:
