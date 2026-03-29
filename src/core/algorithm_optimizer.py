@@ -10,10 +10,13 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
+import os
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -52,6 +55,18 @@ class AlgorithmProfile:
         explore = exploration_c * math.sqrt(math.log(total_calls + 1) / self.call_count)
         return exploit + explore
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "tags": self.tags,
+            "call_count": self.call_count,
+            "total_time": self.total_time,
+            "total_quality": self.total_quality,
+            "avg_time_ms": round(self.avg_time * 1000, 2) if self.call_count else None,
+            "avg_quality": round(self.avg_quality, 4),
+            "last_called": self.last_called,
+        }
+
 
 class AlgorithmOptimizer:
     """
@@ -70,6 +85,74 @@ class AlgorithmOptimizer:
         self._profiles: Dict[str, AlgorithmProfile] = {}
         self._exploration_c = exploration_c
         self._total_calls = 0
+        self._failed_operations: List[Dict[str, Any]] = []
+        self._metadata: Dict[str, Any] = {
+            "phase_history": [],
+            "phase_timings": {},
+            "completed_phases": [],
+        }
+
+    def _start_phase(self, phase_name: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        phase_entry = {
+            "phase": phase_name,
+            "status": "running",
+            "started_at": datetime.now().isoformat(),
+            "context": context or {},
+        }
+        self._metadata["phase_history"].append(phase_entry)
+        return phase_entry
+
+    def _complete_phase(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float) -> None:
+        duration = time.perf_counter() - start_time
+        phase_entry["status"] = "completed"
+        phase_entry["completed_at"] = datetime.now().isoformat()
+        phase_entry["duration"] = duration
+        self._metadata["phase_timings"][phase_name] = duration
+        self._metadata["completed_phases"].append(phase_name)
+        self._metadata["last_completed_phase"] = phase_name
+        self._metadata["final_status"] = "completed"
+
+    def _fail_phase(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float, error: str) -> None:
+        duration = time.perf_counter() - start_time
+        phase_entry["status"] = "failed"
+        phase_entry["completed_at"] = datetime.now().isoformat()
+        phase_entry["duration"] = duration
+        phase_entry["error"] = error
+        self._metadata["phase_timings"][phase_name] = duration
+        self._metadata["failed_phase"] = phase_name
+        self._metadata["final_status"] = "failed"
+        self._failed_operations.append(
+            {
+                "phase": phase_name,
+                "error": error,
+                "timestamp": datetime.now().isoformat(),
+                "duration": duration,
+            }
+        )
+
+    def _build_analysis_summary(self) -> Dict[str, Any]:
+        profiled = list(self._profiles.values())
+        called_profiles = [profile for profile in profiled if profile.call_count > 0]
+        best_profile = max(called_profiles, key=lambda profile: profile.avg_quality, default=None)
+        return {
+            "registered_algorithm_count": len(self._algorithms),
+            "profiled_algorithm_count": len(called_profiles),
+            "total_calls": self._total_calls,
+            "failed_operation_count": len(self._failed_operations),
+            "best_algorithm": best_profile.name if best_profile else "",
+            "best_quality": round(best_profile.avg_quality, 4) if best_profile else 0.0,
+            "status": "needs_followup" if self._failed_operations else ("stable" if self._total_calls > 0 else "idle"),
+            "last_completed_phase": self._metadata.get("last_completed_phase", ""),
+            "failed_phase": self._metadata.get("failed_phase", ""),
+        }
+
+    def _build_report_metadata(self) -> Dict[str, Any]:
+        return {
+            "contract_version": "d21.v1",
+            "generated_at": datetime.now().isoformat(),
+            "result_schema": "algorithm_optimizer_report",
+            "registered_algorithm_count": len(self._algorithms),
+        }
 
     # ------------------------------------------------------------------
     # 注册 / 查询
@@ -99,6 +182,33 @@ class AlgorithmOptimizer:
     def get_all_profiles(self) -> Dict[str, AlgorithmProfile]:
         return dict(self._profiles)
 
+    def get_optimization_summary(self) -> Dict[str, Any]:
+        return {
+            "profiles": {name: profile.to_dict() for name, profile in self._profiles.items()},
+            "failed_operations": self._failed_operations,
+            "analysis_summary": self._build_analysis_summary(),
+            "report_metadata": self._build_report_metadata(),
+            "metadata": self._metadata,
+        }
+
+    def export_optimization_data(self, output_path: str) -> bool:
+        try:
+            payload = {
+                "report_metadata": {
+                    **self._build_report_metadata(),
+                    "output_path": output_path,
+                    "exported_file": os.path.basename(output_path),
+                },
+                "optimizer_summary": self.get_optimization_summary(),
+                "algorithms": list(self._algorithms.keys()),
+            }
+            with open(output_path, "w", encoding="utf-8") as file_obj:
+                json.dump(payload, file_obj, ensure_ascii=False, indent=2)
+            return True
+        except Exception as exc:
+            logger.error("导出算法优化数据失败: %s", exc)
+            return False
+
     # ------------------------------------------------------------------
     # 核心执行
     # ------------------------------------------------------------------
@@ -122,9 +232,16 @@ class AlgorithmOptimizer:
         if not candidates:
             raise ValueError("无可用算法，请先调用 register() 注册实现")
 
-        chosen = self._ucb1_select(candidates)
-        result = self._invoke(chosen, context)
-        return chosen, result
+        start_time = time.perf_counter()
+        phase_entry = self._start_phase("run_best", {"candidate_tags": candidate_tags or []})
+        try:
+            chosen = self._ucb1_select(candidates)
+            result = self._invoke(chosen, context)
+            self._complete_phase("run_best", phase_entry, start_time)
+            return chosen, result
+        except Exception as exc:
+            self._fail_phase("run_best", phase_entry, start_time, str(exc))
+            raise
 
     def benchmark(
         self,
@@ -146,21 +263,34 @@ class AlgorithmOptimizer:
         if not candidates:
             raise ValueError("无可用候选算法")
 
-        results: Dict[str, Dict[str, Any]] = {}
-        for name in candidates:
-            results[name] = self._invoke(name, context)
+        start_time = time.perf_counter()
+        phase_entry = self._start_phase("benchmark", {"candidate_tags": candidate_tags or [], "candidate_count": len(candidates)})
+        try:
+            results: Dict[str, Dict[str, Any]] = {}
+            for name in candidates:
+                results[name] = self._invoke(name, context)
 
-        winner = max(candidates, key=lambda n: self._profiles[n].avg_quality)
-        profiles_snapshot = {
-            n: {
-                "avg_time_ms": round(self._profiles[n].avg_time * 1000, 2),
-                "avg_quality": round(self._profiles[n].avg_quality, 4),
-                "call_count": self._profiles[n].call_count,
+            winner = max(candidates, key=lambda n: self._profiles[n].avg_quality)
+            profiles_snapshot = {
+                n: {
+                    "avg_time_ms": round(self._profiles[n].avg_time * 1000, 2),
+                    "avg_quality": round(self._profiles[n].avg_quality, 4),
+                    "call_count": self._profiles[n].call_count,
+                }
+                for n in candidates
             }
-            for n in candidates
-        }
-        logger.info("基准测试完成，最优算法: '%s'", winner)
-        return {"results": results, "profiles": profiles_snapshot, "winner": winner}
+            self._complete_phase("benchmark", phase_entry, start_time)
+            logger.info("基准测试完成，最优算法: '%s'", winner)
+            return {
+                "results": results,
+                "profiles": profiles_snapshot,
+                "winner": winner,
+                "analysis_summary": self._build_analysis_summary(),
+                "report_metadata": self._build_report_metadata(),
+            }
+        except Exception as exc:
+            self._fail_phase("benchmark", phase_entry, start_time, str(exc))
+            raise
 
     # ------------------------------------------------------------------
     # 内部辅助
@@ -189,20 +319,22 @@ class AlgorithmOptimizer:
     def _invoke(self, name: str, context: Dict[str, Any]) -> Dict[str, Any]:
         func = self._algorithms[name]
         t0 = time.perf_counter()
+        phase_entry = self._start_phase("invoke_algorithm", {"algorithm": name})
         try:
             result: Dict[str, Any] = func(context)
         except Exception as exc:
             elapsed = time.perf_counter() - t0
             self._update_profile(name, elapsed, quality=0.0)
+            self._fail_phase("invoke_algorithm", phase_entry, t0, str(exc))
             logger.error("算法 '%s' 执行异常: %s", name, exc)
             raise
         elapsed = time.perf_counter() - t0
         quality = float(result.get("quality_score", 0.5))
         self._update_profile(name, elapsed, quality)
+        self._complete_phase("invoke_algorithm", phase_entry, t0)
         return result
 
     def _update_profile(self, name: str, elapsed: float, quality: float) -> None:
-        from datetime import datetime
         p = self._profiles[name]
         p.call_count += 1
         p.total_time += elapsed

@@ -603,3 +603,25 @@ python tools/quality_improvement_archive.py --output output/quality-improvement-
 - [ ] 假设、实验、洞察导出不会暴露枚举对象
 - [ ] 导出文件可被 `json.load` 直接回读
 - [ ] 知识图谱导出与研究摘要保持同一契约版本
+
+## 17. D21 算法优化器补充检查项
+
+本章节用于 D21 类 algorithm optimizer 重构，强调优化阶段轨迹、失败操作沉淀、摘要契约与导出一致性统一。
+
+### 17.1 优化器契约一致性
+
+- [ ] 优化器报告输出 `analysis_summary`
+- [ ] 失败操作以稳定 `failed_operations` 列表输出
+- [ ] benchmark 与导出结果输出统一 `report_metadata`
+
+### 17.2 优化阶段可观测性
+
+- [ ] `run_best`、`benchmark` 与算法执行记录 `phase_history`
+- [ ] 失败操作写入 `failed_phase`
+- [ ] 成功路径刷新 `completed_phases` 与 `last_completed_phase`
+
+### 17.3 导出与画像安全
+
+- [ ] 算法画像导出不会暴露不可序列化对象
+- [ ] 导出文件可被 `json.load` 直接回读
+- [ ] D21 变更未破坏既有 learning/optimization 回归测试

@@ -1,3 +1,5 @@
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,6 +31,52 @@ class TestOptimizationAndLearningFeatures(unittest.TestCase):
         report = optimizer.benchmark({"x": 1}, candidate_tags=["text"])
         self.assertIn(report["winner"], {"fast", "accurate"})
         self.assertEqual(set(report["results"].keys()), {"fast", "accurate"})
+        self.assertIn("analysis_summary", report)
+        self.assertIn("report_metadata", report)
+
+        summary = optimizer.get_optimization_summary()
+        self.assertEqual(summary["analysis_summary"]["status"], "stable")
+        self.assertEqual(
+            [phase["phase"] for phase in summary["metadata"]["phase_history"][:2]],
+            ["run_best", "invoke_algorithm"],
+        )
+
+    def test_algorithm_optimizer_tracks_failed_operations(self):
+        optimizer = AlgorithmOptimizer()
+
+        def failing_algo(context):
+            raise RuntimeError("boom")
+
+        optimizer.register("failing", failing_algo, tags=["text"])
+
+        with self.assertRaises(RuntimeError):
+            optimizer.run_best({"x": 1}, candidate_tags=["text"])
+
+        summary = optimizer.get_optimization_summary()
+        self.assertEqual(summary["analysis_summary"]["failed_operation_count"], 2)
+        self.assertEqual(summary["analysis_summary"]["status"], "needs_followup")
+        self.assertIn(summary["analysis_summary"]["failed_phase"], {"invoke_algorithm", "run_best"})
+
+    def test_algorithm_optimizer_export_uses_json_safe_contract(self):
+        optimizer = AlgorithmOptimizer()
+
+        def stable_algo(context):
+            return {"quality_score": 0.88, "result": "stable"}
+
+        optimizer.register("stable", stable_algo, tags=["text"])
+        optimizer.benchmark({"x": 1}, candidate_tags=["text"])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "optimizer-report.json")
+            exported = optimizer.export_optimization_data(output_path)
+
+            self.assertTrue(exported)
+            with open(output_path, "r", encoding="utf-8") as file_obj:
+                payload = json.load(file_obj)
+
+        self.assertEqual(payload["report_metadata"]["contract_version"], "d21.v1")
+        self.assertEqual(payload["optimizer_summary"]["profiles"]["stable"]["name"], "stable")
+        self.assertIn("report_metadata", payload["optimizer_summary"])
 
     def test_pattern_recognizer_detects_patterns(self):
         recognizer = PatternRecognizer(min_frequency=2, anomaly_z_threshold=2.0)
