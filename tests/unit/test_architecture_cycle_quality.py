@@ -8,6 +8,7 @@ from src.core import __all__ as core_all
 from src.cycle.iteration_cycle import CycleStatus, IterationConfig, IterationCycle
 from src.cycle.system_iteration import SystemIterationCycle
 from src.cycle.test_driven_iteration import TestDrivenIterationManager
+from src.cycle.module_iteration import ModuleIterationCycle
 
 
 class TestCoreAndCycleQuality(unittest.TestCase):
@@ -238,6 +239,45 @@ class TestCoreAndCycleQuality(unittest.TestCase):
         self.assertEqual(payload["report_metadata"]["contract_version"], "d15.v1")
         self.assertEqual(len(payload["failed_iterations"]), 1)
         self.assertIn("report_metadata", payload["system_report"])
+
+    def test_module_iteration_tracks_phase_history_and_summary(self):
+        cycle = ModuleIterationCycle("entity_extraction", {"minimum_stable_quality": 0.85})
+        cycle._generate_module_artifact = lambda context: {"artifact_id": "m1", "quality_metrics": {"completeness": 0.92, "accuracy": 0.9, "consistency": 0.91, "reliability": 0.89}}
+        cycle._test_module_artifact = lambda artifacts: {"passed": True, "failures": [], "metrics": {"confidence_score": 0.87}}
+        cycle._repair_module_artifact = lambda artifacts, test_results: []
+
+        result = cycle.execute_module_iteration({})
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.recommendations, [])
+        self.assertEqual([phase["phase"] for phase in result.metadata["phase_history"]], ["generate", "test", "repair", "analyze"])
+        self.assertEqual(result.metadata["analysis_summary"]["module_status"], "stable")
+        self.assertAlmostEqual(result.quality_assessment["quality_score"], result.quality_assessment["overall_quality"])
+
+    def test_module_iteration_export_module_data_uses_stable_contract(self):
+        cycle = ModuleIterationCycle("reasoning_engine")
+        cycle.execute_module_iteration({})
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "module-data.json")
+            exported = cycle.export_module_data(output_path)
+
+            self.assertTrue(exported)
+            with open(output_path, "r", encoding="utf-8") as file_obj:
+                payload = json.load(file_obj)
+
+        self.assertEqual(payload["report_metadata"]["contract_version"], "d16.v1")
+        self.assertIn("module_report", payload)
+        self.assertIsInstance(payload["iteration_history"][0]["recommendations"], list)
+
+    def test_iteration_cycle_cleanup_keeps_shared_executor_available(self):
+        cycle = IterationCycle()
+        executor = cycle.executor
+
+        cleaned = cycle._do_cleanup()
+
+        self.assertTrue(cleaned)
+        self.assertFalse(getattr(executor, "_shutdown", False))
 
 
 if __name__ == "__main__":

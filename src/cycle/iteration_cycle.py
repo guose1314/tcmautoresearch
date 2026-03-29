@@ -967,9 +967,6 @@ class IterationCycle:
     def _do_cleanup(self) -> bool:
         """清理资源"""
         try:
-            # 关闭线程池
-            self.executor.shutdown(wait=True)
-            
             # 清理数据结构
             self.results.clear()
             self.failed_iterations.clear()

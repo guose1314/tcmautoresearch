@@ -20,7 +20,8 @@ _global_executor_max_workers = None
 
 def get_global_executor(max_workers=4):
     global _global_executor, _global_executor_max_workers
-    if _global_executor is None or _global_executor_max_workers != max_workers:
+    executor_shutdown = bool(getattr(_global_executor, "_shutdown", False))
+    if _global_executor is None or executor_shutdown or _global_executor_max_workers != max_workers:
         if _global_executor is not None:
             _global_executor.shutdown(wait=True)
         _global_executor = ThreadPoolExecutor(max_workers=max_workers)

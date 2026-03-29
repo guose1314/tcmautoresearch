@@ -493,3 +493,25 @@ python tools/quality_improvement_archive.py --output output/quality-improvement-
 - [ ] 导出载荷包含契约版本与生成时间
 - [ ] 导出结构保留配置、性能指标与失败明细
 - [ ] D15 变更未破坏既有主流程与系统级测试
+
+## 12. D16 模块级对齐补充检查项
+
+本章节用于 D16 类模块级重构，强调模块迭代与循环级、系统级契约保持一致，并修正清理阶段的资源安全性。
+
+### 12.1 模块结果契约一致性
+
+- [ ] 模块级结果输出 `analysis_summary`
+- [ ] 模块级 `recommendations` 保持列表结构
+- [ ] 模块级质量评分兼容 `overall_quality` 与 `quality_score`
+
+### 12.2 模块阶段可观测性
+
+- [ ] 模块级迭代记录 `phase_history` 与 `phase_timings`
+- [ ] 模块失败路径记录 `failed_phase`
+- [ ] 模块报告输出失败迭代明细与 `report_metadata`
+
+### 12.3 资源清理安全性
+
+- [ ] 模块级与循环级 cleanup 仅清理自身状态
+- [ ] 共享执行器不会在局部 cleanup 中被关闭
+- [ ] D16 变更未破坏既有 cycle 回归测试

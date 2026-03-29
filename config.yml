@@ -400,6 +400,10 @@ iteration_cycle:
     contract_version: "d15.v1"
     include_failed_iterations: true
     include_report_metadata: true
+  module_iteration:
+    enable_phase_tracking: true
+    minimum_stable_quality: 0.85
+    export_contract_version: "d16.v1"
 
 # 系统资源配置
 resources:

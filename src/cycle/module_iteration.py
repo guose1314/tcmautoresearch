@@ -4,13 +4,14 @@
 基于T/C IATCM 098-2023标准的模块级迭代管理
 """
 
+import json
 import logging
+import os
 import time
 import traceback
-from typing import Dict, Any, List, Optional
+from typing import Any, Callable, Dict, List
 from datetime import datetime
 from dataclasses import dataclass, field
-from collections import defaultdict
 import networkx as nx
 
 # 配置日志
@@ -34,6 +35,7 @@ class ModuleIterationResult:
     academic_insights: List[Dict[str, Any]] = field(default_factory=list)
     recommendations: List[Dict[str, Any]] = field(default_factory=list)
     confidence_scores: Dict[str, float] = field(default_factory=dict)
+    quality_assessment: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 class ModuleIterationCycle:
@@ -55,7 +57,8 @@ class ModuleIterationCycle:
     def __init__(self, module_name: str, module_config: Dict[str, Any] = None):
         self.module_name = module_name
         self.config = module_config or {}
-        self.iteration_history = []
+        self.iteration_history: List[ModuleIterationResult] = []
+        self.failed_iterations: List[ModuleIterationResult] = []
         self.performance_metrics = {
             "total_iterations": 0,
             "successful_iterations": 0,
@@ -69,6 +72,80 @@ class ModuleIterationCycle:
         self.logger = logging.getLogger(f"{__name__}.{module_name}")
         
         self.logger.info(f"模块迭代循环初始化完成: {module_name}")
+
+    def _initialize_phase_tracking(self, iteration_result: ModuleIterationResult) -> None:
+        iteration_result.metadata["phase_history"] = []
+        iteration_result.metadata["phase_timings"] = {}
+        iteration_result.metadata["completed_phases"] = []
+
+    def _execute_phase(
+        self,
+        iteration_result: ModuleIterationResult,
+        phase_name: str,
+        status: str,
+        operation: Callable[[], Any],
+    ) -> Any:
+        phase_start = time.time()
+        phase_entry: Dict[str, Any] = {
+            "phase": phase_name,
+            "status": "running",
+            "started_at": datetime.now().isoformat(),
+        }
+        iteration_result.metadata["phase_history"].append(phase_entry)
+        iteration_result.status = status
+
+        try:
+            result = operation()
+        except Exception as exc:
+            duration = time.time() - phase_start
+            phase_entry["status"] = "failed"
+            phase_entry["ended_at"] = datetime.now().isoformat()
+            phase_entry["duration"] = duration
+            phase_entry["error"] = str(exc)
+            iteration_result.metadata["phase_timings"][phase_name] = duration
+            iteration_result.metadata["failed_phase"] = phase_name
+            raise
+
+        duration = time.time() - phase_start
+        phase_entry["status"] = "completed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration"] = duration
+        iteration_result.metadata["phase_timings"][phase_name] = duration
+        iteration_result.metadata["completed_phases"].append(phase_name)
+        iteration_result.metadata["last_completed_phase"] = phase_name
+        return result
+
+    def _finalize_iteration_result(
+        self,
+        iteration_result: ModuleIterationResult,
+        start_time: float,
+        success: bool,
+    ) -> None:
+        iteration_result.status = "completed" if success else "failed"
+        iteration_result.end_time = datetime.now().isoformat()
+        iteration_result.duration = time.time() - start_time
+        iteration_result.metadata["final_status"] = iteration_result.status
+
+    def _build_analysis_summary(
+        self,
+        test_results: Dict[str, Any],
+        repair_actions: List[Dict[str, Any]],
+        quality_metrics: Dict[str, Any],
+        academic_insights: List[Dict[str, Any]],
+        recommendations: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        failed_tests = len(test_results.get("failures", []))
+        quality_score = float(quality_metrics.get("quality_score", quality_metrics.get("overall_quality", 0.0)))
+        return {
+            "module_name": self.module_name,
+            "test_passed": bool(test_results.get("passed", False)),
+            "failed_test_count": failed_tests,
+            "repair_action_count": len(repair_actions),
+            "academic_insight_count": len(academic_insights),
+            "recommendation_count": len(recommendations),
+            "quality_score": quality_score,
+            "module_status": "stable" if failed_tests == 0 and quality_score >= float(self.config.get("minimum_stable_quality", 0.85)) else "needs_followup",
+        }
     
     def execute_module_iteration(self, context: Dict[str, Any]) -> ModuleIterationResult:
         """
@@ -89,52 +166,62 @@ class ModuleIterationCycle:
             status="pending",
             start_time=datetime.now().isoformat()
         )
+        self._initialize_phase_tracking(iteration_result)
         
         try:
-            # 1. 生成阶段
-            iteration_result.status = "generating"
-            artifacts = self._generate_module_artifact(context)
+            artifacts = self._execute_phase(
+                iteration_result,
+                "generate",
+                "generating",
+                lambda: self._generate_module_artifact(context),
+            )
             iteration_result.artifacts = artifacts
             
-            # 2. 测试阶段
-            iteration_result.status = "testing"
-            test_results = self._test_module_artifact(artifacts)
+            test_results = self._execute_phase(
+                iteration_result,
+                "test",
+                "testing",
+                lambda: self._test_module_artifact(artifacts),
+            )
             iteration_result.test_results = test_results
             
-            # 3. 修复阶段
-            iteration_result.status = "fixing"
-            repair_actions = self._repair_module_artifact(artifacts, test_results)
+            repair_actions = self._execute_phase(
+                iteration_result,
+                "repair",
+                "fixing",
+                lambda: self._repair_module_artifact(artifacts, test_results),
+            )
             iteration_result.repair_actions = repair_actions
             
-            # 4. 分析阶段
-            iteration_result.status = "analyzing"
-            analysis_results = self._analyze_module_results(artifacts, test_results, repair_actions)
+            analysis_results = self._execute_phase(
+                iteration_result,
+                "analyze",
+                "analyzing",
+                lambda: self._analyze_module_results(artifacts, test_results, repair_actions),
+            )
             iteration_result.academic_insights = analysis_results.get("academic_insights", [])
             iteration_result.quality_assessment = analysis_results.get("quality_metrics", {})
             iteration_result.confidence_scores = analysis_results.get("confidence_scores", {})
-            iteration_result.recommendations = analysis_results.get("recommendations", {})
+            iteration_result.recommendations = analysis_results.get("recommendations", [])
+            iteration_result.metadata["analysis_summary"] = analysis_results.get("analysis_summary", {})
             
-            # 5. 完成阶段
-            iteration_result.status = "completed"
-            iteration_result.end_time = datetime.now().isoformat()
-            iteration_result.duration = time.time() - start_time
+            self._finalize_iteration_result(iteration_result, start_time, success=True)
             
-            # 6. 更新性能指标
             self._update_performance_metrics(iteration_result)
             
-            # 7. 保存结果
             self.iteration_history.append(iteration_result)
             
             self.logger.info(f"模块迭代完成: {self.module_name}")
             return iteration_result
             
         except Exception as e:
-            iteration_result.status = "failed"
-            iteration_result.end_time = datetime.now().isoformat()
-            iteration_result.duration = time.time() - start_time
             iteration_result.issues_found.append(str(e))
+            self._finalize_iteration_result(iteration_result, start_time, success=False)
             self.logger.error(f"模块迭代失败 {self.module_name}: {e}")
             self.logger.error(traceback.format_exc())
+            self._update_performance_metrics(iteration_result)
+            self.iteration_history.append(iteration_result)
+            self.failed_iterations.append(iteration_result)
             raise
     
     def _generate_module_artifact(self, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -174,7 +261,6 @@ class ModuleIterationCycle:
     def _test_module_artifact(self, artifact: Dict[str, Any]) -> Dict[str, Any]:
         """测试模块输出"""
         self.logger.info(f"测试模块 {self.module_name} 输出")
-        start_time = time.time()
         
         try:
             # 模拟测试过程
@@ -214,7 +300,6 @@ class ModuleIterationCycle:
                               test_results: Dict[str, Any]) -> List[Dict[str, Any]]:
         """修复模块问题"""
         self.logger.info(f"修复模块 {self.module_name} 问题")
-        start_time = time.time()
         
         try:
             repair_actions = []
@@ -273,6 +358,13 @@ class ModuleIterationCycle:
                 "academic_insights": academic_insights,
                 "recommendations": recommendations,
                 "confidence_scores": confidence_scores,
+                "analysis_summary": self._build_analysis_summary(
+                    test_results,
+                    repair_actions,
+                    quality_metrics,
+                    academic_insights,
+                    recommendations,
+                ),
                 "analysis_time": time.time() - start_time
             }
             
@@ -314,6 +406,7 @@ class ModuleIterationCycle:
                 quality_scores.append(quality_metrics[metric] * weight)
         
         quality_metrics["overall_quality"] = sum(quality_scores) if quality_scores else 0.0
+        quality_metrics["quality_score"] = quality_metrics["overall_quality"]
         
         return quality_metrics
     
@@ -487,7 +580,58 @@ class ModuleIterationCycle:
             "average_quality_score": avg_quality_score,
             "average_confidence_score": avg_confidence_score,
             "performance_metrics": self.performance_metrics,
-            "latest_results": [h.__dict__ for h in self.iteration_history[-3:]] if self.iteration_history else []
+            "latest_results": [self._serialize_module_iteration_result(h) for h in self.iteration_history[-3:]] if self.iteration_history else [],
+            "failed_iterations_details": [self._serialize_module_iteration_result(h) for h in failed_iterations],
+            "report_metadata": self._build_module_report_metadata(),
+        }
+
+    def _build_module_report_metadata(self) -> Dict[str, Any]:
+        return {
+            "contract_version": "d16.v1",
+            "generated_at": datetime.now().isoformat(),
+            "result_schema": "module_iteration_report",
+            "latest_iteration_id": self.iteration_history[-1].iteration_id if self.iteration_history else "",
+            "module_name": self.module_name,
+        }
+
+    def _serialize_module_iteration_result(self, iteration_result: ModuleIterationResult) -> Dict[str, Any]:
+        return {
+            "module_name": iteration_result.module_name,
+            "iteration_id": iteration_result.iteration_id,
+            "cycle_number": iteration_result.cycle_number,
+            "status": iteration_result.status,
+            "start_time": iteration_result.start_time,
+            "end_time": iteration_result.end_time,
+            "duration": iteration_result.duration,
+            "artifacts": iteration_result.artifacts,
+            "test_results": iteration_result.test_results,
+            "repair_actions": iteration_result.repair_actions,
+            "issues_found": iteration_result.issues_found,
+            "performance_metrics": iteration_result.performance_metrics,
+            "academic_insights": iteration_result.academic_insights,
+            "recommendations": iteration_result.recommendations,
+            "confidence_scores": iteration_result.confidence_scores,
+            "quality_assessment": iteration_result.quality_assessment,
+            "metadata": iteration_result.metadata,
+        }
+
+    def _build_module_export_payload(self, output_path: str) -> Dict[str, Any]:
+        return {
+            "report_metadata": {
+                **self._build_module_report_metadata(),
+                "output_path": output_path,
+                "exported_file": os.path.basename(output_path),
+            },
+            "module_info": {
+                "module_name": self.module_name,
+                "version": "2.0.0",
+                "generated_at": datetime.now().isoformat(),
+                "performance_metrics": self.performance_metrics,
+            },
+            "module_report": self.get_module_performance_report(),
+            "iteration_history": [self._serialize_module_iteration_result(h) for h in self.iteration_history],
+            "failed_iterations": [self._serialize_module_iteration_result(h) for h in self.failed_iterations],
+            "knowledge_graph": self.get_module_knowledge_graph(),
         }
     
     def get_module_knowledge_graph(self) -> Dict[str, Any]:
@@ -531,16 +675,7 @@ class ModuleIterationCycle:
     def export_module_data(self, output_path: str) -> bool:
         """导出模块数据"""
         try:
-            module_data = {
-                "module_info": {
-                    "module_name": self.module_name,
-                    "version": "2.0.0",
-                    "generated_at": datetime.now().isoformat(),
-                    "performance_metrics": self.performance_metrics
-                },
-                "iteration_history": [h.__dict__ for h in self.iteration_history],
-                "knowledge_graph": self.get_module_knowledge_graph()
-            }
+            module_data = self._build_module_export_payload(output_path)
             
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(module_data, f, ensure_ascii=False, indent=2)
@@ -557,6 +692,7 @@ class ModuleIterationCycle:
         try:
             # 清理数据结构
             self.iteration_history.clear()
+            self.failed_iterations.clear()
             self.knowledge_graph.clear()
             
             self.logger.info(f"模块 {self.module_name} 资源清理完成")
