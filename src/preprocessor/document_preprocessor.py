@@ -7,18 +7,31 @@
 """
 import logging
 import re
+import warnings
 from datetime import datetime
 from typing import Any, Dict, List
 
 try:
-    import jieba
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"pkg_resources is deprecated as an API.*",
+            category=DeprecationWarning,
+        )
+        import jieba
     HAS_JIEBA = True
 except ImportError:
     jieba = None  # type: ignore[assignment]
     HAS_JIEBA = False
 
 try:
-    from jieba import posseg as jieba_posseg
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"pkg_resources is deprecated as an API.*",
+            category=DeprecationWarning,
+        )
+        from jieba import posseg as jieba_posseg
     HAS_JIEBA_POS = True
 except ImportError:
     jieba_posseg = None  # type: ignore[assignment]
