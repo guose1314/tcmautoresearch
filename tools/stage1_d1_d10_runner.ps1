@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25", "D26", "D27")]
+    [ValidateSet("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25", "D26", "D27", "D28")]
     [string]$Day,
     [switch]$All,
     [switch]$DryRun,
@@ -460,6 +460,17 @@ function Get-Plan {
         @{ Type = "commit"; Name = "Commit theoretical framework refresh"; Message = "stage1 D27 theoretical framework refresh" }
     )
 
+    $plans["D28"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d28-system-iteration-refresh" },
+        @{ Type = "cmd"; Name = "Run architecture and cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run theoretical framework quality tests"; Command = "& '$Py' -m unittest tests.test_theoretical_framework_quality" },
+        @{ Type = "cmd"; Name = "Run research pipeline quality tests"; Command = "& '$Py' -m unittest tests.test_research_pipeline_quality" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run system iteration regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings" },
+        @{ Type = "commit"; Name = "Commit system iteration refresh"; Message = "stage1 D28 system iteration refresh" }
+    )
+
     return $plans[$DayCode]
 }
 
@@ -575,6 +586,10 @@ function Get-RollbackTips {
         "git restore src/research/theoretical_framework.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/test_theoretical_framework_quality.py",
         "& <python> -m unittest tests.test_theoretical_framework_quality"
     )
+    $tips["D28"] = @(
+        "git restore src/cycle/system_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
+    )
 
     return $tips[$DayCode]
 }
@@ -619,7 +634,7 @@ $repo = Resolve-RepoRoot -InputPath $RepoPath
 $python = Resolve-Python -Repo $repo -InputPython $PythonExe
 
 if (-not $Day -and -not $All) {
-    throw "Please provide -Day D1..D27 or -All"
+    throw "Please provide -Day D1..D28 or -All"
 }
 if ($Day -and $All) {
     throw "Use either -Day or -All, not both"
@@ -634,7 +649,7 @@ $targetPassRateEnabled = $TargetPassRate -ne -1
 Set-Location $repo
 
 $runDays = if ($All) {
-    @("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25", "D26", "D27")
+    @("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25", "D26", "D27", "D28")
 }
 else {
     @($Day)

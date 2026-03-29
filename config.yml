@@ -424,6 +424,11 @@ iteration_cycle:
     persist_failed_operations: true
     minimum_validation_rate: 0.5
     export_contract_version: "d27.v1"
+  system_iteration:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_quality: 0.85
+    export_contract_version: "d28.v1"
   algorithm_optimizer:
     enable_phase_tracking: true
     persist_failed_operations: true

@@ -203,7 +203,7 @@ class TestCoreAndCycleQuality(unittest.TestCase):
         self.assertIn("module_b", result["analysis_summary"]["failed_modules"])
 
     def test_system_iteration_execute_persists_academic_insights_and_summary(self):
-        cycle = SystemIterationCycle()
+        cycle = SystemIterationCycle({"export_contract_version": "d28.v1", "minimum_stable_quality": 0.85})
         cycle._execute_module_iterations = lambda context: {
             "module_a": {
                 "status": "completed",
@@ -231,7 +231,9 @@ class TestCoreAndCycleQuality(unittest.TestCase):
         self.assertIsInstance(result.academic_insights, list)
         self.assertGreaterEqual(len(result.academic_insights), 1)
         self.assertIn("analysis_summary", result.metadata)
-        self.assertEqual(result.metadata["analysis_summary"]["system_status"], "stable")
+        self.assertEqual(result.metadata["analysis_summary"]["status"], "stable")
+        self.assertEqual(result.metadata["analysis_summary"]["final_status"], "completed")
+        self.assertEqual(cycle.get_system_performance_report()["report_metadata"]["contract_version"], "d28.v1")
 
     def test_iteration_cycle_execute_records_phase_history_and_analysis_summary(self):
         cycle = IterationCycle(IterationConfig(confidence_threshold=0.7))
@@ -260,7 +262,7 @@ class TestCoreAndCycleQuality(unittest.TestCase):
         self.assertEqual(result.metadata["analysis_summary"]["iteration_status"], "stable")
 
     def test_system_iteration_failure_tracks_failed_phase(self):
-        cycle = SystemIterationCycle()
+        cycle = SystemIterationCycle({"export_contract_version": "d28.v1"})
         cycle._execute_module_iterations = lambda context: {"module_a": {"status": "completed"}}
 
         def raise_system_test_error(context, module_results):
@@ -276,6 +278,8 @@ class TestCoreAndCycleQuality(unittest.TestCase):
         self.assertEqual(failed_result.metadata["failed_phase"], "test_system")
         self.assertEqual(failed_result.metadata["phase_history"][-1]["status"], "failed")
         self.assertEqual(failed_result.status, "failed")
+        self.assertEqual(cycle.failed_operations[0]["operation"], "test_system")
+        self.assertEqual(cycle.get_system_performance_report()["analysis_summary"]["status"], "needs_followup")
 
     def test_iteration_cycle_export_results_serializes_status_as_string(self):
         cycle = IterationCycle()
@@ -297,7 +301,7 @@ class TestCoreAndCycleQuality(unittest.TestCase):
         self.assertIn("report_metadata", payload["cycle_summary"])
 
     def test_system_iteration_export_system_data_contains_failed_iterations_and_metadata(self):
-        cycle = SystemIterationCycle()
+        cycle = SystemIterationCycle({"export_contract_version": "d28.v1"})
         cycle._execute_module_iterations = lambda context: {"module_a": {"status": "completed", "quality_assessment": {"overall_quality": 0.91}, "confidence_scores": {"overall": 0.89}}}
         cycle._test_system_level = lambda context, module_results: {"system_health": "healthy", "performance_score": 0.88, "reliability": 0.95, "quality_assurance": {"academic_compliance": True, "quality_metrics": {"completeness": 0.92, "accuracy": 0.9, "consistency": 0.91}}}
         cycle.execute_system_iteration({})
@@ -317,9 +321,22 @@ class TestCoreAndCycleQuality(unittest.TestCase):
             with open(output_path, "r", encoding="utf-8") as file_obj:
                 payload = json.load(file_obj)
 
-        self.assertEqual(payload["report_metadata"]["contract_version"], "d15.v1")
+        self.assertEqual(payload["report_metadata"]["contract_version"], "d28.v1")
         self.assertEqual(len(payload["failed_iterations"]), 1)
         self.assertIn("report_metadata", payload["system_report"])
+        self.assertEqual(payload["failed_operations"][0]["operation"], "test_system")
+
+    def test_system_iteration_cleanup_resets_runtime_state(self):
+        cycle = SystemIterationCycle({"export_contract_version": "d28.v1"})
+        cycle._execute_module_iterations = lambda context: {"module_a": {"status": "completed", "quality_assessment": {"overall_quality": 0.91}, "confidence_scores": {"overall": 0.89}}}
+        cycle._test_system_level = lambda context, module_results: {"system_health": "healthy", "performance_score": 0.88, "reliability": 0.95, "quality_assurance": {"academic_compliance": True, "quality_metrics": {"completeness": 0.92, "accuracy": 0.9, "consistency": 0.91}}}
+        cycle.execute_system_iteration({})
+
+        cleaned = cycle.cleanup()
+
+        self.assertTrue(cleaned)
+        self.assertEqual(cycle.system_metadata["final_status"], "cleaned")
+        self.assertEqual(cycle.get_system_performance_report()["message"], "还没有执行任何系统迭代")
 
     def test_module_iteration_tracks_phase_history_and_summary(self):
         cycle = ModuleIterationCycle("entity_extraction", {"minimum_stable_quality": 0.85})

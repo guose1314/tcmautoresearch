@@ -757,3 +757,25 @@ python tools/quality_improvement_archive.py --output output/quality-improvement-
 - [ ] 导出不会暴露枚举、dataclass 或 callable 原始对象
 - [ ] 导出文件可被 `json.load` 直接回读
 - [ ] cleanup 后运行态元数据与研究缓存重置为稳定空状态
+
+## 24. D28 系统级迭代二次治理补充检查项
+
+本章节用于 D28 类 system iteration 二次治理对齐，强调系统级失败操作、系统摘要契约、导出版本刷新与 cleanup 重置一致性。
+
+### 24.1 系统级迭代契约一致性
+
+- [ ] 系统性能报告输出 `analysis_summary` 与 `final_status`
+- [ ] 失败操作以稳定 `failed_operations` 列表输出，字段使用 `operation`
+- [ ] 导出结果与系统报告输出统一 `report_metadata`
+
+### 24.2 系统编排可观测性
+
+- [ ] 系统迭代执行、导出记录系统级 `phase_history`
+- [ ] 阶段异常写入系统级 `failed_phase`
+- [ ] 成功路径刷新 `completed_phases` 与 `last_completed_phase`
+
+### 24.3 导出与清理安全
+
+- [ ] 导出不会暴露枚举、dataclass 或 callable 原始对象
+- [ ] 导出文件可被 `json.load` 直接回读
+- [ ] cleanup 后运行态元数据、失败操作与系统缓存重置为稳定空状态

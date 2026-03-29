@@ -12,6 +12,7 @@ import os
 from typing import Any, Callable, Dict, List, Optional
 from datetime import datetime
 from dataclasses import dataclass, field
+from enum import Enum
 import networkx as nx
 import numpy as np
 
@@ -56,6 +57,21 @@ class SystemIterationCycle:
         self.config = system_config or {}
         self.system_iterations: List[SystemIterationResult] = []
         self.failed_iterations: List[SystemIterationResult] = []
+        self.failed_operations: List[Dict[str, Any]] = []
+        self.system_metadata = {
+            "phase_history": [],
+            "phase_timings": {},
+            "completed_phases": [],
+            "failed_phase": None,
+            "final_status": "initialized",
+            "last_completed_phase": None,
+        }
+        self.governance_config = {
+            "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
+            "persist_failed_operations": self.config.get("persist_failed_operations", True),
+            "minimum_stable_quality": float(self.config.get("minimum_stable_quality", 0.85)),
+            "export_contract_version": self.config.get("export_contract_version", "d28.v1"),
+        }
         self.performance_metrics = {
             "total_iterations": 0,
             "successful_iterations": 0,
@@ -75,6 +91,81 @@ class SystemIterationCycle:
         iteration_result.metadata["phase_history"] = []
         iteration_result.metadata["phase_timings"] = {}
         iteration_result.metadata["completed_phases"] = []
+        iteration_result.metadata["failed_phase"] = None
+        iteration_result.metadata["final_status"] = iteration_result.status
+        iteration_result.metadata["last_completed_phase"] = None
+        iteration_result.metadata["failed_operations"] = []
+
+    def _start_system_phase(self, phase_name: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        phase_entry = {
+            "phase": phase_name,
+            "status": "in_progress",
+            "started_at": datetime.now().isoformat(),
+            "context": self._serialize_value(context or {}),
+        }
+        if self.governance_config.get("enable_phase_tracking", True):
+            self.system_metadata["phase_history"].append(phase_entry)
+        return phase_entry
+
+    def _complete_system_phase(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float) -> None:
+        duration = time.perf_counter() - start_time
+        phase_entry["status"] = "completed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        self.system_metadata["phase_timings"][phase_name] = round(duration, 6)
+        if phase_name not in self.system_metadata["completed_phases"]:
+            self.system_metadata["completed_phases"].append(phase_name)
+        self.system_metadata["last_completed_phase"] = phase_name
+        self.system_metadata["final_status"] = "completed"
+
+    def _fail_system_phase(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float, error: str) -> None:
+        duration = time.perf_counter() - start_time
+        phase_entry["status"] = "failed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        phase_entry["error"] = error
+        self.system_metadata["phase_timings"][phase_name] = round(duration, 6)
+        self.system_metadata["failed_phase"] = phase_name
+        self.system_metadata["final_status"] = "failed"
+        self._record_failed_operation(self.failed_operations, phase_name, error, duration)
+
+    def _record_failed_operation(
+        self,
+        container: List[Dict[str, Any]],
+        operation: str,
+        error: str,
+        duration: float,
+    ) -> None:
+        if not self.governance_config.get("persist_failed_operations", True):
+            return
+        container.append(
+            {
+                "operation": operation,
+                "error": error,
+                "timestamp": datetime.now().isoformat(),
+                "duration_seconds": round(duration, 6),
+            }
+        )
+
+    def _serialize_value(self, value: Any) -> Any:
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {str(key): self._serialize_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._serialize_value(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._serialize_value(item) for item in value]
+        if hasattr(value, "__dataclass_fields__"):
+            return {
+                field_name: self._serialize_value(getattr(value, field_name))
+                for field_name in value.__dataclass_fields__
+            }
+        if callable(value):
+            return getattr(value, "__name__", "callable")
+        return value
 
     def _execute_phase(
         self,
@@ -83,10 +174,10 @@ class SystemIterationCycle:
         status: str,
         operation: Callable[[], Any],
     ) -> Any:
-        phase_start = time.time()
+        phase_start = time.perf_counter()
         phase_entry = {
             "phase": phase_name,
-            "status": "running",
+            "status": "in_progress",
             "started_at": datetime.now().isoformat(),
         }
         iteration_result.metadata["phase_history"].append(phase_entry)
@@ -95,22 +186,27 @@ class SystemIterationCycle:
         try:
             result = operation()
         except Exception as exc:
-            duration = time.time() - phase_start
+            duration = time.perf_counter() - phase_start
             phase_entry["status"] = "failed"
             phase_entry["ended_at"] = datetime.now().isoformat()
-            phase_entry["duration"] = duration
+            phase_entry["duration_seconds"] = round(duration, 6)
             phase_entry["error"] = str(exc)
-            iteration_result.metadata["phase_timings"][phase_name] = duration
+            iteration_result.metadata["phase_timings"][phase_name] = round(duration, 6)
             iteration_result.metadata["failed_phase"] = phase_name
+            iteration_result.metadata["final_status"] = "failed"
+            self._record_failed_operation(iteration_result.metadata["failed_operations"], phase_name, str(exc), duration)
+            self._record_failed_operation(self.failed_operations, phase_name, str(exc), duration)
             raise
 
-        duration = time.time() - phase_start
+        duration = time.perf_counter() - phase_start
         phase_entry["status"] = "completed"
         phase_entry["ended_at"] = datetime.now().isoformat()
-        phase_entry["duration"] = duration
-        iteration_result.metadata["phase_timings"][phase_name] = duration
-        iteration_result.metadata["completed_phases"].append(phase_name)
+        phase_entry["duration_seconds"] = round(duration, 6)
+        iteration_result.metadata["phase_timings"][phase_name] = round(duration, 6)
+        if phase_name not in iteration_result.metadata["completed_phases"]:
+            iteration_result.metadata["completed_phases"].append(phase_name)
         iteration_result.metadata["last_completed_phase"] = phase_name
+        iteration_result.metadata["final_status"] = "completed"
         return result
 
     def _finalize_iteration_result(
@@ -121,7 +217,7 @@ class SystemIterationCycle:
     ) -> None:
         iteration_result.status = "completed" if success else "failed"
         iteration_result.end_time = datetime.now().isoformat()
-        iteration_result.duration = time.time() - start_time
+        iteration_result.duration = time.perf_counter() - start_time
         iteration_result.metadata["final_status"] = iteration_result.status
     
     def execute_system_iteration(self, context: Dict[str, Any]) -> SystemIterationResult:
@@ -134,7 +230,8 @@ class SystemIterationCycle:
         Returns:
             SystemIterationResult: 系统迭代结果
         """
-        start_time = time.time()
+        start_time = time.perf_counter()
+        system_phase_entry = self._start_system_phase("execute_system_iteration", {"context_keys": sorted((context or {}).keys())})
         
         iteration_result = SystemIterationResult(
             iteration_id=f"sys_iter_{int(time.time())}",
@@ -175,6 +272,9 @@ class SystemIterationCycle:
             iteration_result.metadata["analysis_summary"] = analysis_results.get("analysis_summary", {})
             
             self._finalize_iteration_result(iteration_result, start_time, success=True)
+            self._complete_system_phase("execute_system_iteration", system_phase_entry, start_time)
+            iteration_result.metadata["analysis_summary"]["final_status"] = self.system_metadata.get("final_status", iteration_result.status)
+            iteration_result.metadata["analysis_summary"]["last_completed_phase"] = self.system_metadata.get("last_completed_phase")
             
             self._update_performance_metrics(iteration_result)
             
@@ -185,6 +285,7 @@ class SystemIterationCycle:
             
         except Exception as e:
             self._finalize_iteration_result(iteration_result, start_time, success=False)
+            self._fail_system_phase("execute_system_iteration", system_phase_entry, start_time, str(e))
             self._update_performance_metrics(iteration_result)
             self.system_iterations.append(iteration_result)
             self.failed_iterations.append(iteration_result)
@@ -333,7 +434,7 @@ class SystemIterationCycle:
                 recommendations,
                 academic_insights,
             ),
-            "analysis_time": time.time() - start_time,
+            "analysis_time": round(time.time() - start_time, 6),
         }
 
     def _build_analysis_summary(
@@ -354,8 +455,39 @@ class SystemIterationCycle:
             "failed_modules": failed_modules,
             "overall_quality": overall_quality,
             "system_status": "attention_required" if len(failed_modules) >= failure_threshold or overall_quality < minimum_stable_quality else "stable",
+            "status": "needs_followup" if self.failed_operations or len(failed_modules) >= failure_threshold or overall_quality < minimum_stable_quality else "stable",
             "recommendation_count": len(recommendations),
             "academic_insight_count": len(academic_insights),
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.system_metadata.get("failed_phase"),
+            "last_completed_phase": self.system_metadata.get("last_completed_phase"),
+            "final_status": self.system_metadata.get("final_status", "initialized"),
+        }
+
+    def _build_system_analysis_summary(self) -> Dict[str, Any]:
+        total_iterations = len(self.system_iterations)
+        completed_iterations = sum(1 for item in self.system_iterations if item.status == "completed")
+        failed_iterations = sum(1 for item in self.system_iterations if item.status == "failed")
+        stable = (
+            total_iterations > 0
+            and failed_iterations == 0
+            and self.performance_metrics.get("system_quality_score", 0.0) >= self.governance_config["minimum_stable_quality"]
+        )
+        status = "idle"
+        if self.failed_operations:
+            status = "needs_followup"
+        elif total_iterations > 0:
+            status = "stable" if stable else "degraded"
+
+        return {
+            "status": status,
+            "total_iterations": total_iterations,
+            "completed_iterations": completed_iterations,
+            "failed_iterations": failed_iterations,
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.system_metadata.get("failed_phase"),
+            "last_completed_phase": self.system_metadata.get("last_completed_phase"),
+            "final_status": self.system_metadata.get("final_status", "initialized"),
         }
     
     def _calculate_system_quality_metrics(self, module_results: Dict[str, Any], 
@@ -639,18 +771,25 @@ class SystemIterationCycle:
             "average_execution_time": avg_execution_time,
             "average_quality_score": avg_quality_score,
             "average_confidence_score": avg_confidence_score,
-            "performance_metrics": self.performance_metrics,
+            "performance_metrics": self._serialize_value(self.performance_metrics),
             "latest_results": [self._serialize_system_iteration_result(i) for i in self.system_iterations[-3:]] if self.system_iterations else [],
             "failed_iterations_details": [self._serialize_system_iteration_result(i) for i in failed_iterations],
+            "analysis_summary": self._build_system_analysis_summary(),
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._serialize_value(self.system_metadata),
             "report_metadata": self._build_system_report_metadata(),
         }
 
     def _build_system_report_metadata(self) -> Dict[str, Any]:
         return {
-            "contract_version": "d15.v1",
+            "contract_version": self.governance_config["export_contract_version"],
             "generated_at": datetime.now().isoformat(),
             "result_schema": "system_iteration_report",
             "latest_iteration_id": self.system_iterations[-1].iteration_id if self.system_iterations else "",
+            "completed_phases": list(self.system_metadata.get("completed_phases", [])),
+            "failed_phase": self.system_metadata.get("failed_phase"),
+            "failed_operation_count": len(self.failed_operations),
+            "last_completed_phase": self.system_metadata.get("last_completed_phase"),
         }
 
     def _serialize_system_iteration_result(self, iteration_result: SystemIterationResult) -> Dict[str, Any]:
@@ -661,14 +800,14 @@ class SystemIterationCycle:
             "start_time": iteration_result.start_time,
             "end_time": iteration_result.end_time,
             "duration": iteration_result.duration,
-            "module_results": iteration_result.module_results,
-            "system_metrics": iteration_result.system_metrics,
-            "system_insights": iteration_result.system_insights,
-            "academic_insights": iteration_result.academic_insights,
-            "recommendations": iteration_result.recommendations,
-            "quality_assessment": iteration_result.quality_assessment,
-            "confidence_scores": iteration_result.confidence_scores,
-            "metadata": iteration_result.metadata,
+            "module_results": self._serialize_value(iteration_result.module_results),
+            "system_metrics": self._serialize_value(iteration_result.system_metrics),
+            "system_insights": self._serialize_value(iteration_result.system_insights),
+            "academic_insights": self._serialize_value(iteration_result.academic_insights),
+            "recommendations": self._serialize_value(iteration_result.recommendations),
+            "quality_assessment": self._serialize_value(iteration_result.quality_assessment),
+            "confidence_scores": self._serialize_value(iteration_result.confidence_scores),
+            "metadata": self._serialize_value(iteration_result.metadata),
         }
 
     def _build_system_export_payload(self, output_path: str) -> Dict[str, Any]:
@@ -682,13 +821,14 @@ class SystemIterationCycle:
                 "system_name": "中医古籍全自动研究系统",
                 "version": "2.0.0",
                 "generated_at": datetime.now().isoformat(),
-                "performance_metrics": self.performance_metrics,
+                "performance_metrics": self._serialize_value(self.performance_metrics),
             },
             "system_report": self.get_system_performance_report(),
             "system_iterations": [self._serialize_system_iteration_result(i) for i in self.system_iterations],
             "failed_iterations": [self._serialize_system_iteration_result(i) for i in self.failed_iterations],
-            "knowledge_graph": self.get_system_knowledge_graph(),
-            "module_cycles": {name: cycle.get_module_performance_report() for name, cycle in self.module_cycles.items()},
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "knowledge_graph": self._serialize_value(self.get_system_knowledge_graph()),
+            "module_cycles": self._serialize_value({name: cycle.get_module_performance_report() for name, cycle in self.module_cycles.items()}),
         }
     
     def get_system_knowledge_graph(self) -> Dict[str, Any]:
@@ -731,16 +871,20 @@ class SystemIterationCycle:
     
     def export_system_data(self, output_path: str) -> bool:
         """导出系统数据"""
+        start_time = time.perf_counter()
+        phase_entry = self._start_system_phase("export_system_data", {"output_path": output_path})
         try:
             system_data = self._build_system_export_payload(output_path)
             
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(system_data, f, ensure_ascii=False, indent=2)
+            self._complete_system_phase("export_system_data", phase_entry, start_time)
             
             self.logger.info(f"系统数据已导出到: {output_path}")
             return True
             
         except Exception as e:
+            self._fail_system_phase("export_system_data", phase_entry, start_time, str(e))
             self.logger.error(f"系统数据导出失败: {e}")
             return False
     
@@ -749,12 +893,31 @@ class SystemIterationCycle:
         try:
             # 清理数据结构
             self.system_iterations.clear()
+            self.failed_iterations.clear()
+            self.failed_operations.clear()
             self.knowledge_graph.clear()
+            self.performance_metrics = {
+                "total_iterations": 0,
+                "successful_iterations": 0,
+                "failed_iterations": 0,
+                "average_duration": 0.0,
+                "total_processing_time": 0.0,
+                "system_quality_score": 0.0,
+                "system_confidence_score": 0.0
+            }
             
             # 清理模块循环
             for cycle in self.module_cycles.values():
                 cycle.cleanup()
             self.module_cycles.clear()
+            self.system_metadata = {
+                "phase_history": [],
+                "phase_timings": {},
+                "completed_phases": [],
+                "failed_phase": None,
+                "final_status": "cleaned",
+                "last_completed_phase": None,
+            }
             
             self.logger.info("系统级迭代循环资源清理完成")
             return True
