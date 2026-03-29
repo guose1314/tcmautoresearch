@@ -4,7 +4,6 @@
 基于T/C IATCM 098-2023标准的自动化测试系统
 """
 
-import asyncio
 import concurrent.futures
 import hashlib
 import json
@@ -13,13 +12,12 @@ import time
 import traceback
 import unittest
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
-import numpy as np
+from src.core.module_base import get_global_executor
 
 try:
     import pytest
@@ -119,7 +117,30 @@ class AutomatedTester:
         self.config = config or {}
         self.test_suites = {}
         self.test_results = []
-        self.performance_metrics = {
+        self.failed_operations: List[Dict[str, Any]] = []
+        self.phase_history: List[Dict[str, Any]] = []
+        self.phase_timings: Dict[str, float] = {}
+        self.completed_phases: List[str] = []
+        self.failed_phase: Optional[str] = None
+        self.final_status = "initialized"
+        self.last_completed_phase: Optional[str] = None
+        self.performance_metrics = self._create_performance_metrics()
+        self.executor = get_global_executor(self.config.get("max_workers", 4))
+        self.logger = logging.getLogger(__name__)
+        self.governance_config = {
+            "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
+            "persist_failed_operations": self.config.get("persist_failed_operations", True),
+            "minimum_stable_pass_rate": float(self.config.get("minimum_stable_pass_rate", 0.85)),
+            "export_contract_version": self.config.get("export_contract_version", "d23.v1"),
+        }
+        
+        # 初始化测试框架
+        self._initialize_test_framework()
+        
+        self.logger.info("自动化测试框架初始化完成")
+
+    def _create_performance_metrics(self) -> Dict[str, Any]:
+        return {
             "total_tests": 0,
             "passed_tests": 0,
             "failed_tests": 0,
@@ -128,15 +149,160 @@ class AutomatedTester:
             "average_execution_time": 0.0,
             "total_execution_time": 0.0,
             "test_coverage_rate": 0.0,
-            "quality_assurance_score": 0.0
+            "quality_assurance_score": 0.0,
         }
-        self.executor = ThreadPoolExecutor(max_workers=self.config.get("max_workers", 4))
-        self.logger = logging.getLogger(__name__)
-        
-        # 初始化测试框架
-        self._initialize_test_framework()
-        
-        self.logger.info("自动化测试框架初始化完成")
+
+    def _start_phase(self, phase_name: str, details: Optional[Dict[str, Any]] = None) -> float:
+        started_at = time.time()
+        if self.governance_config.get("enable_phase_tracking", True):
+            self.phase_history.append({
+                "phase": phase_name,
+                "status": "in_progress",
+                "started_at": datetime.now().isoformat(),
+                "details": self._serialize_value(details or {}),
+            })
+        return started_at
+
+    def _complete_phase(
+        self,
+        phase_name: str,
+        phase_started_at: float,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        duration = max(0.0, time.time() - phase_started_at)
+        self.phase_timings[phase_name] = round(duration, 6)
+        if phase_name not in self.completed_phases:
+            self.completed_phases.append(phase_name)
+        self.last_completed_phase = phase_name
+        if phase_name != "cleanup":
+            self.final_status = "completed"
+
+        if not self.governance_config.get("enable_phase_tracking", True):
+            return
+
+        for phase in reversed(self.phase_history):
+            if phase.get("phase") == phase_name and phase.get("status") == "in_progress":
+                phase["status"] = "completed"
+                phase["ended_at"] = datetime.now().isoformat()
+                phase["duration_seconds"] = round(duration, 6)
+                if details:
+                    phase["details"] = self._serialize_value({**phase.get("details", {}), **details})
+                break
+
+    def _fail_phase(
+        self,
+        phase_name: str,
+        phase_started_at: float,
+        error: Exception,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        duration = max(0.0, time.time() - phase_started_at)
+        self.phase_timings[phase_name] = round(duration, 6)
+        self.failed_phase = phase_name
+        self.final_status = "failed"
+        self._record_failed_operation(phase_name, error, details)
+
+        if not self.governance_config.get("enable_phase_tracking", True):
+            return
+
+        for phase in reversed(self.phase_history):
+            if phase.get("phase") == phase_name and phase.get("status") == "in_progress":
+                phase["status"] = "failed"
+                phase["ended_at"] = datetime.now().isoformat()
+                phase["duration_seconds"] = round(duration, 6)
+                phase["error"] = str(error)
+                if details:
+                    phase["details"] = self._serialize_value({**phase.get("details", {}), **details})
+                break
+
+    def _record_failed_operation(
+        self,
+        operation_name: str,
+        error: Exception,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self.governance_config.get("persist_failed_operations", True):
+            return
+
+        self.failed_operations.append({
+            "operation": operation_name,
+            "error": str(error),
+            "details": self._serialize_value(details or {}),
+            "timestamp": datetime.now().isoformat(),
+        })
+
+    def _serialize_value(self, value: Any) -> Any:
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, defaultdict):
+            return {key: self._serialize_value(item) for key, item in value.items()}
+        if isinstance(value, dict):
+            serialized = {}
+            for key, item in value.items():
+                if key == "function":
+                    serialized["function_name"] = getattr(item, "__name__", "anonymous") if item else "missing"
+                else:
+                    serialized[str(key)] = self._serialize_value(item)
+            return serialized
+        if isinstance(value, list):
+            return [self._serialize_value(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._serialize_value(item) for item in value]
+        if hasattr(value, "__dataclass_fields__"):
+            return {
+                field_name: self._serialize_value(getattr(value, field_name))
+                for field_name in value.__dataclass_fields__
+            }
+        if callable(value):
+            return getattr(value, "__name__", "callable")
+        return value
+
+    def _serialize_test_result(self, result: TestResult) -> Dict[str, Any]:
+        return self._serialize_value(result)
+
+    def _serialize_test_suite(self, suite: TestSuite) -> Dict[str, Any]:
+        serialized_suite = self._serialize_value(suite)
+        serialized_suite["test_cases"] = [self._serialize_value(case) for case in suite.test_cases]
+        serialized_suite["test_results"] = [self._serialize_test_result(result) for result in suite.test_results]
+        return serialized_suite
+
+    def _build_analysis_summary(self) -> Dict[str, Any]:
+        total_tests = len(self.test_results)
+        failed_tests = self.performance_metrics.get("failed_tests", 0)
+        error_tests = self.performance_metrics.get("error_tests", 0)
+        passed_tests = self.performance_metrics.get("passed_tests", 0)
+        pass_rate = passed_tests / total_tests if total_tests else 0.0
+        status = "stable"
+        if self.failed_phase or self.failed_operations or failed_tests or error_tests:
+            status = "needs_followup"
+        elif total_tests == 0:
+            status = "idle"
+        elif pass_rate < self.governance_config["minimum_stable_pass_rate"]:
+            status = "degraded"
+
+        return {
+            "status": status,
+            "total_tests": total_tests,
+            "pass_rate": pass_rate,
+            "failed_test_count": failed_tests,
+            "error_test_count": error_tests,
+            "completed_phase_count": len(self.completed_phases),
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.failed_phase,
+            "final_status": self.final_status,
+        }
+
+    def _build_report_metadata(self) -> Dict[str, Any]:
+        return {
+            "contract_version": self.governance_config["export_contract_version"],
+            "generated_at": datetime.now().isoformat(),
+            "completed_phases": list(self.completed_phases),
+            "failed_phase": self.failed_phase,
+            "failed_operation_count": len(self.failed_operations),
+            "last_completed_phase": self.last_completed_phase,
+        }
     
     def _initialize_test_framework(self):
         """初始化测试框架"""
@@ -197,6 +363,8 @@ class AutomatedTester:
         Returns:
             bool: 添加是否成功
         """
+        phase_started_at = self._start_phase("add_test_suite", {"suite_name": suite_name})
+
         try:
             suite_id = f"suite_{int(time.time())}_{hashlib.md5(suite_name.encode()).hexdigest()[:8]}"
             
@@ -214,11 +382,19 @@ class AutomatedTester:
             # 计算覆盖率
             if test_cases:
                 test_suite.coverage_rate = len(test_cases) / len(test_cases)  # 简化计算
+            self.failed_phase = None
+            self.final_status = "completed"
+            self._complete_phase(
+                "add_test_suite",
+                phase_started_at,
+                {"suite_id": suite_id, "test_case_count": len(test_cases)},
+            )
             
             self.logger.info(f"测试套件 {suite_name} 添加成功")
             return True
             
         except Exception as e:
+            self._fail_phase("add_test_suite", phase_started_at, e, {"suite_name": suite_name})
             self.logger.error(f"测试套件 {suite_name} 添加失败: {e}")
             return False
     
@@ -234,6 +410,7 @@ class AutomatedTester:
             Dict[str, Any]: 测试结果
         """
         start_time = time.time()
+        phase_started_at = self._start_phase("run_test_suite", {"suite_id": suite_id})
         
         try:
             if suite_id not in self.test_suites:
@@ -294,11 +471,22 @@ class AutomatedTester:
             
             # 生成测试报告
             test_report = self._generate_test_report(test_suite)
+            self.failed_phase = None if not self.failed_operations else self.failed_phase
+            self._complete_phase(
+                "run_test_suite",
+                phase_started_at,
+                {
+                    "suite_id": suite_id,
+                    "result_count": len(test_results),
+                    "pass_rate": test_report.get("analysis_summary", {}).get("pass_rate", 0.0),
+                },
+            )
             
             self.logger.info(f"测试套件 {test_suite.suite_name} 运行完成")
             return test_report
             
         except Exception as e:
+            self._fail_phase("run_test_suite", phase_started_at, e, {"suite_id": suite_id})
             self.logger.error(f"测试套件运行失败: {e}")
             self.logger.error(traceback.format_exc())
             raise
@@ -444,7 +632,8 @@ class AutomatedTester:
             "status_distribution": dict(status_counts),
             "average_duration": total_duration / len(test_suite.test_results) if test_suite.test_results else 0.0,
             "average_confidence": total_confidence / len(test_suite.test_results) if test_suite.test_results else 0.0,
-            "average_academic_relevance": total_academic / len(test_suite.test_results) if test_suite.test_results else 0.0
+            "average_academic_relevance": total_academic / len(test_suite.test_results) if test_suite.test_results else 0.0,
+            "pass_rate": status_counts.get(TestStatus.PASSED.value, 0) / len(test_suite.test_results) if test_suite.test_results else 0.0,
         }
     
     def _update_performance_metrics(self, test_results: List[TestResult], 
@@ -474,7 +663,6 @@ class AutomatedTester:
         # 更新质量保证评分
         if test_results:
             confidence_scores = [r.confidence_score for r in test_results]
-            academic_scores = [r.academic_relevance for r in test_results]
             
             if confidence_scores:
                 avg_confidence = sum(confidence_scores) / len(confidence_scores)
@@ -496,6 +684,15 @@ class AutomatedTester:
         
         # 计算质量评分
         quality_score = self._calculate_quality_score(test_suite)
+        analysis_summary = {
+            "suite_status": "stable" if passed_rate >= self.governance_config["minimum_stable_pass_rate"] and not any(r.status in {TestStatus.FAILED, TestStatus.ERROR} for r in test_suite.test_results) else "needs_followup",
+            "total_tests": len(test_suite.test_results),
+            "pass_rate": passed_rate,
+            "failed_test_count": len([r for r in test_suite.test_results if r.status == TestStatus.FAILED]),
+            "error_test_count": len([r for r in test_suite.test_results if r.status == TestStatus.ERROR]),
+            "warning_count": sum(len(r.warnings) for r in test_suite.test_results),
+            "quality_score": quality_score,
+        }
         
         # 生成报告
         report = {
@@ -519,10 +716,12 @@ class AutomatedTester:
                 "quality_score": quality_score,
                 "average_execution_time": self.performance_metrics["average_execution_time"]
             },
-            "detailed_results": [result.__dict__ for result in test_suite.test_results],
-            "performance_metrics": self.performance_metrics,
+            "detailed_results": [self._serialize_test_result(result) for result in test_suite.test_results],
+            "performance_metrics": self._serialize_value(self.performance_metrics),
             "academic_analysis": self._analyze_academic_quality(test_suite),
-            "recommendations": self._generate_recommendations(test_suite)
+            "recommendations": self._generate_recommendations(test_suite),
+            "analysis_summary": analysis_summary,
+            "report_metadata": self._build_report_metadata(),
         }
         
         return report
@@ -697,6 +896,7 @@ class AutomatedTester:
             Dict[str, Any]: 测试结果汇总
         """
         start_time = time.time()
+        phase_started_at = self._start_phase("run_all_tests", {"suite_count": len(self.test_suites)})
         self.logger.info("开始运行所有测试套件")
         
         try:
@@ -704,22 +904,34 @@ class AutomatedTester:
                 "suite_results": {},
                 "overall_summary": {},
                 "execution_time": 0.0,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
             
             # 依次运行所有测试套件
-            for suite_id, test_suite in self.test_suites.items():
+            for suite_id in self.test_suites:
                 suite_result = self.run_test_suite(suite_id, context)
                 results["suite_results"][suite_id] = suite_result
             
             # 计算总体摘要
             results["overall_summary"] = self._calculate_overall_summary()
             results["execution_time"] = time.time() - start_time
+            results["analysis_summary"] = self._build_analysis_summary()
+            results["report_metadata"] = self._build_report_metadata()
+            self.failed_phase = None if not self.failed_operations else self.failed_phase
+            self._complete_phase(
+                "run_all_tests",
+                phase_started_at,
+                {
+                    "suite_count": len(results["suite_results"]),
+                    "total_tests": results["overall_summary"].get("total_tests", 0),
+                },
+            )
             
             self.logger.info("所有测试套件运行完成")
             return results
             
         except Exception as e:
+            self._fail_phase("run_all_tests", phase_started_at, e)
             self.logger.error(f"所有测试运行失败: {e}")
             self.logger.error(traceback.format_exc())
             raise
@@ -758,7 +970,7 @@ class AutomatedTester:
             "average_execution_time": average_duration,
             "average_confidence_score": average_confidence,
             "average_academic_relevance": average_academic,
-            "quality_assurance_score": self.performance_metrics["quality_assurance_score"]
+            "quality_assurance_score": self.performance_metrics["quality_assurance_score"],
         }
     
     def export_test_results(self, output_path: str, format_type: str = "json") -> bool:
@@ -772,17 +984,30 @@ class AutomatedTester:
         Returns:
             bool: 导出是否成功
         """
+        phase_started_at = self._start_phase("export_test_results", {"output_path": output_path, "format_type": format_type})
+
         try:
             test_data = {
                 "framework_info": {
                     "framework_name": "中医古籍全自动研究系统测试框架",
                     "version": "2.0.0",
                     "generated_at": datetime.now().isoformat(),
-                    "performance_metrics": self.performance_metrics
+                    "performance_metrics": self._serialize_value(self.performance_metrics)
                 },
-                "test_suites": [suite.__dict__ for suite in self.test_suites.values()],
-                "test_results": [result.__dict__ for result in self.test_results],
-                "test_summary": self._calculate_overall_summary()
+                "test_suites": [self._serialize_test_suite(suite) for suite in self.test_suites.values()],
+                "test_results": [self._serialize_test_result(result) for result in self.test_results],
+                "test_summary": self._calculate_overall_summary(),
+                "analysis_summary": self._build_analysis_summary(),
+                "failed_operations": self._serialize_value(self.failed_operations),
+                "metadata": {
+                    "phase_history": self._serialize_value(self.phase_history),
+                    "phase_timings": self._serialize_value(self.phase_timings),
+                    "completed_phases": list(self.completed_phases),
+                    "failed_phase": self.failed_phase,
+                    "final_status": self.final_status,
+                    "last_completed_phase": self.last_completed_phase,
+                },
+                "report_metadata": self._build_report_metadata(),
             }
             
             if format_type == "json":
@@ -792,17 +1017,21 @@ class AutomatedTester:
                 # CSV格式导出（简化实现）
                 pass
             
+            self.failed_phase = None
+            self.final_status = "completed"
+            self._complete_phase("export_test_results", phase_started_at, {"output_path": output_path})
             self.logger.info(f"测试结果已导出到: {output_path}")
             return True
             
         except Exception as e:
+            self._fail_phase("export_test_results", phase_started_at, e, {"output_path": output_path})
             self.logger.error(f"测试结果导出失败: {e}")
             return False
     
     def get_test_performance_report(self) -> Dict[str, Any]:
         """获取测试性能报告"""
         return {
-            "performance_metrics": self.performance_metrics,
+            "performance_metrics": self._serialize_value(self.performance_metrics),
             "test_summary": self._calculate_overall_summary(),
             "test_suites": [
                 {
@@ -814,23 +1043,41 @@ class AutomatedTester:
                     "pass_rate": suite.test_stats.get("pass_rate", 0.0) if hasattr(suite, "test_stats") else 0.0
                 } for suite in self.test_suites.values()
             ],
-            "latest_results": [r.__dict__ for r in self.test_results[-10:]] if self.test_results else []
+            "latest_results": [self._serialize_test_result(r) for r in self.test_results[-10:]] if self.test_results else [],
+            "analysis_summary": self._build_analysis_summary(),
+            "report_metadata": self._build_report_metadata(),
+            "metadata": {
+                "phase_history": self._serialize_value(self.phase_history),
+                "phase_timings": self._serialize_value(self.phase_timings),
+                "completed_phases": list(self.completed_phases),
+                "failed_phase": self.failed_phase,
+                "final_status": self.final_status,
+                "last_completed_phase": self.last_completed_phase,
+            },
         }
     
     def cleanup(self) -> bool:
         """清理资源"""
+        phase_started_at = self._start_phase("cleanup")
+
         try:
-            # 关闭线程池
-            self.executor.shutdown(wait=True)
-            
-            # 清理数据结构
             self.test_suites.clear()
             self.test_results.clear()
+            self.performance_metrics = self._create_performance_metrics()
+            self.failed_operations.clear()
+            self.phase_history.clear()
+            self.phase_timings.clear()
+            self.completed_phases.clear()
+            self.failed_phase = None
+            self.last_completed_phase = None
+            self.final_status = "terminated"
             
+            self._complete_phase("cleanup", phase_started_at)
             self.logger.info("自动化测试框架资源清理完成")
             return True
             
         except Exception as e:
+            self._fail_phase("cleanup", phase_started_at, e)
             self.logger.error(f"资源清理失败: {e}")
             return False
 
