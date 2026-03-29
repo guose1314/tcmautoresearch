@@ -669,3 +669,25 @@ python tools/quality_improvement_archive.py --output output/quality-improvement-
 - [ ] 导出测试套件时不会直接暴露函数对象
 - [ ] 导出文件可被 `json.load` 直接回读
 - [ ] cleanup 仅清理实例状态，不关闭共享执行器
+
+## 20. D24 集成测试框架补充检查项
+
+本章节用于 D24 类 integration tester 重构，强调集成测试轨迹、失败操作沉淀、测试摘要契约与共享执行器安全统一。
+
+### 20.1 集成测试契约一致性
+
+- [ ] 集成测试报告输出 `analysis_summary`
+- [ ] 失败操作以稳定 `failed_operations` 列表输出
+- [ ] 性能报告与导出结果输出统一 `report_metadata`
+
+### 20.2 集成编排可观测性
+
+- [ ] 环境创建、测试注册、单测执行、全集执行记录 `phase_history`
+- [ ] 阶段异常写入 `failed_phase`
+- [ ] 成功路径刷新 `completed_phases` 与 `last_completed_phase`
+
+### 20.3 导出与资源安全
+
+- [ ] 导出测试历史时不会暴露枚举或 dataclass 原始对象
+- [ ] 导出文件可被 `json.load` 直接回读
+- [ ] cleanup 仅清理实例状态，不关闭共享执行器

@@ -436,6 +436,11 @@ iteration_cycle:
     persist_failed_operations: true
     minimum_stable_pass_rate: 0.85
     export_contract_version: "d23.v1"
+  integration_tester:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_pass_rate: 0.85
+    export_contract_version: "d24.v1"
 
 # 系统资源配置
 resources:
