@@ -13,7 +13,7 @@ from src.research.multimodal_fusion import FusionStrategy, MultimodalFusionEngin
 
 class TestOptimizationAndLearningFeatures(unittest.TestCase):
     def test_algorithm_optimizer_can_select_and_benchmark(self):
-        optimizer = AlgorithmOptimizer(exploration_c=1.0)
+        optimizer = AlgorithmOptimizer(exploration_c=1.0, config={"export_contract_version": "d25.v1"})
 
         def fast_algo(context):
             return {"quality_score": 0.7, "result": "fast"}
@@ -40,9 +40,10 @@ class TestOptimizationAndLearningFeatures(unittest.TestCase):
             [phase["phase"] for phase in summary["metadata"]["phase_history"][:2]],
             ["run_best", "invoke_algorithm"],
         )
+        self.assertEqual(summary["report_metadata"]["contract_version"], "d25.v1")
 
     def test_algorithm_optimizer_tracks_failed_operations(self):
-        optimizer = AlgorithmOptimizer()
+        optimizer = AlgorithmOptimizer(config={"export_contract_version": "d25.v1"})
 
         def failing_algo(context):
             raise RuntimeError("boom")
@@ -56,9 +57,10 @@ class TestOptimizationAndLearningFeatures(unittest.TestCase):
         self.assertEqual(summary["analysis_summary"]["failed_operation_count"], 2)
         self.assertEqual(summary["analysis_summary"]["status"], "needs_followup")
         self.assertIn(summary["analysis_summary"]["failed_phase"], {"invoke_algorithm", "run_best"})
+        self.assertEqual(summary["failed_operations"][0]["operation"], "invoke_algorithm")
 
     def test_algorithm_optimizer_export_uses_json_safe_contract(self):
-        optimizer = AlgorithmOptimizer()
+        optimizer = AlgorithmOptimizer(config={"export_contract_version": "d25.v1"})
 
         def stable_algo(context):
             return {"quality_score": 0.88, "result": "stable"}
@@ -74,9 +76,26 @@ class TestOptimizationAndLearningFeatures(unittest.TestCase):
             with open(output_path, "r", encoding="utf-8") as file_obj:
                 payload = json.load(file_obj)
 
-        self.assertEqual(payload["report_metadata"]["contract_version"], "d21.v1")
+        self.assertEqual(payload["report_metadata"]["contract_version"], "d25.v1")
         self.assertEqual(payload["optimizer_summary"]["profiles"]["stable"]["name"], "stable")
         self.assertIn("report_metadata", payload["optimizer_summary"])
+
+    def test_algorithm_optimizer_cleanup_resets_runtime_state(self):
+        optimizer = AlgorithmOptimizer(config={"export_contract_version": "d25.v1"})
+
+        def stable_algo(context):
+            return {"quality_score": 0.88, "result": "stable"}
+
+        optimizer.register("stable", stable_algo, tags=["text"])
+        optimizer.run_best({"x": 1}, candidate_tags=["text"])
+
+        cleaned = optimizer.cleanup()
+        summary = optimizer.get_optimization_summary()
+
+        self.assertTrue(cleaned)
+        self.assertEqual(summary["analysis_summary"]["status"], "idle")
+        self.assertEqual(summary["analysis_summary"]["total_calls"], 0)
+        self.assertEqual(summary["metadata"]["final_status"], "terminated")
 
     def test_pattern_recognizer_detects_patterns(self):
         recognizer = PatternRecognizer(min_frequency=2, anomaly_z_threshold=2.0)

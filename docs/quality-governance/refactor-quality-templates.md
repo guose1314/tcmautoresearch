@@ -691,3 +691,25 @@ python tools/quality_improvement_archive.py --output output/quality-improvement-
 - [ ] 导出测试历史时不会暴露枚举或 dataclass 原始对象
 - [ ] 导出文件可被 `json.load` 直接回读
 - [ ] cleanup 仅清理实例状态，不关闭共享执行器
+
+## 21. D25 算法优化器刷新补充检查项
+
+本章节用于 D25 类 algorithm optimizer 二次治理对齐，强调优化轨迹元数据、失败操作结构、导出版本刷新与 cleanup 一致性。
+
+### 21.1 优化器契约一致性
+
+- [ ] 优化器摘要输出 `analysis_summary` 与 `final_status`
+- [ ] 失败操作以稳定 `failed_operations` 列表输出，字段使用 `operation`
+- [ ] 优化报告与导出结果输出统一 `report_metadata`
+
+### 21.2 优化阶段可观测性
+
+- [ ] `run_best`、`benchmark`、`invoke_algorithm`、导出记录 `phase_history`
+- [ ] 阶段异常写入 `failed_phase`
+- [ ] 成功路径刷新 `completed_phases` 与 `last_completed_phase`
+
+### 21.3 导出与清理安全
+
+- [ ] 优化器导出不会暴露不可序列化对象
+- [ ] 导出文件可被 `json.load` 直接回读
+- [ ] cleanup 后运行态元数据与画像统计重置为稳定空状态

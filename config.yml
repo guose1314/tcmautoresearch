@@ -425,7 +425,8 @@ iteration_cycle:
   algorithm_optimizer:
     enable_phase_tracking: true
     persist_failed_operations: true
-    export_contract_version: "d21.v1"
+    minimum_stable_quality: 0.8
+    export_contract_version: "d25.v1"
   system_architecture:
     enable_phase_tracking: true
     persist_failed_operations: true

@@ -17,6 +17,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,8 @@ class AlgorithmOptimizer:
     >>> result = opt.run_best(context, candidate_tags=["text"])
     """
 
-    def __init__(self, exploration_c: float = 1.4):
+    def __init__(self, exploration_c: float = 1.4, config: Optional[Dict[str, Any]] = None):
+        self.config = config or {}
         self._algorithms: Dict[str, Callable] = {}
         self._profiles: Dict[str, AlgorithmProfile] = {}
         self._exploration_c = exploration_c
@@ -90,50 +92,87 @@ class AlgorithmOptimizer:
             "phase_history": [],
             "phase_timings": {},
             "completed_phases": [],
+            "failed_phase": None,
+            "final_status": "initialized",
+            "last_completed_phase": None,
+        }
+        self._governance_config = {
+            "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
+            "persist_failed_operations": self.config.get("persist_failed_operations", True),
+            "minimum_stable_quality": float(self.config.get("minimum_stable_quality", 0.8)),
+            "export_contract_version": self.config.get("export_contract_version", "d25.v1"),
         }
 
     def _start_phase(self, phase_name: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         phase_entry = {
             "phase": phase_name,
-            "status": "running",
+            "status": "in_progress",
             "started_at": datetime.now().isoformat(),
-            "context": context or {},
+            "context": self._serialize_value(context or {}),
         }
-        self._metadata["phase_history"].append(phase_entry)
+        if self._governance_config.get("enable_phase_tracking", True):
+            self._metadata["phase_history"].append(phase_entry)
         return phase_entry
 
     def _complete_phase(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float) -> None:
         duration = time.perf_counter() - start_time
         phase_entry["status"] = "completed"
-        phase_entry["completed_at"] = datetime.now().isoformat()
-        phase_entry["duration"] = duration
-        self._metadata["phase_timings"][phase_name] = duration
-        self._metadata["completed_phases"].append(phase_name)
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        self._metadata["phase_timings"][phase_name] = round(duration, 6)
+        if phase_name not in self._metadata["completed_phases"]:
+            self._metadata["completed_phases"].append(phase_name)
         self._metadata["last_completed_phase"] = phase_name
         self._metadata["final_status"] = "completed"
 
     def _fail_phase(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float, error: str) -> None:
         duration = time.perf_counter() - start_time
         phase_entry["status"] = "failed"
-        phase_entry["completed_at"] = datetime.now().isoformat()
-        phase_entry["duration"] = duration
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
         phase_entry["error"] = error
-        self._metadata["phase_timings"][phase_name] = duration
+        self._metadata["phase_timings"][phase_name] = round(duration, 6)
         self._metadata["failed_phase"] = phase_name
         self._metadata["final_status"] = "failed"
-        self._failed_operations.append(
-            {
-                "phase": phase_name,
-                "error": error,
-                "timestamp": datetime.now().isoformat(),
-                "duration": duration,
+        if self._governance_config.get("persist_failed_operations", True):
+            self._failed_operations.append(
+                {
+                    "operation": phase_name,
+                    "error": error,
+                    "timestamp": datetime.now().isoformat(),
+                    "duration_seconds": round(duration, 6),
+                }
+            )
+
+    def _serialize_value(self, value: Any) -> Any:
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {str(key): self._serialize_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._serialize_value(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._serialize_value(item) for item in value]
+        if hasattr(value, "__dataclass_fields__"):
+            return {
+                field_name: self._serialize_value(getattr(value, field_name))
+                for field_name in value.__dataclass_fields__
             }
-        )
+        if callable(value):
+            return getattr(value, "__name__", "callable")
+        return value
 
     def _build_analysis_summary(self) -> Dict[str, Any]:
         profiled = list(self._profiles.values())
         called_profiles = [profile for profile in profiled if profile.call_count > 0]
         best_profile = max(called_profiles, key=lambda profile: profile.avg_quality, default=None)
+        status = "idle"
+        if self._failed_operations:
+            status = "needs_followup"
+        elif self._total_calls > 0:
+            status = "stable" if (best_profile.avg_quality if best_profile else 0.0) >= self._governance_config["minimum_stable_quality"] else "degraded"
         return {
             "registered_algorithm_count": len(self._algorithms),
             "profiled_algorithm_count": len(called_profiles),
@@ -141,17 +180,22 @@ class AlgorithmOptimizer:
             "failed_operation_count": len(self._failed_operations),
             "best_algorithm": best_profile.name if best_profile else "",
             "best_quality": round(best_profile.avg_quality, 4) if best_profile else 0.0,
-            "status": "needs_followup" if self._failed_operations else ("stable" if self._total_calls > 0 else "idle"),
+            "status": status,
             "last_completed_phase": self._metadata.get("last_completed_phase", ""),
             "failed_phase": self._metadata.get("failed_phase", ""),
+            "final_status": self._metadata.get("final_status", "initialized"),
         }
 
     def _build_report_metadata(self) -> Dict[str, Any]:
         return {
-            "contract_version": "d21.v1",
+            "contract_version": self._governance_config["export_contract_version"],
             "generated_at": datetime.now().isoformat(),
             "result_schema": "algorithm_optimizer_report",
             "registered_algorithm_count": len(self._algorithms),
+            "completed_phases": list(self._metadata.get("completed_phases", [])),
+            "failed_phase": self._metadata.get("failed_phase"),
+            "failed_operation_count": len(self._failed_operations),
+            "last_completed_phase": self._metadata.get("last_completed_phase"),
         }
 
     # ------------------------------------------------------------------
@@ -184,14 +228,16 @@ class AlgorithmOptimizer:
 
     def get_optimization_summary(self) -> Dict[str, Any]:
         return {
-            "profiles": {name: profile.to_dict() for name, profile in self._profiles.items()},
-            "failed_operations": self._failed_operations,
+            "profiles": {name: self._serialize_value(profile.to_dict()) for name, profile in self._profiles.items()},
+            "failed_operations": self._serialize_value(self._failed_operations),
             "analysis_summary": self._build_analysis_summary(),
             "report_metadata": self._build_report_metadata(),
-            "metadata": self._metadata,
+            "metadata": self._serialize_value(self._metadata),
         }
 
     def export_optimization_data(self, output_path: str) -> bool:
+        phase_entry = self._start_phase("export_optimization_data", {"output_path": output_path})
+        start_time = time.perf_counter()
         try:
             payload = {
                 "report_metadata": {
@@ -204,8 +250,11 @@ class AlgorithmOptimizer:
             }
             with open(output_path, "w", encoding="utf-8") as file_obj:
                 json.dump(payload, file_obj, ensure_ascii=False, indent=2)
+            self._metadata["failed_phase"] = None
+            self._complete_phase("export_optimization_data", phase_entry, start_time)
             return True
         except Exception as exc:
+            self._fail_phase("export_optimization_data", phase_entry, start_time, str(exc))
             logger.error("导出算法优化数据失败: %s", exc)
             return False
 
@@ -237,6 +286,7 @@ class AlgorithmOptimizer:
         try:
             chosen = self._ucb1_select(candidates)
             result = self._invoke(chosen, context)
+            self._metadata["failed_phase"] = None if not self._failed_operations else self._metadata.get("failed_phase")
             self._complete_phase("run_best", phase_entry, start_time)
             return chosen, result
         except Exception as exc:
@@ -279,6 +329,7 @@ class AlgorithmOptimizer:
                 }
                 for n in candidates
             }
+            self._metadata["failed_phase"] = None if not self._failed_operations else self._metadata.get("failed_phase")
             self._complete_phase("benchmark", phase_entry, start_time)
             logger.info("基准测试完成，最优算法: '%s'", winner)
             return {
@@ -341,3 +392,22 @@ class AlgorithmOptimizer:
         p.total_quality += max(0.0, min(1.0, quality))
         p.last_called = datetime.now().isoformat()
         self._total_calls += 1
+
+    def cleanup(self) -> bool:
+        try:
+            self._algorithms.clear()
+            self._profiles.clear()
+            self._failed_operations.clear()
+            self._total_calls = 0
+            self._metadata = {
+                "phase_history": [],
+                "phase_timings": {},
+                "completed_phases": [],
+                "failed_phase": None,
+                "final_status": "terminated",
+                "last_completed_phase": None,
+            }
+            return True
+        except Exception as exc:
+            logger.error("清理算法优化器失败: %s", exc)
+            return False

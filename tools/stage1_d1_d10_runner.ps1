@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18", "D19", "D20", "D21", "D22", "D23", "D24")]
+    [ValidateSet("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25")]
     [string]$Day,
     [switch]$All,
     [switch]$DryRun,
@@ -420,6 +420,22 @@ function Get-Plan {
         @{ Type = "commit"; Name = "Commit integration tester alignment"; Message = "stage1 D24 integration tester alignment" }
     )
 
+    $plans["D25"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d25-algorithm-optimizer-refresh" },
+        @{ Type = "cmd"; Name = "Run optimization feature tests"; Command = "& '$Py' -m unittest tests.unit.test_learning_optimization_features" },
+        @{ Type = "cmd"; Name = "Run integration tester quality tests"; Command = "& '$Py' -m unittest tests.unit.test_integration_tester_quality" },
+        @{ Type = "cmd"; Name = "Run automated tester quality tests"; Command = "& '$Py' -m unittest tests.unit.test_automated_tester_quality" },
+        @{ Type = "cmd"; Name = "Run architecture cycle quality tests"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run research pipeline quality tests"; Command = "& '$Py' -m unittest tests.test_research_pipeline_quality" },
+        @{ Type = "cmd"; Name = "Run theoretical framework quality tests"; Command = "& '$Py' -m unittest tests.test_theoretical_framework_quality" },
+        @{ Type = "cmd"; Name = "Run cycle system unittest"; Command = "& '$Py' -m unittest tests.test_cycle_system" },
+        @{ Type = "cmd"; Name = "Run full cycle test"; Command = "& '$Py' tests/test_full_cycle.py" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run optimizer regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings" },
+        @{ Type = "commit"; Name = "Commit algorithm optimizer refresh"; Message = "stage1 D25 algorithm optimizer refresh" }
+    )
+
     return $plans[$DayCode]
 }
 
@@ -523,6 +539,10 @@ function Get-RollbackTips {
         "git restore src/test/integration_tester.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_integration_tester_quality.py",
         "& <python> -m unittest tests.unit.test_integration_tester_quality"
     )
+    $tips["D25"] = @(
+        "git restore src/core/algorithm_optimizer.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_learning_optimization_features.py",
+        "& <python> -m unittest tests.unit.test_learning_optimization_features"
+    )
 
     return $tips[$DayCode]
 }
@@ -567,7 +587,7 @@ $repo = Resolve-RepoRoot -InputPath $RepoPath
 $python = Resolve-Python -Repo $repo -InputPython $PythonExe
 
 if (-not $Day -and -not $All) {
-    throw "Please provide -Day D1..D24 or -All"
+    throw "Please provide -Day D1..D25 or -All"
 }
 if ($Day -and $All) {
     throw "Use either -Day or -All, not both"
@@ -582,7 +602,7 @@ $targetPassRateEnabled = $TargetPassRate -ne -1
 Set-Location $repo
 
 $runDays = if ($All) {
-    @("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18", "D19", "D20", "D21", "D22", "D23", "D24")
+    @("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18", "D19", "D20", "D21", "D22", "D23", "D24", "D25")
 }
 else {
     @($Day)
