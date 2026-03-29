@@ -106,7 +106,7 @@ class FixingStage:
     6. 知识沉淀与传承
     """
     
-    def __init__(self, config: Dict[str, Any] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
         self.repair_actions = []
         self.repair_history = []
@@ -401,41 +401,62 @@ class FixingStage:
         self.logger.info("开始验证修复效果")
         
         try:
-            validation_results = {
-                "total_repairs": len(repair_actions),
-                "successful_repairs": 0,
-                "failed_repairs": 0,
-                "quality_improvement": 0.0,
-                "confidence_improvement": 0.0,
-                "validation_time": 0.0
-            }
-            
+            validation_results = self._initialize_validation_results(len(repair_actions))
+
             # 统计修复结果
-            for action in repair_actions:
-                if action.success:
-                    validation_results["successful_repairs"] += 1
-                else:
-                    validation_results["failed_repairs"] += 1
-            
+            self._update_repair_statistics(validation_results, repair_actions)
+
             # 计算质量提升
-            if validation_results["successful_repairs"] > 0:
-                validation_results["quality_improvement"] = (
-                    validation_results["successful_repairs"] / validation_results["total_repairs"]
-                )
-            
+            self._calculate_quality_improvement(validation_results)
+
             # 计算置信度提升
-            if repair_actions:
-                avg_confidence = sum(a.confidence for a in repair_actions if a.success) / len([a for a in repair_actions if a.success])
-                validation_results["confidence_improvement"] = avg_confidence
-            
+            self._calculate_confidence_improvement(validation_results, repair_actions)
+
             validation_results["validation_time"] = time.time() - start_time
-            
+
             self.logger.info("修复效果验证完成")
             return validation_results
             
         except Exception as e:
             self.logger.error(f"修复效果验证失败: {e}")
             raise
+
+    def _initialize_validation_results(self, total_repairs: int) -> Dict[str, Any]:
+        return {
+            "total_repairs": total_repairs,
+            "successful_repairs": 0,
+            "failed_repairs": 0,
+            "quality_improvement": 0.0,
+            "confidence_improvement": 0.0,
+            "validation_time": 0.0
+        }
+
+    def _update_repair_statistics(
+        self,
+        validation_results: Dict[str, Any],
+        repair_actions: List[RepairAction],
+    ) -> None:
+        for action in repair_actions:
+            if action.success:
+                validation_results["successful_repairs"] += 1
+            else:
+                validation_results["failed_repairs"] += 1
+
+    def _calculate_quality_improvement(self, validation_results: Dict[str, Any]) -> None:
+        if validation_results["successful_repairs"] > 0:
+            validation_results["quality_improvement"] = (
+                validation_results["successful_repairs"] / validation_results["total_repairs"]
+            )
+
+    def _calculate_confidence_improvement(
+        self,
+        validation_results: Dict[str, Any],
+        repair_actions: List[RepairAction],
+    ) -> None:
+        successful_actions = [a for a in repair_actions if a.success]
+        if successful_actions:
+            avg_confidence = sum(a.confidence for a in successful_actions) / len(successful_actions)
+            validation_results["confidence_improvement"] = avg_confidence
     
     def analyze_repair_outcomes(self, repair_actions: List[RepairAction]) -> Dict[str, Any]:
         """

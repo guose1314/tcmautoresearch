@@ -4,8 +4,6 @@
 基于T/C IATCM 098-2023标准的智能迭代循环管理
 """
 
-import asyncio
-import concurrent.futures
 import json
 import logging
 import time
@@ -13,8 +11,7 @@ import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List
 
 from src.core.module_base import get_global_executor
 
@@ -86,14 +83,14 @@ class IterationCycle:
     6. 知识沉淀与传承
     """
     
-    def __init__(self, config: IterationConfig = None):
+    def __init__(self, config: IterationConfig | None = None):
         self.config = config or IterationConfig()
         self.current_iteration = 0
-        self.results = []
-        self.failed_iterations = []
+        self.results: List[IterationResult] = []
+        self.failed_iterations: List[IterationResult] = []
         self.iteration_lock = False
-        self.start_time = None
-        self.end_time = None
+        self.start_time: datetime | None = None
+        self.end_time: datetime | None = None
         self.total_duration = 0.0
         # 使用全局共享线程池，避免每个实例各自创建线程池导致资源泄漏
         self.executor = get_global_executor(self.config.max_concurrent_tasks)
@@ -334,31 +331,35 @@ class IterationCycle:
         self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代 - 验证阶段")
         
         try:
-            # 验证结果的学术有效性
-            validation_results = {
-                "validation_status": "passed",
-                "validation_date": datetime.now().isoformat(),
-                "validation_score": 0.95,
-                "validation_comments": [
-                    "结果符合T/C IATCM 098-2023标准",
-                    "学术价值较高",
-                    "方法论严谨"
-                ],
-                "validation_certification": "academic_approved",
-                "validation_timestamp": datetime.now().isoformat()
-            }
-            
+            validation_results = self._create_validation_results()
+
             # 模拟验证过程
-            time.sleep(0.01)  # 模拟验证时间
-            
-            duration = time.time() - start_time
-            self.logger.info(f"验证阶段完成，耗时: {duration:.2f}s")
-            
+            self._simulate_validation_process(start_time)
+
             return validation_results
-            
+
         except Exception as e:
             self.logger.error(f"验证阶段失败: {e}")
             raise
+
+    def _create_validation_results(self) -> dict:
+        return {
+            "validation_status": "passed",
+            "validation_date": datetime.now().isoformat(),
+            "validation_score": 0.95,
+            "validation_comments": [
+                "结果符合T/C IATCM 098-2023标准",
+                "学术价值较高",
+                "方法论严谨"
+            ],
+            "validation_certification": "academic_approved",
+            "validation_timestamp": datetime.now().isoformat()
+        }
+
+    def _simulate_validation_process(self, start_time: float) -> None:
+        time.sleep(0.01)  # 模拟验证时间
+        duration = time.time() - start_time
+        self.logger.info(f"验证阶段完成，耗时: {duration:.2f}s")
     
     def execute_iteration(self, context: Dict[str, Any]) -> IterationResult:
         """执行单次迭代"""
@@ -366,6 +367,7 @@ class IterationCycle:
             raise RuntimeError("迭代循环正在执行中")
         
         self.iteration_lock = True
+        iteration_start = time.time()
         iteration_result = IterationResult(
             iteration_id=f"iter_{self.current_iteration}_{int(time.time())}",
             cycle_number=self.current_iteration,
@@ -395,7 +397,7 @@ class IterationCycle:
             iteration_result.academic_insights = analysis_results.get("academic_insights", [])
             iteration_result.quality_assessment = analysis_results.get("quality_metrics", {})
             iteration_result.confidence_scores = analysis_results.get("confidence_scores", {})
-            iteration_result.recommendations = analysis_results.get("recommendations", {})
+            iteration_result.recommendations = analysis_results.get("recommendations", [])
             
             # 5. 优化阶段
             iteration_result.status = CycleStatus.OPTIMIZING
@@ -418,7 +420,7 @@ class IterationCycle:
             # 9. 完成阶段
             iteration_result.status = CycleStatus.COMPLETED
             iteration_result.end_time = datetime.now().isoformat()
-            iteration_result.duration = time.time() - float(iteration_result.start_time)
+            iteration_result.duration = time.time() - iteration_start
             
             # 10. 更新性能指标
             self._update_performance_metrics(iteration_result)
@@ -433,7 +435,7 @@ class IterationCycle:
         except Exception as e:
             iteration_result.status = CycleStatus.FAILED
             iteration_result.end_time = datetime.now().isoformat()
-            iteration_result.duration = time.time() - float(iteration_result.start_time)
+            iteration_result.duration = time.time() - iteration_start
             iteration_result.issues_found.append(str(e))
             self.logger.error(f"第 {self.current_iteration} 次迭代失败: {e}")
             self.logger.error(traceback.format_exc())
@@ -498,7 +500,8 @@ class IterationCycle:
                         break
             
             self.end_time = datetime.now()
-            self.total_duration = (self.end_time - self.start_time).total_seconds()
+            if self.start_time is not None:
+                self.total_duration = (self.end_time - self.start_time).total_seconds()
             
             # 更新最终性能指标
             self.performance_metrics["total_iterations"] = len(results)

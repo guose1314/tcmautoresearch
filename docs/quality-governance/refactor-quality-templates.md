@@ -113,13 +113,13 @@ python tools/quality_improvement_archive.py --output output/quality-improvement-
 
 ```python
 def run_quality_assessment(report: dict) -> dict:
-	required = ["results"]
-	missing = [k for k in required if k not in report]
-	if missing:
-		return {"ok": False, "error": "missing_fields", "fields": missing}
-	if not isinstance(report["results"], list):
-		return {"ok": False, "error": "invalid_type", "field": "results"}
-	return {"ok": True}
+    required = ["results"]
+    missing = [k for k in required if k not in report]
+    if missing:
+        return {"ok": False, "error": "missing_fields", "fields": missing}
+    if not isinstance(report["results"], list):
+        return {"ok": False, "error": "invalid_type", "field": "results"}
+    return {"ok": True}
 ```
 
 ### 5.2 配置读取严谨化（容错 + 默认回退）
@@ -132,11 +132,11 @@ def run_quality_assessment(report: dict) -> dict:
 
 ```python
 def load_thresholds(path):
-	try:
-		data = parse_yaml(path)
-	except Exception:
-		return {"min_score": 85.0, "source": "default_fallback"}
-	return {"min_score": float(data.get("min_score", 85.0)), "source": "config"}
+    try:
+        data = parse_yaml(path)
+    except Exception:
+        return {"min_score": 85.0, "source": "default_fallback"}
+    return {"min_score": float(data.get("min_score", 85.0)), "source": "config"}
 ```
 
 ### 5.3 规则判定严谨化（规则表 + 默认分支）
@@ -149,16 +149,16 @@ def load_thresholds(path):
 
 ```python
 RULES = [
-	(("security", "vulnerability"), "security_vulnerability"),
-	(("timeout", "slow"), "performance_issue"),
+    (("security", "vulnerability"), "security_vulnerability"),
+    (("timeout", "slow"), "performance_issue"),
 ]
 
 def classify(msg: str) -> str:
-	low = msg.lower()
-	for keys, issue_type in RULES:
-		if any(k in low for k in keys):
-			return issue_type
-	return "general_issue"
+    low = msg.lower()
+    for keys, issue_type in RULES:
+        if any(k in low for k in keys):
+            return issue_type
+    return "general_issue"
 ```
 
 ### 5.4 指标计算严谨化（边界保护）
@@ -171,10 +171,10 @@ def classify(msg: str) -> str:
 
 ```python
 def safe_ratio(num: float, den: float) -> float:
-	if den <= 0:
-		return 1.0
-	value = num / den
-	return max(0.0, min(1.0, value))
+    if den <= 0:
+        return 1.0
+    value = num / den
+    return max(0.0, min(1.0, value))
 ```
 
 ### 5.5 档案追溯严谨化（timeline + latest + dossier）
@@ -274,7 +274,7 @@ python tools/continuous_improvement_loop.py --assessment-report output/quality-a
 
 建议公式：
 
-Debt = alpha * warnings + beta * complexity_hotspots + gamma * flaky_tests
+`Debt = alpha * warnings + beta * complexity_hotspots + gamma * flaky_tests`
 
 落地命令：
 
@@ -296,7 +296,7 @@ python tools/quality_assessment.py --gates-report output/quality-gate.json --out
 
 建议公式：
 
-ROI = (delta_quality_score + delta_stability_score) / engineering_hours
+`ROI = (delta_quality_score + delta_stability_score) / engineering_hours`
 
 落地命令：
 
@@ -383,3 +383,25 @@ python tools/quality_improvement_archive.py --output output/quality-improvement-
 - [ ] 五段流程均有产物文件
 - [ ] 每段输入输出关系明确
 - [ ] 可从档案完整回放单次治理周期
+
+## 7. D11 验证逻辑补充检查项
+
+本章节用于 D11 类验证阶段重构，强调验证结果结构、失败路径和可复核证据。
+
+### 7.1 验证覆盖率
+
+- [ ] 验证用例覆盖率达到 90% 以上
+- [ ] 验证逻辑的边界条件已测试
+- [ ] 空输入与零结果场景不抛异常
+
+### 7.2 验证性能
+
+- [ ] 验证时间符合预期（填写：实际时间）
+- [ ] 验证结果的置信度提升率已记录
+- [ ] 验证阶段耗时字段可稳定输出
+
+### 7.3 验证结果一致性
+
+- [ ] 验证结果与预期一致
+- [ ] 验证失败路径已记录并分析
+- [ ] 返回结构字段在成功与失败路径上保持兼容

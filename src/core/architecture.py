@@ -281,30 +281,47 @@ class ModuleRegistry:
             module_info = self.get_module(module_id)
             if not module_info:
                 return {"valid": False, "error": "模块不存在"}
-            
-            # 验证依赖关系
+
             dependencies = self.get_module_dependencies(module_id)
-            for dep_id in dependencies:
-                dep_module = self.get_module(dep_id)
-                if not dep_module or dep_module.status != ModuleStatus.ACTIVE:
-                    return {
-                        "valid": False, 
-                        "error": f"依赖模块 {dep_id} 不可用"
-                    }
-            
-            # 验证接口兼容性
+            dependency_issue = self._find_unavailable_dependency(dependencies)
+            if dependency_issue is not None:
+                return {
+                    "valid": False,
+                    "error": f"依赖模块 {dependency_issue} 不可用"
+                }
+
             interface_compatibility = self._check_interface_compatibility(module_info)
-            
-            return {
-                "valid": True,
-                "module_id": module_id,
-                "dependencies": dependencies,
-                "interface_compatibility": interface_compatibility,
-                "timestamp": datetime.now().isoformat()
-            }
+            return self._build_compatibility_result(
+                module_id,
+                dependencies,
+                interface_compatibility,
+            )
             
         except Exception as e:
             return {"valid": False, "error": str(e)}
+
+    def _find_unavailable_dependency(self, dependencies: List[str]) -> str | None:
+        """返回第一个不可用依赖模块 ID。"""
+        for dep_id in dependencies:
+            dep_module = self.get_module(dep_id)
+            if not dep_module or dep_module.status != ModuleStatus.ACTIVE:
+                return dep_id
+        return None
+
+    def _build_compatibility_result(
+        self,
+        module_id: str,
+        dependencies: List[str],
+        interface_compatibility: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """构建统一的模块兼容性验证结果。"""
+        return {
+            "valid": True,
+            "module_id": module_id,
+            "dependencies": dependencies,
+            "interface_compatibility": interface_compatibility,
+            "timestamp": datetime.now().isoformat()
+        }
     
     def _check_interface_compatibility(self, module_info: ModuleInfo) -> Dict[str, Any]:
         """检查接口兼容性"""

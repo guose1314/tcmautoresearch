@@ -4,8 +4,6 @@
 基于T/C IATCM 098-2023标准的接口一致性验证
 """
 
-import hashlib
-import inspect
 import json
 import logging
 import time
@@ -13,7 +11,7 @@ import traceback
 import unittest
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -71,7 +69,7 @@ class InterfaceConsistencyTest:
     6. 学术规范符合性
     """
     
-    def __init__(self, config: Dict[str, Any] = None):
+    def __init__(self, config: Dict[str, Any] | None = None):
         self.config = config or {}
         self.test_results = []
         self.test_history = []
@@ -103,54 +101,17 @@ class InterfaceConsistencyTest:
         self.logger.info("开始验证模块接口一致性")
         
         try:
-            validation_results = {
-                "validation_summary": {},
-                "module_results": {},
-                "compliance_report": {},
-                "academic_analysis": {},
-                "recommendations": []
-            }
-            
-            # 验证每个模块的接口
-            for module_info in modules:
-                module_name = module_info.get("name", "unknown")
-                module_interface = module_info.get("interface", {})
-                
-                # 执行模块接口验证
-                module_result = self._validate_single_module_interface(
-                    module_name, module_interface
-                )
-                
-                validation_results["module_results"][module_name] = module_result
-                
-                # 更新验证摘要
-                validation_results["validation_summary"][module_name] = {
-                    "status": module_result["status"],
-                    "compliance_score": module_result["compliance_score"],
-                    "academic_score": module_result["academic_relevance"]
-                }
-            
-            # 生成合规报告
-            validation_results["compliance_report"] = self._generate_compliance_report(
-                validation_results["module_results"]
-            )
-            
-            # 生成学术分析
-            validation_results["academic_analysis"] = self._generate_academic_analysis(
-                validation_results["module_results"]
-            )
-            
-            # 生成改进建议
-            validation_results["recommendations"] = self._generate_recommendations(
-                validation_results["module_results"]
-            )
-            
-            # 更新性能指标
-            self._update_performance_metrics(
-                validation_results["module_results"], 
-                time.time() - start_time
-            )
-            
+            validation_results = self._initialize_validation_results()
+
+            module_results = self._validate_all_modules(modules)
+            validation_results["module_results"] = module_results
+            validation_results["validation_summary"] = self._build_validation_summary(module_results)
+            validation_results["compliance_report"] = self._generate_compliance_report(module_results)
+            validation_results["academic_analysis"] = self._generate_academic_analysis(module_results)
+            validation_results["recommendations"] = self._generate_recommendations(module_results)
+
+            self._update_performance_metrics(module_results, time.time() - start_time)
+
             self.logger.info("模块接口一致性验证完成")
             return validation_results
             
@@ -158,6 +119,36 @@ class InterfaceConsistencyTest:
             self.logger.error(f"模块接口一致性验证失败: {e}")
             self.logger.error(traceback.format_exc())
             raise
+
+    def _initialize_validation_results(self) -> Dict[str, Any]:
+        return {
+                "validation_summary": {},
+                "module_results": {},
+                "compliance_report": {},
+                "academic_analysis": {},
+                "recommendations": []
+            }
+
+    def _validate_all_modules(self, modules: List[Dict[str, Any]]) -> Dict[str, Any]:
+        module_results: Dict[str, Any] = {}
+        for module_info in modules:
+            module_name = module_info.get("name", "unknown")
+            module_interface = module_info.get("interface", {})
+            module_results[module_name] = self._validate_single_module_interface(
+                module_name,
+                module_interface,
+            )
+        return module_results
+
+    def _build_validation_summary(self, module_results: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            module_name: {
+                "status": result["status"],
+                "compliance_score": result["compliance_score"],
+                "academic_score": result["academic_relevance"],
+            }
+            for module_name, result in module_results.items()
+        }
     
     def _validate_single_module_interface(self, module_name: str, 
                                         module_interface: Dict[str, Any]) -> Dict[str, Any]:

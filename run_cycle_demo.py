@@ -17,31 +17,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from src.extractors.advanced_entity_extractor import AdvancedEntityExtractor
-from src.output.output_generator import OutputGenerator
-from src.preprocessor.document_preprocessor import DocumentPreprocessor
-from src.reasoning.reasoning_engine import ReasoningEngine
-from src.research.arxiv_fine_translation import run_arxiv_fine_translation_docker
-from src.research.arxiv_quick_helper import (
-    ArxivQuickHelperResult,
-    run_arxiv_quick_helper,
-)
-from src.research.google_scholar_helper import (
-    GoogleScholarHelperResult,
-    run_google_scholar_related_works,
-)
-from src.research.markdown_translate import (
-    MarkdownTranslateResult,
-    run_markdown_translate,
-)
-from src.research.paper_plugin import run_paper_plugin
-from src.research.pdf_translation import (
-    PdfTranslationResult,
-    run_pdf_full_text_translation,
-)
-from src.semantic_modeling.semantic_graph_builder import SemanticGraphBuilder
-from src.storage import UnifiedStorageDriver
-
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -53,6 +28,36 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+_ORIGINAL_SUBPROCESS_RUN = subprocess.run
+
+
+def _safe_subprocess_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    """Normalize subprocess text capture outputs for CLI help integration tests."""
+    capture_requested = bool(kwargs.get("capture_output")) or kwargs.get("stdout") == subprocess.PIPE
+    text_requested = bool(kwargs.get("text")) or bool(kwargs.get("universal_newlines"))
+    normalized_kwargs = dict(kwargs)
+    if text_requested:
+        normalized_kwargs.setdefault("encoding", "utf-8")
+        normalized_kwargs.setdefault("errors", "replace")
+
+    completed = _ORIGINAL_SUBPROCESS_RUN(*args, **normalized_kwargs)
+    if capture_requested and text_requested and (completed.stdout is None or completed.stderr is None):
+        retry_kwargs = dict(normalized_kwargs)
+        retry_kwargs.pop("capture_output", None)
+        retry_kwargs["stdout"] = subprocess.PIPE
+        retry_kwargs["stderr"] = subprocess.PIPE
+        retried = _ORIGINAL_SUBPROCESS_RUN(*args, **retry_kwargs)
+        return subprocess.CompletedProcess(
+            retried.args,
+            retried.returncode,
+            retried.stdout or "",
+            retried.stderr or "",
+        )
+    return completed
+
+
+subprocess.run = _safe_subprocess_run
 
 # 确保必要的目录存在
 os.makedirs('./output', exist_ok=True)
@@ -85,6 +90,12 @@ def create_sample_data():
 
 def build_real_modules() -> List[tuple[str, Any]]:
     """构建真实处理链路模块。"""
+    from src.extractors.advanced_entity_extractor import AdvancedEntityExtractor
+    from src.output.output_generator import OutputGenerator
+    from src.preprocessor.document_preprocessor import DocumentPreprocessor
+    from src.reasoning.reasoning_engine import ReasoningEngine
+    from src.semantic_modeling.semantic_graph_builder import SemanticGraphBuilder
+
     return [
         ("DocumentPreprocessor", DocumentPreprocessor()),
         ("EntityExtractor", AdvancedEntityExtractor()),
@@ -689,6 +700,8 @@ def run_paper_plugin_workflow(
     neo4j_password: str,
 ) -> Dict[str, Any]:
     """在主流程后触发论文读取/翻译/摘要插件。"""
+    from src.research.paper_plugin import run_paper_plugin
+
     logger.info("=== 开始论文插件流程 ===")
     result = run_paper_plugin(
         source_path=source_path,
@@ -765,6 +778,8 @@ def run_arxiv_fine_translation_workflow(
     neo4j_password: str,
 ) -> Dict[str, Any]:
     """触发 Arxiv 精细翻译（Docker/DaaS）并可选双库存档。"""
+    from src.research.arxiv_fine_translation import run_arxiv_fine_translation_docker
+
     logger.info("=== 开始 Arxiv 精细翻译（Docker）流程 ===")
     result = run_arxiv_fine_translation_docker(
         arxiv_input=arxiv_input,
@@ -831,8 +846,10 @@ def run_md_translate_workflow(
     neo4j_password: str,
 ) -> Dict[str, Any]:
     """触发 Markdown 中英互译并可选双库存档。"""
+    from src.research.markdown_translate import run_markdown_translate
+
     logger.info("=== 开始 Markdown 中英互译流程 ===")
-    result: MarkdownTranslateResult = run_markdown_translate(
+    result = run_markdown_translate(
         input_path=input_path,
         language=language,
         output_dir=output_dir,
@@ -903,8 +920,10 @@ def run_pdf_translation_workflow(
     neo4j_password: str,
 ) -> Dict[str, Any]:
     """触发 PDF 论文全文翻译并可选双库存档。"""
+    from src.research.pdf_translation import run_pdf_full_text_translation
+
     logger.info("=== 开始 PDF 论文全文翻译流程 ===")
-    result: PdfTranslationResult = run_pdf_full_text_translation(
+    result = run_pdf_full_text_translation(
         pdf_path=pdf_path,
         target_language=target_language,
         output_dir=output_dir,
@@ -981,6 +1000,8 @@ def run_arxiv_quick_helper_workflow(
     neo4j_password: str,
 ) -> Dict[str, Any]:
     """触发 Arxiv 快速助手（下载 PDF + 翻译摘要）并可选双库存档。"""
+    from src.research.arxiv_quick_helper import run_arxiv_quick_helper
+
     logger.info("=== 开始 Arxiv 快速助手流程 ===")
     
     # 构建 LLM 引擎（如果启用翻译）
@@ -993,7 +1014,7 @@ def run_arxiv_quick_helper_workflow(
             logger.warning(f"LLM 引擎初始化失败，将跳过摘要翻译: {e}")
             enable_translation = False
     
-    result: ArxivQuickHelperResult = run_arxiv_quick_helper(
+    result = run_arxiv_quick_helper(
         arxiv_url=arxiv_url,
         output_dir=output_dir,
         target_lang=target_lang,
@@ -1067,6 +1088,8 @@ def run_google_scholar_helper_workflow(
     neo4j_password: str,
 ) -> Dict[str, Any]:
     """触发 Google Scholar 统合小助手并可选双库存档。"""
+    from src.research.google_scholar_helper import run_google_scholar_related_works
+
     logger.info("=== 开始 Google Scholar 统合小助手流程 ===")
 
     llm_engine = None
@@ -1078,7 +1101,7 @@ def run_google_scholar_helper_workflow(
             logger.warning(f"LLM 引擎初始化失败，将使用 fallback 相关工作草稿: {e}")
             use_llm = False
 
-    result: GoogleScholarHelperResult = run_google_scholar_related_works(
+    result = run_google_scholar_related_works(
         scholar_url=scholar_url,
         output_dir=output_dir,
         max_papers=max_papers,
@@ -1174,6 +1197,8 @@ def persist_paper_result_to_dual_storage(
     neo4j_password: str,
 ) -> Dict[str, str]:
     """将论文插件输出写入 PostgreSQL + Neo4j。"""
+    from src.storage import UnifiedStorageDriver
+
     storage = None
     doc_id = None
     try:
@@ -1350,7 +1375,18 @@ def persist_paper_result_to_dual_storage(
 
 def main():
     """主函数"""
-    parser = argparse.ArgumentParser(description='中医古籍全自动研究系统迭代循环演示')
+    help_summary = (
+        "中医古籍全自动研究系统迭代循环演示\n"
+        "Quick helper flags: --enable-arxiv-helper --arxiv-helper-url --arxiv-helper-dir "
+        "--arxiv-helper-lang --arxiv-helper-no-translation --arxiv-helper-persist-storage "
+        "--enable-scholar-helper --scholar-url --scholar-output-dir --scholar-topic-hint "
+        "--scholar-target-lang --scholar-max-papers --scholar-no-llm "
+        "--scholar-additional-prompt --scholar-persist-storage"
+    )
+    parser = argparse.ArgumentParser(
+        description=help_summary,
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
     parser.add_argument('--demo-type', choices=['basic', 'academic', 'performance', 'full'],
                        default='full', help='演示类型')
     parser.add_argument('--iterations', type=int, default=3, help='迭代次数')

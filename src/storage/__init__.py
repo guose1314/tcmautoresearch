@@ -28,6 +28,9 @@ from .neo4j_driver import (
 )
 from .storage_driver import UnifiedStorageDriver
 
+# Backward compatibility for legacy diagnostics and tests.
+Database = DatabaseManager
+
 __all__ = [
     # Schema
     'get_init_script',
@@ -36,6 +39,7 @@ __all__ = [
     
     # Models
     'Base',
+    'Database',
     'DatabaseManager',
     'Document',
     'Entity',

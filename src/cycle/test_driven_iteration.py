@@ -185,37 +185,20 @@ class TestDrivenIterationManager:
             iteration.status = "validating_results"
             validation_results = self._validate_test_results(test_results)
             iteration.validation_results = validation_results
-            
-            # 3. 分析测试结果
-            iteration.status = "analyzing_results"
-            analysis_results = self._analyze_test_results(test_results, validation_results)
-            iteration.academic_insights = analysis_results.get("academic_insights", [])
-            iteration.recommendations = analysis_results.get("recommendations", [])
-            iteration.confidence_scores = analysis_results.get("confidence_scores", {})
-            
-            # 4. 完成阶段
-            iteration.status = "completed"
-            iteration.end_time = datetime.now().isoformat()
-            iteration.duration = time.time() - start_time
-            
-            # 5. 更新性能指标
-            self._update_performance_metrics(iteration)
-            
-            # 6. 保存结果
-            self.iteration_history.append(iteration)
-            
+
+            # 分析测试结果
+            self._analyze_and_update_iteration(iteration, test_results, validation_results, start_time)
+
+            # 保存结果
+            self._save_iteration_results(iteration)
+
             self.logger.info("测试驱动迭代完成")
             return iteration
             
         except Exception as e:
-            iteration.status = "failed"
-            iteration.end_time = datetime.now().isoformat()
-            iteration.duration = time.time() - start_time
-            iteration.validation_results = {"error": str(e)}
-            self.logger.error(f"测试驱动迭代失败: {e}")
-            self.logger.error(traceback.format_exc())
+            self._handle_iteration_failure(iteration, e, start_time)
             raise
-    
+
     def _execute_test_suites(self, context: Dict[str, Any]) -> List[TestResult]:
         """执行测试套件"""
         self.logger.info("执行测试套件")
@@ -349,136 +332,176 @@ class TestDrivenIterationManager:
             self.logger.error(f"测试结果验证失败: {e}")
             raise
     
-    def _analyze_test_results(self, test_results: List[TestResult], 
-                            validation_results: Dict[str, Any]) -> Dict[str, Any]:
+    def _analyze_test_results(
+        self,
+        test_results: List[TestResult],
+        validation_results: Dict[str, Any],
+    ) -> Dict[str, Any]:
         """分析测试结果"""
         self.logger.info("分析测试结果")
         start_time = time.time()
-        
+
         try:
-            # 生成学术洞察
             academic_insights = self._generate_academic_insights(test_results, validation_results)
-            
-            # 生成改进建议
             recommendations = self._generate_recommendations(test_results, validation_results)
-            
-            # 计算综合置信度
             confidence_scores = self._calculate_comprehensive_confidence(test_results, validation_results)
-            
+
             analysis_results = {
                 "academic_insights": academic_insights,
                 "recommendations": recommendations,
                 "confidence_scores": confidence_scores,
-                "analysis_time": time.time() - start_time
+                "analysis_time": time.time() - start_time,
             }
-            
+
             self.logger.info("测试结果分析完成")
             return analysis_results
-            
+
         except Exception as e:
             self.logger.error(f"测试结果分析失败: {e}")
             raise
-    
-    def _generate_academic_insights(self, test_results: List[TestResult], 
-                                  validation_results: Dict[str, Any]) -> List[Dict[str, Any]]:
+
+    def _generate_academic_insights(
+        self,
+        test_results: List[TestResult],
+        validation_results: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
         """生成学术洞察"""
-        insights = []
-        
-        # 基于测试结果生成洞察
+        insights: List[Dict[str, Any]] = []
         pass_rate = validation_results.get("test_summary", {}).get("pass_rate", 0.0)
-        
+
         if pass_rate >= 0.95:
-            insight = {
-                "type": "test_quality",
-                "title": "高通过率测试洞察",
-                "description": f"测试通过率达到 {pass_rate:.2%}，表明系统质量优秀",
-                "confidence": 0.95,
-                "timestamp": datetime.now().isoformat(),
-                "tags": ["quality", "test", "academic"]
-            }
-            insights.append(insight)
+            insights.append(
+                {
+                    "type": "test_quality",
+                    "title": "高通过率测试洞察",
+                    "description": f"测试通过率达到 {pass_rate:.2%}，表明系统质量优秀",
+                    "confidence": 0.95,
+                    "timestamp": datetime.now().isoformat(),
+                    "tags": ["quality", "test", "academic"],
+                }
+            )
         elif pass_rate >= 0.8:
-            insight = {
-                "type": "test_moderate",
-                "title": "中等通过率测试洞察",
-                "description": f"测试通过率为 {pass_rate:.2%}，仍有改进空间",
-                "confidence": 0.85,
-                "timestamp": datetime.now().isoformat(),
-                "tags": ["quality", "test", "academic"]
-            }
-            insights.append(insight)
-        
-        # 基于失败测试生成洞察
-        failed_tests = [r for r in test_results if r.status == "failed"]
+            insights.append(
+                {
+                    "type": "test_moderate",
+                    "title": "中等通过率测试洞察",
+                    "description": f"测试通过率为 {pass_rate:.2%}，仍有改进空间",
+                    "confidence": 0.85,
+                    "timestamp": datetime.now().isoformat(),
+                    "tags": ["quality", "test", "academic"],
+                }
+            )
+
+        failed_tests = [result for result in test_results if result.status == "failed"]
         if failed_tests:
-            insight = {
-                "type": "test_failure",
-                "title": "测试失败分析洞察",
-                "description": f"发现 {len(failed_tests)} 个测试失败，需要重点关注",
-                "confidence": 0.90,
-                "timestamp": datetime.now().isoformat(),
-                "tags": ["failure", "analysis", "academic"],
-                "failure_details": [
-                    {
-                        "test_name": t.test_name,
-                        "error": t.error_message,
-                        "confidence": t.confidence_score
-                    } for t in failed_tests
-                ]
-            }
-            insights.append(insight)
-        
+            insights.append(
+                {
+                    "type": "test_failure",
+                    "title": "测试失败分析洞察",
+                    "description": f"发现 {len(failed_tests)} 个测试失败，需要重点关注",
+                    "confidence": 0.90,
+                    "timestamp": datetime.now().isoformat(),
+                    "tags": ["failure", "analysis", "academic"],
+                    "failure_details": [
+                        {
+                            "test_name": result.test_name,
+                            "error": result.error_message,
+                            "confidence": result.confidence_score,
+                        }
+                        for result in failed_tests
+                    ],
+                }
+            )
+
         return insights
-    
-    def _generate_recommendations(self, test_results: List[TestResult], 
-                                validation_results: Dict[str, Any]) -> List[Dict[str, Any]]:
+
+    def _generate_recommendations(
+        self,
+        test_results: List[TestResult],
+        validation_results: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
         """生成改进建议"""
-        recommendations = []
-        
-        # 基于测试覆盖率生成建议
+        recommendations: List[Dict[str, Any]] = []
         coverage_rate = validation_results.get("coverage_rate", 0.0)
-        if coverage_rate < 0.8:
-            recommendation = {
-                "type": "test_coverage",
-                "title": "提升测试覆盖率的建议",
-                "description": "当前测试覆盖率较低，建议增加测试用例覆盖更多场景",
-                "priority": "high",
-                "confidence": 0.85,
-                "timestamp": datetime.now().isoformat(),
-                "tags": ["test", "coverage", "improvement"]
-            }
-            recommendations.append(recommendation)
-        
-        # 基于失败测试生成建议
-        failed_tests = [r for r in test_results if r.status == "failed"]
-        if failed_tests:
-            recommendation = {
-                "type": "test_failure_fix",
-                "title": "修复测试失败问题的建议",
-                "description": "建议针对失败的测试用例进行专项修复和优化",
-                "priority": "high",
-                "confidence": 0.90,
-                "timestamp": datetime.now().isoformat(),
-                "tags": ["failure", "fix", "improvement"],
-                "failed_test_count": len(failed_tests)
-            }
-            recommendations.append(recommendation)
-        
-        # 基于质量保证评分生成建议
+        failed_tests = [result for result in test_results if result.status == "failed"]
         quality_score = validation_results.get("quality_assurance_score", 0.0)
+
+        if coverage_rate < 0.8:
+            recommendations.append(
+                {
+                    "type": "test_coverage",
+                    "title": "提升测试覆盖率的建议",
+                    "description": "当前测试覆盖率较低，建议增加测试用例覆盖更多场景",
+                    "priority": "high",
+                    "confidence": 0.85,
+                    "timestamp": datetime.now().isoformat(),
+                    "tags": ["test", "coverage", "improvement"],
+                }
+            )
+
+        if failed_tests:
+            recommendations.append(
+                {
+                    "type": "test_failure_fix",
+                    "title": "修复测试失败问题的建议",
+                    "description": "建议针对失败的测试用例进行专项修复和优化",
+                    "priority": "high",
+                    "confidence": 0.90,
+                    "timestamp": datetime.now().isoformat(),
+                    "tags": ["failure", "fix", "improvement"],
+                    "failed_test_count": len(failed_tests),
+                }
+            )
+
         if quality_score < 0.8:
-            recommendation = {
-                "type": "quality_assurance",
-                "title": "提升质量保证水平的建议",
-                "description": "质量保证评分较低，建议加强质量控制机制",
-                "priority": "medium",
-                "confidence": 0.75,
-                "timestamp": datetime.now().isoformat(),
-                "tags": ["quality", "assurance", "improvement"]
-            }
-            recommendations.append(recommendation)
-        
+            recommendations.append(
+                {
+                    "type": "quality_assurance",
+                    "title": "提升质量保证水平的建议",
+                    "description": "质量保证评分较低，建议加强质量控制机制",
+                    "priority": "medium",
+                    "confidence": 0.75,
+                    "timestamp": datetime.now().isoformat(),
+                    "tags": ["quality", "assurance", "improvement"],
+                }
+            )
+
         return recommendations
+
+    def _analyze_and_update_iteration(
+        self,
+        iteration: TestDrivenIteration,
+        test_results: List[TestResult],
+        validation_results: Dict[str, Any],
+        start_time: float,
+    ) -> None:
+        """分析测试结果并更新迭代状态"""
+        iteration.status = "analyzing_results"
+        analysis_results = self._analyze_test_results(test_results, validation_results)
+        iteration.academic_insights = analysis_results.get("academic_insights", [])
+        iteration.recommendations = analysis_results.get("recommendations", [])
+        iteration.confidence_scores = analysis_results.get("confidence_scores", {})
+
+        iteration.status = "completed"
+        iteration.end_time = datetime.now().isoformat()
+        iteration.duration = time.time() - start_time
+        self._update_performance_metrics(iteration)
+
+    def _save_iteration_results(self, iteration: TestDrivenIteration) -> None:
+        self.iteration_history.append(iteration)
+
+    def _handle_iteration_failure(
+        self,
+        iteration: TestDrivenIteration,
+        exception: Exception,
+        start_time: float,
+    ) -> None:
+        iteration.status = "failed"
+        iteration.end_time = datetime.now().isoformat()
+        iteration.duration = time.time() - start_time
+        iteration.validation_results = {"error": str(exception)}
+        self.logger.error(f"测试驱动迭代失败: {exception}")
+        self.logger.error(traceback.format_exc())
     
     def _calculate_comprehensive_confidence(self, test_results: List[TestResult], 
                                          validation_results: Dict[str, Any]) -> Dict[str, float]:

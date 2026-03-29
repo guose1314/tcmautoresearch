@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10")]
+    [ValidateSet("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11")]
     [string]$Day,
     [switch]$All,
     [switch]$DryRun,
@@ -208,6 +208,7 @@ function Get-Plan {
         @{ Type = "cmd"; Name = "Run cycle system unittest"; Command = "& '$Py' -m unittest tests.test_cycle_system" },
         @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
         @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run validation tests"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings" },
         @{ Type = "commit"; Name = "Commit reasoning refactor"; Message = "stage1 D6 reasoning engine evidence-chain refactor" }
     )
 
@@ -247,6 +248,16 @@ function Get-Plan {
         @{ Type = "cmd"; Name = "Run quality archive"; Command = "& '$Py' tools/quality_improvement_archive.py" },
         @{ Type = "cmd"; Name = "Run quality feedback"; Command = "& '$Py' tools/quality_feedback.py" },
         @{ Type = "commit"; Name = "Commit release artifacts"; Message = "stage1 D10 release gate, assessment, archive, feedback" }
+    )
+
+    $plans["D11"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d11-validation" },
+        @{ Type = "cmd"; Name = "Run full cycle test"; Command = "& '$Py' tests/test_full_cycle.py" },
+        @{ Type = "cmd"; Name = "Run cycle system unittest"; Command = "& '$Py' -m unittest tests.test_cycle_system" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run validation tests"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings" },
+        @{ Type = "commit"; Name = "Commit validation"; Message = "stage1 D11 validation" }
     )
 
     return $plans[$DayCode]
@@ -293,6 +304,10 @@ function Get-RollbackTips {
         "& <python> tools/quality_gate.py"
     )
     $tips["D10"] = @(
+        "git restore .",
+        "& <python> tools/quality_gate.py"
+    )
+    $tips["D11"] = @(
         "git restore .",
         "& <python> tools/quality_gate.py"
     )
@@ -355,7 +370,7 @@ $targetPassRateEnabled = $TargetPassRate -ne -1
 Set-Location $repo
 
 $runDays = if ($All) {
-    @("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10")
+    @("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11")
 }
 else {
     @($Day)
