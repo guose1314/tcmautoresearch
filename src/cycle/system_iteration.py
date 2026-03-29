@@ -8,7 +8,7 @@ import logging
 import time
 import traceback
 import json
-from typing import Dict, Any, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from datetime import datetime
 from dataclasses import dataclass, field
 import networkx as nx
@@ -54,6 +54,7 @@ class SystemIterationCycle:
     def __init__(self, system_config: Optional[Dict[str, Any]] = None):
         self.config = system_config or {}
         self.system_iterations: List[SystemIterationResult] = []
+        self.failed_iterations: List[SystemIterationResult] = []
         self.performance_metrics = {
             "total_iterations": 0,
             "successful_iterations": 0,
@@ -68,6 +69,59 @@ class SystemIterationCycle:
         self.logger = logging.getLogger(__name__)
         
         self.logger.info("系统级迭代循环管理器初始化完成")
+
+    def _initialize_phase_tracking(self, iteration_result: SystemIterationResult) -> None:
+        iteration_result.metadata["phase_history"] = []
+        iteration_result.metadata["phase_timings"] = {}
+        iteration_result.metadata["completed_phases"] = []
+
+    def _execute_phase(
+        self,
+        iteration_result: SystemIterationResult,
+        phase_name: str,
+        status: str,
+        operation: Callable[[], Any],
+    ) -> Any:
+        phase_start = time.time()
+        phase_entry = {
+            "phase": phase_name,
+            "status": "running",
+            "started_at": datetime.now().isoformat(),
+        }
+        iteration_result.metadata["phase_history"].append(phase_entry)
+        iteration_result.status = status
+
+        try:
+            result = operation()
+        except Exception as exc:
+            duration = time.time() - phase_start
+            phase_entry["status"] = "failed"
+            phase_entry["ended_at"] = datetime.now().isoformat()
+            phase_entry["duration"] = duration
+            phase_entry["error"] = str(exc)
+            iteration_result.metadata["phase_timings"][phase_name] = duration
+            iteration_result.metadata["failed_phase"] = phase_name
+            raise
+
+        duration = time.time() - phase_start
+        phase_entry["status"] = "completed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration"] = duration
+        iteration_result.metadata["phase_timings"][phase_name] = duration
+        iteration_result.metadata["completed_phases"].append(phase_name)
+        iteration_result.metadata["last_completed_phase"] = phase_name
+        return result
+
+    def _finalize_iteration_result(
+        self,
+        iteration_result: SystemIterationResult,
+        start_time: float,
+        success: bool,
+    ) -> None:
+        iteration_result.status = "completed" if success else "failed"
+        iteration_result.end_time = datetime.now().isoformat()
+        iteration_result.duration = time.time() - start_time
+        iteration_result.metadata["final_status"] = iteration_result.status
     
     def execute_system_iteration(self, context: Dict[str, Any]) -> SystemIterationResult:
         """
@@ -87,21 +141,31 @@ class SystemIterationCycle:
             status="pending",
             start_time=datetime.now().isoformat()
         )
+        self._initialize_phase_tracking(iteration_result)
         
         try:
-            # 1. 逐个执行模块迭代
-            iteration_result.status = "executing_modules"
-            module_results = self._execute_module_iterations(context)
+            module_results = self._execute_phase(
+                iteration_result,
+                "execute_modules",
+                "executing_modules",
+                lambda: self._execute_module_iterations(context),
+            )
             iteration_result.module_results = module_results
             
-            # 2. 系统级测试
-            iteration_result.status = "testing_system"
-            system_test_results = self._test_system_level(context, module_results)
+            system_test_results = self._execute_phase(
+                iteration_result,
+                "test_system",
+                "testing_system",
+                lambda: self._test_system_level(context, module_results),
+            )
             iteration_result.system_metrics = system_test_results
             
-            # 3. 系统级分析
-            iteration_result.status = "analyzing_system"
-            analysis_results = self._analyze_system_results(context, module_results, system_test_results)
+            analysis_results = self._execute_phase(
+                iteration_result,
+                "analyze_system",
+                "analyzing_system",
+                lambda: self._analyze_system_results(context, module_results, system_test_results),
+            )
             iteration_result.system_insights = analysis_results.get("system_insights", [])
             iteration_result.academic_insights = analysis_results.get("academic_insights", [])
             iteration_result.quality_assessment = analysis_results.get("quality_metrics", {})
@@ -109,24 +173,20 @@ class SystemIterationCycle:
             iteration_result.recommendations = analysis_results.get("recommendations", [])
             iteration_result.metadata["analysis_summary"] = analysis_results.get("analysis_summary", {})
             
-            # 4. 完成阶段
-            iteration_result.status = "completed"
-            iteration_result.end_time = datetime.now().isoformat()
-            iteration_result.duration = time.time() - start_time
+            self._finalize_iteration_result(iteration_result, start_time, success=True)
             
-            # 5. 更新性能指标
             self._update_performance_metrics(iteration_result)
             
-            # 6. 保存结果
             self.system_iterations.append(iteration_result)
             
             self.logger.info("系统级迭代完成")
             return iteration_result
             
         except Exception as e:
-            iteration_result.status = "failed"
-            iteration_result.end_time = datetime.now().isoformat()
-            iteration_result.duration = time.time() - start_time
+            self._finalize_iteration_result(iteration_result, start_time, success=False)
+            self._update_performance_metrics(iteration_result)
+            self.system_iterations.append(iteration_result)
+            self.failed_iterations.append(iteration_result)
             self.logger.error(f"系统级迭代失败: {e}")
             self.logger.error(traceback.format_exc())
             raise
@@ -284,13 +344,15 @@ class SystemIterationCycle:
     ) -> Dict[str, Any]:
         failed_modules = self._get_failed_modules(module_results)
         overall_quality = float(quality_metrics.get("overall_quality", 0.0))
+        failure_threshold = int(self.config.get("failed_module_attention_threshold", 1))
+        minimum_stable_quality = float(self.config.get("minimum_stable_quality", 0.85))
 
         return {
             "module_count": len(module_results),
             "failed_module_count": len(failed_modules),
             "failed_modules": failed_modules,
             "overall_quality": overall_quality,
-            "system_status": "attention_required" if failed_modules or overall_quality < 0.85 else "stable",
+            "system_status": "attention_required" if len(failed_modules) >= failure_threshold or overall_quality < minimum_stable_quality else "stable",
             "recommendation_count": len(recommendations),
             "academic_insight_count": len(academic_insights),
         }

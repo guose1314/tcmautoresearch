@@ -2,7 +2,7 @@ import unittest
 from importlib.util import find_spec
 
 from src.core import __all__ as core_all
-from src.cycle.iteration_cycle import IterationConfig, IterationCycle
+from src.cycle.iteration_cycle import CycleStatus, IterationConfig, IterationCycle
 from src.cycle.system_iteration import SystemIterationCycle
 from src.cycle.test_driven_iteration import TestDrivenIterationManager
 
@@ -147,6 +147,50 @@ class TestCoreAndCycleQuality(unittest.TestCase):
         self.assertGreaterEqual(len(result.academic_insights), 1)
         self.assertIn("analysis_summary", result.metadata)
         self.assertEqual(result.metadata["analysis_summary"]["system_status"], "stable")
+
+    def test_iteration_cycle_execute_records_phase_history_and_analysis_summary(self):
+        cycle = IterationCycle(IterationConfig(confidence_threshold=0.7))
+        cycle.generate_artifacts = lambda context: {"artifact_id": "a1", "quality_metrics": {"completeness": 0.9, "accuracy": 0.88, "consistency": 0.91}}
+        cycle.test_artifacts = lambda artifacts: {"passed": True, "failures": [], "metrics": {"execution_time": 0.2, "memory_usage": 8.0}}
+        cycle.repair_artifacts = lambda artifacts, test_results: []
+        cycle.analyze_results = lambda artifacts, test_results, repair_actions: {
+            "quality_metrics": {"overall_quality": 0.89, "quality_score": 0.89},
+            "academic_insights": [{"title": "ok"}],
+            "recommendations": [{"title": "keep"}],
+            "confidence_scores": {"overall": 0.91},
+            "analysis_summary": {"iteration_status": "stable", "quality_score": 0.89},
+        }
+        cycle.optimize_process = lambda analysis_results: {
+            "optimization_actions": [],
+            "optimization_summary": {"status": "no_action_needed"},
+        }
+        cycle.validate_results = lambda artifacts, analysis_results: {"validation_status": "passed"}
+
+        result = cycle.execute_iteration({})
+
+        self.assertEqual(result.status, CycleStatus.COMPLETED)
+        self.assertEqual([phase["phase"] for phase in result.metadata["phase_history"]], ["generate", "test", "repair", "analyze", "optimize", "validate"])
+        self.assertTrue(all(phase["status"] == "completed" for phase in result.metadata["phase_history"]))
+        self.assertIn("analyze", result.metadata["phase_timings"])
+        self.assertEqual(result.metadata["analysis_summary"]["iteration_status"], "stable")
+
+    def test_system_iteration_failure_tracks_failed_phase(self):
+        cycle = SystemIterationCycle()
+        cycle._execute_module_iterations = lambda context: {"module_a": {"status": "completed"}}
+
+        def raise_system_test_error(context, module_results):
+            raise RuntimeError("system test failed")
+
+        cycle._test_system_level = raise_system_test_error
+
+        with self.assertRaises(RuntimeError):
+            cycle.execute_system_iteration({})
+
+        self.assertEqual(len(cycle.failed_iterations), 1)
+        failed_result = cycle.failed_iterations[0]
+        self.assertEqual(failed_result.metadata["failed_phase"], "test_system")
+        self.assertEqual(failed_result.metadata["phase_history"][-1]["status"], "failed")
+        self.assertEqual(failed_result.status, "failed")
 
 
 if __name__ == "__main__":

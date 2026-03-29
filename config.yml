@@ -390,6 +390,11 @@ iteration_cycle:
     max_recommendations: 5
     academic_insight_min_quality: 0.85
     failed_module_attention_threshold: 1
+    minimum_stable_quality: 0.85
+    enable_phase_tracking: true
+  orchestration:
+    enable_phase_tracking: true
+    persist_failed_iterations: true
 
 # 系统资源配置
 resources:
