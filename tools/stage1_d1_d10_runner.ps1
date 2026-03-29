@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11")]
+    [ValidateSet("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12")]
     [string]$Day,
     [switch]$All,
     [switch]$DryRun,
@@ -260,6 +260,17 @@ function Get-Plan {
         @{ Type = "commit"; Name = "Commit validation"; Message = "stage1 D11 validation" }
     )
 
+    $plans["D12"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d12-optimization" },
+        @{ Type = "cmd"; Name = "Run cycle quality unit test"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run full cycle test"; Command = "& '$Py' tests/test_full_cycle.py" },
+        @{ Type = "cmd"; Name = "Run cycle system unittest"; Command = "& '$Py' -m unittest tests.test_cycle_system" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run optimization regression tests"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings" },
+        @{ Type = "commit"; Name = "Commit optimization"; Message = "stage1 D12 optimization" }
+    )
+
     return $plans[$DayCode]
 }
 
@@ -311,6 +322,10 @@ function Get-RollbackTips {
         "git restore .",
         "& <python> tools/quality_gate.py"
     )
+    $tips["D12"] = @(
+        "git restore src/cycle/iteration_cycle.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
+    )
 
     return $tips[$DayCode]
 }
@@ -355,7 +370,7 @@ $repo = Resolve-RepoRoot -InputPath $RepoPath
 $python = Resolve-Python -Repo $repo -InputPython $PythonExe
 
 if (-not $Day -and -not $All) {
-    throw "Please provide -Day D1..D10 or -All"
+    throw "Please provide -Day D1..D12 or -All"
 }
 if ($Day -and $All) {
     throw "Use either -Day or -All, not both"
@@ -370,7 +385,7 @@ $targetPassRateEnabled = $TargetPassRate -ne -1
 Set-Location $repo
 
 $runDays = if ($All) {
-    @("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11")
+    @("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12")
 }
 else {
     @($Day)

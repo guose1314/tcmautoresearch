@@ -258,6 +258,17 @@ monitoring:
     enabled: true
     thresholds:
       cpu_usage: 80
+      memory_usage: 85
+      error_rate: 0.05
+      processing_time: 300
+    notification_channels:
+      - "email"
+      - "slack"
+      - "webhook"
+    email_recipients:
+      - "admin@example.com"
+      - "research-team@example.com"
+    webhook_url: "https://example.invalid/slack-webhook-placeholder"
 
 # ctext 标准语料采集配置
 ctext_corpus:
@@ -274,17 +285,6 @@ ctext_corpus:
       - "five_classics"
       - "tcm_classics"
   batch_manifest_output: "./output/ctext_batch_manifest.json"
-      memory_usage: 85
-      error_rate: 0.05
-      processing_time: 300
-    notification_channels:
-      - "email"
-      - "slack"
-      - "webhook"
-    email_recipients:
-      - "admin@example.com"
-      - "research-team@example.com"
-    webhook_url: "https://example.invalid/slack-webhook-placeholder"
 
 # 安全配置
 security:
@@ -359,6 +359,14 @@ iteration_cycle:
   quality_assurance_level: "high"
   parallel_execution: true
   max_concurrent_tasks: 4
+  optimization:
+    enabled: true
+    quality_threshold: 0.8
+    confidence_threshold: 0.8
+    max_actions_per_iteration: 3
+    expected_improvements:
+      quality_score: 0.15
+      confidence_score: 0.1
   cycle_validation:
     enabled: true
     validation_frequency: "every_iteration"
@@ -500,14 +508,11 @@ advanced:
   async_processing:
     enabled: true
     event_loop: "asyncio"
-    enabled: false
+    distributed_mode: false
     # 配置分布式节点示例: 
     # cluster_nodes:
     #   - "192.168.1.101:8000"
     #   - "192.168.1.102:8000"
-    cluster_nodes: []
-    load_balancing: "round_robin"
-    fault_tolerance: true
     cluster_nodes: []
     load_balancing: "round_robin"
     fault_tolerance: true

@@ -29,6 +29,58 @@ class TestCoreAndCycleQuality(unittest.TestCase):
         if has_pytest:
             self.assertIn("pytest", manager.test_frameworks)
 
+    def test_iteration_cycle_optimization_generates_ranked_actions(self):
+        cycle = IterationCycle(
+            IterationConfig(
+                optimization_quality_threshold=0.8,
+                optimization_confidence_threshold=0.8,
+                max_optimization_actions=3,
+            )
+        )
+
+        result = cycle.optimize_process(
+            {
+                "quality_metrics": {"quality_score": 0.62},
+                "confidence_scores": {"entity": 0.71, "reasoning": 0.69},
+            }
+        )
+
+        self.assertEqual(result["optimization_status"], "optimization_required")
+        self.assertEqual(len(result["optimization_actions"]), 2)
+        self.assertEqual(result["optimization_actions"][0]["priority"], "high")
+        self.assertEqual(result["optimization_actions"][1]["priority"], "medium")
+        self.assertEqual(result["optimization_summary"]["highest_priority"], "high")
+        self.assertAlmostEqual(result["optimization_summary"]["quality_threshold"], 0.8)
+
+    def test_iteration_cycle_optimization_handles_empty_analysis_results(self):
+        cycle = IterationCycle(IterationConfig())
+
+        result = cycle.optimize_process({})
+
+        self.assertEqual(result["optimization_status"], "no_action_needed")
+        self.assertEqual(result["optimization_actions"], [])
+        self.assertEqual(result["optimization_summary"]["action_count"], 0)
+        self.assertEqual(result["optimization_summary"]["highest_priority"], "none")
+
+    def test_iteration_cycle_optimization_respects_max_actions(self):
+        cycle = IterationCycle(
+            IterationConfig(
+                optimization_quality_threshold=0.9,
+                optimization_confidence_threshold=0.95,
+                max_optimization_actions=1,
+            )
+        )
+
+        result = cycle.optimize_process(
+            {
+                "quality_metrics": {"quality_score": 0.6},
+                "confidence_scores": {"entity": 0.7, "reasoning": 0.75},
+            }
+        )
+
+        self.assertEqual(len(result["optimization_actions"]), 1)
+        self.assertEqual(result["optimization_actions"][0]["action"], "process_optimization")
+
 
 if __name__ == "__main__":
     unittest.main()

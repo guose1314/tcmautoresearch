@@ -65,6 +65,9 @@ class IterationConfig:
     quality_assurance_level: str = "high"
     parallel_execution: bool = False
     max_concurrent_tasks: int = 4
+    optimization_quality_threshold: float = 0.8
+    optimization_confidence_threshold: float = 0.8
+    max_optimization_actions: int = 3
 
 class IterationCycle:
     """
@@ -278,51 +281,124 @@ class IterationCycle:
         self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代 - 优化阶段")
         
         try:
-            # 基于分析结果进行优化
-            optimization_actions = []
-            
-            # 检查质量指标
-            quality_metrics = analysis_results.get("quality_metrics", {})
-            if quality_metrics:
-                # 如果质量偏低，提出优化建议
-                if quality_metrics.get("quality_score", 0.0) < 0.8:
-                    optimization_action = {
-                        "action": "process_optimization",
-                        "description": "根据质量分析结果优化处理流程",
-                        "priority": "high",
-                        "expected_improvement": "提高质量评分0.15",
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    optimization_actions.append(optimization_action)
-            
-            # 检查置信度
-            confidence_scores = analysis_results.get("confidence_scores", {})
-            if confidence_scores:
-                avg_confidence = sum(confidence_scores.values()) / len(confidence_scores) if confidence_scores else 0.0
-                if avg_confidence < 0.8:
-                    optimization_action = {
-                        "action": "confidence_improvement",
-                        "description": "提升模型置信度",
-                        "priority": "medium",
-                        "expected_improvement": "提高置信度0.1",
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    optimization_actions.append(optimization_action)
-            
-            # 模拟优化过程
-            time.sleep(0.01)  # 模拟优化时间
-            
+            optimization_actions = self._build_optimization_actions(analysis_results)
+            optimization_summary = self._build_optimization_summary(
+                analysis_results,
+                optimization_actions,
+            )
+
+            self._simulate_optimization_process()
+
             duration = time.time() - start_time
             self.logger.info(f"优化阶段完成，耗时: {duration:.2f}s")
-            
+
             return {
+                "optimization_status": optimization_summary["status"],
                 "optimization_actions": optimization_actions,
+                "optimization_summary": optimization_summary,
                 "optimization_time": duration
             }
             
         except Exception as e:
             self.logger.error(f"优化阶段失败: {e}")
             raise
+
+    def _build_optimization_actions(self, analysis_results: Dict[str, Any]) -> List[Dict[str, Any]]:
+        actions: List[Dict[str, Any]] = []
+
+        quality_action = self._create_quality_optimization_action(
+            analysis_results.get("quality_metrics", {})
+        )
+        if quality_action is not None:
+            actions.append(quality_action)
+
+        confidence_action = self._create_confidence_optimization_action(
+            analysis_results.get("confidence_scores", {})
+        )
+        if confidence_action is not None:
+            actions.append(confidence_action)
+
+        return self._prioritize_optimization_actions(actions)
+
+    def _create_quality_optimization_action(
+        self,
+        quality_metrics: Dict[str, Any],
+    ) -> Dict[str, Any] | None:
+        quality_score = float(quality_metrics.get("quality_score", 0.0))
+        threshold = self.config.optimization_quality_threshold
+        if not quality_metrics or quality_score >= threshold:
+            return None
+
+        return {
+            "action": "process_optimization",
+            "description": "根据质量分析结果优化处理流程",
+            "priority": "high",
+            "current_score": quality_score,
+            "target_score": threshold,
+            "gap": round(threshold - quality_score, 4),
+            "expected_improvement": "提高质量评分0.15",
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    def _create_confidence_optimization_action(
+        self,
+        confidence_scores: Dict[str, Any],
+    ) -> Dict[str, Any] | None:
+        average_confidence = self._calculate_average_confidence(confidence_scores)
+        threshold = self.config.optimization_confidence_threshold
+        if not confidence_scores or average_confidence >= threshold:
+            return None
+
+        return {
+            "action": "confidence_improvement",
+            "description": "提升模型置信度",
+            "priority": "medium",
+            "current_score": average_confidence,
+            "target_score": threshold,
+            "gap": round(threshold - average_confidence, 4),
+            "expected_improvement": "提高置信度0.1",
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    def _prioritize_optimization_actions(
+        self,
+        optimization_actions: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        ranked_actions = sorted(
+            optimization_actions,
+            key=lambda action: priority_order.get(str(action.get("priority", "low")), 99),
+        )
+        return ranked_actions[: self.config.max_optimization_actions]
+
+    def _build_optimization_summary(
+        self,
+        analysis_results: Dict[str, Any],
+        optimization_actions: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        quality_metrics = analysis_results.get("quality_metrics", {})
+        confidence_scores = analysis_results.get("confidence_scores", {})
+        average_confidence = self._calculate_average_confidence(confidence_scores)
+        status = "optimization_required" if optimization_actions else "no_action_needed"
+
+        return {
+            "status": status,
+            "action_count": len(optimization_actions),
+            "highest_priority": optimization_actions[0]["priority"] if optimization_actions else "none",
+            "quality_score": float(quality_metrics.get("quality_score", 0.0)),
+            "quality_threshold": self.config.optimization_quality_threshold,
+            "average_confidence": average_confidence,
+            "confidence_threshold": self.config.optimization_confidence_threshold,
+        }
+
+    def _calculate_average_confidence(self, confidence_scores: Dict[str, Any]) -> float:
+        if not confidence_scores:
+            return 0.0
+        values = [float(value) for value in confidence_scores.values()]
+        return sum(values) / len(values)
+
+    def _simulate_optimization_process(self) -> None:
+        time.sleep(0.01)  # 模拟优化时间
     
     def validate_results(self, artifacts: Dict[str, Any], 
                         analysis_results: Dict[str, Any]) -> Dict[str, Any]:
@@ -403,6 +479,7 @@ class IterationCycle:
             iteration_result.status = CycleStatus.OPTIMIZING
             optimization_results = self.optimize_process(analysis_results)
             iteration_result.metadata["optimization_actions"] = optimization_results.get("optimization_actions", [])
+            iteration_result.metadata["optimization_summary"] = optimization_results.get("optimization_summary", {})
             
             # 6. 验证阶段
             iteration_result.status = CycleStatus.VALIDATING
