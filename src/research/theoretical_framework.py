@@ -7,6 +7,7 @@
 import hashlib
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -408,6 +409,15 @@ class TheoreticalFramework:
             "phase_history": [],
             "phase_timings": {},
             "completed_phases": [],
+            "failed_phase": None,
+            "final_status": "initialized",
+            "last_completed_phase": None,
+        }
+        self.governance_config = {
+            "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
+            "persist_failed_operations": self.config.get("persist_failed_operations", True),
+            "minimum_validation_rate": float(self.config.get("minimum_validation_rate", 0.5)),
+            "export_contract_version": self.config.get("export_contract_version", "d27.v1"),
         }
         self.knowledge_graph = nx.MultiDiGraph()
         self.logger = logging.getLogger(__name__)
@@ -430,45 +440,68 @@ class TheoreticalFramework:
     def _start_operation(self, phase_name: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         phase_entry = {
             "phase": phase_name,
-            "status": "running",
+            "status": "in_progress",
             "started_at": datetime.now().isoformat(),
-            "context": context or {},
+            "context": self._serialize_value(context or {}),
         }
-        self.framework_metadata["phase_history"].append(phase_entry)
+        if self.governance_config.get("enable_phase_tracking", True):
+            self.framework_metadata["phase_history"].append(phase_entry)
         return phase_entry
 
     def _complete_operation(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float) -> None:
-        duration = time.time() - start_time
+        duration = time.perf_counter() - start_time
         phase_entry["status"] = "completed"
-        phase_entry["completed_at"] = datetime.now().isoformat()
-        phase_entry["duration"] = duration
-        self.framework_metadata["phase_timings"][phase_name] = duration
-        self.framework_metadata["completed_phases"].append(phase_name)
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        self.framework_metadata["phase_timings"][phase_name] = round(duration, 6)
+        if phase_name not in self.framework_metadata["completed_phases"]:
+            self.framework_metadata["completed_phases"].append(phase_name)
         self.framework_metadata["last_completed_phase"] = phase_name
         self.framework_metadata["final_status"] = "completed"
 
     def _fail_operation(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float, error: str) -> None:
-        duration = time.time() - start_time
+        duration = time.perf_counter() - start_time
         phase_entry["status"] = "failed"
-        phase_entry["completed_at"] = datetime.now().isoformat()
-        phase_entry["duration"] = duration
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
         phase_entry["error"] = error
-        self.framework_metadata["phase_timings"][phase_name] = duration
+        self.framework_metadata["phase_timings"][phase_name] = round(duration, 6)
         self.framework_metadata["failed_phase"] = phase_name
         self.framework_metadata["final_status"] = "failed"
-        self.failed_operations.append(
-            {
-                "phase": phase_name,
-                "error": error,
-                "timestamp": datetime.now().isoformat(),
-                "duration": duration,
+        if self.governance_config.get("persist_failed_operations", True):
+            self.failed_operations.append(
+                {
+                    "operation": phase_name,
+                    "error": error,
+                    "timestamp": datetime.now().isoformat(),
+                    "duration_seconds": round(duration, 6),
+                }
+            )
+
+    def _serialize_value(self, value: Any) -> Any:
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {str(key): self._serialize_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._serialize_value(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._serialize_value(item) for item in value]
+        if hasattr(value, "__dataclass_fields__"):
+            return {
+                field_name: self._serialize_value(getattr(value, field_name))
+                for field_name in value.__dataclass_fields__
             }
-        )
+        if callable(value):
+            return getattr(value, "__name__", "callable")
+        return value
 
     def _build_analysis_summary(self) -> Dict[str, Any]:
         validated_hypotheses = sum(1 for h in self.hypotheses.values() if h.status == HypothesisStatus.VALIDATED)
         active_hypotheses = sum(1 for h in self.hypotheses.values() if h.status == HypothesisStatus.ACTIVE)
-        minimum_validation_rate = float(self.config.get("minimum_validation_rate", 0.5))
+        minimum_validation_rate = self.governance_config["minimum_validation_rate"]
         validation_rate = float(self.research_metrics.get("validation_rate", 0.0))
         stable = validation_rate >= minimum_validation_rate or validated_hypotheses > 0
         if not self.hypotheses and not self.experiments and not self.insights:
@@ -490,14 +523,19 @@ class TheoreticalFramework:
             "failed_operation_count": len(self.failed_operations),
             "last_completed_phase": self.framework_metadata.get("last_completed_phase", ""),
             "failed_phase": self.framework_metadata.get("failed_phase", ""),
+            "final_status": self.framework_metadata.get("final_status", "initialized"),
         }
 
     def _build_report_metadata(self) -> Dict[str, Any]:
         return {
-            "contract_version": self.config.get("export_contract_version", "d20.v1"),
+            "contract_version": self.governance_config["export_contract_version"],
             "generated_at": datetime.now().isoformat(),
             "result_schema": "theoretical_framework_report",
             "history_entries": len(self.research_history),
+            "completed_phases": list(self.framework_metadata.get("completed_phases", [])),
+            "failed_phase": self.framework_metadata.get("failed_phase"),
+            "failed_operation_count": len(self.failed_operations),
+            "last_completed_phase": self.framework_metadata.get("last_completed_phase"),
         }
     
     def _load_terminology_dict(self) -> Dict[str, Any]:
@@ -529,8 +567,8 @@ class TheoreticalFramework:
         Returns:
             ResearchHypothesis: 生成的研究假设
         """
-        start_time = time.time()
-        phase_entry = self._start_operation("generate_hypothesis", {"has_text": bool(context.get("text_content")), "domain": str(context.get("domain", ResearchDomain.FORMULA_RESEARCH))})
+        start_time = time.perf_counter()
+        phase_entry = self._start_operation("generate_hypothesis", {"has_text": bool(context.get("text_content")), "domain": context.get("domain", ResearchDomain.FORMULA_RESEARCH)})
         
         try:
             # 从上下文中提取信息
@@ -574,7 +612,7 @@ class TheoreticalFramework:
                 "timestamp": datetime.now().isoformat(),
                 "action": "hypothesis_generated",
                 "hypothesis_id": hypothesis_id,
-                "duration": time.time() - start_time
+                "duration": round(time.perf_counter() - start_time, 6)
             })
             self._complete_operation("generate_hypothesis", phase_entry, start_time)
             
@@ -648,7 +686,7 @@ class TheoreticalFramework:
         Returns:
             ResearchExperiment: 实验设计
         """
-        start_time = time.time()
+        start_time = time.perf_counter()
         phase_entry = self._start_operation("design_experiment", {"hypothesis_id": hypothesis.hypothesis_id, "context_keys": sorted((context or {}).keys())})
         
         try:
@@ -690,7 +728,7 @@ class TheoreticalFramework:
                 "action": "experiment_designed",
                 "experiment_id": experiment_id,
                 "hypothesis_id": hypothesis.hypothesis_id,
-                "duration": time.time() - start_time
+                "duration": round(time.perf_counter() - start_time, 6)
             })
             self._complete_operation("design_experiment", phase_entry, start_time)
             
@@ -731,7 +769,7 @@ class TheoreticalFramework:
         Returns:
             ResearchInsight: 研究洞察
         """
-        start_time = time.time()
+        start_time = time.perf_counter()
         phase_entry = self._start_operation("generate_insight", {"hypothesis_id": hypothesis.hypothesis_id, "experiment_id": experiment.experiment_id})
         
         try:
@@ -770,7 +808,7 @@ class TheoreticalFramework:
                 "action": "insight_generated",
                 "insight_id": insight_id,
                 "hypothesis_id": hypothesis.hypothesis_id,
-                "duration": time.time() - start_time
+                "duration": round(time.perf_counter() - start_time, 6)
             })
             self._complete_operation("generate_insight", phase_entry, start_time)
             
@@ -815,7 +853,7 @@ class TheoreticalFramework:
         Returns:
             bool: 验证是否成功
         """
-        start_time = time.time()
+        start_time = time.perf_counter()
         try:
             phase_entry = self._start_operation("validate_hypothesis", {"hypothesis_id": hypothesis_id, "validation_result": validation_result})
             if hypothesis_id not in self.hypotheses:
@@ -894,7 +932,7 @@ class TheoreticalFramework:
             Dict[str, Any]: 研究摘要信息
         """
         return {
-            "research_metrics": self.research_metrics,
+            "research_metrics": self._serialize_value(self.research_metrics),
             "hypotheses_count": len(self.hypotheses),
             "experiments_count": len(self.experiments),
             "insights_count": len(self.insights),
@@ -902,11 +940,11 @@ class TheoreticalFramework:
                                     if h.status == HypothesisStatus.ACTIVE]),
             "validated_hypotheses": len([h for h in self.hypotheses.values() 
                                        if h.status == HypothesisStatus.VALIDATED]),
-            "recent_activity": self.research_history[-10:] if self.research_history else [],
-            "failed_operations": self.failed_operations,
+            "recent_activity": self._serialize_value(self.research_history[-10:] if self.research_history else []),
+            "failed_operations": self._serialize_value(self.failed_operations),
             "analysis_summary": self._build_analysis_summary(),
             "report_metadata": self._build_report_metadata(),
-            "framework_metadata": self.framework_metadata,
+            "framework_metadata": self._serialize_value(self.framework_metadata),
         }
     
     def get_hypothesis_by_id(self, hypothesis_id: str) -> Optional[ResearchHypothesis]:
@@ -964,7 +1002,7 @@ class TheoreticalFramework:
             Dict[str, Any]: 知识图谱数据
         """
         try:
-            start_time = time.time()
+            start_time = time.perf_counter()
             phase_entry = self._start_operation("build_knowledge_graph")
             # 清空现有图
             self.knowledge_graph.clear()
@@ -1030,14 +1068,14 @@ class TheoreticalFramework:
                     {
                         "id": node,
                         "type": data.get("type", "unknown"),
-                        "data": data
+                        "data": self._serialize_value(data)
                     } for node, data in self.knowledge_graph.nodes(data=True)
                 ],
                 "edges": [
                     {
                         "source": edge[0],
                         "target": edge[1],
-                        "attributes": edge[2]
+                        "attributes": self._serialize_value(edge[2])
                     } for edge in self.knowledge_graph.edges(data=True)
                 ],
                 "graph_properties": {
@@ -1073,34 +1111,70 @@ class TheoreticalFramework:
         Returns:
             bool: 导出是否成功
         """
+        start_time = time.perf_counter()
+        phase_entry = self._start_operation("export_research_data", {"output_path": output_path})
         try:
             research_data = {
                 "report_metadata": {
                     **self._build_report_metadata(),
                     "output_path": output_path,
+                    "exported_file": os.path.basename(output_path),
                 },
                 "framework_info": {
                     "version": "2.0.0",
                     "generated_at": datetime.now().isoformat(),
-                    "research_metrics": self.research_metrics
+                    "research_metrics": self._serialize_value(self.research_metrics)
                 },
                 "hypotheses": [h.to_dict() for h in self.hypotheses.values()],
                 "experiments": [e.to_dict() for e in self.experiments.values()],
                 "insights": [i.to_dict() for i in self.insights.values()],
-                "research_history": self.research_history,
-                "failed_operations": self.failed_operations,
+                "research_history": self._serialize_value(self.research_history),
+                "failed_operations": self._serialize_value(self.failed_operations),
                 "research_summary": self.get_research_summary(),
-                "knowledge_graph": self.build_knowledge_graph()
+                "knowledge_graph": self._serialize_value(self.build_knowledge_graph())
             }
             
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(research_data, f, ensure_ascii=False, indent=2)
+            self._complete_operation("export_research_data", phase_entry, start_time)
             
             self.logger.info(f"研究数据已导出到: {output_path}")
             return True
             
         except Exception as e:
+            self._fail_operation("export_research_data", phase_entry, start_time, str(e))
             self.logger.error(f"研究数据导出失败: {e}")
+            return False
+
+    def cleanup(self) -> bool:
+        """清理理论框架运行态资源。"""
+        try:
+            self.hypotheses.clear()
+            self.experiments.clear()
+            self.insights.clear()
+            self.research_history.clear()
+            self.failed_operations.clear()
+            self.knowledge_graph.clear()
+            self.research_metrics = {
+                "hypotheses_count": 0,
+                "experiments_count": 0,
+                "insights_count": 0,
+                "validation_rate": 0.0,
+                "novation_score": 0.0,
+                "practical_impact": 0.0
+            }
+            self.framework_metadata = {
+                "phase_history": [],
+                "phase_timings": {},
+                "completed_phases": [],
+                "failed_phase": None,
+                "final_status": "cleaned",
+                "last_completed_phase": None,
+            }
+            self.logger.info("中医研究理论框架资源清理完成")
+            return True
+        except Exception as e:
+            self.logger.error(f"中医研究理论框架资源清理失败: {e}")
             return False
 
 # 导出主要类和函数

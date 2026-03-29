@@ -9,7 +9,10 @@ from src.research.theoretical_framework import HypothesisStatus, ResearchDomain,
 
 class TestTheoreticalFrameworkQuality(unittest.TestCase):
     def setUp(self):
-        self.framework = TheoreticalFramework({"export_contract_version": "d20.v1", "minimum_validation_rate": 0.5})
+        self.framework = TheoreticalFramework({"export_contract_version": "d27.v1", "minimum_validation_rate": 0.5})
+
+    def tearDown(self):
+        self.framework.cleanup()
 
     def test_operation_history_and_analysis_summary(self):
         hypothesis = self.framework.generate_hypothesis(
@@ -30,6 +33,7 @@ class TestTheoreticalFrameworkQuality(unittest.TestCase):
             ["generate_hypothesis", "design_experiment", "generate_insight", "validate_hypothesis"],
         )
         self.assertEqual(summary["analysis_summary"]["status"], "stable")
+        self.assertEqual(summary["analysis_summary"]["final_status"], "completed")
         self.assertEqual(summary["validated_hypotheses"], 1)
         self.assertEqual(hypothesis.status, HypothesisStatus.VALIDATED)
 
@@ -48,6 +52,7 @@ class TestTheoreticalFrameworkQuality(unittest.TestCase):
         self.assertEqual(summary["analysis_summary"]["failed_operation_count"], 1)
         self.assertEqual(self.framework.framework_metadata["failed_phase"], "generate_hypothesis")
         self.assertEqual(self.framework.framework_metadata["phase_history"][-1]["status"], "failed")
+        self.assertEqual(summary["failed_operations"][-1]["operation"], "generate_hypothesis")
 
     def test_export_research_data_uses_json_safe_contract(self):
         hypothesis = self.framework.generate_hypothesis(
@@ -68,10 +73,26 @@ class TestTheoreticalFrameworkQuality(unittest.TestCase):
             with open(output_path, "r", encoding="utf-8") as file_obj:
                 payload = json.load(file_obj)
 
-        self.assertEqual(payload["report_metadata"]["contract_version"], "d20.v1")
+        self.assertEqual(payload["report_metadata"]["contract_version"], "d27.v1")
         self.assertEqual(payload["hypotheses"][0]["research_domain"], "historical_research")
         self.assertEqual(payload["hypotheses"][0]["status"], "active")
         self.assertIn("report_metadata", payload["research_summary"])
+        self.assertIn("failed_operations", payload)
+
+    def test_cleanup_resets_runtime_state(self):
+        self.framework.generate_hypothesis(
+            {
+                "text_content": "理论研究",
+                "research_objective": "cleanup",
+                "domain": ResearchDomain.CLINICAL_RESEARCH,
+            }
+        )
+
+        cleaned = self.framework.cleanup()
+
+        self.assertTrue(cleaned)
+        self.assertEqual(self.framework.framework_metadata["final_status"], "cleaned")
+        self.assertEqual(self.framework.get_research_summary()["analysis_summary"]["status"], "idle")
 
 
 if __name__ == "__main__":

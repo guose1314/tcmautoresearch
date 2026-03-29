@@ -735,3 +735,25 @@ python tools/quality_improvement_archive.py --output output/quality-improvement-
 - [ ] 导出不会暴露枚举、dataclass 或 callable 原始对象
 - [ ] 导出文件可被 `json.load` 直接回读
 - [ ] cleanup 后实例状态重置，但共享执行器保持可用
+
+## 23. D27 理论框架二次治理补充检查项
+
+本章节用于 D27 类 theoretical framework 二次治理对齐，强调研究框架编排轨迹、失败操作结构、导出版本刷新与 cleanup 重置一致性。
+
+### 23.1 理论框架契约一致性
+
+- [ ] 研究摘要输出 `analysis_summary` 与 `final_status`
+- [ ] 失败操作以稳定 `failed_operations` 列表输出，字段使用 `operation`
+- [ ] 导出结果与研究摘要输出统一 `report_metadata`
+
+### 23.2 研究编排可观测性
+
+- [ ] 假设生成、实验设计、洞察生成、假设验证、知识图谱构建、导出记录 `phase_history`
+- [ ] 阶段异常写入 `failed_phase`
+- [ ] 成功路径刷新 `completed_phases` 与 `last_completed_phase`
+
+### 23.3 导出与清理安全
+
+- [ ] 导出不会暴露枚举、dataclass 或 callable 原始对象
+- [ ] 导出文件可被 `json.load` 直接回读
+- [ ] cleanup 后运行态元数据与研究缓存重置为稳定空状态
