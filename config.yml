@@ -385,6 +385,11 @@ iteration_cycle:
       - "reproducibility"
       - "standard_compliance"
     compliance_threshold: 0.95
+  system_iteration:
+    enabled: true
+    max_recommendations: 5
+    academic_insight_min_quality: 0.85
+    failed_module_attention_threshold: 1
 
 # 系统资源配置
 resources:

@@ -11,7 +11,6 @@ import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from dataclasses import dataclass, field
-from collections import defaultdict
 import networkx as nx
 import numpy as np
 
@@ -30,6 +29,7 @@ class SystemIterationResult:
     module_results: Dict[str, Any] = field(default_factory=dict)
     system_metrics: Dict[str, Any] = field(default_factory=dict)
     system_insights: List[Dict[str, Any]] = field(default_factory=list)
+    academic_insights: List[Dict[str, Any]] = field(default_factory=list)
     recommendations: List[Dict[str, Any]] = field(default_factory=list)
     quality_assessment: Dict[str, Any] = field(default_factory=dict)
     confidence_scores: Dict[str, float] = field(default_factory=dict)
@@ -51,9 +51,9 @@ class SystemIterationCycle:
     6. 知识沉淀与传承
     """
     
-    def __init__(self, system_config: Dict[str, Any] = None):
+    def __init__(self, system_config: Optional[Dict[str, Any]] = None):
         self.config = system_config or {}
-        self.system_iterations = []
+        self.system_iterations: List[SystemIterationResult] = []
         self.performance_metrics = {
             "total_iterations": 0,
             "successful_iterations": 0,
@@ -103,9 +103,11 @@ class SystemIterationCycle:
             iteration_result.status = "analyzing_system"
             analysis_results = self._analyze_system_results(context, module_results, system_test_results)
             iteration_result.system_insights = analysis_results.get("system_insights", [])
+            iteration_result.academic_insights = analysis_results.get("academic_insights", [])
             iteration_result.quality_assessment = analysis_results.get("quality_metrics", {})
             iteration_result.confidence_scores = analysis_results.get("confidence_scores", {})
-            iteration_result.recommendations = analysis_results.get("recommendations", {})
+            iteration_result.recommendations = analysis_results.get("recommendations", [])
+            iteration_result.metadata["analysis_summary"] = analysis_results.get("analysis_summary", {})
             
             # 4. 完成阶段
             iteration_result.status = "completed"
@@ -226,25 +228,20 @@ class SystemIterationCycle:
         start_time = time.time()
         
         try:
-            # 计算系统质量指标
             quality_metrics = self._calculate_system_quality_metrics(module_results, system_test_results)
-            
-            # 生成系统洞察
             system_insights = self._generate_system_insights(module_results, system_test_results)
-            
-            # 生成改进建议
+            academic_insights = self._generate_academic_insights(module_results, system_test_results)
             recommendations = self._generate_system_recommendations(module_results, system_test_results)
-            
-            # 计算系统置信度
             confidence_scores = self._calculate_system_confidence_scores(module_results, system_test_results)
-            
-            analysis_results = {
-                "quality_metrics": quality_metrics,
-                "system_insights": system_insights,
-                "recommendations": recommendations,
-                "confidence_scores": confidence_scores,
-                "analysis_time": time.time() - start_time
-            }
+            analysis_results = self._build_analysis_results(
+                module_results,
+                quality_metrics,
+                system_insights,
+                academic_insights,
+                recommendations,
+                confidence_scores,
+                start_time,
+            )
             
             self.logger.info("系统结果分析完成")
             return analysis_results
@@ -252,6 +249,51 @@ class SystemIterationCycle:
         except Exception as e:
             self.logger.error(f"系统结果分析失败: {e}")
             raise
+
+    def _build_analysis_results(
+        self,
+        module_results: Dict[str, Any],
+        quality_metrics: Dict[str, Any],
+        system_insights: List[Dict[str, Any]],
+        academic_insights: List[Dict[str, Any]],
+        recommendations: List[Dict[str, Any]],
+        confidence_scores: Dict[str, float],
+        start_time: float,
+    ) -> Dict[str, Any]:
+        return {
+            "quality_metrics": quality_metrics,
+            "system_insights": system_insights,
+            "academic_insights": academic_insights,
+            "recommendations": recommendations,
+            "confidence_scores": confidence_scores,
+            "analysis_summary": self._build_analysis_summary(
+                module_results,
+                quality_metrics,
+                recommendations,
+                academic_insights,
+            ),
+            "analysis_time": time.time() - start_time,
+        }
+
+    def _build_analysis_summary(
+        self,
+        module_results: Dict[str, Any],
+        quality_metrics: Dict[str, Any],
+        recommendations: List[Dict[str, Any]],
+        academic_insights: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        failed_modules = self._get_failed_modules(module_results)
+        overall_quality = float(quality_metrics.get("overall_quality", 0.0))
+
+        return {
+            "module_count": len(module_results),
+            "failed_module_count": len(failed_modules),
+            "failed_modules": failed_modules,
+            "overall_quality": overall_quality,
+            "system_status": "attention_required" if failed_modules or overall_quality < 0.85 else "stable",
+            "recommendation_count": len(recommendations),
+            "academic_insight_count": len(academic_insights),
+        }
     
     def _calculate_system_quality_metrics(self, module_results: Dict[str, Any], 
                                         system_test_results: Dict[str, Any]) -> Dict[str, Any]:
@@ -268,7 +310,7 @@ class SystemIterationCycle:
         
         # 计算模块平均质量
         module_quality_scores = []
-        for module_name, result in module_results.items():
+        for result in module_results.values():
             if "quality_assessment" in result:
                 quality = result["quality_assessment"].get("overall_quality", 0.0)
                 module_quality_scores.append(quality)
@@ -325,7 +367,74 @@ class SystemIterationCycle:
                 "tags": ["health", "performance", "system"]
             }
             insights.append(insight)
+
+        failed_modules = self._get_failed_modules(module_results)
+        if failed_modules:
+            insights.append(
+                {
+                    "type": "system_risk",
+                    "title": "系统级风险洞察",
+                    "description": f"发现 {len(failed_modules)} 个失败模块，需要优先处理：{', '.join(failed_modules)}",
+                    "confidence": 0.88,
+                    "timestamp": datetime.now().isoformat(),
+                    "tags": ["risk", "integration", "system"],
+                }
+            )
         
+        return insights
+
+    def _generate_academic_insights(
+        self,
+        module_results: Dict[str, Any],
+        system_test_results: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """生成学术一致性洞察"""
+        insights: List[Dict[str, Any]] = []
+        quality_assurance = system_test_results.get("quality_assurance", {})
+        quality_metrics = quality_assurance.get("quality_metrics", {})
+        academic_compliance = bool(quality_assurance.get("academic_compliance", False))
+        overall_quality = self._calculate_system_quality_metrics(module_results, system_test_results).get("overall_quality", 0.0)
+
+        if academic_compliance:
+            insights.append(
+                {
+                    "type": "academic_compliance",
+                    "title": "学术合规性洞察",
+                    "description": "系统级结果满足学术合规要求，可进入后续复核流程",
+                    "confidence": 0.92,
+                    "timestamp": datetime.now().isoformat(),
+                    "tags": ["academic", "compliance", "system"],
+                }
+            )
+
+        if quality_metrics:
+            insights.append(
+                {
+                    "type": "academic_quality",
+                    "title": "学术质量洞察",
+                    "description": (
+                        f"系统质量指标完整度={quality_metrics.get('completeness', 0.0):.2f}, "
+                        f"准确性={quality_metrics.get('accuracy', 0.0):.2f}, "
+                        f"一致性={quality_metrics.get('consistency', 0.0):.2f}"
+                    ),
+                    "confidence": 0.87,
+                    "timestamp": datetime.now().isoformat(),
+                    "tags": ["academic", "quality", "metrics"],
+                }
+            )
+
+        if overall_quality < float(self.config.get("academic_insight_min_quality", 0.85)):
+            insights.append(
+                {
+                    "type": "academic_gap",
+                    "title": "学术质量缺口洞察",
+                    "description": "系统整体质量尚未达到学术沉淀阈值，建议补充系统级回归与证据归档",
+                    "confidence": 0.83,
+                    "timestamp": datetime.now().isoformat(),
+                    "tags": ["academic", "gap", "quality"],
+                }
+            )
+
         return insights
     
     def _generate_system_recommendations(self, module_results: Dict[str, Any], 
@@ -359,8 +468,29 @@ class SystemIterationCycle:
                 "tags": ["scalability", "optimization", "system"]
             }
             recommendations.append(recommendation)
+
+        failed_modules = self._get_failed_modules(module_results)
+        if failed_modules:
+            recommendations.append(
+                {
+                    "type": "failed_module_followup",
+                    "title": "失败模块跟进建议",
+                    "description": f"建议为失败模块建立专项回归清单：{', '.join(failed_modules)}",
+                    "priority": "high",
+                    "confidence": 0.9,
+                    "timestamp": datetime.now().isoformat(),
+                    "tags": ["followup", "reliability", "system"],
+                }
+            )
         
-        return recommendations
+        return recommendations[: int(self.config.get("max_system_recommendations", 5))]
+
+    def _get_failed_modules(self, module_results: Dict[str, Any]) -> List[str]:
+        return [
+            module_name
+            for module_name, result in module_results.items()
+            if str(result.get("status", "")).lower() == "failed" or "error" in result
+        ]
     
     def _calculate_system_confidence_scores(self, module_results: Dict[str, Any], 
                                           system_test_results: Dict[str, Any]) -> Dict[str, float]:
@@ -373,7 +503,7 @@ class SystemIterationCycle:
         
         # 计算模块平均置信度
         module_confidence_scores = []
-        for module_name, result in module_results.items():
+        for result in module_results.values():
             if "confidence_scores" in result:
                 confidence = result["confidence_scores"].get("overall", 0.0)
                 module_confidence_scores.append(confidence)
