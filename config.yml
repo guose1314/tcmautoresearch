@@ -395,6 +395,11 @@ iteration_cycle:
   orchestration:
     enable_phase_tracking: true
     persist_failed_iterations: true
+  export_contract:
+    enabled: true
+    contract_version: "d15.v1"
+    include_failed_iterations: true
+    include_report_metadata: true
 
 # 系统资源配置
 resources:

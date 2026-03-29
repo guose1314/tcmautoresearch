@@ -1,4 +1,7 @@
 import unittest
+import json
+import os
+import tempfile
 from importlib.util import find_spec
 
 from src.core import __all__ as core_all
@@ -191,6 +194,50 @@ class TestCoreAndCycleQuality(unittest.TestCase):
         self.assertEqual(failed_result.metadata["failed_phase"], "test_system")
         self.assertEqual(failed_result.metadata["phase_history"][-1]["status"], "failed")
         self.assertEqual(failed_result.status, "failed")
+
+    def test_iteration_cycle_export_results_serializes_status_as_string(self):
+        cycle = IterationCycle()
+        cycle.results.append(
+            cycle.execute_iteration({})
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "iteration-results.json")
+            exported = cycle.export_results(output_path)
+
+            self.assertTrue(exported)
+            with open(output_path, "r", encoding="utf-8") as file_obj:
+                payload = json.load(file_obj)
+
+        self.assertEqual(payload["report_metadata"]["contract_version"], "d15.v1")
+        self.assertIsInstance(payload["iteration_results"][0]["status"], str)
+        self.assertEqual(payload["iteration_results"][0]["status"], "completed")
+        self.assertIn("report_metadata", payload["cycle_summary"])
+
+    def test_system_iteration_export_system_data_contains_failed_iterations_and_metadata(self):
+        cycle = SystemIterationCycle()
+        cycle._execute_module_iterations = lambda context: {"module_a": {"status": "completed", "quality_assessment": {"overall_quality": 0.91}, "confidence_scores": {"overall": 0.89}}}
+        cycle._test_system_level = lambda context, module_results: {"system_health": "healthy", "performance_score": 0.88, "reliability": 0.95, "quality_assurance": {"academic_compliance": True, "quality_metrics": {"completeness": 0.92, "accuracy": 0.9, "consistency": 0.91}}}
+        cycle.execute_system_iteration({})
+
+        def raise_system_test_error(context, module_results):
+            raise RuntimeError("system export test failure")
+
+        cycle._test_system_level = raise_system_test_error
+        with self.assertRaises(RuntimeError):
+            cycle.execute_system_iteration({})
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "system-data.json")
+            exported = cycle.export_system_data(output_path)
+
+            self.assertTrue(exported)
+            with open(output_path, "r", encoding="utf-8") as file_obj:
+                payload = json.load(file_obj)
+
+        self.assertEqual(payload["report_metadata"]["contract_version"], "d15.v1")
+        self.assertEqual(len(payload["failed_iterations"]), 1)
+        self.assertIn("report_metadata", payload["system_report"])
 
 
 if __name__ == "__main__":

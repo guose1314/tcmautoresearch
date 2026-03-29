@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14")]
+    [ValidateSet("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15")]
     [string]$Day,
     [switch]$All,
     [switch]$DryRun,
@@ -293,6 +293,17 @@ function Get-Plan {
         @{ Type = "commit"; Name = "Commit orchestration"; Message = "stage1 D14 orchestration" }
     )
 
+    $plans["D15"] = @(
+        @{ Type = "branch"; Name = "Create or switch branch"; Branch = "stage1-d15-export-contract" },
+        @{ Type = "cmd"; Name = "Run cycle quality unit test"; Command = "& '$Py' -m unittest tests.unit.test_architecture_cycle_quality" },
+        @{ Type = "cmd"; Name = "Run cycle system unittest"; Command = "& '$Py' -m unittest tests.test_cycle_system" },
+        @{ Type = "cmd"; Name = "Run full cycle test"; Command = "& '$Py' tests/test_full_cycle.py" },
+        @{ Type = "cmd"; Name = "Run integrated research test"; Command = "& '$Py' test_integrated_research.py" },
+        @{ Type = "cmd"; Name = "Run quality gate"; Command = "& '$Py' tools/quality_gate.py" },
+        @{ Type = "cmd"; Name = "Run export contract regressions"; Command = "& '$Py' -m pytest --maxfail=5 --disable-warnings" },
+        @{ Type = "commit"; Name = "Commit export contract"; Message = "stage1 D15 export contract" }
+    )
+
     return $plans[$DayCode]
 }
 
@@ -356,6 +367,10 @@ function Get-RollbackTips {
         "git restore src/cycle/iteration_cycle.py src/cycle/system_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
+    $tips["D15"] = @(
+        "git restore src/cycle/iteration_cycle.py src/cycle/system_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
+    )
 
     return $tips[$DayCode]
 }
@@ -400,7 +415,7 @@ $repo = Resolve-RepoRoot -InputPath $RepoPath
 $python = Resolve-Python -Repo $repo -InputPython $PythonExe
 
 if (-not $Day -and -not $All) {
-    throw "Please provide -Day D1..D14 or -All"
+    throw "Please provide -Day D1..D15 or -All"
 }
 if ($Day -and $All) {
     throw "Use either -Day or -All, not both"
@@ -415,7 +430,7 @@ $targetPassRateEnabled = $TargetPassRate -ne -1
 Set-Location $repo
 
 $runDays = if ($All) {
-    @("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14")
+    @("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15")
 }
 else {
     @($Day)

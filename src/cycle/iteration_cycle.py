@@ -8,6 +8,7 @@ import json
 import logging
 import time
 import traceback
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -748,21 +749,58 @@ class IterationCycle:
             "average_memory_usage_mb": avg_memory_usage,
             "average_quality_score": avg_quality_score,
             "average_confidence_score": avg_confidence_score,
-            "latest_results": [r.__dict__ for r in self.results[-3:]],  # 最近3次结果
-            "failed_iterations_details": [r.__dict__ for r in self.failed_iterations],
+            "latest_results": [self._serialize_iteration_result(r) for r in self.results[-3:]],
+            "failed_iterations_details": [self._serialize_iteration_result(r) for r in self.failed_iterations],
+            "report_metadata": self._build_report_metadata(),
             "performance_metrics": self.performance_metrics
+        }
+
+    def _build_report_metadata(self) -> Dict[str, Any]:
+        return {
+            "contract_version": "d15.v1",
+            "generated_at": datetime.now().isoformat(),
+            "result_schema": "iteration_cycle_report",
+            "latest_iteration_id": self.results[-1].iteration_id if self.results else "",
+        }
+
+    def _serialize_iteration_result(self, iteration_result: IterationResult) -> Dict[str, Any]:
+        return {
+            "iteration_id": iteration_result.iteration_id,
+            "cycle_number": iteration_result.cycle_number,
+            "status": iteration_result.status.value,
+            "start_time": iteration_result.start_time,
+            "end_time": iteration_result.end_time,
+            "duration": iteration_result.duration,
+            "generated_artifacts": iteration_result.generated_artifacts,
+            "test_results": iteration_result.test_results,
+            "repair_actions": iteration_result.repair_actions,
+            "issues_found": iteration_result.issues_found,
+            "performance_metrics": iteration_result.performance_metrics,
+            "metadata": iteration_result.metadata,
+            "confidence_scores": iteration_result.confidence_scores,
+            "academic_insights": iteration_result.academic_insights,
+            "quality_assessment": iteration_result.quality_assessment,
+            "recommendations": iteration_result.recommendations,
+        }
+
+    def _build_export_payload(self, output_path: str) -> Dict[str, Any]:
+        return {
+            "report_metadata": {
+                **self._build_report_metadata(),
+                "output_path": output_path,
+                "exported_file": os.path.basename(output_path),
+            },
+            "cycle_summary": self.get_cycle_summary(),
+            "iteration_results": [self._serialize_iteration_result(r) for r in self.results],
+            "failed_iterations": [self._serialize_iteration_result(r) for r in self.failed_iterations],
+            "configuration": self.config.__dict__,
+            "performance_metrics": self.performance_metrics,
         }
     
     def export_results(self, output_path: str = "iteration_results.json"):
         """导出结果"""
         try:
-            results_data = {
-                "cycle_summary": self.get_cycle_summary(),
-                "iteration_results": [r.__dict__ for r in self.results],
-                "failed_iterations": [r.__dict__ for r in self.failed_iterations],
-                "configuration": self.config.__dict__,
-                "performance_metrics": self.performance_metrics
-            }
+            results_data = self._build_export_payload(output_path)
             
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(results_data, f, ensure_ascii=False, indent=2)

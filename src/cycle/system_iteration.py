@@ -8,6 +8,7 @@ import logging
 import time
 import traceback
 import json
+import os
 from typing import Any, Callable, Dict, List, Optional
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -639,7 +640,55 @@ class SystemIterationCycle:
             "average_quality_score": avg_quality_score,
             "average_confidence_score": avg_confidence_score,
             "performance_metrics": self.performance_metrics,
-            "latest_results": [i.__dict__ for i in self.system_iterations[-3:]] if self.system_iterations else []
+            "latest_results": [self._serialize_system_iteration_result(i) for i in self.system_iterations[-3:]] if self.system_iterations else [],
+            "failed_iterations_details": [self._serialize_system_iteration_result(i) for i in failed_iterations],
+            "report_metadata": self._build_system_report_metadata(),
+        }
+
+    def _build_system_report_metadata(self) -> Dict[str, Any]:
+        return {
+            "contract_version": "d15.v1",
+            "generated_at": datetime.now().isoformat(),
+            "result_schema": "system_iteration_report",
+            "latest_iteration_id": self.system_iterations[-1].iteration_id if self.system_iterations else "",
+        }
+
+    def _serialize_system_iteration_result(self, iteration_result: SystemIterationResult) -> Dict[str, Any]:
+        return {
+            "iteration_id": iteration_result.iteration_id,
+            "cycle_number": iteration_result.cycle_number,
+            "status": iteration_result.status,
+            "start_time": iteration_result.start_time,
+            "end_time": iteration_result.end_time,
+            "duration": iteration_result.duration,
+            "module_results": iteration_result.module_results,
+            "system_metrics": iteration_result.system_metrics,
+            "system_insights": iteration_result.system_insights,
+            "academic_insights": iteration_result.academic_insights,
+            "recommendations": iteration_result.recommendations,
+            "quality_assessment": iteration_result.quality_assessment,
+            "confidence_scores": iteration_result.confidence_scores,
+            "metadata": iteration_result.metadata,
+        }
+
+    def _build_system_export_payload(self, output_path: str) -> Dict[str, Any]:
+        return {
+            "report_metadata": {
+                **self._build_system_report_metadata(),
+                "output_path": output_path,
+                "exported_file": os.path.basename(output_path),
+            },
+            "system_info": {
+                "system_name": "中医古籍全自动研究系统",
+                "version": "2.0.0",
+                "generated_at": datetime.now().isoformat(),
+                "performance_metrics": self.performance_metrics,
+            },
+            "system_report": self.get_system_performance_report(),
+            "system_iterations": [self._serialize_system_iteration_result(i) for i in self.system_iterations],
+            "failed_iterations": [self._serialize_system_iteration_result(i) for i in self.failed_iterations],
+            "knowledge_graph": self.get_system_knowledge_graph(),
+            "module_cycles": {name: cycle.get_module_performance_report() for name, cycle in self.module_cycles.items()},
         }
     
     def get_system_knowledge_graph(self) -> Dict[str, Any]:
@@ -683,18 +732,7 @@ class SystemIterationCycle:
     def export_system_data(self, output_path: str) -> bool:
         """导出系统数据"""
         try:
-            system_data = {
-                "system_info": {
-                    "system_name": "中医古籍全自动研究系统",
-                    "version": "2.0.0",
-                    "generated_at": datetime.now().isoformat(),
-                    "performance_metrics": self.performance_metrics
-                },
-                "system_iterations": [i.__dict__ for i in self.system_iterations],
-                "knowledge_graph": self.get_system_knowledge_graph(),
-                "module_cycles": {name: cycle.get_module_performance_report() 
-                                for name, cycle in self.module_cycles.items()}
-            }
+            system_data = self._build_system_export_payload(output_path)
             
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(system_data, f, ensure_ascii=False, indent=2)
