@@ -9,6 +9,7 @@ from src.cycle.iteration_cycle import CycleStatus, IterationConfig, IterationCyc
 from src.cycle.system_iteration import SystemIterationCycle
 from src.cycle.test_driven_iteration import TestDrivenIterationManager
 from src.cycle.module_iteration import ModuleIterationCycle
+from src.cycle.fixing_stage import FixingStage
 
 
 class TestCoreAndCycleQuality(unittest.TestCase):
@@ -356,6 +357,65 @@ class TestCoreAndCycleQuality(unittest.TestCase):
 
         self.assertTrue(cleaned)
         self.assertFalse(getattr(executor, "_shutdown", False))
+
+    def test_fixing_stage_tracks_phase_history_and_analysis_summary(self):
+        stage = FixingStage({"minimum_stable_success_rate": 0.8, "export_contract_version": "d18.v1"})
+
+        result = stage.run_fixing_stage(
+            [{"message": "Input parameter mismatch detected", "affected_components": ["parser"]}],
+            {"source": "unit-test"},
+            iteration_id="iter-d18",
+        )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(
+            [phase["phase"] for phase in result.metadata["phase_history"]],
+            ["identify_repairs", "execute_repairs", "validate_repairs", "analyze_repairs"],
+        )
+        self.assertEqual(result.metadata["analysis_summary"]["stage_status"], "stable")
+        self.assertEqual(result.iteration_id, "iter-d18")
+        self.assertEqual(len(stage.repair_history), 1)
+
+    def test_fixing_stage_export_uses_json_safe_contract(self):
+        stage = FixingStage({"export_contract_version": "d18.v1"})
+        stage.run_fixing_stage(
+            [{"message": "security vulnerability found", "affected_components": ["api"]}],
+            {"source": "export-test"},
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "fixing-stage.json")
+            exported = stage.export_repair_data(output_path)
+
+            self.assertTrue(exported)
+            with open(output_path, "r", encoding="utf-8") as file_obj:
+                payload = json.load(file_obj)
+
+        self.assertEqual(payload["report_metadata"]["contract_version"], "d18.v1")
+        self.assertEqual(payload["repair_actions"][0]["priority"], "critical")
+        self.assertEqual(payload["repair_actions"][0]["repair_type"], "security")
+        self.assertIn("report_metadata", payload["repair_performance_report"])
+
+    def test_fixing_stage_failure_tracks_failed_phase(self):
+        stage = FixingStage({})
+        original_validate = stage.validate_repair_effects
+
+        def raise_validation_error(repair_actions):
+            raise RuntimeError("repair validation failed")
+
+        stage.validate_repair_effects = raise_validation_error
+
+        with self.assertRaises(RuntimeError):
+            stage.run_fixing_stage(
+                [{"message": "timeout on task", "affected_components": ["scheduler"]}],
+                {"source": "failure-test"},
+            )
+
+        stage.validate_repair_effects = original_validate
+        self.assertEqual(len(stage.failed_stages), 1)
+        failed_stage = stage.failed_stages[0]
+        self.assertEqual(failed_stage.metadata["failed_phase"], "validate_repairs")
+        self.assertEqual(failed_stage.metadata["phase_history"][-1]["status"], "failed")
 
 
 if __name__ == "__main__":

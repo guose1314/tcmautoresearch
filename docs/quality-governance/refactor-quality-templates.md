@@ -537,3 +537,25 @@ python tools/quality_improvement_archive.py --output output/quality-improvement-
 - [ ] 导出测试套件时不会直接暴露函数对象
 - [ ] 导出文件可被 `json.load` 直接回读
 - [ ] cleanup 会同时清理历史与失败记录
+
+## 14. D18 修复阶段补充检查项
+
+本章节用于 D18 类修复阶段重构，强调修复阶段编排、失败阶段追踪与 JSON 安全导出契约统一。
+
+### 14.1 修复阶段契约一致性
+
+- [ ] 修复阶段主流程输出 `analysis_summary`
+- [ ] 修复行动、阶段历史、失败阶段均保持稳定列表结构
+- [ ] 修复性能报告输出统一 `report_metadata`
+
+### 14.2 修复阶段可观测性
+
+- [ ] 修复阶段记录 `phase_history` 与 `phase_timings`
+- [ ] 失败阶段写入 `failed_phase`
+- [ ] 完成阶段记录 `completed_phases` 与 `final_status`
+
+### 14.3 导出与指标安全
+
+- [ ] 导出修复行动时不会直接暴露枚举对象
+- [ ] 导出文件可被 `json.load` 直接回读
+- [ ] 修复指标不会重复累计成功数与失败数

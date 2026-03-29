@@ -408,6 +408,11 @@ iteration_cycle:
     enable_phase_tracking: true
     minimum_stable_pass_rate: 0.85
     export_contract_version: "d17.v1"
+  fixing_stage:
+    enable_phase_tracking: true
+    minimum_stable_success_rate: 0.8
+    export_contract_version: "d18.v1"
+    persist_failed_stages: true
 
 # 系统资源配置
 resources:
