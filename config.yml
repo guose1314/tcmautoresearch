@@ -426,6 +426,11 @@ iteration_cycle:
     enable_phase_tracking: true
     persist_failed_operations: true
     export_contract_version: "d21.v1"
+  system_architecture:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_health_score: 0.8
+    export_contract_version: "d22.v1"
 
 # 系统资源配置
 resources:

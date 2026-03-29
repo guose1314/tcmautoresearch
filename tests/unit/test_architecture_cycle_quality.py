@@ -5,11 +5,13 @@ import tempfile
 from importlib.util import find_spec
 
 from src.core import __all__ as core_all
+from src.core.architecture import ModuleInfo, ModuleType, SystemArchitecture
 from src.cycle.iteration_cycle import CycleStatus, IterationConfig, IterationCycle
 from src.cycle.system_iteration import SystemIterationCycle
 from src.cycle.test_driven_iteration import TestDrivenIterationManager
 from src.cycle.module_iteration import ModuleIterationCycle
 from src.cycle.fixing_stage import FixingStage
+from src.core.module_interface import ModuleStatus
 
 
 class TestCoreAndCycleQuality(unittest.TestCase):
@@ -416,6 +418,86 @@ class TestCoreAndCycleQuality(unittest.TestCase):
         failed_stage = stage.failed_stages[0]
         self.assertEqual(failed_stage.metadata["failed_phase"], "validate_repairs")
         self.assertEqual(failed_stage.metadata["phase_history"][-1]["status"], "failed")
+
+    def test_system_architecture_tracks_phase_history_and_analysis_summary(self):
+        architecture = SystemArchitecture({"minimum_stable_health_score": 0.5, "export_contract_version": "d22.v1"})
+        module_info = ModuleInfo(
+            module_id="preprocess",
+            module_name="PreprocessModule",
+            module_type=ModuleType.PREPROCESSING,
+            version="1.0.0",
+            status=ModuleStatus.CREATED,
+            created_at="2024-01-01T00:00:00",
+        )
+
+        self.assertTrue(architecture.register_module(module_info))
+        self.assertTrue(architecture.initialize_system())
+        self.assertTrue(architecture.activate_module("preprocess"))
+
+        pipeline_result = architecture.execute_pipeline({"source": "unit-test"})
+        system_status = architecture.get_system_status()
+
+        self.assertEqual(pipeline_result["analysis_summary"]["status"], "stable")
+        self.assertEqual(system_status["analysis_summary"]["status"], "stable")
+        self.assertEqual(
+            [phase["phase"] for phase in system_status["metadata"]["phase_history"]],
+            ["register_module", "initialize_system", "activate_module", "execute_pipeline"],
+        )
+        self.assertEqual(system_status["metadata"]["completed_phases"][-1], "execute_pipeline")
+        self.assertEqual(system_status["report_metadata"]["contract_version"], "d22.v1")
+
+    def test_system_architecture_failure_tracks_failed_phase(self):
+        architecture = SystemArchitecture({"export_contract_version": "d22.v1"})
+        module_info = ModuleInfo(
+            module_id="reasoning",
+            module_name="ReasoningModule",
+            module_type=ModuleType.REASONING,
+            version="1.0.0",
+            status=ModuleStatus.CREATED,
+            created_at="2024-01-01T00:00:00",
+        )
+        architecture.register_module(module_info)
+        architecture.initialize_system()
+        architecture.activate_module("reasoning")
+
+        def raise_module_error(module_info, context):
+            raise RuntimeError("execution failed")
+
+        architecture._execute_single_module = raise_module_error
+        result = architecture.execute_pipeline({"source": "failure-test"})
+        system_status = architecture.get_system_status()
+
+        self.assertEqual(result["analysis_summary"]["status"], "needs_followup")
+        self.assertEqual(system_status["analysis_summary"]["failed_operation_count"], 1)
+        self.assertEqual(system_status["failed_operations"][0]["operation"], "execute_module")
+        self.assertIsNone(system_status["metadata"]["failed_phase"])
+
+    def test_system_architecture_export_uses_json_safe_contract(self):
+        architecture = SystemArchitecture({"export_contract_version": "d22.v1"})
+        module_info = ModuleInfo(
+            module_id="output",
+            module_name="OutputModule",
+            module_type=ModuleType.OUTPUT,
+            version="1.0.0",
+            status=ModuleStatus.CREATED,
+            created_at="2024-01-01T00:00:00",
+        )
+        architecture.register_module(module_info)
+        architecture.initialize_system()
+        architecture.activate_module("output")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "architecture-report.json")
+            exported = architecture.export_system_info(output_path)
+
+            self.assertTrue(exported)
+            with open(output_path, "r", encoding="utf-8") as file_obj:
+                payload = json.load(file_obj)
+
+        self.assertEqual(payload["report_metadata"]["contract_version"], "d22.v1")
+        self.assertEqual(payload["module_registry"]["modules"][0]["module_type"], "output")
+        self.assertEqual(payload["module_registry"]["modules"][0]["status"], "active")
+        self.assertIn("report_metadata", payload["architecture_summary"])
 
 
 if __name__ == "__main__":

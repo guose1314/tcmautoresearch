@@ -439,8 +439,189 @@ class SystemArchitecture:
             "average_performance": 0.0,
             "quality_assurance_score": 0.0
         }
+        self.phase_history: List[Dict[str, Any]] = []
+        self.phase_timings: Dict[str, float] = {}
+        self.completed_phases: List[str] = []
+        self.failed_phase: Optional[str] = None
+        self.failed_operations: List[Dict[str, Any]] = []
+        self.final_status = self.system_status
+        self.last_completed_phase: Optional[str] = None
+        self.architecture_metadata = {
+            "enable_phase_tracking": config.get("enable_phase_tracking", True),
+            "persist_failed_operations": config.get("persist_failed_operations", True),
+            "minimum_stable_health_score": float(config.get("minimum_stable_health_score", 0.8)),
+            "export_contract_version": config.get("export_contract_version", "d22.v1"),
+        }
         
         self.logger.info("系统架构初始化完成")
+
+    def _start_phase(self, phase_name: str, details: Optional[Dict[str, Any]] = None) -> float:
+        """记录阶段开始时间。"""
+        started_at = time.time()
+        if self.architecture_metadata.get("enable_phase_tracking", True):
+            self.phase_history.append({
+                "phase": phase_name,
+                "status": "in_progress",
+                "started_at": datetime.now().isoformat(),
+                "details": self._serialize_value(details or {}),
+            })
+        return started_at
+
+    def _complete_phase(
+        self,
+        phase_name: str,
+        phase_started_at: float,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """记录阶段完成状态。"""
+        duration = max(0.0, time.time() - phase_started_at)
+        self.phase_timings[phase_name] = round(duration, 6)
+        if phase_name not in self.completed_phases:
+            self.completed_phases.append(phase_name)
+        self.last_completed_phase = phase_name
+        self.final_status = self.system_status
+
+        if not self.architecture_metadata.get("enable_phase_tracking", True):
+            return
+
+        for phase in reversed(self.phase_history):
+            if phase.get("phase") == phase_name and phase.get("status") == "in_progress":
+                phase["status"] = "completed"
+                phase["ended_at"] = datetime.now().isoformat()
+                phase["duration_seconds"] = round(duration, 6)
+                if details:
+                    phase["details"] = self._serialize_value({**phase.get("details", {}), **details})
+                break
+
+    def _fail_phase(
+        self,
+        phase_name: str,
+        phase_started_at: float,
+        error: Exception,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """记录阶段失败状态。"""
+        duration = max(0.0, time.time() - phase_started_at)
+        self.phase_timings[phase_name] = round(duration, 6)
+        self.failed_phase = phase_name
+        self.final_status = "failed"
+        self._record_failed_operation(phase_name, error, details)
+
+        if not self.architecture_metadata.get("enable_phase_tracking", True):
+            return
+
+        for phase in reversed(self.phase_history):
+            if phase.get("phase") == phase_name and phase.get("status") == "in_progress":
+                phase["status"] = "failed"
+                phase["ended_at"] = datetime.now().isoformat()
+                phase["duration_seconds"] = round(duration, 6)
+                phase["error"] = str(error)
+                if details:
+                    phase["details"] = self._serialize_value({**phase.get("details", {}), **details})
+                break
+
+    def _record_failed_operation(
+        self,
+        operation_name: str,
+        error: Exception,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """沉淀失败操作信息。"""
+        if not self.architecture_metadata.get("persist_failed_operations", True):
+            return
+
+        self.failed_operations.append({
+            "operation": operation_name,
+            "error": str(error),
+            "details": self._serialize_value(details or {}),
+            "timestamp": datetime.now().isoformat(),
+        })
+
+    def _serialize_value(self, value: Any) -> Any:
+        """将复杂对象转换为 JSON 安全结构。"""
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, defaultdict):
+            return {key: self._serialize_value(item) for key, item in value.items()}
+        if isinstance(value, dict):
+            return {str(key): self._serialize_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._serialize_value(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._serialize_value(item) for item in value]
+        if hasattr(value, "__dataclass_fields__"):
+            return {
+                field_name: self._serialize_value(getattr(value, field_name))
+                for field_name in value.__dataclass_fields__
+            }
+        return value
+
+    def _module_to_dict(self, module_info: ModuleInfo) -> Dict[str, Any]:
+        """输出稳定的模块序列化结构。"""
+        return self._serialize_value(module_info)
+
+    def _build_analysis_summary(
+        self,
+        execution_results: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """构建系统架构摘要。"""
+        health_score = float(self.performance_metrics.get("system_health_score", 0.0) or 0.0)
+        failed_modules: List[str] = []
+        if execution_results:
+            failed_modules = [
+                result.get("module_id", "unknown")
+                for result in execution_results
+                if result.get("status") == "failed"
+            ]
+
+        status = "stable"
+        if self.failed_phase or self.failed_operations or failed_modules:
+            status = "needs_followup"
+        elif health_score < self.architecture_metadata["minimum_stable_health_score"]:
+            status = "degraded"
+
+        return {
+            "status": status,
+            "system_status": self.system_status,
+            "final_status": self.final_status,
+            "registered_module_count": len(self.module_registry.modules),
+            "completed_phase_count": len(self.completed_phases),
+            "failed_operation_count": len(self.failed_operations),
+            "failed_modules": failed_modules,
+            "failed_phase": self.failed_phase,
+            "health_score": health_score,
+        }
+
+    def _build_report_metadata(self) -> Dict[str, Any]:
+        """构建统一报告元数据。"""
+        return {
+            "contract_version": self.architecture_metadata["export_contract_version"],
+            "generated_at": datetime.now().isoformat(),
+            "completed_phases": list(self.completed_phases),
+            "failed_phase": self.failed_phase,
+            "failed_operation_count": len(self.failed_operations),
+            "last_completed_phase": self.last_completed_phase,
+        }
+
+    def get_architecture_summary(self) -> Dict[str, Any]:
+        """获取统一架构治理摘要。"""
+        return {
+            "system_info": self._serialize_value(self.config),
+            "performance_metrics": self._serialize_value(self.performance_metrics),
+            "analysis_summary": self._build_analysis_summary(),
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": {
+                "phase_history": self._serialize_value(self.phase_history),
+                "phase_timings": self._serialize_value(self.phase_timings),
+                "completed_phases": list(self.completed_phases),
+                "failed_phase": self.failed_phase,
+                "final_status": self.final_status,
+                "last_completed_phase": self.last_completed_phase,
+            },
+            "report_metadata": self._build_report_metadata(),
+        }
     
     def register_module(self, module_info: ModuleInfo) -> bool:
         """
@@ -452,10 +633,18 @@ class SystemArchitecture:
         Returns:
             bool: 注册是否成功
         """
+        phase_started_at = self._start_phase("register_module", {"module_id": module_info.module_id})
+
         try:
             # 验证模块信息
             if not self._validate_module_info(module_info):
                 self.logger.error(f"模块信息验证失败: {module_info.module_name}")
+                self._fail_phase(
+                    "register_module",
+                    phase_started_at,
+                    ValueError("invalid module info"),
+                    {"module_id": module_info.module_id},
+                )
                 return False
             
             # 判断是否为新增模块
@@ -467,11 +656,31 @@ class SystemArchitecture:
             if success:
                 if is_new:
                     self.performance_metrics["total_modules"] += 1
+                self.failed_phase = None
+                self.final_status = self.system_status
+                self._complete_phase(
+                    "register_module",
+                    phase_started_at,
+                    {"module_id": module_info.module_id, "registered": True},
+                )
                 self.logger.info(f"模块 {module_info.module_name} 注册成功")
+            else:
+                self._fail_phase(
+                    "register_module",
+                    phase_started_at,
+                    RuntimeError("module registry rejected registration"),
+                    {"module_id": module_info.module_id},
+                )
             
             return success
             
         except Exception as e:
+            self._fail_phase(
+                "register_module",
+                phase_started_at,
+                e,
+                {"module_id": module_info.module_id},
+            )
             self.logger.error(f"模块注册失败: {e}")
             return False
     
@@ -485,6 +694,8 @@ class SystemArchitecture:
         Returns:
             bool: 注销是否成功
         """
+        phase_started_at = self._start_phase("unregister_module", {"module_id": module_id})
+
         try:
             # 检查模块是否存在
             module_existed = module_id in self.module_registry.modules
@@ -492,11 +703,31 @@ class SystemArchitecture:
             
             if success and module_existed:
                 self.performance_metrics["total_modules"] -= 1
+                self.failed_phase = None
+                self.final_status = self.system_status
+                self._complete_phase(
+                    "unregister_module",
+                    phase_started_at,
+                    {"module_id": module_id, "unregistered": True},
+                )
                 self.logger.info(f"模块 {module_id} 注销成功")
+            elif not success:
+                self._fail_phase(
+                    "unregister_module",
+                    phase_started_at,
+                    RuntimeError("module registry rejected unregistration"),
+                    {"module_id": module_id},
+                )
             
             return success
             
         except Exception as e:
+            self._fail_phase(
+                "unregister_module",
+                phase_started_at,
+                e,
+                {"module_id": module_id},
+            )
             self.logger.error(f"模块注销失败: {e}")
             return False
     
@@ -507,6 +738,8 @@ class SystemArchitecture:
         Returns:
             bool: 初始化是否成功
         """
+        phase_started_at = self._start_phase("initialize_system")
+
         try:
             self.start_time = datetime.now()
             self.system_status = "initializing"
@@ -529,6 +762,11 @@ class SystemArchitecture:
                     
                 except Exception as e:
                     module_info.status = ModuleStatus.ERROR
+                    self._record_failed_operation(
+                        "initialize_module",
+                        e,
+                        {"module_id": module_info.module_id},
+                    )
                     initialization_results.append({
                         "module_id": module_info.module_id,
                         "status": "failed",
@@ -539,15 +777,26 @@ class SystemArchitecture:
             
             # 更新系统状态
             self.system_status = "initialized"
+            self.failed_phase = None
+            self.final_status = self.system_status
             
             # 更新性能指标
             self._update_performance_metrics()
+            self._complete_phase(
+                "initialize_system",
+                phase_started_at,
+                {
+                    "initialized_module_count": len(modules),
+                    "failed_module_count": sum(1 for item in initialization_results if item.get("status") == "failed"),
+                },
+            )
             
             self.logger.info("系统初始化完成")
             return True
             
         except Exception as e:
             self.system_status = "error"
+            self._fail_phase("initialize_system", phase_started_at, e)
             self.logger.error(f"系统初始化失败: {e}")
             self.logger.error(traceback.format_exc())
             return False
@@ -562,11 +811,19 @@ class SystemArchitecture:
         Returns:
             bool: 激活是否成功
         """
+        phase_started_at = self._start_phase("activate_module", {"module_id": module_id})
+
         try:
             # 验证模块兼容性
             compatibility = self.module_registry.validate_module_compatibility(module_id)
             if not compatibility.get("valid", False):
                 self.logger.error(f"模块 {module_id} 不兼容: {compatibility.get('error', '未知错误')}")
+                self._fail_phase(
+                    "activate_module",
+                    phase_started_at,
+                    RuntimeError(compatibility.get("error", "模块兼容性验证失败")),
+                    {"module_id": module_id},
+                )
                 return False
             
             # 激活模块
@@ -575,11 +832,26 @@ class SystemArchitecture:
             if success:
                 # 更新性能指标
                 self._update_performance_metrics()
+                self.failed_phase = None
+                self.final_status = self.system_status
+                self._complete_phase(
+                    "activate_module",
+                    phase_started_at,
+                    {"module_id": module_id, "activated": True},
+                )
                 self.logger.info(f"模块 {module_id} 激活成功")
+            else:
+                self._fail_phase(
+                    "activate_module",
+                    phase_started_at,
+                    RuntimeError("module activation failed"),
+                    {"module_id": module_id},
+                )
             
             return success
             
         except Exception as e:
+            self._fail_phase("activate_module", phase_started_at, e, {"module_id": module_id})
             self.logger.error(f"模块激活失败: {e}")
             return False
     
@@ -593,17 +865,34 @@ class SystemArchitecture:
         Returns:
             bool: 停用是否成功
         """
+        phase_started_at = self._start_phase("deactivate_module", {"module_id": module_id})
+
         try:
             success = self.module_registry.deactivate_module(module_id)
             
             if success:
                 # 更新性能指标
                 self._update_performance_metrics()
+                self.failed_phase = None
+                self.final_status = self.system_status
+                self._complete_phase(
+                    "deactivate_module",
+                    phase_started_at,
+                    {"module_id": module_id, "deactivated": True},
+                )
                 self.logger.info(f"模块 {module_id} 停用成功")
+            else:
+                self._fail_phase(
+                    "deactivate_module",
+                    phase_started_at,
+                    RuntimeError("module deactivation failed"),
+                    {"module_id": module_id},
+                )
             
             return success
             
         except Exception as e:
+            self._fail_phase("deactivate_module", phase_started_at, e, {"module_id": module_id})
             self.logger.error(f"模块停用失败: {e}")
             return False
     
@@ -618,12 +907,17 @@ class SystemArchitecture:
             Dict[str, Any]: 执行结果
         """
         start_time = time.time()
+        phase_started_at = self._start_phase(
+            "execute_pipeline",
+            {"context_keys": sorted(context.keys())},
+        )
         self.logger.info("开始执行系统流水线")
         
         try:
             # 验证系统状态
             if self.system_status != "initialized":
                 raise RuntimeError("系统未初始化")
+            self.system_status = "running"
             # 获取活跃模块
             active_modules = [
                 info for info in self.module_registry.modules.values() 
@@ -661,6 +955,11 @@ class SystemArchitecture:
                     self.logger.info(f"模块 {module_info.module_name} 执行成功")
 
                 except Exception as e:
+                    self._record_failed_operation(
+                        "execute_module",
+                        e,
+                        {"module_id": module_info.module_id, "module_name": module_info.module_name},
+                    )
                     execution_results.append({
                         "module_id": module_info.module_id,
                         "module_name": module_info.module_name,
@@ -673,6 +972,8 @@ class SystemArchitecture:
             
             # 更新性能指标
             self._update_performance_metrics()
+            self.system_status = "initialized"
+            self.final_status = "pipeline_completed"
             
             # 构造最终结果
             final_result = {
@@ -684,13 +985,26 @@ class SystemArchitecture:
                 "modules_executed": len(execution_results),
                 "execution_results": execution_results,
                 "performance_metrics": self.performance_metrics,
-                "quality_assessment": self._assess_quality(execution_results)
+                "quality_assessment": self._assess_quality(execution_results),
+                "analysis_summary": self._build_analysis_summary(execution_results),
+                "report_metadata": self._build_report_metadata(),
             }
+            self.failed_phase = None if not self.failed_operations else self.failed_phase
+            self._complete_phase(
+                "execute_pipeline",
+                phase_started_at,
+                {
+                    "executed_module_count": len(execution_results),
+                    "failed_module_count": sum(1 for item in execution_results if item.get("status") == "failed"),
+                },
+            )
             
             self.logger.info("系统流水线执行完成")
             return final_result
             
         except Exception as e:
+            self.system_status = "error"
+            self._fail_phase("execute_pipeline", phase_started_at, e)
             self.logger.error(f"系统流水线执行失败: {e}")
             self.logger.error(traceback.format_exc())
             raise
@@ -834,7 +1148,18 @@ class SystemArchitecture:
                 "standards_followed": self.config.standards,
                 "compliance_score": 0.98,
                 "academic_compliance": True
-            }
+            },
+            "analysis_summary": self._build_analysis_summary(),
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": {
+                "phase_history": self._serialize_value(self.phase_history),
+                "phase_timings": self._serialize_value(self.phase_timings),
+                "completed_phases": list(self.completed_phases),
+                "failed_phase": self.failed_phase,
+                "final_status": self.final_status,
+                "last_completed_phase": self.last_completed_phase,
+            },
+            "report_metadata": self._build_report_metadata(),
         }
     
     def get_module_list(self) -> List[Dict[str, Any]]:
@@ -883,29 +1208,40 @@ class SystemArchitecture:
     
     def export_system_info(self, output_path: str) -> bool:
         """导出系统信息"""
+        phase_started_at = self._start_phase("export_system_info", {"output_path": output_path})
+
         try:
             system_info = {
-                "system_config": self.config.__dict__,
+                "system_config": self._serialize_value(self.config),
                 "module_registry": {
-                    "modules": [m.__dict__ for m in self.module_registry.modules.values()],
-                    "module_graph": list(self.module_registry.get_module_graph().edges())
+                    "modules": [self._module_to_dict(m) for m in self.module_registry.modules.values()],
+                    "module_graph": self._serialize_value(list(self.module_registry.get_module_graph().edges()))
                 },
-                "performance_metrics": self.performance_metrics,
-                "system_status": self.get_system_status()
+                "performance_metrics": self._serialize_value(self.performance_metrics),
+                "system_status": self.get_system_status(),
+                "architecture_summary": self.get_architecture_summary(),
+                "failed_operations": self._serialize_value(self.failed_operations),
+                "report_metadata": self._build_report_metadata(),
             }
             
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(system_info, f, ensure_ascii=False, indent=2)
             
+            self.failed_phase = None
+            self.final_status = self.system_status
+            self._complete_phase("export_system_info", phase_started_at, {"output_path": output_path})
             self.logger.info(f"系统信息已导出到: {output_path}")
             return True
             
         except Exception as e:
+            self._fail_phase("export_system_info", phase_started_at, e, {"output_path": output_path})
             self.logger.error(f"系统信息导出失败: {e}")
             return False
     
     def cleanup(self) -> bool:
         """清理系统资源"""
+        phase_started_at = self._start_phase("cleanup")
+
         try:
             # 清理模块注册中心
             self.module_registry.modules.clear()
@@ -914,11 +1250,27 @@ class SystemArchitecture:
             # 重置系统状态
             self.system_status = "terminated"
             self.start_time = None
+            self.performance_metrics = {
+                "total_modules": 0,
+                "active_modules": 0,
+                "system_health_score": 0.0,
+                "average_performance": 0.0,
+                "quality_assurance_score": 0.0
+            }
+            self.phase_history.clear()
+            self.phase_timings.clear()
+            self.completed_phases.clear()
+            self.failed_operations.clear()
+            self.failed_phase = None
+            self.last_completed_phase = None
+            self.final_status = self.system_status
             
+            self._complete_phase("cleanup", phase_started_at)
             self.logger.info("系统资源清理完成")
             return True
             
         except Exception as e:
+            self._fail_phase("cleanup", phase_started_at, e)
             self.logger.error(f"系统资源清理失败: {e}")
             return False
 

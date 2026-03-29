@@ -625,3 +625,25 @@ python tools/quality_improvement_archive.py --output output/quality-improvement-
 - [ ] 算法画像导出不会暴露不可序列化对象
 - [ ] 导出文件可被 `json.load` 直接回读
 - [ ] D21 变更未破坏既有 learning/optimization 回归测试
+
+## 18. D22 系统架构补充检查项
+
+本章节用于 D22 类 system architecture 重构，强调系统级阶段轨迹、失败操作沉淀、状态摘要契约与 JSON 安全导出统一。
+
+### 18.1 系统架构契约一致性
+
+- [ ] 系统状态输出 `analysis_summary`
+- [ ] 失败操作以稳定 `failed_operations` 列表输出
+- [ ] 系统摘要与导出结果输出统一 `report_metadata`
+
+### 18.2 系统阶段可观测性
+
+- [ ] 模块注册、初始化、激活、流水线执行记录 `phase_history`
+- [ ] 阶段异常写入 `failed_phase`
+- [ ] 成功路径刷新 `completed_phases` 与 `last_completed_phase`
+
+### 18.3 导出与序列化安全
+
+- [ ] 模块信息导出不会暴露枚举或 dataclass 原始对象
+- [ ] 导出文件可被 `json.load` 直接回读
+- [ ] D22 变更未破坏既有 architecture/cycle 回归测试
