@@ -699,12 +699,10 @@ class IterationCycle(PhaseTrackerMixin):
                 lambda: self.validate_results(artifacts, analysis_results),
             )
             iteration_result.metadata["validation"] = validation_results
-            
-            # 7. 记录问题
+
             if test_results.get("failures"):
                 iteration_result.issues_found = test_results["failures"]
-            
-            # 8. 性能指标
+
             if test_results.get("metrics"):
                 iteration_result.performance_metrics = test_results["metrics"]
             
@@ -852,46 +850,15 @@ class IterationCycle(PhaseTrackerMixin):
         """获取循环摘要"""
         if not self.results:
             return {"message": "还没有执行任何迭代"}
-        
+
         completed_iterations = len(self.results)
         failed_iterations = len(self.failed_iterations)
         total_duration = self.total_duration
-        
-        # 计算平均性能指标
-        avg_execution_time = 0
-        avg_memory_usage = 0
-        avg_quality_score = 0
-        avg_confidence_score = 0
-        
-        if completed_iterations > 0:
-            execution_times = [r.duration for r in self.results]
-            avg_execution_time = sum(execution_times) / len(execution_times)
-            
-            memory_usages = [r.performance_metrics.get("memory_usage", 0) 
-                           for r in self.results if r.performance_metrics]
-            if memory_usages:
-                avg_memory_usage = sum(memory_usages) / len(memory_usages)
-            
-            quality_scores = [r.quality_assessment.get("quality_score", 0.0) 
-                            for r in self.results if r.quality_assessment]
-            if quality_scores:
-                avg_quality_score = sum(quality_scores) / len(quality_scores)
-            
-            confidence_scores = [r.confidence_scores.get("overall", 0.0) 
-                               for r in self.results if r.confidence_scores]
-            if confidence_scores:
-                avg_confidence_score = sum(confidence_scores) / len(confidence_scores)
-        
-        stable_iterations = len(
-            [
-                result
-                for result in self.results
-                if result.metadata.get("analysis_summary", {}).get("iteration_status") == "stable"
-            ]
-        )
+        average_metrics = self._build_average_metrics()
+        stable_iterations = self._count_stable_iterations()
         cycle_status = (
             "stable"
-            if failed_iterations == 0 and avg_quality_score >= self.config.minimum_stable_quality
+            if failed_iterations == 0 and average_metrics["average_quality_score"] >= self.config.minimum_stable_quality
             else "needs_followup"
         )
 
@@ -901,10 +868,10 @@ class IterationCycle(PhaseTrackerMixin):
             "successful_iterations": completed_iterations - failed_iterations,
             "stable_iterations": stable_iterations,
             "total_duration_seconds": total_duration,
-            "average_iteration_time": avg_execution_time,
-            "average_memory_usage_mb": avg_memory_usage,
-            "average_quality_score": avg_quality_score,
-            "average_confidence_score": avg_confidence_score,
+            "average_iteration_time": average_metrics["average_iteration_time"],
+            "average_memory_usage_mb": average_metrics["average_memory_usage_mb"],
+            "average_quality_score": average_metrics["average_quality_score"],
+            "average_confidence_score": average_metrics["average_confidence_score"],
             "analysis_summary": {
                 "status": cycle_status,
                 "failed_operation_count": len(self.failed_operations),
@@ -919,6 +886,45 @@ class IterationCycle(PhaseTrackerMixin):
             "report_metadata": self._build_report_metadata(),
             "performance_metrics": self._serialize_value(self.performance_metrics)
         }
+
+    def _build_average_metrics(self) -> Dict[str, float]:
+        if not self.results:
+            return {
+                "average_iteration_time": 0.0,
+                "average_memory_usage_mb": 0.0,
+                "average_quality_score": 0.0,
+                "average_confidence_score": 0.0,
+            }
+
+        avg_iteration_time = sum(result.duration for result in self.results) / len(self.results)
+        memory_usages = [
+            result.performance_metrics.get("memory_usage", 0)
+            for result in self.results
+            if result.performance_metrics
+        ]
+        quality_scores = [
+            result.quality_assessment.get("quality_score", 0.0)
+            for result in self.results
+            if result.quality_assessment
+        ]
+        confidence_scores = [
+            result.confidence_scores.get("overall", 0.0)
+            for result in self.results
+            if result.confidence_scores
+        ]
+        return {
+            "average_iteration_time": avg_iteration_time,
+            "average_memory_usage_mb": sum(memory_usages) / len(memory_usages) if memory_usages else 0.0,
+            "average_quality_score": sum(quality_scores) / len(quality_scores) if quality_scores else 0.0,
+            "average_confidence_score": sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.0,
+        }
+
+    def _count_stable_iterations(self) -> int:
+        return sum(
+            1
+            for result in self.results
+            if result.metadata.get("analysis_summary", {}).get("iteration_status") == "stable"
+        )
 
     def _build_report_metadata(self) -> Dict[str, Any]:
         return {

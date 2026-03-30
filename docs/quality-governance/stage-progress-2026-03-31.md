@@ -398,3 +398,23 @@
 - 回归通过：`tests/test_multi_source_corpus.py` + `tests/unit/test_fixing_stage_classification.py` + `tests/unit/test_architecture_cycle_quality.py`（145 passed）。
 - `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
 - `code_quality` 告警：`53 -> 51`（下降 2）。
+
+## 20. 当日增量（S2-6 后续：warning TopN 精修第 9 轮）
+
+### 20.1 精修目标
+
+- `src/cycle/iteration_cycle.py`：`execute_iteration` 过长告警（122 > 120）。
+- `src/cycle/iteration_cycle.py`：`get_cycle_summary` 复杂度告警（14 > 12）。
+
+### 20.2 代码重构
+
+- `src/cycle/iteration_cycle.py`
+  - `execute_iteration` 清理非必要注释与空行，函数长度收敛至阈值内。
+  - `get_cycle_summary` 拆分为 `_build_average_metrics` 与 `_count_stable_iterations`，将平均指标计算与稳定轮次统计下沉到 helper。
+  - 保持摘要输出契约不变（字段名与含义保持一致）。
+
+### 20.3 测试与验证
+
+- 回归通过：`tests/unit/test_architecture_cycle_quality.py` + `tests/unit/test_cycle_demo_contract.py`（126 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`51 -> 49`（下降 2）。
