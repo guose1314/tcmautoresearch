@@ -90,42 +90,18 @@ def build_batch_manifest(
     seen_urls: Set[str] = set()
     entries: List[Dict[str, Any]] = []
 
-    for group_key in target_groups:
-        group_info = groups.get(group_key, {})
-        group_name = group_info.get("name", group_key)
-        items = group_info.get("items", [])
-        if not isinstance(items, list):
+    for group_key, group_name, item in _iter_group_items(groups, target_groups):
+        entry = _build_manifest_entry(group_key, group_name, item)
+        if not entry:
             continue
 
-        for item in items:
-            if not isinstance(item, dict):
-                continue
+        urn = entry.get("urn", "")
+        url = entry.get("url", "")
+        if _is_duplicate_entry(urn, url, seen_urns, seen_urls):
+            continue
 
-            urn = (item.get("urn") or "").strip()
-            url = (item.get("url") or "").strip()
-            dedupe_key = urn or url
-            if not dedupe_key:
-                continue
-
-            if urn and urn in seen_urns:
-                continue
-            if url and url in seen_urls:
-                continue
-
-            if urn:
-                seen_urns.add(urn)
-            if url:
-                seen_urls.add(url)
-            entries.append(
-                {
-                    "group": group_key,
-                    "group_name": group_name,
-                    "title": item.get("title", ""),
-                    "urn": urn,
-                    "url": url,
-                    "priority": item.get("priority", "medium")
-                }
-            )
+        _track_seen_values(urn, url, seen_urns, seen_urls)
+        entries.append(entry)
 
     return {
         "generated_at": datetime.now().isoformat(),
@@ -134,3 +110,63 @@ def build_batch_manifest(
         "count": len(entries),
         "entries": entries
     }
+
+
+def _iter_group_items(
+    groups: Dict[str, Any],
+    target_groups: List[str],
+) -> List[tuple[str, str, Any]]:
+    items: List[tuple[str, str, Any]] = []
+    for group_key in target_groups:
+        group_info = groups.get(group_key, {})
+        group_name = group_info.get("name", group_key)
+        group_items = group_info.get("items", [])
+        if not isinstance(group_items, list):
+            continue
+        for item in group_items:
+            items.append((group_key, group_name, item))
+    return items
+
+
+def _build_manifest_entry(group_key: str, group_name: str, item: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(item, dict):
+        return None
+
+    urn = (item.get("urn") or "").strip()
+    url = (item.get("url") or "").strip()
+    if not (urn or url):
+        return None
+
+    return {
+        "group": group_key,
+        "group_name": group_name,
+        "title": item.get("title", ""),
+        "urn": urn,
+        "url": url,
+        "priority": item.get("priority", "medium")
+    }
+
+
+def _is_duplicate_entry(
+    urn: str,
+    url: str,
+    seen_urns: Set[str],
+    seen_urls: Set[str],
+) -> bool:
+    if urn and urn in seen_urns:
+        return True
+    if url and url in seen_urls:
+        return True
+    return False
+
+
+def _track_seen_values(
+    urn: str,
+    url: str,
+    seen_urns: Set[str],
+    seen_urls: Set[str],
+) -> None:
+    if urn:
+        seen_urns.add(urn)
+    if url:
+        seen_urls.add(url)

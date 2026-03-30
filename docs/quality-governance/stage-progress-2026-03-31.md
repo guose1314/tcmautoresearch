@@ -350,3 +350,27 @@
 - 回归通过：`tests/test_research_pipeline_quality.py` + `tests/test_research_orchestrator.py` + `tests/test_corpus_bundle.py`（164 passed）。
 - `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
 - `code_quality` 告警：`57 -> 55`（下降 2）。
+
+## 18. 当日增量（S2-6 后续：warning TopN 精修第 7 轮）
+
+### 18.1 精修目标
+
+- `src/research/ctext_whitelist.py`：`build_batch_manifest` 复杂度告警（16 > 12）。
+- `src/research/literature_retriever.py`：`_build_query_plan` 复杂度告警（13 > 12）。
+
+### 18.2 代码重构
+
+- `src/research/ctext_whitelist.py`
+  - `build_batch_manifest` 拆分为 `_iter_group_items` / `_build_manifest_entry` / `_is_duplicate_entry` / `_track_seen_values`，统一去重与过滤逻辑。
+
+- `src/research/literature_retriever.py`
+  - `_build_query_plan` 改为 `QUERY_PLAN_TEMPLATES` 模板驱动，消除大规模 if-elif 链。
+  - 保持各来源 URL 模板与提示语语义不变，fallback 场景继续追加“（API 回退）”。
+
+### 18.3 测试与验证
+
+- 扩展 `tests/test_ctext_whitelist.py`：新增重复 URN/URL 去重与非法项过滤测试。
+- 新增 `tests/unit/test_literature_retriever_query_plan.py`：覆盖已知来源 fallback 与未知来源默认模板行为。
+- 回归通过：`tests/test_ctext_whitelist.py` + `tests/unit/test_literature_retriever_query_plan.py` + `tests/test_research_pipeline_literature.py`（15 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`55 -> 53`（下降 2）。

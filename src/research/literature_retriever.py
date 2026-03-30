@@ -24,6 +24,61 @@ SEMANTIC_SCHOLAR_SEARCH = "https://api.semanticscholar.org/graph/v1/paper/search
 PLOS_SEARCH_API = "https://api.plos.org/search"
 ARXIV_API = "http://export.arxiv.org/api/query"
 
+QUERY_PLAN_TEMPLATES: Dict[str, Dict[str, str]] = {
+    "pubmed": {
+        "query_url": "https://pubmed.ncbi.nlm.nih.gov/?term={q}",
+        "note": "PubMed 网页检索入口",
+    },
+    "medline_api": {
+        "query_url": "https://pubmed.ncbi.nlm.nih.gov/?term={q}",
+        "note": "PubMed 网页检索入口",
+    },
+    "semantic_scholar": {
+        "query_url": "https://www.semanticscholar.org/search?q={q}",
+        "note": "Semantic Scholar 网页检索入口，常见限流可改走网页查询",
+    },
+    "plos_one": {
+        "query_url": "https://journals.plos.org/plosone/search?q={q}",
+        "note": "PLOS ONE 网页检索入口",
+    },
+    "arxiv": {
+        "query_url": "https://arxiv.org/search/?query={q}&searchtype=all",
+        "note": "arXiv 网页检索入口",
+    },
+    "google_scholar": {
+        "query_url": "https://scholar.google.com/scholar?q={q}",
+        "note": "Google Scholar 无稳定官方开放 API，建议使用页面检索或合规代理服务。",
+    },
+    "iorxiv": {
+        "query_url": "https://www.biorxiv.org/search/{q}%20numresults%3A50%20sort%3Arelevance-rank",
+        "note": "bioRxiv/ioRxiv 推荐使用网页检索或机构提供的数据接口。",
+    },
+    "cochrane": {
+        "query_url": "https://www.cochranelibrary.com/advanced-search?text={q}",
+        "note": "Cochrane Library 多数内容需机构订阅。",
+    },
+    "embase": {
+        "query_url": "https://www.embase.com/search/results?query={q}",
+        "note": "Embase 属付费数据库，通常需机构账号。",
+    },
+    "scopus": {
+        "query_url": "https://www.scopus.com/results/results.uri?query={q}",
+        "note": "Scopus API 需 Elsevier 开发者密钥与订阅授权。",
+    },
+    "web_of_science": {
+        "query_url": "https://www.webofscience.com/wos/woscc/basic-search?search_mode=GeneralSearch&q={q}",
+        "note": "Web of Science 访问通常需要机构订阅。",
+    },
+    "lexicomp": {
+        "query_url": "https://online.lexi.com/lco/action/search?query={q}",
+        "note": "Lexicomp 是临床决策支持平台，需要授权账号。",
+    },
+    "clinicalkey": {
+        "query_url": "https://www.clinicalkey.com/#!/search/{q}",
+        "note": "ClinicalKey 通常需要机构订阅。",
+    },
+}
+
 
 @dataclass
 class LiteratureRecord:
@@ -341,83 +396,21 @@ class LiteratureRetriever:
 
     def _build_query_plan(self, source: str, query: str, fallback: bool = False) -> Dict[str, Any]:
         q = urllib.parse.quote_plus(query)
-        fallback_note = "（API 回退）" if fallback else ""
-        if source in ("pubmed", "medline_api"):
+        template = QUERY_PLAN_TEMPLATES.get(source)
+        if not template:
             return {
                 "source": source,
-                "query_url": f"https://pubmed.ncbi.nlm.nih.gov/?term={q}",
-                "note": f"PubMed 网页检索入口{fallback_note}".strip(),
+                "query_url": "",
+                "note": "暂无检索 URL 模板。",
             }
-        if source == "semantic_scholar":
-            return {
-                "source": source,
-                "query_url": f"https://www.semanticscholar.org/search?q={q}",
-                "note": f"Semantic Scholar 网页检索入口，常见限流可改走网页查询{fallback_note}".strip(),
-            }
-        if source == "plos_one":
-            return {
-                "source": source,
-                "query_url": f"https://journals.plos.org/plosone/search?q={q}",
-                "note": f"PLOS ONE 网页检索入口{fallback_note}".strip(),
-            }
-        if source == "arxiv":
-            return {
-                "source": source,
-                "query_url": f"https://arxiv.org/search/?query={q}&searchtype=all",
-                "note": f"arXiv 网页检索入口{fallback_note}".strip(),
-            }
-        if source == "google_scholar":
-            return {
-                "source": source,
-                "query_url": f"https://scholar.google.com/scholar?q={q}",
-                "note": f"Google Scholar 无稳定官方开放 API，建议使用页面检索或合规代理服务。{fallback_note}".strip(),
-            }
-        if source == "iorxiv":
-            return {
-                "source": source,
-                "query_url": f"https://www.biorxiv.org/search/{q}%20numresults%3A50%20sort%3Arelevance-rank",
-                "note": f"bioRxiv/ioRxiv 推荐使用网页检索或机构提供的数据接口。{fallback_note}".strip(),
-            }
-        if source == "cochrane":
-            return {
-                "source": source,
-                "query_url": f"https://www.cochranelibrary.com/advanced-search?text={q}",
-                "note": f"Cochrane Library 多数内容需机构订阅。{fallback_note}".strip(),
-            }
-        if source == "embase":
-            return {
-                "source": source,
-                "query_url": f"https://www.embase.com/search/results?query={q}",
-                "note": f"Embase 属付费数据库，通常需机构账号。{fallback_note}".strip(),
-            }
-        if source == "scopus":
-            return {
-                "source": source,
-                "query_url": f"https://www.scopus.com/results/results.uri?query={q}",
-                "note": f"Scopus API 需 Elsevier 开发者密钥与订阅授权。{fallback_note}".strip(),
-            }
-        if source == "web_of_science":
-            return {
-                "source": source,
-                "query_url": f"https://www.webofscience.com/wos/woscc/basic-search?search_mode=GeneralSearch&q={q}",
-                "note": f"Web of Science 访问通常需要机构订阅。{fallback_note}".strip(),
-            }
-        if source == "lexicomp":
-            return {
-                "source": source,
-                "query_url": f"https://online.lexi.com/lco/action/search?query={q}",
-                "note": f"Lexicomp 是临床决策支持平台，需要授权账号。{fallback_note}".strip(),
-            }
-        if source == "clinicalkey":
-            return {
-                "source": source,
-                "query_url": f"https://www.clinicalkey.com/#!/search/{q}",
-                "note": f"ClinicalKey 通常需要机构订阅。{fallback_note}".strip(),
-            }
+
+        note = template["note"]
+        if fallback:
+            note = f"{note}（API 回退）"
         return {
             "source": source,
-            "query_url": "",
-            "note": "暂无检索 URL 模板。",
+            "query_url": template["query_url"].format(q=q),
+            "note": note,
         }
 
     def _request_json(self, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
