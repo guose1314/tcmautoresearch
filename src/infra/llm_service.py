@@ -80,19 +80,16 @@ class APILLMEngine(LLMService):
         self,
         api_url: str,
         model: str,
-        api_key: Optional[str] = None,
-        timeout_seconds: float = 60.0,
-        temperature: float = 0.3,
-        max_tokens: int = 1024,
-        extra_headers: Optional[dict[str, str]] = None,
+        **api_options: Any,
     ):
         self.api_url = str(api_url).strip()
         self.model = str(model).strip()
-        self.api_key = str(api_key).strip() if api_key else ""
-        self.timeout_seconds = float(timeout_seconds)
-        self.temperature = float(temperature)
-        self.max_tokens = int(max_tokens)
-        self.extra_headers = dict(extra_headers or {})
+        raw_api_key = api_options.get("api_key")
+        self.api_key = str(raw_api_key).strip() if raw_api_key else ""
+        self.timeout_seconds = float(api_options.get("timeout_seconds", 60.0))
+        self.temperature = float(api_options.get("temperature", 0.3))
+        self.max_tokens = int(api_options.get("max_tokens", 1024))
+        self.extra_headers = dict(api_options.get("extra_headers") or {})
         self.llm_mode = "api"
 
         if not self.api_url:

@@ -423,13 +423,15 @@ class ResearchPipeline(PhaseTrackerMixin):
             "last_completed_phase": runtime_metadata.get("last_completed_phase"),
         }
     
-    def create_research_cycle(self, cycle_name: str, 
-                            description: str,
-                            objective: str,
-                            scope: str,
-                            researchers: Optional[List[str]] = None,
-                            advisors: Optional[List[str]] = None,
-                            resources: Optional[Dict[str, Any]] = None) -> ResearchCycle:
+    def create_research_cycle(
+        self,
+        cycle_name: str,
+        description: str,
+        objective: str,
+        scope: str,
+        researchers: Optional[List[str]] = None,
+        **cycle_options: Any,
+    ) -> ResearchCycle:
         """
         创建研究循环
         
@@ -452,6 +454,9 @@ class ResearchPipeline(PhaseTrackerMixin):
         )
         start_time = time.perf_counter()
         try:
+            advisors = cycle_options.get("advisors") or []
+            resources = cycle_options.get("resources") or {}
+
             # 生成循环ID
             cycle_id = f"cycle_{int(time.time())}_{hashlib.md5(cycle_name.encode()).hexdigest()[:8]}"
             
@@ -463,8 +468,8 @@ class ResearchPipeline(PhaseTrackerMixin):
                 research_objective=objective,
                 research_scope=scope,
                 researchers=researchers or [],
-                advisors=advisors or [],
-                resources=resources or {},
+                advisors=advisors,
+                resources=resources,
                 tags=["created", "automated", "tcmautoresearch"]
             )
             self._initialize_cycle_tracking(research_cycle)

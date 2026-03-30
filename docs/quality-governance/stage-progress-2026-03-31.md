@@ -540,3 +540,26 @@
 - 回归通过：`tests/test_llm_service.py` + `tests/unit/test_google_scholar_helper_options.py` + `tests/test_google_scholar_helper_smoke.py`（117 passed）。
 - `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
 - `code_quality` 告警：`40 -> 37`（下降 3）。
+
+## 26. 当日增量（S2-6 后续：warning TopN 精修第 15 轮，research/infra）
+
+### 26.1 精修目标
+
+- `src/research/research_pipeline.py`：`create_research_cycle` 参数过多告警（8 > 7）。
+- `src/infra/llm_service.py`：`APILLMEngine.__init__` 参数过多告警（8 > 7）。
+
+### 26.2 代码重构
+
+- `src/research/research_pipeline.py`
+  - `create_research_cycle` 改为 `researchers + **cycle_options` 入口，兼容旧的 `advisors` / `resources` kwargs。
+  - 内部统一解析 `advisors` 与 `resources` 默认值，保持 `ResearchCycle` 构造语义不变。
+
+- `src/infra/llm_service.py`
+  - `APILLMEngine.__init__` 改为 `api_url/model + **api_options`，收敛显式参数数量。
+  - 内部保留原默认值与类型规范化：`api_key`、`timeout_seconds`、`temperature`、`max_tokens`、`extra_headers`。
+
+### 26.3 测试与验证
+
+- 回归通过：`tests/test_llm_service.py` + `tests/test_research_pipeline_quality.py`（180 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`37 -> 35`（下降 2）。
