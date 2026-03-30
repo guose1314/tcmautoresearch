@@ -4,8 +4,8 @@ from tempfile import TemporaryDirectory
 
 from tools.quality_assessment import (
     AssessmentThresholds,
-    assess_quality_metrics,
     assess_from_gate_results,
+    assess_quality_metrics,
     export_assessment_report,
     metrics_from_gate_results,
 )
@@ -133,6 +133,14 @@ class TestQualityAssessment(unittest.TestCase):
             self.assertTrue(output_path.exists())
             self.assertEqual(exported["metadata"]["last_completed_phase"], "export_assessment_report")
             self.assertEqual(exported["report_metadata"]["contract_version"], "d49.v1")
+            self.assertEqual(
+                exported["report_metadata"]["output_path"],
+                str(output_path).replace("\\", "/"),
+            )
+            self.assertEqual(
+                exported["metadata"]["phase_history"][-1]["details"]["output_path"],
+                exported["report_metadata"]["output_path"],
+            )
 
 
 if __name__ == "__main__":

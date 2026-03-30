@@ -470,22 +470,22 @@ iteration_cycle:
     enable_phase_tracking: true
     persist_failed_operations: true
     minimum_stable_overall_score: 85.0
-    export_contract_version: "d50.v1"
+    export_contract_version: "d66.v1"
   quality_improvement_archive:
     enable_phase_tracking: true
     persist_failed_operations: true
     minimum_stable_quality_score: 85.0
-    export_contract_version: "d51.v1"
+    export_contract_version: "d65.v1"
   quality_feedback:
     enable_phase_tracking: true
     persist_failed_operations: true
     minimum_stable_overall_score: 85.0
-    export_contract_version: "d52.v1"
+    export_contract_version: "d73.v1"
   quality_gate:
     enable_phase_tracking: true
     persist_failed_operations: true
     minimum_stable_success_rate: 1.0
-    export_contract_version: "d57.v1"
+    export_contract_version: "d63.v1"
   cycle_demo:
     enable_phase_tracking: true
     persist_failed_operations: true
@@ -506,12 +506,12 @@ iteration_cycle:
     enable_phase_tracking: true
     persist_failed_operations: true
     minimum_stable_pass_rate: 85.0
-    export_contract_version: "d55.v1"
+    export_contract_version: "d67.v1"
   stage2_runner:
     enable_phase_tracking: true
     persist_failed_operations: true
     minimum_stable_pass_rate: 85.0
-    export_contract_version: "d56.v1"
+    export_contract_version: "d67.v1"
   automated_tester:
     enable_phase_tracking: true
     persist_failed_operations: true

@@ -72,10 +72,10 @@ function Get-Stage1RunnerGovernanceConfig {
     param([string]$ConfigPath)
 
     $config = [ordered]@{
-        enable_phase_tracking      = $true
-        persist_failed_operations  = $true
-        minimum_stable_pass_rate   = 85.0
-        export_contract_version    = "d55.v1"
+        enable_phase_tracking     = $true
+        persist_failed_operations = $true
+        minimum_stable_pass_rate  = 85.0
+        export_contract_version   = "d67.v1"
     }
 
     if (-not (Test-Path $ConfigPath)) {
@@ -118,11 +118,11 @@ function Get-Stage1RunnerGovernanceConfig {
 
 function New-RunnerMetadata {
     return [ordered]@{
-        phase_history     = @()
-        phase_timings     = [ordered]@{}
-        completed_phases  = @()
-        failed_phase      = $null
-        final_status      = "completed"
+        phase_history        = @()
+        phase_timings        = [ordered]@{}
+        completed_phases     = @()
+        failed_phase         = $null
+        final_status         = "completed"
         last_completed_phase = $null
     }
 }
@@ -135,8 +135,8 @@ function Start-RunnerPhase {
 
     $timestamp = (Get-Date).ToString("o")
     $Metadata.phase_history += [ordered]@{
-        phase = $PhaseName
-        event = "started"
+        phase     = $PhaseName
+        event     = "started"
         timestamp = $timestamp
     }
     $Metadata.phase_timings[$PhaseName] = [ordered]@{
@@ -152,8 +152,8 @@ function Complete-RunnerPhase {
 
     $timestamp = (Get-Date).ToString("o")
     $Metadata.phase_history += [ordered]@{
-        phase = $PhaseName
-        event = "completed"
+        phase     = $PhaseName
+        event     = "completed"
         timestamp = $timestamp
     }
 
@@ -180,12 +180,12 @@ function Add-FailedOperation {
     }
 
     [void]$FailedOperations.Add([ordered]@{
-        operation = $Operation
-        error = $Error
-        details = if ($null -ne $Details) { $Details } else { [ordered]@{} }
-        timestamp = (Get-Date).ToString("o")
-        duration_seconds = [math]::Round($DurationSeconds, 2)
-    })
+            operation        = $Operation
+            error            = $Error
+            details          = if ($null -ne $Details) { $Details } else { [ordered]@{} }
+            timestamp        = (Get-Date).ToString("o")
+            duration_seconds = [math]::Round($DurationSeconds, 2)
+        })
 }
 
 function Fail-RunnerPhase {
@@ -199,8 +199,8 @@ function Fail-RunnerPhase {
     )
 
     $Metadata.phase_history += [ordered]@{
-        phase = $PhaseName
-        event = "failed"
+        phase     = $PhaseName
+        event     = "failed"
         timestamp = (Get-Date).ToString("o")
     }
     $Metadata.failed_phase = $PhaseName
@@ -224,14 +224,14 @@ function Get-DayAnalysisSummary {
     $passRateBand = if ($PassRate -ge 100) { "perfect" } elseif ($PassRate -ge 85) { "stable" } elseif ($PassRate -ge 60) { "watch" } else { "critical" }
 
     return [ordered]@{
-        command_step_count = $commandSteps
-        branch_step_count = $branchSteps
-        commit_step_count = $commitSteps
-        actionable_failure_count = $failedSteps
-        rollback_tip_count = $RollbackTipCount
+        command_step_count         = $commandSteps
+        branch_step_count          = $branchSteps
+        commit_step_count          = $commitSteps
+        actionable_failure_count   = $failedSteps
+        rollback_tip_count         = $RollbackTipCount
         strict_rollback_step_count = $StrictRollbackStepCount
-        threshold_breached = $ThresholdBreached
-        pass_rate_band = $passRateBand
+        threshold_breached         = $ThresholdBreached
+        pass_rate_band             = $passRateBand
     }
 }
 
@@ -253,12 +253,12 @@ function Get-GlobalAnalysisSummary {
     }
 
     return [ordered]@{
-        day_count = $dayCount
-        failed_day_count = $failedDays
+        day_count                    = $dayCount
+        failed_day_count             = $failedDays
         threshold_breached_day_count = $thresholdDays
-        average_pass_rate_percent = $averagePassRate
-        aborted_by_threshold = $AbortedByThreshold
-        failed_day_codes = @($Days | Where-Object { $_["failed"] } | ForEach-Object { $_["day"] })
+        average_pass_rate_percent    = $averagePassRate
+        aborted_by_threshold         = $AbortedByThreshold
+        failed_day_codes             = @($Days | Where-Object { $_["failed"] } | ForEach-Object { $_["day"] })
     }
 }
 
@@ -271,13 +271,53 @@ function New-ReportMetadata {
     )
 
     return [ordered]@{
-        contract_version = $GovernanceConfig.export_contract_version
-        generated_at = (Get-Date).ToString("o")
-        result_schema = $ResultSchema
+        contract_version       = $GovernanceConfig.export_contract_version
+        generated_at           = (Get-Date).ToString("o")
+        result_schema          = $ResultSchema
         failed_operation_count = @($FailedOperations).Count
-        final_status = $Metadata.final_status
-        last_completed_phase = $Metadata.last_completed_phase
+        final_status           = $Metadata.final_status
+        last_completed_phase   = $Metadata.last_completed_phase
     }
+}
+
+function Get-InventoryTrendGovernanceAlerts {
+    param([string]$Repo)
+
+    $archiveLatest = Join-Path $Repo "output\quality-improvement-archive-latest.json"
+    if (-not (Test-Path $archiveLatest)) {
+        return @()
+    }
+
+    try {
+        $payload = Get-Content -Path $archiveLatest -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    catch {
+        return @()
+    }
+
+    if ($null -eq $payload -or $null -eq $payload.inventory_trend) {
+        return @()
+    }
+
+    $inventoryTrend = $payload.inventory_trend
+    if ($inventoryTrend.status -ne "regressing") {
+        return @()
+    }
+
+    $inventorySummary = if ($null -ne $payload.inventory_summary) { $payload.inventory_summary } else { $null }
+    return @(
+        [ordered]@{
+            alert_type                      = "inventory_trend_regressing"
+            severity                        = "warning"
+            source_report                   = $archiveLatest
+            message                         = "Inventory trend is regressing; expose governance follow-up in runner summary."
+            inventory_trend_status          = $inventoryTrend.status
+            history_points                  = $inventoryTrend.history_points
+            missing_contract_delta          = $inventoryTrend.missing_contract_delta
+            uncategorized_root_script_delta = $inventoryTrend.uncategorized_root_script_delta
+            recommended_next_target         = if ($null -ne $inventorySummary) { $inventorySummary.recommended_next_target } else { $null }
+        }
+    )
 }
 
 function Ensure-Branch {
@@ -1266,6 +1306,7 @@ $repo = Resolve-RepoRoot -InputPath $RepoPath
 $python = Resolve-Python -Repo $repo -InputPython $PythonExe
 $configPath = Join-Path $repo "config.yml"
 $runnerGovernanceConfig = Get-Stage1RunnerGovernanceConfig -ConfigPath $configPath
+$inventoryTrendGovernanceAlerts = @(Get-InventoryTrendGovernanceAlerts -Repo $repo)
 
 if (-not $Day -and -not $All) {
     throw "Please provide -Day D1..D56 or -All"
@@ -1401,6 +1442,9 @@ foreach ($d in $runDays) {
         analysis_summary         = Get-DayAnalysisSummary -Steps $results -PassRate $passRate -RollbackTipCount @($rollbackTips).Count -StrictRollbackStepCount @($strictRollbackFlow).Count -ThresholdBreached $thresholdBreached
         failed_operations        = @($dayFailedOperations)
     }
+    if ($inventoryTrendGovernanceAlerts.Count -gt 0) {
+        $daySummary["governance_alerts"] = $inventoryTrendGovernanceAlerts
+    }
 
     if ($failed -and $dayMetadata.final_status -ne "failed") {
         $dayMetadata.final_status = "failed"
@@ -1453,6 +1497,9 @@ $globalSummary["aborted_by_threshold"] = $abortedByThreshold
 $globalSummary["abort_reason"] = $abortReason
 $globalSummary["analysis_summary"] = Get-GlobalAnalysisSummary -Days $globalSummary.days -AbortedByThreshold $abortedByThreshold
 $globalSummary["failed_operations"] = @($globalSummary.failed_operations)
+if ($inventoryTrendGovernanceAlerts.Count -gt 0) {
+    $globalSummary["governance_alerts"] = $inventoryTrendGovernanceAlerts
+}
 if (-not $globalSummary.metadata.last_completed_phase) {
     $globalSummary.metadata.final_status = "completed"
 }

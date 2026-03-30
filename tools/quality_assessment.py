@@ -19,7 +19,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-import yaml
+try:
+    import yaml
+except ImportError:  # pragma: no cover
+    yaml = None
 
 DEFAULT_WEIGHTS = {
     "gate_stability": 0.25,
@@ -247,7 +250,7 @@ def _build_report_metadata(
         "last_completed_phase": runtime_metadata.get("last_completed_phase"),
     }
     if output_path is not None:
-        report_metadata["output_path"] = str(output_path)
+        report_metadata["output_path"] = str(output_path).replace("\\", "/")
     return report_metadata
 
 
@@ -457,12 +460,13 @@ def export_assessment_report(assessment: Dict[str, object], output_path: Path) -
         "minimum_stable_overall_score": report.get("thresholds", {}).get("min_overall_score", DEFAULT_GOVERNANCE_CONFIG["minimum_stable_overall_score"]),
     }
 
-    export_started_at = _start_phase(metadata, "export_assessment_report", {"output_path": str(output_path)})
+    export_details = {"output_path": str(output_path).replace("\\", "/")}
+    export_started_at = _start_phase(metadata, "export_assessment_report", export_details)
     _complete_phase(
         metadata,
         "export_assessment_report",
         export_started_at,
-        {"output_path": str(output_path)},
+        export_details,
         final_status="completed" if metadata.get("final_status") != "cleaned" else metadata.get("final_status"),
     )
     report["metadata"] = _build_runtime_metadata(metadata)

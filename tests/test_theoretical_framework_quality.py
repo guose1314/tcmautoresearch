@@ -4,7 +4,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from src.research.theoretical_framework import HypothesisStatus, ResearchDomain, TheoreticalFramework
+from src.research.theoretical_framework import (
+    HypothesisStatus,
+    ResearchDomain,
+    TheoreticalFramework,
+)
 
 
 class TestTheoreticalFrameworkQuality(unittest.TestCase):

@@ -4,8 +4,8 @@ import tempfile
 import unittest
 
 from src.test.integration_tester import (
-    IntegrationTestPriority,
     IntegrationTester,
+    IntegrationTestPriority,
     IntegrationTestType,
 )
 

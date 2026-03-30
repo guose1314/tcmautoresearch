@@ -32,7 +32,12 @@ except ImportError:  # pragma: no cover
     yaml = None
 
 from tools.code_quality_checks import run_checks as run_code_quality_checks
-from tools.continuous_improvement_loop import build_cycle_report, export_cycle_report, load_history
+from tools.continuous_improvement_loop import (
+    build_cycle_report,
+    export_cycle_report,
+    load_archive_history,
+    load_history,
+)
 from tools.generate_dependency_graph import build_dependency_graph, write_outputs
 from tools.logic_checks import run_checks
 from tools.quality_assessment import assess_from_gate_results, export_assessment_report
@@ -50,13 +55,14 @@ DEFAULT_TEST_MODULES = [
     "tests.unit.test_quality_assessment",
     "tests.unit.test_quality_improvement_archive",
     "tests.unit.test_quality_feedback",
+    "tests.unit.test_quality_consumer_inventory",
 ]
 
 DEFAULT_GOVERNANCE_CONFIG = {
     "enable_phase_tracking": True,
     "persist_failed_operations": True,
     "minimum_stable_success_rate": 1.0,
-    "export_contract_version": "d57.v1",
+    "export_contract_version": "d63.v1",
 }
 
 
@@ -108,6 +114,48 @@ def _serialize_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return [_serialize_value(item) for item in value]
     return value
+
+
+def _normalize_reference_path(path: Path | str) -> str:
+    return str(path).replace("\\", "/")
+
+
+def _result_name(result: GateResult | Dict[str, object]) -> str:
+    if isinstance(result, GateResult):
+        return result.name
+    return str(result.get("name", "unknown"))
+
+
+def _result_details(result: GateResult | Dict[str, object]) -> Dict[str, object]:
+    if isinstance(result, GateResult):
+        return result.details
+    details = result.get("details", {})
+    return details if isinstance(details, dict) else {}
+
+
+def _is_artifact_reference_key(key: str) -> bool:
+    lowered = key.lower()
+    return lowered == "outputs" or lowered.endswith(
+        ("_path", "_report", "_file", "_json", "_markdown", "_index", "_dir")
+    )
+
+
+def _artifact_reference_entries(results: List[GateResult | Dict[str, object]]) -> List[tuple[str, str]]:
+    entries: List[tuple[str, str]] = []
+    for result in results:
+        gate_name = _result_name(result)
+        details = _result_details(result)
+        for key in sorted(details):
+            value = details[key]
+            if key == "outputs" and isinstance(value, dict):
+                for nested_key in sorted(value):
+                    nested_value = value[nested_key]
+                    if isinstance(nested_value, str):
+                        entries.append((f"{gate_name}.outputs.{nested_key}", _normalize_reference_path(nested_value)))
+                continue
+            if _is_artifact_reference_key(key) and isinstance(value, str):
+                entries.append((f"{gate_name}.{key}", _normalize_reference_path(value)))
+    return entries
 
 
 def _start_phase(runtime_metadata: Dict[str, Any], phase_name: str, details: Dict[str, Any] | None = None) -> float:
@@ -247,8 +295,10 @@ def _build_report_metadata(
     governance_config: Dict[str, Any],
     runtime_metadata: Dict[str, Any],
     failed_operations: List[Dict[str, Any]],
+    results: List[GateResult | Dict[str, object]],
     report_path: Path | None = None,
 ) -> Dict[str, Any]:
+    artifact_entries = _artifact_reference_entries(results)
     report_metadata = {
         "contract_version": governance_config["export_contract_version"],
         "generated_at": _utc_now_iso(),
@@ -256,9 +306,12 @@ def _build_report_metadata(
         "failed_operation_count": len(failed_operations),
         "final_status": runtime_metadata.get("final_status", "initialized"),
         "last_completed_phase": runtime_metadata.get("last_completed_phase"),
+        "gate_names": [_result_name(result) for result in results],
+        "artifact_reference_labels": [label for label, _ in artifact_entries],
+        "artifact_reference_paths": [path for _, path in artifact_entries],
     }
     if report_path is not None:
-        report_metadata["output_path"] = str(report_path)
+        report_metadata["output_path"] = _normalize_reference_path(report_path)
     return report_metadata
 
 
@@ -414,6 +467,7 @@ def run_quality_assessment_gate(root: Path, gate_results: List[GateResult]) -> G
 def run_continuous_improvement_gate(root: Path) -> GateResult:
     assessment_path = root / "output" / "quality-assessment.json"
     history_path = root / "output" / "quality-history.jsonl"
+    archive_history_path = root / "output" / "quality-improvement-archive.jsonl"
     output_path = root / "output" / "continuous-improvement.json"
 
     if not assessment_path.exists():
@@ -427,7 +481,8 @@ def run_continuous_improvement_gate(root: Path) -> GateResult:
     try:
         assessment = json.loads(assessment_path.read_text(encoding="utf-8"))
         history = load_history(history_path)
-        report = build_cycle_report(assessment, history, root / "config.yml")
+        archive_history = load_archive_history(archive_history_path)
+        report = build_cycle_report(assessment, history, root / "config.yml", archive_history)
         report = export_cycle_report(report, history_path, output_path)
     except Exception as error:
         return GateResult(
@@ -456,18 +511,20 @@ def run_continuous_improvement_gate(root: Path) -> GateResult:
 def run_quality_improvement_archive_gate(root: Path, gate_report: Dict[str, object]) -> GateResult:
     assessment_path = root / "output" / "quality-assessment.json"
     improvement_path = root / "output" / "continuous-improvement.json"
-    if not assessment_path.exists() or not improvement_path.exists():
+    inventory_path = root / "output" / "quality-consumer-inventory.json"
+    if not assessment_path.exists() or not improvement_path.exists() or not inventory_path.exists():
         return GateResult(
             name="quality_improvement_archive",
             success=False,
             metrics={"archive_entry_written": 0},
-            details={"error": "assessment or improvement report is missing"},
+            details={"error": "assessment, improvement, or inventory report is missing"},
         )
 
     try:
         assessment_report = json.loads(assessment_path.read_text(encoding="utf-8"))
         improvement_report = json.loads(improvement_path.read_text(encoding="utf-8"))
-        entry = build_archive_entry(gate_report, assessment_report, improvement_report, root / "config.yml")
+        inventory_report = json.loads(inventory_path.read_text(encoding="utf-8"))
+        entry = build_archive_entry(gate_report, assessment_report, improvement_report, root / "config.yml", inventory_report)
 
         outputs = write_archive(
             entry,
@@ -503,7 +560,8 @@ def run_quality_feedback_gate(root: Path) -> GateResult:
     assessment_path = root / "output" / "quality-assessment.json"
     improvement_path = root / "output" / "continuous-improvement.json"
     archive_latest_path = root / "output" / "quality-improvement-archive-latest.json"
-    if not assessment_path.exists() or not improvement_path.exists() or not archive_latest_path.exists():
+    inventory_path = root / "output" / "quality-consumer-inventory.json"
+    if not assessment_path.exists() or not improvement_path.exists() or not archive_latest_path.exists() or not inventory_path.exists():
         return GateResult(
             name="quality_feedback",
             success=False,
@@ -515,7 +573,8 @@ def run_quality_feedback_gate(root: Path) -> GateResult:
         assessment = json.loads(assessment_path.read_text(encoding="utf-8"))
         improvement = json.loads(improvement_path.read_text(encoding="utf-8"))
         archive_latest = json.loads(archive_latest_path.read_text(encoding="utf-8"))
-        feedback = build_feedback_report(assessment, improvement, archive_latest, root / "config.yml")
+        inventory_report = json.loads(inventory_path.read_text(encoding="utf-8"))
+        feedback = build_feedback_report(assessment, improvement, archive_latest, root / "config.yml", inventory_report)
 
         json_path = root / "output" / "quality-feedback.json"
         md_path = root / "output" / "quality-feedback.md"
@@ -555,6 +614,63 @@ def run_quality_feedback_gate(root: Path) -> GateResult:
     )
 
 
+def run_quality_consumer_inventory_gate(root: Path) -> GateResult:
+    output_path = root / "output" / "quality-consumer-inventory.json"
+    inventory_tool_path = Path(__file__).resolve().with_name("quality_consumer_inventory.py")
+    command = [
+        sys.executable,
+        str(inventory_tool_path),
+        "--config",
+        str(root / "config.yml"),
+        "--output",
+        str(output_path),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return GateResult(
+            name="quality_consumer_inventory",
+            success=False,
+            metrics={"return_code": completed.returncode},
+            details={
+                "command": command,
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
+                "inventory_report": str(output_path.relative_to(root)).replace("\\", "/"),
+            },
+        )
+
+    report = json.loads(output_path.read_text(encoding="utf-8")) if output_path.exists() else {}
+    analysis_summary = report.get("analysis_summary") or {}
+    category_counts = analysis_summary.get("root_script_observation_category_counts") or {}
+    missing_contract_count = int(analysis_summary.get("missing_contract_count", 0) or 0)
+    uncategorized_count = int(category_counts.get("uncategorized_root_script", 0) or 0)
+    recommendation = report.get("recommendation") or {}
+    return GateResult(
+        name="quality_consumer_inventory",
+        success=missing_contract_count == 0 and uncategorized_count == 0,
+        metrics={
+            "return_code": completed.returncode,
+            "scanned_consumer_count": int(analysis_summary.get("scanned_consumer_count", 0) or 0),
+            "missing_contract_count": missing_contract_count,
+            "uncategorized_root_script_count": uncategorized_count,
+        },
+        details={
+            "command": command,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "inventory_report": str(output_path.relative_to(root)).replace("\\", "/"),
+            "recommended_next_target": recommendation.get("recommended_path") or analysis_summary.get("recommended_next_target"),
+            "root_script_observation_category_counts": category_counts,
+        },
+    )
+
+
 def build_report(
     results: List[GateResult],
     governance_config: Dict[str, Any] | None = None,
@@ -580,7 +696,7 @@ def build_report(
         "analysis_summary": _build_analysis_summary(results, governance_config, runtime_metadata, failed_operations),
         "failed_operations": _serialize_value(failed_operations),
         "metadata": _build_runtime_metadata(runtime_metadata),
-        "report_metadata": _build_report_metadata(governance_config, runtime_metadata, failed_operations, report_path),
+        "report_metadata": _build_report_metadata(governance_config, runtime_metadata, failed_operations, results, report_path),
     }
 
 
@@ -595,12 +711,13 @@ def export_quality_gate_report(report: Dict[str, object], output_path: Path) -> 
         "minimum_stable_success_rate": DEFAULT_GOVERNANCE_CONFIG["minimum_stable_success_rate"],
     }
 
-    export_started_at = _start_phase(metadata, "export_quality_gate_report", {"output_path": str(output_path)})
+    export_details = {"output_path": _normalize_reference_path(output_path)}
+    export_started_at = _start_phase(metadata, "export_quality_gate_report", export_details)
     _complete_phase(
         metadata,
         "export_quality_gate_report",
         export_started_at,
-        {"output_path": str(output_path)},
+        export_details,
         final_status=metadata.get("final_status", "completed"),
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -611,7 +728,13 @@ def export_quality_gate_report(report: Dict[str, object], output_path: Path) -> 
         metadata,
         failed_operations,
     )
-    payload["report_metadata"] = _build_report_metadata(governance_config, metadata, failed_operations, output_path)
+    payload["report_metadata"] = _build_report_metadata(
+        governance_config,
+        metadata,
+        failed_operations,
+        payload.get("results", []),
+        output_path,
+    )
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return payload
 
@@ -674,7 +797,15 @@ def main() -> int:
         governance_config,
         lambda: run_continuous_improvement_gate(root),
     )
-    pre_archive_results = [*core_results, assessment_result, improvement_result]
+    inventory_result = _run_gate_phase(
+        "run_quality_consumer_inventory_gate",
+        root,
+        runtime_metadata,
+        failed_operations,
+        governance_config,
+        lambda: run_quality_consumer_inventory_gate(root),
+    )
+    pre_archive_results = [*core_results, assessment_result, improvement_result, inventory_result]
     pre_archive_report = build_report(pre_archive_results, governance_config, runtime_metadata, failed_operations)
     archive_result = _run_gate_phase(
         "run_quality_improvement_archive_gate",

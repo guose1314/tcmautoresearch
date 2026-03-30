@@ -3,7 +3,10 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from tools.quality_consumer_inventory import build_quality_consumer_inventory, export_quality_consumer_inventory
+from tools.quality_consumer_inventory import (
+    build_quality_consumer_inventory,
+    export_quality_consumer_inventory,
+)
 
 
 class TestQualityConsumerInventory(unittest.TestCase):

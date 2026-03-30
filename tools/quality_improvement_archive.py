@@ -25,14 +25,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
-import yaml
+try:
+    import yaml
+except ImportError:  # pragma: no cover
+    yaml = None
 
 
 DEFAULT_GOVERNANCE_CONFIG = {
     "enable_phase_tracking": True,
     "persist_failed_operations": True,
     "minimum_stable_quality_score": 85.0,
-    "export_contract_version": "d51.v1",
+    "export_contract_version": "d65.v1",
 }
 
 
@@ -41,7 +44,7 @@ def _utc_now_iso() -> str:
 
 
 def _load_archive_section(config_path: Path | None) -> Dict[str, Any]:
-    if config_path is None or not config_path.exists():
+    if config_path is None or not config_path.exists() or yaml is None:
         return {}
 
     try:
@@ -74,6 +77,25 @@ def _serialize_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return [_serialize_value(item) for item in value]
     return value
+
+
+def _normalize_reference_path(path: Path | str) -> str:
+    return str(path).replace("\\", "/")
+
+
+def _reference_list_entries(
+    history_path: Path | None = None,
+    latest_output: Path | None = None,
+    dossier_path: Path | None = None,
+) -> List[tuple[str, str]]:
+    entries: List[tuple[str, str]] = []
+    if history_path is not None:
+        entries.append(("history", _normalize_reference_path(history_path)))
+    if latest_output is not None:
+        entries.append(("latest_output", _normalize_reference_path(latest_output)))
+    if dossier_path is not None:
+        entries.append(("dossier", _normalize_reference_path(dossier_path)))
+    return entries
 
 
 def _start_phase(runtime_metadata: Dict[str, Any], phase_name: str, details: Dict[str, Any] | None = None) -> float:
@@ -174,10 +196,129 @@ def _build_analysis_summary(
         "failed_gate_count": len(entry.get("failed_gates", [])),
         "failed_dimension_count": len(entry.get("failed_dimensions", [])),
         "action_backlog_count": int(entry.get("action_backlog_count", 0) or 0),
+        "inventory_missing_contract_count": int(((entry.get("inventory_summary") or {}).get("missing_contract_count", 0)) or 0),
+        "inventory_uncategorized_root_script_count": int((((entry.get("inventory_summary") or {}).get("root_script_observation_category_counts") or {}).get("uncategorized_root_script", 0)) or 0),
+        "inventory_trend_status": str((entry.get("inventory_trend") or {}).get("status", "stable")),
+        "inventory_history_points": int((entry.get("inventory_trend") or {}).get("history_points", 1) or 1),
         "failed_operation_count": len(failed_operations),
         "failed_phase": runtime_metadata.get("failed_phase"),
         "final_status": runtime_metadata.get("final_status", "initialized"),
         "last_completed_phase": runtime_metadata.get("last_completed_phase"),
+    }
+
+
+def _build_inventory_summary(inventory_report: Dict[str, object] | None) -> Dict[str, object]:
+    report = inventory_report or {}
+    analysis_summary = report.get("analysis_summary") or {}
+    recommendation = report.get("recommendation") or {}
+    category_counts = analysis_summary.get("root_script_observation_category_counts") or {}
+    return {
+        "status": "healthy"
+        if int(analysis_summary.get("missing_contract_count", 0) or 0) == 0
+        and int(category_counts.get("uncategorized_root_script", 0) or 0) == 0
+        else "needs_followup",
+        "scanned_consumer_count": int(analysis_summary.get("scanned_consumer_count", 0) or 0),
+        "missing_contract_count": int(analysis_summary.get("missing_contract_count", 0) or 0),
+        "eligible_missing_contract_count": int(analysis_summary.get("eligible_missing_contract_count", 0) or 0),
+        "root_script_observation_count": int(analysis_summary.get("root_script_observation_count", 0) or 0),
+        "root_script_observation_category_counts": _serialize_value(category_counts),
+        "recommended_next_target": recommendation.get("recommended_path") or analysis_summary.get("recommended_next_target"),
+    }
+
+
+def _load_archive_history(history_path: Path) -> List[Dict[str, object]]:
+    if not history_path.exists():
+        return []
+    rows: List[Dict[str, object]] = []
+    for line in history_path.read_text(encoding="utf-8").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            value = json.loads(text)
+        except Exception:
+            continue
+        if isinstance(value, dict):
+            rows.append(value)
+    return rows
+
+
+def _select_previous_inventory_summary(history_rows: List[Dict[str, object]]) -> Dict[str, object] | None:
+    for row in reversed(history_rows):
+        summary = row.get("inventory_summary")
+        if isinstance(summary, dict):
+            return summary
+    return None
+
+
+def _count_inventory_history_points(history_rows: List[Dict[str, object]]) -> int:
+    return sum(1 for row in history_rows if isinstance(row.get("inventory_summary"), dict))
+
+
+def _inventory_trend_status(
+    current_missing_contract_count: int,
+    previous_missing_contract_count: int | None,
+    current_uncategorized_count: int,
+    previous_uncategorized_count: int | None,
+) -> str:
+    if previous_missing_contract_count is None or previous_uncategorized_count is None:
+        return "baseline"
+    current_tuple = (current_missing_contract_count, current_uncategorized_count)
+    previous_tuple = (previous_missing_contract_count, previous_uncategorized_count)
+    if current_tuple < previous_tuple:
+        return "improving"
+    if current_tuple > previous_tuple:
+        return "regressing"
+    return "stable"
+
+
+def _build_inventory_trend(history_rows: List[Dict[str, object]], inventory_summary: Dict[str, object]) -> Dict[str, object]:
+    previous_summary = _select_previous_inventory_summary(history_rows)
+    previous_missing_contract_count = None
+    previous_uncategorized_count = None
+    previous_scanned_consumer_count = None
+    previous_recommended_next_target = None
+    if previous_summary is not None:
+        previous_missing_contract_count = int(previous_summary.get("missing_contract_count", 0) or 0)
+        previous_uncategorized_count = int(((previous_summary.get("root_script_observation_category_counts") or {}).get("uncategorized_root_script", 0)) or 0)
+        previous_scanned_consumer_count = int(previous_summary.get("scanned_consumer_count", 0) or 0)
+        previous_recommended_next_target = previous_summary.get("recommended_next_target")
+    current_missing_contract_count = int(inventory_summary.get("missing_contract_count", 0) or 0)
+    current_uncategorized_count = int(((inventory_summary.get("root_script_observation_category_counts") or {}).get("uncategorized_root_script", 0)) or 0)
+    current_scanned_consumer_count = int(inventory_summary.get("scanned_consumer_count", 0) or 0)
+    current_recommended_next_target = inventory_summary.get("recommended_next_target")
+    return {
+        "status": _inventory_trend_status(
+            current_missing_contract_count,
+            previous_missing_contract_count,
+            current_uncategorized_count,
+            previous_uncategorized_count,
+        ),
+        "history_points": _count_inventory_history_points(history_rows) + 1,
+        "previous_missing_contract_count": previous_missing_contract_count,
+        "current_missing_contract_count": current_missing_contract_count,
+        "missing_contract_delta": (
+            current_missing_contract_count - previous_missing_contract_count
+            if previous_missing_contract_count is not None
+            else 0
+        ),
+        "previous_uncategorized_root_script_count": previous_uncategorized_count,
+        "current_uncategorized_root_script_count": current_uncategorized_count,
+        "uncategorized_root_script_delta": (
+            current_uncategorized_count - previous_uncategorized_count
+            if previous_uncategorized_count is not None
+            else 0
+        ),
+        "previous_scanned_consumer_count": previous_scanned_consumer_count,
+        "current_scanned_consumer_count": current_scanned_consumer_count,
+        "scanned_consumer_delta": (
+            current_scanned_consumer_count - previous_scanned_consumer_count
+            if previous_scanned_consumer_count is not None
+            else 0
+        ),
+        "previous_recommended_next_target": previous_recommended_next_target,
+        "current_recommended_next_target": current_recommended_next_target,
+        "recommended_next_target_changed": previous_recommended_next_target != current_recommended_next_target,
     }
 
 
@@ -189,6 +330,7 @@ def _build_report_metadata(
     latest_output: Path | None = None,
     dossier_path: Path | None = None,
 ) -> Dict[str, Any]:
+    artifact_entries = _reference_list_entries(history_path, latest_output, dossier_path)
     report_metadata = {
         "contract_version": governance_config["export_contract_version"],
         "generated_at": _utc_now_iso(),
@@ -196,13 +338,15 @@ def _build_report_metadata(
         "failed_operation_count": len(failed_operations),
         "final_status": runtime_metadata.get("final_status", "initialized"),
         "last_completed_phase": runtime_metadata.get("last_completed_phase"),
+        "artifact_reference_labels": [label for label, _ in artifact_entries],
+        "artifact_reference_paths": [path for _, path in artifact_entries],
     }
     if history_path is not None:
-        report_metadata["history_path"] = str(history_path)
+        report_metadata["history_path"] = _normalize_reference_path(history_path)
     if latest_output is not None:
-        report_metadata["latest_output_path"] = str(latest_output)
+        report_metadata["latest_output_path"] = _normalize_reference_path(latest_output)
     if dossier_path is not None:
-        report_metadata["dossier_path"] = str(dossier_path)
+        report_metadata["dossier_path"] = _normalize_reference_path(dossier_path)
     return report_metadata
 
 
@@ -245,6 +389,7 @@ def build_archive_entry(
     assessment_report: Dict[str, object],
     improvement_report: Dict[str, object],
     config_path: Path | None = None,
+    inventory_report: Dict[str, object] | None = None,
 ) -> Dict[str, object]:
     governance_config = _load_governance_config(config_path)
     runtime_metadata: Dict[str, Any] = {
@@ -284,6 +429,7 @@ def build_archive_entry(
         ]
 
     action_backlog = improvement_report.get("action_backlog", [])
+    inventory_summary = _build_inventory_summary(inventory_report)
     entry = {
         "timestamp": _utc_now_iso(),
         "overall_success": bool(gate_report.get("overall_success", False)),
@@ -295,6 +441,7 @@ def build_archive_entry(
         "failed_dimensions": assessment_report.get("failed_dimensions", []),
         "action_backlog_count": len(action_backlog) if isinstance(action_backlog, list) else 0,
         "next_cycle_targets": improvement_report.get("next_cycle_targets", {}),
+        "inventory_summary": inventory_summary,
     }
     runtime_metadata["final_status"] = "completed"
     _complete_phase(
@@ -305,6 +452,7 @@ def build_archive_entry(
             "failed_gate_count": len(failed_gates),
             "failed_dimension_count": len(entry.get("failed_dimensions", [])),
             "action_backlog_count": entry.get("action_backlog_count", 0),
+            "inventory_missing_contract_count": inventory_summary.get("missing_contract_count", 0),
         },
         final_status="completed",
     )
@@ -312,6 +460,9 @@ def build_archive_entry(
 
 
 def _to_md_lines(entry: Dict[str, object]) -> List[str]:
+    inventory_summary = entry.get("inventory_summary") or {}
+    inventory_trend = entry.get("inventory_trend") or {}
+    report_metadata = entry.get("report_metadata") or {}
     lines = [
         "# Quality Improvement Archive Entry",
         "",
@@ -334,6 +485,29 @@ def _to_md_lines(entry: Dict[str, object]) -> List[str]:
         "- Backlog Count: {0}".format(entry.get("action_backlog_count", 0)),
         "- Next Cycle Targets: {0}".format(json.dumps(entry.get("next_cycle_targets", {}), ensure_ascii=False)),
         "",
+        "## Inventory Governance",
+        "",
+        "- Status: {0}".format(inventory_summary.get("status", "unknown")),
+        "- Scanned Consumers: {0}".format(inventory_summary.get("scanned_consumer_count", 0)),
+        "- Missing Contracts: {0}".format(inventory_summary.get("missing_contract_count", 0)),
+        "- Root Script Observations: {0}".format(inventory_summary.get("root_script_observation_count", 0)),
+        "- Recommended Next Target: {0}".format(inventory_summary.get("recommended_next_target") or "none"),
+        "- Root Script Observation Categories: {0}".format(json.dumps(inventory_summary.get("root_script_observation_category_counts", {}), ensure_ascii=False)),
+        "",
+        "## Inventory Trend",
+        "",
+        "- Trend Status: {0}".format(inventory_trend.get("status", "stable")),
+        "- History Points: {0}".format(inventory_trend.get("history_points", 1)),
+        "- Missing Contract Delta: {0}".format(inventory_trend.get("missing_contract_delta", 0)),
+        "- Uncategorized Root Script Delta: {0}".format(inventory_trend.get("uncategorized_root_script_delta", 0)),
+        "- Recommended Next Target Changed: {0}".format(inventory_trend.get("recommended_next_target_changed", False)),
+        "",
+        "## Artifact References",
+        "",
+        "- History Path: {0}".format(report_metadata.get("history_path", "")),
+        "- Latest Output Path: {0}".format(report_metadata.get("latest_output_path", "")),
+        "- Dossier Path: {0}".format(report_metadata.get("dossier_path", "")),
+        "",
     ]
     return lines
 
@@ -348,6 +522,8 @@ def write_archive(
     metadata = payload.setdefault("metadata", _build_runtime_metadata({}))
     failed_operations = payload.setdefault("failed_operations", [])
     report_metadata = payload.setdefault("report_metadata", {})
+    history_rows = _load_archive_history(history_path)
+    payload["inventory_trend"] = _build_inventory_trend(history_rows, payload.get("inventory_summary") or {})
     governance_config = {
         "export_contract_version": report_metadata.get("contract_version", DEFAULT_GOVERNANCE_CONFIG["export_contract_version"]),
         "persist_failed_operations": True,
@@ -362,9 +538,9 @@ def write_archive(
         metadata,
         "export_quality_improvement_archive",
         {
-            "history_path": str(history_path),
-            "latest_output": str(latest_output),
-            "dossier_dir": str(dossier_dir),
+            "history_path": _normalize_reference_path(history_path),
+            "latest_output": _normalize_reference_path(latest_output),
+            "dossier_dir": _normalize_reference_path(dossier_dir),
         },
     )
 
@@ -376,9 +552,9 @@ def write_archive(
         "export_quality_improvement_archive",
         export_phase_started_at,
         {
-            "history_path": str(history_path),
-            "latest_output": str(latest_output),
-            "dossier_path": str(md_path),
+            "history_path": _normalize_reference_path(history_path),
+            "latest_output": _normalize_reference_path(latest_output),
+            "dossier_path": _normalize_reference_path(md_path),
         },
         final_status="completed" if metadata.get("final_status") != "cleaned" else metadata.get("final_status"),
     )
@@ -413,6 +589,7 @@ def main() -> int:
     parser.add_argument("--gate-report", default="output/quality-gate.json", help="Path to quality gate report")
     parser.add_argument("--assessment-report", default="output/quality-assessment.json", help="Path to quality assessment report")
     parser.add_argument("--improvement-report", default="output/continuous-improvement.json", help="Path to continuous improvement report")
+    parser.add_argument("--inventory-report", default="output/quality-consumer-inventory.json", help="Path to quality consumer inventory report")
     parser.add_argument("--history", default="output/quality-improvement-archive.jsonl", help="Path to archive JSONL")
     parser.add_argument("--dossier-dir", default="docs/quality-archive", help="Directory for markdown dossiers")
     parser.add_argument("--output", default="output/quality-improvement-archive-latest.json", help="Path to latest archive summary")
@@ -422,8 +599,9 @@ def main() -> int:
     gate_report = _safe_load_json(Path(args.gate_report).resolve())
     assessment_report = _safe_load_json(Path(args.assessment_report).resolve())
     improvement_report = _safe_load_json(Path(args.improvement_report).resolve())
+    inventory_report = _safe_load_json(Path(args.inventory_report).resolve())
 
-    entry = build_archive_entry(gate_report, assessment_report, improvement_report, config_path)
+    entry = build_archive_entry(gate_report, assessment_report, improvement_report, config_path, inventory_report)
     outputs = write_archive(
         entry,
         Path(args.history).resolve(),

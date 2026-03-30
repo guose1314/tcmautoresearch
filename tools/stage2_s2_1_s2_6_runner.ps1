@@ -79,10 +79,10 @@ function Get-Stage2RunnerGovernanceConfig {
     param([string]$ConfigPath)
 
     $config = [ordered]@{
-        enable_phase_tracking = $true
+        enable_phase_tracking     = $true
         persist_failed_operations = $true
-        minimum_stable_pass_rate = 85.0
-        export_contract_version = "d56.v1"
+        minimum_stable_pass_rate  = 85.0
+        export_contract_version   = "d67.v1"
     }
 
     if (-not (Test-Path $ConfigPath)) {
@@ -125,11 +125,11 @@ function Get-Stage2RunnerGovernanceConfig {
 
 function New-RunnerMetadata {
     return [ordered]@{
-        phase_history = @()
-        phase_timings = [ordered]@{}
-        completed_phases = @()
-        failed_phase = $null
-        final_status = "completed"
+        phase_history        = @()
+        phase_timings        = [ordered]@{}
+        completed_phases     = @()
+        failed_phase         = $null
+        final_status         = "completed"
         last_completed_phase = $null
     }
 }
@@ -142,8 +142,8 @@ function Start-RunnerPhase {
 
     $timestamp = (Get-Date).ToString("o")
     $Metadata.phase_history += [ordered]@{
-        phase = $PhaseName
-        event = "started"
+        phase     = $PhaseName
+        event     = "started"
         timestamp = $timestamp
     }
     $Metadata.phase_timings[$PhaseName] = [ordered]@{
@@ -159,8 +159,8 @@ function Complete-RunnerPhase {
 
     $timestamp = (Get-Date).ToString("o")
     $Metadata.phase_history += [ordered]@{
-        phase = $PhaseName
-        event = "completed"
+        phase     = $PhaseName
+        event     = "completed"
         timestamp = $timestamp
     }
     if (-not $Metadata.phase_timings.Contains($PhaseName)) {
@@ -185,12 +185,12 @@ function Add-FailedOperation {
     }
 
     [void]$FailedOperations.Add([ordered]@{
-        operation = $Operation
-        error = $Error
-        details = if ($null -ne $Details) { $Details } else { [ordered]@{} }
-        timestamp = (Get-Date).ToString("o")
-        duration_seconds = [math]::Round($DurationSeconds, 2)
-    })
+            operation        = $Operation
+            error            = $Error
+            details          = if ($null -ne $Details) { $Details } else { [ordered]@{} }
+            timestamp        = (Get-Date).ToString("o")
+            duration_seconds = [math]::Round($DurationSeconds, 2)
+        })
 }
 
 function Fail-RunnerPhase {
@@ -204,8 +204,8 @@ function Fail-RunnerPhase {
     )
 
     $Metadata.phase_history += [ordered]@{
-        phase = $PhaseName
-        event = "failed"
+        phase     = $PhaseName
+        event     = "failed"
         timestamp = (Get-Date).ToString("o")
     }
     $Metadata.failed_phase = $PhaseName
@@ -228,13 +228,13 @@ function Get-StageAnalysisSummary {
     $passRateBand = if ($PassRate -ge 100) { "perfect" } elseif ($PassRate -ge 85) { "stable" } elseif ($PassRate -ge 60) { "watch" } else { "critical" }
 
     return [ordered]@{
-        command_step_count = $commandSteps
-        branch_step_count = $branchSteps
-        commit_step_count = $commitSteps
-        actionable_failure_count = $failedSteps
-        pass_rate_band = $passRateBand
+        command_step_count         = $commandSteps
+        branch_step_count          = $branchSteps
+        commit_step_count          = $commitSteps
+        actionable_failure_count   = $failedSteps
+        pass_rate_band             = $passRateBand
         target_code_health_percent = $TargetCodeHealth
-        dry_run = $DryRunMode
+        dry_run                    = $DryRunMode
     }
 }
 
@@ -255,11 +255,11 @@ function Get-GlobalAnalysisSummary {
     }
 
     return [ordered]@{
-        stage_count = $stageCount
-        failed_stage_count = $failedStages
+        stage_count               = $stageCount
+        failed_stage_count        = $failedStages
         average_pass_rate_percent = $averagePassRate
-        dry_run = $DryRunMode
-        failed_stage_codes = @($Stages | Where-Object { $_["failed"] } | ForEach-Object { $_["stage"] })
+        dry_run                   = $DryRunMode
+        failed_stage_codes        = @($Stages | Where-Object { $_["failed"] } | ForEach-Object { $_["stage"] })
     }
 }
 
@@ -272,13 +272,53 @@ function New-ReportMetadata {
     )
 
     return [ordered]@{
-        contract_version = $GovernanceConfig.export_contract_version
-        generated_at = (Get-Date).ToString("o")
-        result_schema = $ResultSchema
+        contract_version       = $GovernanceConfig.export_contract_version
+        generated_at           = (Get-Date).ToString("o")
+        result_schema          = $ResultSchema
         failed_operation_count = @($FailedOperations).Count
-        final_status = $Metadata.final_status
-        last_completed_phase = $Metadata.last_completed_phase
+        final_status           = $Metadata.final_status
+        last_completed_phase   = $Metadata.last_completed_phase
     }
+}
+
+function Get-InventoryTrendGovernanceAlerts {
+    param([string]$Repo)
+
+    $archiveLatest = Join-Path $Repo "output\quality-improvement-archive-latest.json"
+    if (-not (Test-Path $archiveLatest)) {
+        return @()
+    }
+
+    try {
+        $payload = Get-Content -Path $archiveLatest -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    catch {
+        return @()
+    }
+
+    if ($null -eq $payload -or $null -eq $payload.inventory_trend) {
+        return @()
+    }
+
+    $inventoryTrend = $payload.inventory_trend
+    if ($inventoryTrend.status -ne "regressing") {
+        return @()
+    }
+
+    $inventorySummary = if ($null -ne $payload.inventory_summary) { $payload.inventory_summary } else { $null }
+    return @(
+        [ordered]@{
+            alert_type                      = "inventory_trend_regressing"
+            severity                        = "warning"
+            source_report                   = $archiveLatest
+            message                         = "Inventory trend is regressing; expose governance follow-up in runner summary."
+            inventory_trend_status          = $inventoryTrend.status
+            history_points                  = $inventoryTrend.history_points
+            missing_contract_delta          = $inventoryTrend.missing_contract_delta
+            uncategorized_root_script_delta = $inventoryTrend.uncategorized_root_script_delta
+            recommended_next_target         = if ($null -ne $inventorySummary) { $inventorySummary.recommended_next_target } else { $null }
+        }
+    )
 }
 
 function Write-Summary {
@@ -302,9 +342,9 @@ function Get-Plan {
 
     $plans = @{
         "S2-1" = @{
-            name = "preprocessor-opt"
+            name   = "preprocessor-opt"
             branch = "stage2-s2_1-preprocessor-opt"
-            steps = @(
+            steps  = @(
                 @{ name = "Create or switch branch"; type = "branch"; cmd = 'git checkout -b/checkout stage2-s2_1-preprocessor-opt' },
                 @{ name = "Add type annotations"; type = "cmd"; cmd = '& "{python}" -m pylance mcp_s_pylanceInvokeRefactoring --file src/preprocessor/document_preprocessor.py --name source.addTypeAnnotation' },
                 @{ name = "Apply pylance fixes"; type = "cmd"; cmd = '& "{python}" -m pylance mcp_s_pylanceInvokeRefactoring --file src/preprocessor/document_preprocessor.py --name source.fixAll.pylance' },
@@ -313,9 +353,9 @@ function Get-Plan {
             )
         }
         "S2-2" = @{
-            name = "extractor-refactor"
+            name   = "extractor-refactor"
             branch = "stage2-s2_2-extractor-refactor"
-            steps = @(
+            steps  = @(
                 @{ name = "Create or switch branch"; type = "branch"; cmd = 'git checkout -b/checkout stage2-s2_2-extractor-refactor' },
                 @{ name = "Apply pylance fixes"; type = "cmd"; cmd = '& "{python}" -m pylance mcp_s_pylanceInvokeRefactoring --file src/extractors/advanced_entity_extractor.py --name source.fixAll.pylance' },
                 @{ name = "Remove unused imports"; type = "cmd"; cmd = '& "{python}" -m pylance mcp_s_pylanceInvokeRefactoring --file src/extractors/advanced_entity_extractor.py --name source.unusedImports' },
@@ -324,9 +364,9 @@ function Get-Plan {
             )
         }
         "S2-3" = @{
-            name = "semantic-stable"
+            name   = "semantic-stable"
             branch = "stage2-s2_3-semantic-stable"
-            steps = @(
+            steps  = @(
                 @{ name = "Create or switch branch"; type = "branch"; cmd = 'git checkout -b/checkout stage2-s2_3-semantic-stable' },
                 @{ name = "Add type annotations"; type = "cmd"; cmd = '& "{python}" -m pylance mcp_s_pylanceInvokeRefactoring --file src/semantic_modeling/semantic_graph_builder.py --name source.addTypeAnnotation' },
                 @{ name = "Apply pylance fixes"; type = "cmd"; cmd = '& "{python}" -m pylance mcp_s_pylanceInvokeRefactoring --file src/semantic_modeling/semantic_graph_builder.py --name source.fixAll.pylance' },
@@ -335,9 +375,9 @@ function Get-Plan {
             )
         }
         "S2-4" = @{
-            name = "reasoning-opt"
+            name   = "reasoning-opt"
             branch = "stage2-s2_4-reasoning-opt"
-            steps = @(
+            steps  = @(
                 @{ name = "Create or switch branch"; type = "branch"; cmd = 'git checkout -b/checkout stage2-s2_4-reasoning-opt' },
                 @{ name = "Apply pylance fixes"; type = "cmd"; cmd = '& "{python}" -m pylance mcp_s_pylanceInvokeRefactoring --file src/reasoning/reasoning_engine.py --name source.fixAll.pylance' },
                 @{ name = "Run quality gate"; type = "cmd"; cmd = '& "{python}" tools/quality_gate.py' },
@@ -345,9 +385,9 @@ function Get-Plan {
             )
         }
         "S2-5" = @{
-            name = "output-strengthen"
+            name   = "output-strengthen"
             branch = "stage2-s2_5-output-strengthen"
-            steps = @(
+            steps  = @(
                 @{ name = "Create or switch branch"; type = "branch"; cmd = 'git checkout -b/checkout stage2-s2_5-output-strengthen' },
                 @{ name = "Add type annotations"; type = "cmd"; cmd = '& "{python}" -m pylance mcp_s_pylanceInvokeRefactoring --file src/output/output_generator.py --name source.addTypeAnnotation' },
                 @{ name = "Apply pylance fixes"; type = "cmd"; cmd = '& "{python}" -m pylance mcp_s_pylanceInvokeRefactoring --file src/output/output_generator.py --name source.fixAll.pylance' },
@@ -356,9 +396,9 @@ function Get-Plan {
             )
         }
         "S2-6" = @{
-            name = "quality-integration"
+            name   = "quality-integration"
             branch = "stage2-s2_6-quality-integration"
-            steps = @(
+            steps  = @(
                 @{ name = "Verify all branches merged"; type = "cmd"; cmd = 'git branch | find /V "*" | wc -l' },
                 @{ name = "Run full quality gate"; type = "cmd"; cmd = '& "{python}" tools/quality_gate.py' },
                 @{ name = "Run quality assessment"; type = "cmd"; cmd = '& "{python}" tools/quality_assessment.py --gates-report output/quality-gate.json' },
@@ -389,15 +429,15 @@ function Invoke-Step {
     $stepType = $Step.type
     $cmd = $Step.cmd -replace '{python}', $Python
     $result = [ordered]@{
-        name = $stepName
-        type = $stepType
-        status = "passed"
-        exit_code = 0
-        started_at = (Get-Date).ToString("o")
-        ended_at = ""
+        name             = $stepName
+        type             = $stepType
+        status           = "passed"
+        exit_code        = 0
+        started_at       = (Get-Date).ToString("o")
+        ended_at         = ""
         duration_seconds = 0.0
-        command = $cmd
-        message = ""
+        command          = $cmd
+        message          = ""
     }
     $start = Get-Date
 
@@ -549,22 +589,25 @@ function Run-Stage {
 
     Start-RunnerPhase -Metadata $metadata -PhaseName "assemble_stage2_stage_summary"
     $stageSummary = [ordered]@{
-        stage = $StageName
-        started_at = if ($stepResults.Count -gt 0) { $stepResults[0].started_at } else { (Get-Date).ToString("o") }
-        ended_at = (Get-Date).ToString("o")
-        total_steps = $totalSteps
-        passed_steps = $passedSteps
-        skipped_steps = $skippedSteps
-        failed_steps = $failedSteps
-        pass_rate_percent = $passRate
+        stage                      = $StageName
+        started_at                 = if ($stepResults.Count -gt 0) { $stepResults[0].started_at } else { (Get-Date).ToString("o") }
+        ended_at                   = (Get-Date).ToString("o")
+        total_steps                = $totalSteps
+        passed_steps               = $passedSteps
+        skipped_steps              = $skippedSteps
+        failed_steps               = $failedSteps
+        pass_rate_percent          = $passRate
         target_code_health_percent = $TargetCodeHealth
-        failed = ($failedSteps -gt 0)
-        dry_run = [bool]$DryRunMode
-        log_file = $logFile
-        steps = $stepResults
-        metadata = $metadata
-        analysis_summary = Get-StageAnalysisSummary -Steps $stepResults -PassRate $passRate -TargetCodeHealth $TargetCodeHealth -DryRunMode ([bool]$DryRunMode)
-        failed_operations = @($failedOperations)
+        failed                     = ($failedSteps -gt 0)
+        dry_run                    = [bool]$DryRunMode
+        log_file                   = $logFile
+        steps                      = $stepResults
+        metadata                   = $metadata
+        analysis_summary           = Get-StageAnalysisSummary -Steps $stepResults -PassRate $passRate -TargetCodeHealth $TargetCodeHealth -DryRunMode ([bool]$DryRunMode)
+        failed_operations          = @($failedOperations)
+    }
+    if ($script:InventoryTrendGovernanceAlerts.Count -gt 0) {
+        $stageSummary["governance_alerts"] = $script:InventoryTrendGovernanceAlerts
     }
     Complete-RunnerPhase -Metadata $metadata -PhaseName "assemble_stage2_stage_summary"
 
@@ -584,6 +627,7 @@ $python = Resolve-Python $repo $PythonExe
 $logDir = Ensure-LogDir $repo
 $configPath = Join-Path $repo "config.yml"
 $governanceConfig = Get-Stage2RunnerGovernanceConfig -ConfigPath $configPath
+$script:InventoryTrendGovernanceAlerts = @(Get-InventoryTrendGovernanceAlerts -Repo $repo)
 
 if (-not $Stage -and -not $All) {
     throw "Please provide -Stage S2-1..S2-6 or -All"
@@ -602,14 +646,14 @@ else {
 $globalMetadata = New-RunnerMetadata
 $globalFailedOperations = [System.Collections.ArrayList]::new()
 $globalSummary = [ordered]@{
-    started_at = (Get-Date).ToString("o")
-    repo = $repo
-    python = $python
-    dry_run = [bool]$DryRun
+    started_at                 = (Get-Date).ToString("o")
+    repo                       = $repo
+    python                     = $python
+    dry_run                    = [bool]$DryRun
     target_code_health_percent = $TargetCodeHealth
-    stages = @()
-    metadata = $globalMetadata
-    failed_operations = $globalFailedOperations
+    stages                     = @()
+    metadata                   = $globalMetadata
+    failed_operations          = $globalFailedOperations
 }
 
 Start-RunnerPhase -Metadata $globalMetadata -PhaseName "run_stage2_stages"
@@ -632,6 +676,9 @@ Start-RunnerPhase -Metadata $globalMetadata -PhaseName "assemble_stage2_global_s
 $globalSummary["ended_at"] = (Get-Date).ToString("o")
 $globalSummary["analysis_summary"] = Get-GlobalAnalysisSummary -Stages $globalSummary.stages -DryRunMode ([bool]$DryRun)
 $globalSummary["failed_operations"] = @($globalFailedOperations)
+if ($script:InventoryTrendGovernanceAlerts.Count -gt 0) {
+    $globalSummary["governance_alerts"] = $script:InventoryTrendGovernanceAlerts
+}
 Complete-RunnerPhase -Metadata $globalMetadata -PhaseName "assemble_stage2_global_summary"
 
 $globalReport = Join-Path $logDir ("stage2_all_{0}.json" -f (Get-Timestamp))
