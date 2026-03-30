@@ -50,6 +50,14 @@ class TestDocumentPreprocessorQuality(unittest.TestCase):
 
         sentences = module.segment_with_ancient_punctuation("主治寒热往来。功效和解少阳")
         self.assertGreater(len(sentences), 0)
+        self.assertTrue(all(isinstance(sentence, list) for sentence in sentences))
+
+    def test_estimate_token_count_fallback(self):
+        module = DocumentPreprocessor()
+        self.assertTrue(module.initialize())
+        with patch.object(module, "segment_text", side_effect=RuntimeError("segment fail")):
+            count = module._estimate_token_count("a b c")
+        self.assertEqual(count, 3)
 
     def test_extract_metadata_and_cleanup(self):
         module = DocumentPreprocessor()
@@ -170,6 +178,31 @@ class TestOutputGeneratorQuality(unittest.TestCase):
         recs_many = module._build_recommendations({"entities": list(range(80)), "confidence_score": 0.99})
         self.assertEqual(len(recs_many), 1)
         self.assertTrue(module.cleanup())
+
+    def test_output_recommendations_handles_bad_confidence(self):
+        module = OutputGenerator({"max_recommendations": 5})
+        self.assertTrue(module.initialize())
+
+        recs = module._build_recommendations({"entities": [1, 2], "confidence_score": "bad"})
+        self.assertIn("置信度较低，建议人工复核", recs)
+
+    def test_output_quality_metrics_handles_non_numeric_statistics(self):
+        module = OutputGenerator()
+        self.assertTrue(module.initialize())
+
+        metrics = module._calculate_quality_metrics(
+            {
+                "entities": [1],
+                "statistics": {
+                    "formulas_count": "x",
+                    "herbs_count": None,
+                    "syndromes_count": "-2",
+                },
+            }
+        )
+        self.assertEqual(metrics["formulas_found"], 0)
+        self.assertEqual(metrics["herbs_identified"], 0)
+        self.assertEqual(metrics["syndromes_recognized"], 0)
 
     def test_make_json_safe_depth_limit(self):
         module = OutputGenerator({"max_string_length": 8})

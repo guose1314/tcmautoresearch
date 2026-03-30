@@ -1,4 +1,4 @@
-﻿# src/llm/llm_service.py
+# src/llm/llm_service.py
 """
 LLM 服务模块 — 向后兼容层
 

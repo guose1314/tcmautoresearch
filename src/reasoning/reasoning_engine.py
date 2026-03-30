@@ -18,6 +18,7 @@
   kg_paths / inference_chains / composition_analysis / hub_nodes / coverage_stats
 """
 import collections
+from dataclasses import dataclass
 from typing import Any, Dict, List, Set, Tuple
 
 import networkx as nx
@@ -47,6 +48,15 @@ _INFERENCE_CHAIN_PATTERNS: List[List[str]] = [
     [RelationshipType.MINISTER.value,  RelationshipType.TREATS.value],
     [RelationshipType.SOVEREIGN.value, RelationshipType.EFFICACY.value, RelationshipType.TREATS.value],
 ]
+
+
+@dataclass
+class _ChainTraversalState:
+    formula_name: str
+    pattern: List[str]
+    path: List[str]
+    rel_path: List[str]
+    results: List[Dict[str, Any]]
 
 
 class ReasoningEngine(BaseModule):
@@ -218,22 +228,48 @@ class ReasoningEngine(BaseModule):
         查找方剂节点到证候/功效节点之间的多跳路径（≤ max_path_len 跳）。
         每对最多保留 3 条路径，全局上限 50 条，按置信度降序排列。
         """
-        formula_nodes = [
-            f"formula:{e['name']}"
-            for e in entities if e.get("type") == "formula"
-        ]
+        formula_nodes = self._collect_formula_nodes(entities)
+        target_nodes = self._collect_target_nodes(kg, entities)
+
+        paths_found: List[Dict[str, Any]] = []
+        for src, tgt in self._iter_valid_pairs(kg, formula_nodes, target_nodes):
+            for path in self._safe_simple_paths(kg, src, tgt):
+                edge_labels = self._path_edge_labels(kg, path)
+                confidence = self._path_confidence(kg, path)
+                paths_found.append({
+                    "path": path,
+                    "length": len(path) - 1,
+                    "relationship_sequence": edge_labels,
+                    "confidence": round(confidence, 4),
+                })
+
+        paths_found.sort(key=lambda p: p["confidence"], reverse=True)
+        return paths_found[:50]
+
+    def _collect_formula_nodes(self, entities: List[Dict[str, Any]]) -> List[str]:
+        """收集方剂节点 ID。"""
+        return [f"formula:{e['name']}" for e in entities if e.get("type") == "formula" and e.get("name")]
+
+    def _collect_target_nodes(self, kg: nx.DiGraph, entities: List[Dict[str, Any]]) -> List[str]:
+        """收集证候/功效目标节点，包含实体输入和 KG 现有节点。"""
         target_nodes: List[str] = (
-            [f"syndrome:{e['name']}" for e in entities if e.get("type") == "syndrome"]
-            + [f"efficacy:{e['name']}"  for e in entities if e.get("type") == "efficacy"]
+            [f"syndrome:{e['name']}" for e in entities if e.get("type") == "syndrome" and e.get("name")]
+            + [f"efficacy:{e['name']}" for e in entities if e.get("type") == "efficacy" and e.get("name")]
         )
-        # 补充 KG 中所有 efficacy/syndrome 节点
         for node in kg.nodes():
             if node.startswith(("syndrome:", "efficacy:")) and node not in target_nodes:
                 target_nodes.append(node)
+        return target_nodes
 
-        paths_found: List[Dict[str, Any]] = []
+    def _iter_valid_pairs(
+        self,
+        kg: nx.DiGraph,
+        formula_nodes: List[str],
+        target_nodes: List[str],
+    ) -> List[Tuple[str, str]]:
+        """生成有效 source-target 对，受 max_pairs 限制。"""
+        pairs: List[Tuple[str, str]] = []
         visited_pairs: Set[Tuple[str, str]] = set()
-
         for src in formula_nodes:
             if src not in kg:
                 continue
@@ -241,26 +277,20 @@ class ReasoningEngine(BaseModule):
                 if tgt not in kg or src == tgt:
                     continue
                 pair = (src, tgt)
-                if pair in visited_pairs or len(visited_pairs) >= self._max_pairs:
+                if pair in visited_pairs:
                     continue
                 visited_pairs.add(pair)
-                try:
-                    for path in list(
-                        nx.all_simple_paths(kg, source=src, target=tgt, cutoff=self._max_path_len)
-                    )[:3]:
-                        edge_labels = self._path_edge_labels(kg, path)
-                        confidence  = self._path_confidence(kg, path)
-                        paths_found.append({
-                            "path":                  path,
-                            "length":                len(path) - 1,
-                            "relationship_sequence": edge_labels,
-                            "confidence":            round(confidence, 4),
-                        })
-                except (nx.NetworkXNoPath, nx.NodeNotFound, nx.NetworkXError):
-                    pass
+                pairs.append(pair)
+                if len(pairs) >= self._max_pairs:
+                    return pairs
+        return pairs
 
-        paths_found.sort(key=lambda p: p["confidence"], reverse=True)
-        return paths_found[:50]
+    def _safe_simple_paths(self, kg: nx.DiGraph, src: str, tgt: str) -> List[List[str]]:
+        """安全获取简单路径，异常时返回空列表。"""
+        try:
+            return list(nx.all_simple_paths(kg, source=src, target=tgt, cutoff=self._max_path_len))[:3]
+        except (nx.NetworkXNoPath, nx.NodeNotFound, nx.NetworkXError):
+            return []
 
     def _path_edge_labels(self, kg: nx.DiGraph, path: List[str]) -> List[str]:
         return [
@@ -303,10 +333,14 @@ class ReasoningEngine(BaseModule):
             if formula_node not in kg:
                 continue
             for pattern in _INFERENCE_CHAIN_PATTERNS:
-                self._dfs_chain(
-                    kg, formula_node, formula_name, pattern, 0,
-                    [formula_node], [], chains,
+                state = _ChainTraversalState(
+                    formula_name=formula_name,
+                    pattern=pattern,
+                    path=[formula_node],
+                    rel_path=[],
+                    results=chains,
                 )
+                self._dfs_chain(kg, formula_node, 0, state)
 
         # 去重 + 排序
         seen: Set[str] = set()
@@ -323,37 +357,33 @@ class ReasoningEngine(BaseModule):
         self,
         kg: nx.DiGraph,
         current: str,
-        formula_name: str,
-        pattern: List[str],
         depth: int,
-        path: List[str],
-        rel_path: List[str],
-        results: List[Dict],
+        state: _ChainTraversalState,
     ) -> None:
         """按 pattern[depth] 扩展一跳，递归直到 pattern 消耗完。"""
-        if depth == len(pattern):
-            confidence = self._path_confidence_from_rel_path(kg, path, rel_path)
-            results.append({
-                "formula":               formula_name,
-                "path":                  list(path),
-                "relationship_sequence": list(rel_path),
-                "pattern":               list(pattern),
+        if depth == len(state.pattern):
+            confidence = self._path_confidence_from_rel_path(kg, state.path, state.rel_path)
+            state.results.append({
+                "formula":               state.formula_name,
+                "path":                  list(state.path),
+                "relationship_sequence": list(state.rel_path),
+                "pattern":               list(state.pattern),
                 "confidence":            round(confidence, 4),
-                "terminal_node":         path[-1],
+                "terminal_node":         state.path[-1],
                 "terminal_label": (
-                    path[-1].split(":", 1)[-1] if ":" in path[-1] else path[-1]
+                    state.path[-1].split(":", 1)[-1] if ":" in state.path[-1] else state.path[-1]
                 ),
             })
             return
-        target_rel = pattern[depth]
+        target_rel = state.pattern[depth]
         for _, tgt, data in kg.out_edges(current, data=True):
-            if data.get("relationship_type") != target_rel or tgt in path:
+            if data.get("relationship_type") != target_rel or tgt in state.path:
                 continue
-            path.append(tgt)
-            rel_path.append(target_rel)
-            self._dfs_chain(kg, tgt, formula_name, pattern, depth + 1, path, rel_path, results)
-            path.pop()
-            rel_path.pop()
+            state.path.append(tgt)
+            state.rel_path.append(target_rel)
+            self._dfs_chain(kg, tgt, depth + 1, state)
+            state.path.pop()
+            state.rel_path.pop()
 
     def _path_confidence_from_rel_path(
         self,

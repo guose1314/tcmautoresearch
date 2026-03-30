@@ -4,7 +4,7 @@
 支持方剂结构、性味归经、类方比较、现代药理学分析
 基于T/C IATCM 098-2023标准
 """
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 
 import networkx as nx
 
@@ -52,8 +52,7 @@ class SemanticGraphBuilder(BaseModule):
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """执行语义图构建 - 集成高级研究方法"""
         try:
-            # 获取实体数据
-            entities = context.get("entities", [])
+            entities = self._validate_entities(context)
             
             # 构建语义图
             graph = self._build_semantic_graph(entities)
@@ -61,10 +60,8 @@ class SemanticGraphBuilder(BaseModule):
             # 统计关系分布
             relationship_stats = self._calculate_relationship_statistics()
             
-            # 【新增】提取关键方剂和药物
-            formulas = [e for e in entities if e.get("type") == "formula"]
-            herbs = [e for e in entities if e.get("type") == "herb"]
-            herb_names = [h.get("name") for h in herbs if h.get("name")]
+            formulas, herbs = self._partition_entities(entities)
+            herb_names = self._extract_entity_names(herbs)
             
             # 【新增】生成高级研究视角
             research_perspectives = self._generate_research_perspectives(formulas)
@@ -79,29 +76,10 @@ class SemanticGraphBuilder(BaseModule):
             pharmacology_data = self._collect_pharmacology_data(herbs)
 
             # 优先复用 integrated 结果，避免首轮重复高级分析
-            network_systems = self._extract_from_integrated(
+            advanced_analyses = self._collect_advanced_formula_analyses(
                 formulas,
+                herb_names,
                 research_perspectives,
-                integrated_key="network_pharmacology",
-                fallback=lambda items: self._analyze_network_systems(items, herb_names),
-            )
-            supramolecular_physicochemistry = self._extract_from_integrated(
-                formulas,
-                research_perspectives,
-                integrated_key="supramolecular_physicochemical",
-                fallback=lambda items: self._analyze_supramolecular_physicochemistry(items, herb_names),
-            )
-            knowledge_archaeology = self._extract_from_integrated(
-                formulas,
-                research_perspectives,
-                integrated_key="knowledge_archaeology",
-                fallback=lambda items: self._analyze_knowledge_archaeology(items, herb_names),
-            )
-            complexity_dynamics = self._extract_from_integrated(
-                formulas,
-                research_perspectives,
-                integrated_key="complexity_dynamics",
-                fallback=lambda items: self._analyze_complexity_dynamics(items, herb_names),
             )
 
             # 【新增】统一评分面板（8维 0-1 标准化 + 总分 + 95%CI）
@@ -138,10 +116,10 @@ class SemanticGraphBuilder(BaseModule):
                 "herb_properties": herb_analysis,
                 "formula_comparisons": formula_comparison,
                 "pharmacology_integration": pharmacology_data,
-                "network_pharmacology_systems_biology": network_systems,
-                "supramolecular_physicochemistry": supramolecular_physicochemistry,
-                "knowledge_archaeology": knowledge_archaeology,
-                "complexity_nonlinear_dynamics": complexity_dynamics,
+                "network_pharmacology_systems_biology": advanced_analyses["network_pharmacology_systems_biology"],
+                "supramolecular_physicochemistry": advanced_analyses["supramolecular_physicochemistry"],
+                "knowledge_archaeology": advanced_analyses["knowledge_archaeology"],
+                "complexity_nonlinear_dynamics": advanced_analyses["complexity_nonlinear_dynamics"],
                 "research_scoring_panel": scoring_panel,
                 "summary_analysis": summary_analysis,
             }
@@ -151,6 +129,49 @@ class SemanticGraphBuilder(BaseModule):
         except Exception as e:
             self.logger.error(f"语义图构建执行失败: {e}")
             raise
+
+    def _validate_entities(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """验证实体输入并统一为列表结构。"""
+        entities = context.get("entities", [])
+        if entities is None:
+            return []
+        if not isinstance(entities, list):
+            raise ValueError("entities 必须为列表")
+        return [item for item in entities if isinstance(item, dict)]
+
+    def _partition_entities(self, entities: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """拆分方剂与药物实体。"""
+        formulas = [entity for entity in entities if entity.get("type") == "formula"]
+        herbs = [entity for entity in entities if entity.get("type") == "herb"]
+        return formulas, herbs
+
+    def _extract_entity_names(self, entities: List[Dict[str, Any]]) -> List[str]:
+        """提取实体名称列表（过滤空值）。"""
+        return [str(entity.get("name")) for entity in entities if entity.get("name")]
+
+    def _collect_advanced_formula_analyses(
+        self,
+        formulas: List[Dict[str, Any]],
+        herb_names: List[str],
+        research_perspectives: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        """聚合高级方剂分析结果，优先复用 integrated 输出。"""
+        analysis_specs: List[Tuple[str, str, Callable[[List[Dict[str, Any]], List[str]], Dict[str, Any]]]] = [
+            ("network_pharmacology_systems_biology", "network_pharmacology", self._analyze_network_systems),
+            ("supramolecular_physicochemistry", "supramolecular_physicochemical", self._analyze_supramolecular_physicochemistry),
+            ("knowledge_archaeology", "knowledge_archaeology", self._analyze_knowledge_archaeology),
+            ("complexity_nonlinear_dynamics", "complexity_dynamics", self._analyze_complexity_dynamics),
+        ]
+
+        results: Dict[str, Dict[str, Any]] = {}
+        for output_key, integrated_key, fallback in analysis_specs:
+            results[output_key] = self._extract_from_integrated(
+                formulas,
+                research_perspectives,
+                integrated_key=integrated_key,
+                fallback=lambda items, analyzer=fallback: analyzer(items, herb_names),
+            )
+        return results
     
     def _build_semantic_graph(self, entities: List[Dict]) -> nx.MultiDiGraph:
         """
@@ -303,50 +324,48 @@ class SemanticGraphBuilder(BaseModule):
 
     def _analyze_network_systems(self, formulas: List[Dict], herb_names: List[str]) -> Dict:
         """网络药理学与系统性生物学分析"""
-        output: Dict[str, Any] = {}
-        for formula in formulas:
-            formula_name = formula.get("name")
-            if formula_name:
-                output[formula_name] = NetworkPharmacologySystemBiologyAnalyzer.analyze_formula_network(
-                    formula_name,
-                    herb_names,
-                )
-        return output
+        return self._analyze_formulas_with(
+            formulas,
+            herb_names,
+            NetworkPharmacologySystemBiologyAnalyzer.analyze_formula_network,
+        )
 
     def _analyze_supramolecular_physicochemistry(self, formulas: List[Dict], herb_names: List[str]) -> Dict:
         """超分子化学和物理化学分析"""
-        output: Dict[str, Any] = {}
-        for formula in formulas:
-            formula_name = formula.get("name")
-            if formula_name:
-                output[formula_name] = SupramolecularPhysicochemicalAnalyzer.analyze_formula_physicochemical(
-                    formula_name,
-                    herb_names,
-                )
-        return output
+        return self._analyze_formulas_with(
+            formulas,
+            herb_names,
+            SupramolecularPhysicochemicalAnalyzer.analyze_formula_physicochemical,
+        )
 
     def _analyze_knowledge_archaeology(self, formulas: List[Dict], herb_names: List[str]) -> Dict:
         """古典文献数字化与知识考古分析"""
-        output: Dict[str, Any] = {}
-        for formula in formulas:
-            formula_name = formula.get("name")
-            if formula_name:
-                output[formula_name] = ClassicalLiteratureArchaeologyAnalyzer.analyze_formula_knowledge_archaeology(
-                    formula_name,
-                    herb_names,
-                )
-        return output
+        return self._analyze_formulas_with(
+            formulas,
+            herb_names,
+            ClassicalLiteratureArchaeologyAnalyzer.analyze_formula_knowledge_archaeology,
+        )
 
     def _analyze_complexity_dynamics(self, formulas: List[Dict], herb_names: List[str]) -> Dict:
         """复杂性科学与非线性动力学分析"""
+        return self._analyze_formulas_with(
+            formulas,
+            herb_names,
+            ComplexityNonlinearDynamicsAnalyzer.analyze_formula_complexity_dynamics,
+        )
+
+    def _analyze_formulas_with(
+        self,
+        formulas: List[Dict],
+        herb_names: List[str],
+        analyzer: Callable[[str, List[str]], Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """用统一模式执行方剂级分析器。"""
         output: Dict[str, Any] = {}
         for formula in formulas:
             formula_name = formula.get("name")
             if formula_name:
-                output[formula_name] = ComplexityNonlinearDynamicsAnalyzer.analyze_formula_complexity_dynamics(
-                    formula_name,
-                    herb_names,
-                )
+                output[formula_name] = analyzer(formula_name, herb_names)
         return output
 
     def _build_research_scoring_panel(

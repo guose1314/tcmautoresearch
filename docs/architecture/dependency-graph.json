@@ -1,13 +1,33 @@
 {
-  "module_count": 54,
-  "module_edge_count": 61,
-  "package_count": 14,
-  "package_edge_count": 14,
+  "module_count": 81,
+  "module_edge_count": 119,
+  "package_count": 22,
+  "package_edge_count": 33,
   "modules": [
     {
       "module": "src",
       "file_path": "src/__init__.py",
       "package": "src"
+    },
+    {
+      "module": "src.analysis",
+      "file_path": "src/analysis/__init__.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.gap_analyzer",
+      "file_path": "src/analysis/gap_analyzer.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analytics",
+      "file_path": "src/analytics/__init__.py",
+      "package": "src.analytics"
+    },
+    {
+      "module": "src.analytics.data_miner",
+      "file_path": "src/analytics/data_miner.py",
+      "package": "src.analytics"
     },
     {
       "module": "src.core",
@@ -33,6 +53,26 @@
       "module": "src.core.module_interface",
       "file_path": "src/core/module_interface.py",
       "package": "src.core"
+    },
+    {
+      "module": "src.core.phase_tracker",
+      "file_path": "src/core/phase_tracker.py",
+      "package": "src.core"
+    },
+    {
+      "module": "src.corpus",
+      "file_path": "src/corpus/__init__.py",
+      "package": "src.corpus"
+    },
+    {
+      "module": "src.corpus.corpus_bundle",
+      "file_path": "src/corpus/corpus_bundle.py",
+      "package": "src.corpus"
+    },
+    {
+      "module": "src.corpus.local_collector",
+      "file_path": "src/corpus/local_collector.py",
+      "package": "src.corpus"
     },
     {
       "module": "src.cycle",
@@ -75,6 +115,16 @@
       "package": "src.data"
     },
     {
+      "module": "src.extraction",
+      "file_path": "src/extraction/__init__.py",
+      "package": "src.extraction"
+    },
+    {
+      "module": "src.extraction.relation_extractor",
+      "file_path": "src/extraction/relation_extractor.py",
+      "package": "src.extraction"
+    },
+    {
       "module": "src.extractors",
       "file_path": "src/extractors/__init__.py",
       "package": "src.extractors"
@@ -83,6 +133,51 @@
       "module": "src.extractors.advanced_entity_extractor",
       "file_path": "src/extractors/advanced_entity_extractor.py",
       "package": "src.extractors"
+    },
+    {
+      "module": "src.hypothesis",
+      "file_path": "src/hypothesis/__init__.py",
+      "package": "src.hypothesis"
+    },
+    {
+      "module": "src.hypothesis.hypothesis_engine",
+      "file_path": "src/hypothesis/hypothesis_engine.py",
+      "package": "src.hypothesis"
+    },
+    {
+      "module": "src.infra",
+      "file_path": "src/infra/__init__.py",
+      "package": "src.infra"
+    },
+    {
+      "module": "src.infra.cache_service",
+      "file_path": "src/infra/cache_service.py",
+      "package": "src.infra"
+    },
+    {
+      "module": "src.infra.lexicon_service",
+      "file_path": "src/infra/lexicon_service.py",
+      "package": "src.infra"
+    },
+    {
+      "module": "src.infra.llm_service",
+      "file_path": "src/infra/llm_service.py",
+      "package": "src.infra"
+    },
+    {
+      "module": "src.knowledge",
+      "file_path": "src/knowledge/__init__.py",
+      "package": "src.knowledge"
+    },
+    {
+      "module": "src.knowledge.embedding_service",
+      "file_path": "src/knowledge/embedding_service.py",
+      "package": "src.knowledge"
+    },
+    {
+      "module": "src.knowledge.ontology_manager",
+      "file_path": "src/knowledge/ontology_manager.py",
+      "package": "src.knowledge"
     },
     {
       "module": "src.learning",
@@ -115,8 +210,33 @@
       "package": "src.llm"
     },
     {
+      "module": "src.llm.llm_service",
+      "file_path": "src/llm/llm_service.py",
+      "package": "src.llm"
+    },
+    {
+      "module": "src.orchestration",
+      "file_path": "src/orchestration/__init__.py",
+      "package": "src.orchestration"
+    },
+    {
+      "module": "src.orchestration.research_orchestrator",
+      "file_path": "src/orchestration/research_orchestrator.py",
+      "package": "src.orchestration"
+    },
+    {
+      "module": "src.orchestration.task_scheduler",
+      "file_path": "src/orchestration/task_scheduler.py",
+      "package": "src.orchestration"
+    },
+    {
       "module": "src.output",
       "file_path": "src/output/__init__.py",
+      "package": "src.output"
+    },
+    {
+      "module": "src.output.citation_manager",
+      "file_path": "src/output/citation_manager.py",
       "package": "src.output"
     },
     {
@@ -170,8 +290,23 @@
       "package": "src.research"
     },
     {
+      "module": "src.research.data_miner",
+      "file_path": "src/research/data_miner.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.gap_analyzer",
+      "file_path": "src/research/gap_analyzer.py",
+      "package": "src.research"
+    },
+    {
       "module": "src.research.google_scholar_helper",
       "file_path": "src/research/google_scholar_helper.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.hypothesis_engine",
+      "file_path": "src/research/hypothesis_engine.py",
       "package": "src.research"
     },
     {
@@ -277,6 +412,18 @@
   ],
   "module_edges": [
     {
+      "source": "src.analysis",
+      "target": "src.analysis.gap_analyzer"
+    },
+    {
+      "source": "src.analysis.gap_analyzer",
+      "target": "src.research"
+    },
+    {
+      "source": "src.analytics",
+      "target": "src.analytics.data_miner"
+    },
+    {
       "source": "src.core",
       "target": "src.core.algorithm_optimizer"
     },
@@ -293,8 +440,40 @@
       "target": "src.core.module_interface"
     },
     {
+      "source": "src.core.algorithm_optimizer",
+      "target": "src.core.phase_tracker"
+    },
+    {
       "source": "src.core.architecture",
       "target": "src.core.module_interface"
+    },
+    {
+      "source": "src.core.architecture",
+      "target": "src.core.phase_tracker"
+    },
+    {
+      "source": "src.core.module_base",
+      "target": "src.core.phase_tracker"
+    },
+    {
+      "source": "src.core.module_interface",
+      "target": "src.core.phase_tracker"
+    },
+    {
+      "source": "src.corpus",
+      "target": "src.corpus.corpus_bundle"
+    },
+    {
+      "source": "src.corpus",
+      "target": "src.corpus.local_collector"
+    },
+    {
+      "source": "src.corpus.local_collector",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.corpus.local_collector",
+      "target": "src.corpus.corpus_bundle"
     },
     {
       "source": "src.cycle",
@@ -317,12 +496,48 @@
       "target": "src.cycle.test_driven_iteration"
     },
     {
+      "source": "src.cycle.fixing_stage",
+      "target": "src.core.phase_tracker"
+    },
+    {
       "source": "src.cycle.iteration_cycle",
       "target": "src.core.module_base"
     },
     {
+      "source": "src.cycle.iteration_cycle",
+      "target": "src.core.phase_tracker"
+    },
+    {
+      "source": "src.cycle.module_iteration",
+      "target": "src.core.phase_tracker"
+    },
+    {
+      "source": "src.cycle.system_iteration",
+      "target": "src.core.phase_tracker"
+    },
+    {
       "source": "src.cycle.system_iteration",
       "target": "src.cycle.module_iteration"
+    },
+    {
+      "source": "src.cycle.test_driven_iteration",
+      "target": "src.core.phase_tracker"
+    },
+    {
+      "source": "src.data.tcm_lexicon",
+      "target": "src.infra.lexicon_service"
+    },
+    {
+      "source": "src.extraction",
+      "target": "src.extraction.relation_extractor"
+    },
+    {
+      "source": "src.extraction.relation_extractor",
+      "target": "src.knowledge.ontology_manager"
+    },
+    {
+      "source": "src.extraction.relation_extractor",
+      "target": "src.semantic_modeling.tcm_relationships"
     },
     {
       "source": "src.extractors.advanced_entity_extractor",
@@ -331,6 +546,50 @@
     {
       "source": "src.extractors.advanced_entity_extractor",
       "target": "src.data.tcm_lexicon"
+    },
+    {
+      "source": "src.hypothesis",
+      "target": "src.hypothesis.hypothesis_engine"
+    },
+    {
+      "source": "src.hypothesis.hypothesis_engine",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.infra",
+      "target": "src.infra.cache_service"
+    },
+    {
+      "source": "src.infra",
+      "target": "src.infra.lexicon_service"
+    },
+    {
+      "source": "src.infra",
+      "target": "src.infra.llm_service"
+    },
+    {
+      "source": "src.infra.llm_service",
+      "target": "src.infra.cache_service"
+    },
+    {
+      "source": "src.infra.llm_service",
+      "target": "src.llm.llm_engine"
+    },
+    {
+      "source": "src.knowledge",
+      "target": "src.knowledge.embedding_service"
+    },
+    {
+      "source": "src.knowledge",
+      "target": "src.knowledge.ontology_manager"
+    },
+    {
+      "source": "src.knowledge.embedding_service",
+      "target": "src.knowledge.ontology_manager"
+    },
+    {
+      "source": "src.knowledge.ontology_manager",
+      "target": "src.semantic_modeling.tcm_relationships"
     },
     {
       "source": "src.learning",
@@ -361,6 +620,42 @@
       "target": "src.llm.llm_engine"
     },
     {
+      "source": "src.llm",
+      "target": "src.llm.llm_service"
+    },
+    {
+      "source": "src.llm.llm_engine",
+      "target": "src.research.gap_analyzer"
+    },
+    {
+      "source": "src.llm.llm_service",
+      "target": "src.infra"
+    },
+    {
+      "source": "src.orchestration",
+      "target": "src.orchestration.research_orchestrator"
+    },
+    {
+      "source": "src.orchestration",
+      "target": "src.orchestration.task_scheduler"
+    },
+    {
+      "source": "src.orchestration.research_orchestrator",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.output",
+      "target": "src.output.citation_manager"
+    },
+    {
+      "source": "src.output",
+      "target": "src.output.output_generator"
+    },
+    {
+      "source": "src.output.citation_manager",
+      "target": "src.core.module_base"
+    },
+    {
       "source": "src.output.output_generator",
       "target": "src.core.module_base"
     },
@@ -371,6 +666,10 @@
     {
       "source": "src.reasoning.reasoning_engine",
       "target": "src.core.module_base"
+    },
+    {
+      "source": "src.reasoning.reasoning_engine",
+      "target": "src.semantic_modeling.tcm_relationships"
     },
     {
       "source": "src.research",
@@ -387,6 +686,14 @@
     {
       "source": "src.research",
       "target": "src.research.ctext_whitelist"
+    },
+    {
+      "source": "src.research",
+      "target": "src.research.data_miner"
+    },
+    {
+      "source": "src.research",
+      "target": "src.research.gap_analyzer"
     },
     {
       "source": "src.research",
@@ -429,6 +736,18 @@
       "target": "src.research.ctext_whitelist"
     },
     {
+      "source": "src.research.data_miner",
+      "target": "src.analytics.data_miner"
+    },
+    {
+      "source": "src.research.gap_analyzer",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.research.hypothesis_engine",
+      "target": "src.hypothesis"
+    },
+    {
       "source": "src.research.markdown_translate",
       "target": "src.llm.llm_engine"
     },
@@ -446,11 +765,35 @@
     },
     {
       "source": "src.research.research_pipeline",
+      "target": "src.core.phase_tracker"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.corpus.corpus_bundle"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.corpus.local_collector"
+    },
+    {
+      "source": "src.research.research_pipeline",
       "target": "src.extractors.advanced_entity_extractor"
     },
     {
       "source": "src.research.research_pipeline",
+      "target": "src.hypothesis"
+    },
+    {
+      "source": "src.research.research_pipeline",
       "target": "src.llm.llm_engine"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.llm.llm_service"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.output.citation_manager"
     },
     {
       "source": "src.research.research_pipeline",
@@ -462,6 +805,10 @@
     },
     {
       "source": "src.research.research_pipeline",
+      "target": "src.research.gap_analyzer"
+    },
+    {
+      "source": "src.research.research_pipeline",
       "target": "src.research.literature_retriever"
     },
     {
@@ -469,16 +816,28 @@
       "target": "src.semantic_modeling.semantic_graph_builder"
     },
     {
+      "source": "src.research.theoretical_framework",
+      "target": "src.core.phase_tracker"
+    },
+    {
+      "source": "src.semantic_modeling.research_methods",
+      "target": "src.research.data_miner"
+    },
+    {
       "source": "src.semantic_modeling.semantic_graph_builder",
       "target": "src.core.module_base"
     },
     {
       "source": "src.semantic_modeling.semantic_graph_builder",
-      "target": "src.semantic_modeling.research_methods"
+      "target": "src.extraction.relation_extractor"
     },
     {
       "source": "src.semantic_modeling.semantic_graph_builder",
-      "target": "src.semantic_modeling.tcm_relationships"
+      "target": "src.knowledge.ontology_manager"
+    },
+    {
+      "source": "src.semantic_modeling.semantic_graph_builder",
+      "target": "src.semantic_modeling.research_methods"
     },
     {
       "source": "src.storage",
@@ -517,8 +876,16 @@
       "target": "src.core.module_base"
     },
     {
+      "source": "src.test.automated_tester",
+      "target": "src.core.phase_tracker"
+    },
+    {
       "source": "src.test.integration_tester",
       "target": "src.core.module_base"
+    },
+    {
+      "source": "src.test.integration_tester",
+      "target": "src.core.phase_tracker"
     }
   ],
   "packages": [
@@ -528,9 +895,24 @@
       "out_degree": 0
     },
     {
-      "package": "src.core",
-      "in_degree": 9,
+      "package": "src.analysis",
+      "in_degree": 0,
+      "out_degree": 1
+    },
+    {
+      "package": "src.analytics",
+      "in_degree": 1,
       "out_degree": 0
+    },
+    {
+      "package": "src.core",
+      "in_degree": 11,
+      "out_degree": 0
+    },
+    {
+      "package": "src.corpus",
+      "in_degree": 1,
+      "out_degree": 1
     },
     {
       "package": "src.cycle",
@@ -540,12 +922,32 @@
     {
       "package": "src.data",
       "in_degree": 1,
-      "out_degree": 0
+      "out_degree": 1
+    },
+    {
+      "package": "src.extraction",
+      "in_degree": 1,
+      "out_degree": 2
     },
     {
       "package": "src.extractors",
       "in_degree": 1,
       "out_degree": 2
+    },
+    {
+      "package": "src.hypothesis",
+      "in_degree": 1,
+      "out_degree": 1
+    },
+    {
+      "package": "src.infra",
+      "in_degree": 2,
+      "out_degree": 1
+    },
+    {
+      "package": "src.knowledge",
+      "in_degree": 2,
+      "out_degree": 1
     },
     {
       "package": "src.learning",
@@ -554,12 +956,17 @@
     },
     {
       "package": "src.llm",
-      "in_degree": 1,
-      "out_degree": 0
+      "in_degree": 2,
+      "out_degree": 2
+    },
+    {
+      "package": "src.orchestration",
+      "in_degree": 0,
+      "out_degree": 1
     },
     {
       "package": "src.output",
-      "in_degree": 0,
+      "in_degree": 1,
       "out_degree": 1
     },
     {
@@ -570,17 +977,17 @@
     {
       "package": "src.reasoning",
       "in_degree": 0,
-      "out_degree": 1
+      "out_degree": 2
     },
     {
       "package": "src.research",
-      "in_degree": 0,
-      "out_degree": 5
+      "in_degree": 4,
+      "out_degree": 9
     },
     {
       "package": "src.semantic_modeling",
-      "in_degree": 1,
-      "out_degree": 1
+      "in_degree": 4,
+      "out_degree": 4
     },
     {
       "package": "src.storage",
@@ -595,8 +1002,28 @@
   ],
   "package_edges": [
     {
+      "source": "src.analysis",
+      "target": "src.research"
+    },
+    {
+      "source": "src.corpus",
+      "target": "src.core"
+    },
+    {
       "source": "src.cycle",
       "target": "src.core"
+    },
+    {
+      "source": "src.data",
+      "target": "src.infra"
+    },
+    {
+      "source": "src.extraction",
+      "target": "src.knowledge"
+    },
+    {
+      "source": "src.extraction",
+      "target": "src.semantic_modeling"
     },
     {
       "source": "src.extractors",
@@ -607,8 +1034,32 @@
       "target": "src.data"
     },
     {
+      "source": "src.hypothesis",
+      "target": "src.core"
+    },
+    {
+      "source": "src.infra",
+      "target": "src.llm"
+    },
+    {
+      "source": "src.knowledge",
+      "target": "src.semantic_modeling"
+    },
+    {
       "source": "src.learning",
       "target": "src.core"
+    },
+    {
+      "source": "src.llm",
+      "target": "src.infra"
+    },
+    {
+      "source": "src.llm",
+      "target": "src.research"
+    },
+    {
+      "source": "src.orchestration",
+      "target": "src.research"
     },
     {
       "source": "src.output",
@@ -623,8 +1074,20 @@
       "target": "src.core"
     },
     {
+      "source": "src.reasoning",
+      "target": "src.semantic_modeling"
+    },
+    {
+      "source": "src.research",
+      "target": "src.analytics"
+    },
+    {
       "source": "src.research",
       "target": "src.core"
+    },
+    {
+      "source": "src.research",
+      "target": "src.corpus"
     },
     {
       "source": "src.research",
@@ -632,7 +1095,15 @@
     },
     {
       "source": "src.research",
+      "target": "src.hypothesis"
+    },
+    {
+      "source": "src.research",
       "target": "src.llm"
+    },
+    {
+      "source": "src.research",
+      "target": "src.output"
     },
     {
       "source": "src.research",
@@ -645,6 +1116,18 @@
     {
       "source": "src.semantic_modeling",
       "target": "src.core"
+    },
+    {
+      "source": "src.semantic_modeling",
+      "target": "src.extraction"
+    },
+    {
+      "source": "src.semantic_modeling",
+      "target": "src.knowledge"
+    },
+    {
+      "source": "src.semantic_modeling",
+      "target": "src.research"
     },
     {
       "source": "src.test",

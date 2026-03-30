@@ -845,7 +845,5 @@ class FullCycleTest(unittest.TestCase):
 # 导出主要类和函数
 __all__ = [
     'FullCycleTest',
-    'FullCycleTest',
     'FullCycleResult',
-    'FullCycleTest'
 ]

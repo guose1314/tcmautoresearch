@@ -102,39 +102,12 @@ class DocumentPreprocessor(BaseModule):
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """执行文档预处理"""
         try:
-            # 验证输入
-            if not context.get("raw_text"):
-                raise ValueError("缺少原始文本输入")
-            
-            raw_text = context["raw_text"]
-            if not isinstance(raw_text, str):
-                raise ValueError("raw_text 必须为字符串")
-            if len(raw_text) > self.max_input_chars:
-                raise ValueError(f"输入文本过大，超过限制 {self.max_input_chars} 字符")
+            raw_text = self._validate_raw_text(context)
             
             # 执行预处理
             processed_text = self._process_text(raw_text)
             metadata = self._extract_metadata(context)
-            
-            # 计算文本处理统计
-            processing_steps = [
-                "encoding_detection",
-                "format_cleaning",
-                "line_break_fix"
-            ]
-            
-            if self._opencc:
-                processing_steps.append("convert_traditional_to_simplified")
-                metadata["convert_mode"] = self.convert_mode
-            
-            if HAS_JIEBA:
-                processing_steps.append("jieba_segmentation")
-                # 尝试分词，计算词数
-                try:
-                    segments = self.segment_text(processed_text)
-                    metadata["token_count"] = len(list(segments))
-                except Exception:
-                    metadata["token_count"] = len(processed_text.split())
+            processing_steps = self._build_processing_steps(metadata, processed_text)
             
             # 构造输出
             output_data = {
@@ -148,6 +121,45 @@ class DocumentPreprocessor(BaseModule):
         except Exception as e:
             self.logger.error(f"文档预处理执行失败: {e}")
             raise
+
+    def _validate_raw_text(self, context: Dict[str, Any]) -> str:
+        """验证输入中的 raw_text 并返回可处理文本。"""
+        if "raw_text" not in context:
+            raise ValueError("缺少原始文本输入")
+
+        raw_text = context["raw_text"]
+        if not isinstance(raw_text, str):
+            raise ValueError("raw_text 必须为字符串")
+        if not raw_text:
+            raise ValueError("缺少原始文本输入")
+        if len(raw_text) > self.max_input_chars:
+            raise ValueError(f"输入文本过大，超过限制 {self.max_input_chars} 字符")
+        return raw_text
+
+    def _build_processing_steps(self, metadata: Dict[str, Any], processed_text: str) -> List[str]:
+        """根据启用能力构建处理步骤并补充元数据。"""
+        processing_steps = [
+            "encoding_detection",
+            "format_cleaning",
+            "line_break_fix"
+        ]
+
+        if self._opencc:
+            processing_steps.append("convert_traditional_to_simplified")
+            metadata["convert_mode"] = self.convert_mode
+
+        if HAS_JIEBA:
+            processing_steps.append("jieba_segmentation")
+            metadata["token_count"] = self._estimate_token_count(processed_text)
+
+        return processing_steps
+
+    def _estimate_token_count(self, text: str) -> int:
+        """估算 token 数量，分词失败时降级为空格分词。"""
+        try:
+            return len(self.segment_text(text))
+        except Exception:
+            return len(text.split())
     
     def _process_text(self, text: str) -> str:
         """处理文本内容"""
@@ -220,7 +232,7 @@ class DocumentPreprocessor(BaseModule):
             self.logger.warning(f"分词失败: {e}，使用空格分割")
             return text.split()
     
-    def segment_with_ancient_punctuation(self, text: str) -> List[str]:
+    def segment_with_ancient_punctuation(self, text: str) -> List[List[Any]]:
         """
         针对古文进行分词，同时补全可能缺失的断句标记。
         
@@ -236,7 +248,7 @@ class DocumentPreprocessor(BaseModule):
         sentences = re.split(r'[。？！；、]', text)
         
         # 对每个句子进行分词
-        result = []
+        result: List[List[Any]] = []
         for sent in sentences:
             if sent.strip():
                 words = self.segment_text(sent.strip())
