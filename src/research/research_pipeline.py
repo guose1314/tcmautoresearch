@@ -548,9 +548,12 @@ class ResearchPipeline(PhaseTrackerMixin):
             self.logger.error(f"研究循环启动失败: {e}")
             return False
     
-    def execute_research_phase(self, cycle_id: str, 
-                              phase: ResearchPhase,
-                              phase_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def execute_research_phase(
+        self,
+        cycle_id: str,
+        phase: ResearchPhase,
+        phase_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         执行研究阶段
         
@@ -562,122 +565,179 @@ class ResearchPipeline(PhaseTrackerMixin):
         Returns:
             Dict[str, Any]: 执行结果
         """
-        start_time = time.time()
-        
-        try:
-            if cycle_id not in self.research_cycles:
-                self.logger.warning(f"研究循环 {cycle_id} 不存在")
-                return {"error": "循环不存在"}
-            
-            research_cycle = self.research_cycles[cycle_id]
-            
-            # 检查循环状态
-            if research_cycle.status != ResearchCycleStatus.ACTIVE:
-                self.logger.warning(f"研究循环 {cycle_id} 不处于活跃状态")
-                return {"error": "循环未激活"}
+        phase_context_payload = phase_context or {}
+        start_time = time.perf_counter()
 
-            phase_entry = self._start_phase(research_cycle.metadata, phase.value, phase_context or {})
-            
-            # 执行阶段
-            phase_result = self._execute_phase_internal(phase, research_cycle, phase_context or {})
-            
-            # 更新循环状态
-            if phase == ResearchPhase.OBSERVE:
-                research_cycle.current_phase = ResearchPhase.HYPOTHESIS
-            elif phase == ResearchPhase.HYPOTHESIS:
-                research_cycle.current_phase = ResearchPhase.EXPERIMENT
-            elif phase == ResearchPhase.EXPERIMENT:
-                research_cycle.current_phase = ResearchPhase.ANALYZE
-            elif phase == ResearchPhase.ANALYZE:
-                research_cycle.current_phase = ResearchPhase.PUBLISH
-            elif phase == ResearchPhase.PUBLISH:
-                research_cycle.current_phase = ResearchPhase.REFLECT
-            elif phase == ResearchPhase.REFLECT:
-                research_cycle.current_phase = ResearchPhase.OBSERVE  # 循环回起点
-            
-            # 记录阶段执行信息
-            phase_execution = {
-                "phase": phase.value,
-                "started_at": phase_entry["started_at"],
-                "completed_at": datetime.now().isoformat(),
-                "duration": time.time() - start_time,
-                "context": phase_context or {},
-                "result": phase_result
-            }
-            
+        validation_error = self._validate_research_phase_request(cycle_id)
+        if validation_error:
+            return validation_error
+
+        research_cycle = self.research_cycles[cycle_id]
+        phase_entry = self._start_phase(research_cycle.metadata, phase.value, phase_context_payload)
+
+        try:
+            phase_result = self._execute_phase_internal(phase, research_cycle, phase_context_payload)
+            self._advance_research_cycle_phase(research_cycle, phase)
+            phase_execution = self._build_phase_execution(
+                phase=phase,
+                started_at=phase_entry["started_at"],
+                start_time=start_time,
+                phase_context=phase_context_payload,
+                phase_result=phase_result,
+            )
             research_cycle.phase_executions[phase] = phase_execution
             self._complete_phase(research_cycle.metadata, phase.value, phase_entry, start_time)
-            phase_entry["completed_at"] = phase_execution["completed_at"]
-            phase_entry["duration"] = phase_execution["duration"]
-            phase_entry["result"] = self._serialize_value(phase_result)
-            research_cycle.metadata["final_status"] = research_cycle.status.value
-
-            if isinstance(phase_result, dict):
-                research_cycle.outcomes.append({"phase": phase.value, "result": phase_result})
-                if phase == ResearchPhase.PUBLISH:
-                    research_cycle.deliverables = phase_result.get("deliverables", [])
-                if phase == ResearchPhase.ANALYZE:
-                    research_cycle.quality_metrics = phase_result.get("results", {})
-
+            self._sync_phase_history_entry(phase_entry, phase_execution, phase_result)
+            self._apply_phase_result(research_cycle, phase, phase_result)
             research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
-            
-            # 记录历史
-            self.execution_history.append({
+            self._record_phase_success(cycle_id, phase, start_time)
+            self.logger.info(f"研究阶段执行完成: {phase.value}")
+            return phase_result
+        except Exception as exc:
+            return self._handle_phase_execution_failure(cycle_id, phase, start_time, exc)
+
+    def _validate_research_phase_request(self, cycle_id: str) -> Optional[Dict[str, Any]]:
+        if cycle_id not in self.research_cycles:
+            self.logger.warning(f"研究循环 {cycle_id} 不存在")
+            return {"error": "循环不存在"}
+
+        research_cycle = self.research_cycles[cycle_id]
+        if research_cycle.status != ResearchCycleStatus.ACTIVE:
+            self.logger.warning(f"研究循环 {cycle_id} 不处于活跃状态")
+            return {"error": "循环未激活"}
+        return None
+
+    def _advance_research_cycle_phase(self, research_cycle: ResearchCycle, phase: ResearchPhase) -> None:
+        phase_transitions = {
+            ResearchPhase.OBSERVE: ResearchPhase.HYPOTHESIS,
+            ResearchPhase.HYPOTHESIS: ResearchPhase.EXPERIMENT,
+            ResearchPhase.EXPERIMENT: ResearchPhase.ANALYZE,
+            ResearchPhase.ANALYZE: ResearchPhase.PUBLISH,
+            ResearchPhase.PUBLISH: ResearchPhase.REFLECT,
+            ResearchPhase.REFLECT: ResearchPhase.OBSERVE,
+        }
+        research_cycle.current_phase = phase_transitions.get(phase, research_cycle.current_phase)
+
+    def _build_phase_execution(
+        self,
+        phase: ResearchPhase,
+        started_at: str,
+        start_time: float,
+        phase_context: Dict[str, Any],
+        phase_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return {
+            "phase": phase.value,
+            "started_at": started_at,
+            "completed_at": datetime.now().isoformat(),
+            "duration": time.perf_counter() - start_time,
+            "context": phase_context,
+            "result": phase_result,
+        }
+
+    def _sync_phase_history_entry(
+        self,
+        phase_entry: Dict[str, Any],
+        phase_execution: Dict[str, Any],
+        phase_result: Dict[str, Any],
+    ) -> None:
+        phase_entry["completed_at"] = phase_execution["completed_at"]
+        phase_entry["duration"] = phase_execution["duration"]
+        phase_entry["result"] = self._serialize_value(phase_result)
+
+    def _apply_phase_result(
+        self,
+        research_cycle: ResearchCycle,
+        phase: ResearchPhase,
+        phase_result: Dict[str, Any],
+    ) -> None:
+        research_cycle.metadata["final_status"] = research_cycle.status.value
+        if not isinstance(phase_result, dict):
+            return
+
+        research_cycle.outcomes.append({"phase": phase.value, "result": phase_result})
+        if phase == ResearchPhase.PUBLISH:
+            research_cycle.deliverables = phase_result.get("deliverables", [])
+        if phase == ResearchPhase.ANALYZE:
+            research_cycle.quality_metrics = phase_result.get("results", {})
+
+    def _record_phase_success(self, cycle_id: str, phase: ResearchPhase, start_time: float) -> None:
+        self.execution_history.append(
+            {
                 "timestamp": datetime.now().isoformat(),
                 "action": "phase_executed",
                 "cycle_id": cycle_id,
                 "phase": phase.value,
-                "duration": time.time() - start_time
-            })
-            
-            self.logger.info(f"研究阶段执行完成: {phase.value}")
-            return phase_result
-            
-        except Exception as e:
-            self.logger.error(f"研究阶段执行失败: {e}")
-            if cycle_id in self.research_cycles:
-                research_cycle = self.research_cycles[cycle_id]
-                history = research_cycle.metadata.get("phase_history", [])
-                if history and history[-1].get("phase") == phase.value:
-                    failure_details = {
-                        "cycle_id": research_cycle.cycle_id,
-                        "cycle_name": research_cycle.cycle_name,
-                        "status": research_cycle.status.value,
-                        "phase": phase.value,
-                    }
-                    history[-1]["context"] = self._serialize_value(
-                        {
-                            **(history[-1].get("context") or {}),
-                            **failure_details,
-                        }
-                    )
-                    self._fail_phase(
-                        research_cycle.metadata,
-                        research_cycle.metadata.setdefault("failed_operations", []),
-                        phase.value,
-                        history[-1],
-                        start_time,
-                        str(e),
-                    )
-                    history[-1]["completed_at"] = datetime.now().isoformat()
-                    history[-1]["duration"] = time.time() - start_time
-                    self._record_failed_operation(
-                        self._failed_operations,
-                        phase.value,
-                        str(e),
-                        time.time() - start_time,
-                        failure_details,
-                    )
-                self._mark_cycle_failed(research_cycle, phase.value, str(e))
-                research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
-                self.execution_history.append({
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "phase_failed",
-                    "cycle_id": cycle_id,
-                    "phase": phase.value,
-                    "error": str(e),
-                })
-            return {"error": str(e)}
+                "duration": time.perf_counter() - start_time,
+            }
+        )
+
+    def _handle_phase_execution_failure(
+        self,
+        cycle_id: str,
+        phase: ResearchPhase,
+        start_time: float,
+        exc: Exception,
+    ) -> Dict[str, Any]:
+        self.logger.error(f"研究阶段执行失败: {exc}")
+        if cycle_id not in self.research_cycles:
+            return {"error": str(exc)}
+
+        research_cycle = self.research_cycles[cycle_id]
+        self._record_failed_phase_history(research_cycle, phase, start_time, str(exc))
+        self._mark_cycle_failed(research_cycle, phase.value, str(exc))
+        research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
+        self.execution_history.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "action": "phase_failed",
+                "cycle_id": cycle_id,
+                "phase": phase.value,
+                "error": str(exc),
+            }
+        )
+        return {"error": str(exc)}
+
+    def _record_failed_phase_history(
+        self,
+        research_cycle: ResearchCycle,
+        phase: ResearchPhase,
+        start_time: float,
+        error: str,
+    ) -> None:
+        history = research_cycle.metadata.get("phase_history", [])
+        if not history or history[-1].get("phase") != phase.value:
+            return
+
+        failure_details = {
+            "cycle_id": research_cycle.cycle_id,
+            "cycle_name": research_cycle.cycle_name,
+            "status": research_cycle.status.value,
+            "phase": phase.value,
+        }
+        history[-1]["context"] = self._serialize_value(
+            {
+                **(history[-1].get("context") or {}),
+                **failure_details,
+            }
+        )
+        self._fail_phase(
+            research_cycle.metadata,
+            research_cycle.metadata.setdefault("failed_operations", []),
+            phase.value,
+            history[-1],
+            start_time,
+            error,
+        )
+        history[-1]["completed_at"] = datetime.now().isoformat()
+        history[-1]["duration"] = time.perf_counter() - start_time
+        self._record_failed_operation(
+            self._failed_operations,
+            phase.value,
+            error,
+            time.perf_counter() - start_time,
+            failure_details,
+        )
     
     def _execute_phase_internal(self, phase: ResearchPhase, 
                               cycle: ResearchCycle,

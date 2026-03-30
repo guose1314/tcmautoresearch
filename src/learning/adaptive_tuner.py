@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -132,14 +132,35 @@ class AdaptiveTuner:
         return list(self._update_log)
 
     def add_parameter(
-        self, name: str, current: float, min_val: float, max_val: float,
-        step: float = 0.05, ema_alpha: float = 0.2, cooldown: int = 5,
+        self,
+        name: str,
+        current: float,
+        min_val: float,
+        max_val: float,
+        *legacy_args: Any,
+        **parameter_options: Any,
     ) -> None:
         """动态注册新参数。"""
+        step, ema_alpha, cooldown = self._resolve_parameter_options(legacy_args, parameter_options)
         self._params[name] = ParameterSpec(
             name=name, current=current, min_val=min_val, max_val=max_val,
             step=step, ema_alpha=ema_alpha, cooldown=cooldown,
         )
+
+    def _resolve_parameter_options(
+        self,
+        legacy_args: Tuple[Any, ...],
+        parameter_options: Dict[str, Any],
+    ) -> Tuple[float, float, int]:
+        default_values = (0.05, 0.2, 5)
+        normalized = list(default_values)
+        for idx, value in enumerate(legacy_args[:3]):
+            normalized[idx] = value
+
+        step = float(parameter_options.get("step", normalized[0]))
+        ema_alpha = float(parameter_options.get("ema_alpha", normalized[1]))
+        cooldown = int(parameter_options.get("cooldown", normalized[2]))
+        return step, ema_alpha, cooldown
 
     # ------------------------------------------------------------------
     # 内部调整逻辑

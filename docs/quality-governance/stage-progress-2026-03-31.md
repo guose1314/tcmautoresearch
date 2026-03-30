@@ -563,3 +563,32 @@
 - 回归通过：`tests/test_llm_service.py` + `tests/test_research_pipeline_quality.py`（180 passed）。
 - `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
 - `code_quality` 告警：`37 -> 35`（下降 2）。
+
+## 27. 当日增量（S2-6 后续：warning TopN 精修第 16 轮，learning/research）
+
+### 27.1 精修目标
+
+- `src/learning/adaptive_tuner.py`：`add_parameter` 参数过多告警（8 > 7）。
+- `src/research/arxiv_fine_translation.py`：`run_arxiv_fine_translation_docker` 过长告警（154 > 120）。
+- `src/research/research_pipeline.py`：`execute_research_phase` 过长与高复杂度告警（130 > 120，19 > 12）。
+
+### 27.2 代码重构
+
+- `src/learning/adaptive_tuner.py`
+  - `add_parameter` 改为 `*legacy_args/**parameter_options` 兼容入口。
+  - 新增 `_resolve_parameter_options`，统一解析 `step/ema_alpha/cooldown`，保留旧位置参数调用兼容。
+
+- `src/research/arxiv_fine_translation.py`
+  - 新增 `_build_failed_result`、`_build_output_dirs`、`_build_daas_files`、`_collect_output_manifest`、`_persist_arxiv_outputs`。
+  - `run_arxiv_fine_translation_docker` 主流程下沉到 helper，保持输入输出契约与错误语义不变。
+
+- `src/research/research_pipeline.py`
+  - `execute_research_phase` 拆分为校验、阶段推进、执行记录、结果应用、成功/失败记录多个 helper。
+  - 新增 `_validate_research_phase_request`、`_advance_research_cycle_phase`、`_build_phase_execution`、`_sync_phase_history_entry`、`_apply_phase_result`、`_record_phase_success`、`_handle_phase_execution_failure`、`_record_failed_phase_history`。
+  - 保持阶段状态流转、失败标记和元数据更新语义一致。
+
+### 27.3 测试与验证
+
+- 回归通过：`tests/unit/test_learning_optimization_features.py` + `tests/test_research_pipeline_quality.py`（87 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`35 -> 31`（下降 4）。
