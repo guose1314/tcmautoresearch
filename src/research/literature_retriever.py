@@ -233,68 +233,88 @@ class LiteratureRetriever:
         email: str,
         api_key: str,
     ) -> List[LiteratureRecord]:
-        esearch_params = {
-            "db": "pubmed",
-            "term": query,
-            "retmode": "json",
-            "retmax": str(max_results),
-            "sort": "relevance",
-        }
-        if email:
-            esearch_params["email"] = email
-        if api_key:
-            esearch_params["api_key"] = api_key
+        esearch_params = self._build_pubmed_params(
+            {"term": query, "retmax": str(max_results), "sort": "relevance"},
+            email,
+            api_key,
+        )
 
         esearch_data = self._request_json(f"{PUBMED_EUTILS_BASE}/esearch.fcgi", esearch_params)
         ids = (esearch_data.get("esearchresult") or {}).get("idlist") or []
         if not ids:
             return []
 
-        esummary_params = {
-            "db": "pubmed",
-            "id": ",".join(ids),
-            "retmode": "json",
-        }
-        if email:
-            esummary_params["email"] = email
-        if api_key:
-            esummary_params["api_key"] = api_key
+        esummary_params = self._build_pubmed_params(
+            {"id": ",".join(ids)},
+            email,
+            api_key,
+        )
 
         summary_data = self._request_json(f"{PUBMED_EUTILS_BASE}/esummary.fcgi", esummary_params)
         result_obj = summary_data.get("result") or {}
-        records: List[LiteratureRecord] = []
+        return self._build_pubmed_records(ids, result_obj)
 
+    def _build_pubmed_params(
+        self,
+        base_params: Dict[str, str],
+        email: str,
+        api_key: str,
+    ) -> Dict[str, str]:
+        params: Dict[str, str] = {
+            "db": "pubmed",
+            "retmode": "json",
+            **base_params,
+        }
+        if email:
+            params["email"] = email
+        if api_key:
+            params["api_key"] = api_key
+        return params
+
+    def _build_pubmed_records(
+        self,
+        ids: List[str],
+        result_obj: Dict[str, Any],
+    ) -> List[LiteratureRecord]:
+        records: List[LiteratureRecord] = []
         for pmid in ids:
             item = result_obj.get(pmid) or {}
-            if not item:
-                continue
-
-            pubdate = str(item.get("pubdate", ""))
-            year = None
-            if len(pubdate) >= 4 and pubdate[:4].isdigit():
-                year = int(pubdate[:4])
-
-            authors = [a.get("name", "") for a in item.get("authors", []) if a.get("name")]
-            doi = ""
-            for article_id in item.get("articleids", []):
-                if article_id.get("idtype") == "doi":
-                    doi = article_id.get("value", "")
-                    break
-
-            records.append(
-                LiteratureRecord(
-                    source="pubmed",
-                    title=item.get("title", ""),
-                    authors=authors,
-                    year=year,
-                    doi=doi,
-                    url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
-                    abstract="",
-                    citation_count=None,
-                    external_id=pmid,
-                )
-            )
+            record = self._build_single_pubmed_record(pmid, item)
+            if record:
+                records.append(record)
         return records
+
+    def _build_single_pubmed_record(
+        self,
+        pmid: str,
+        item: Dict[str, Any],
+    ) -> Optional[LiteratureRecord]:
+        if not item:
+            return None
+        authors = [author.get("name", "") for author in item.get("authors", []) if author.get("name")]
+        return LiteratureRecord(
+            source="pubmed",
+            title=item.get("title", ""),
+            authors=authors,
+            year=self._extract_pubmed_year(item),
+            doi=self._extract_pubmed_doi(item),
+            url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+            abstract="",
+            citation_count=None,
+            external_id=pmid,
+        )
+
+    def _extract_pubmed_year(self, item: Dict[str, Any]) -> Optional[int]:
+        pubdate = str(item.get("pubdate", ""))
+        if len(pubdate) >= 4 and pubdate[:4].isdigit():
+            return int(pubdate[:4])
+        return None
+
+    def _extract_pubmed_doi(self, item: Dict[str, Any]) -> str:
+        for article_id in item.get("articleids", []):
+            if article_id.get("idtype") == "doi":
+                return article_id.get("value", "")
+        return ""
 
     def _search_semantic_scholar(self, query: str, max_results: int) -> List[LiteratureRecord]:
         params = {

@@ -316,21 +316,11 @@ class LLMDiskCache(DiskCacheStore):
         self,
         cache_key: str,
         response: str,
-        prompt: str,
-        system_prompt: str,
-        model_id: str,
-        temperature: float,
-        max_tokens: int,
+        *legacy_args: Any,
+        **legacy_kwargs: Any,
     ) -> None:
         """写入 LLM 响应，自动附加 LLM 元数据，兼容原 ``_DiskCache.put`` 签名。"""
-        meta: dict[str, Any] = {
-            "model_id": model_id,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "system_prompt_len": len(system_prompt),
-            "prompt_hash": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16],
-            "cached_at": datetime.now().isoformat(),
-        }
+        meta = self._build_llm_meta(*legacy_args, **legacy_kwargs)
         self.put(cache_key, response, meta=meta)
 
     # 供原 _DiskCache 调用方透明切换（旧签名别名）
@@ -338,12 +328,9 @@ class LLMDiskCache(DiskCacheStore):
         self,
         cache_key: str,
         value_or_response: str,
-        prompt: str = "",
-        system_prompt: str = "",
-        model_id: str = "",
-        temperature: float = 0.0,
-        max_tokens: int = 0,
+        *legacy_args: Any,
         meta: Optional[dict[str, Any]] = None,
+        **legacy_kwargs: Any,
     ) -> None:
         """
         兼容两种调用形式：
@@ -352,21 +339,47 @@ class LLMDiskCache(DiskCacheStore):
         * ``put(key, response, prompt, system_prompt, model_id, temperature, max_tokens)``
           — 原 ``_DiskCache.put`` 形式
         """
-        if prompt or model_id:
-            # 旧签名：带 LLM 参数
-            combined_meta: dict[str, Any] = {
-                "model_id": model_id,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "system_prompt_len": len(system_prompt),
-                "prompt_hash": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16],
-                "cached_at": datetime.now().isoformat(),
-            }
+        has_legacy_llm_args = bool(legacy_args) or any(
+            key in legacy_kwargs
+            for key in ["prompt", "system_prompt", "model_id", "temperature", "max_tokens"]
+        )
+
+        if has_legacy_llm_args:
+            combined_meta: dict[str, Any] = self._build_llm_meta(*legacy_args, **legacy_kwargs)
             if meta:
                 combined_meta.update(meta)
             super().put(cache_key, value_or_response, meta=combined_meta)
         else:
             super().put(cache_key, value_or_response, meta=meta)
+
+    def _build_llm_meta(self, *legacy_args: Any, **legacy_kwargs: Any) -> dict[str, Any]:
+        parsed = self._parse_legacy_llm_args(*legacy_args, **legacy_kwargs)
+        return {
+            "model_id": parsed["model_id"],
+            "temperature": parsed["temperature"],
+            "max_tokens": parsed["max_tokens"],
+            "system_prompt_len": len(parsed["system_prompt"]),
+            "prompt_hash": hashlib.sha256(parsed["prompt"].encode("utf-8")).hexdigest()[:16],
+            "cached_at": datetime.now().isoformat(),
+        }
+
+    def _parse_legacy_llm_args(self, *legacy_args: Any, **legacy_kwargs: Any) -> dict[str, Any]:
+        values = list(legacy_args[:5])
+        while len(values) < 5:
+            values.append("")
+
+        prompt = str(legacy_kwargs.get("prompt", values[0] or ""))
+        system_prompt = str(legacy_kwargs.get("system_prompt", values[1] or ""))
+        model_id = str(legacy_kwargs.get("model_id", values[2] or ""))
+        temperature = float(legacy_kwargs.get("temperature", values[3] or 0.0))
+        max_tokens = int(legacy_kwargs.get("max_tokens", values[4] or 0))
+        return {
+            "prompt": prompt,
+            "system_prompt": system_prompt,
+            "model_id": model_id,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

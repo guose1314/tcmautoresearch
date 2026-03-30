@@ -489,3 +489,28 @@
 - 回归通过：`tests/test_hypothesis_engine.py` + `tests/unit/test_architecture_cycle_quality.py`（144 passed）。
 - `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
 - `code_quality` 告警：`45 -> 43`（下降 2）。
+
+## 24. 当日增量（S2-6 后续：warning TopN 精修第 13 轮，research/infra）
+
+### 24.1 精修目标
+
+- `src/research/literature_retriever.py`：`_search_pubmed` 复杂度告警（16 > 12）。
+- `src/infra/cache_service.py`：`put_llm` 参数过多告警（8 > 7）与 `put` 参数过多告警（9 > 7）。
+
+### 24.2 代码重构
+
+- `src/research/literature_retriever.py`
+  - `_search_pubmed` 拆分为 `_build_pubmed_params` / `_build_pubmed_records` / `_build_single_pubmed_record` / `_extract_pubmed_year` / `_extract_pubmed_doi`。
+  - 保持 PubMed 请求参数、年份提取与 DOI 解析语义不变。
+
+- `src/infra/cache_service.py`
+  - `put_llm` 改为 `*legacy_args/**legacy_kwargs` 兼容模式，并下沉到 `_build_llm_meta` / `_parse_legacy_llm_args`。
+  - `put` 维持新旧两套签名兼容（通用 `put(key, value, meta=...)` 与旧 LLM 参数形式），同时收敛显式参数数量。
+
+### 24.3 测试与验证
+
+- 扩展 `tests/test_cache_service.py`：新增 `put_llm` kwargs 兼容测试。
+- 新增 `tests/unit/test_literature_retriever_pubmed_helpers.py`：覆盖 PubMed 年份/DOI 解析与空项处理。
+- 回归通过：`tests/test_cache_service.py` + `tests/unit/test_literature_retriever_pubmed_helpers.py` + `tests/test_research_pipeline_literature.py`（104 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`43 -> 40`（下降 3）。

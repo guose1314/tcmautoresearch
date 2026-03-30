@@ -224,6 +224,20 @@ class TestLLMDiskCache(unittest.TestCase):
         c.put(key, "value", meta={"x": 1})
         self.assertEqual(c.get(key), "value")
 
+    def test_put_llm_accepts_legacy_kwargs(self):
+        c = _llm_cache()
+        key = LLMDiskCache.make_key("p", "s", "/m", 0.3, 512)
+        c.put_llm(
+            key,
+            "response",
+            prompt="p",
+            system_prompt="s",
+            model_id="/m",
+            temperature=0.3,
+            max_tokens=512,
+        )
+        self.assertEqual(c.get(key), "response")
+
     def test_database_filename_is_llm_cache_db(self):
         tmp = tempfile.mkdtemp()
         c = LLMDiskCache(tmp)
