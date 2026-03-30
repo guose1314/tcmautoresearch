@@ -147,6 +147,15 @@ class TestHypothesisEngine(unittest.TestCase):
         self.assertEqual(payload["verification_score"], "not-a-number")
         self.assertEqual(payload["action"], "retain")
 
+    def test_run_llm_closed_loop_skips_when_llm_generation_disabled(self):
+        prepared = self.engine._prepare_context(SAMPLE_CONTEXT)
+        hypotheses = self.engine._generate_heuristic_hypotheses(prepared)
+
+        iterations = self.engine._run_llm_closed_loop(hypotheses, prepared)
+
+        self.assertEqual(iterations, [])
+        self.assertFalse(prepared["used_llm_closed_loop"])
+
 
 class TestHypothesisEnginePipelineIntegration(unittest.TestCase):
     def setUp(self):

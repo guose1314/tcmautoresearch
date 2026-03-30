@@ -442,3 +442,26 @@
 - 回归通过：`tests/test_hypothesis_engine.py` + `tests/unit/test_architecture_cycle_quality.py`（139 passed）。
 - `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
 - `code_quality` 告警：`49 -> 47`（下降 2）。
+
+## 22. 当日增量（S2-6 后续：warning TopN 精修第 11 轮）
+
+### 22.1 精修目标
+
+- `src/cycle/test_driven_iteration.py`：`get_test_performance_report` 复杂度告警（13 > 12）。
+- `src/hypothesis/hypothesis_engine.py`：`_run_llm_closed_loop` 复杂度告警（20 > 12）。
+
+### 22.2 代码重构
+
+- `src/cycle/test_driven_iteration.py`
+  - `get_test_performance_report` 拆分为 `_partition_iterations` / `_average_execution_time` / `_average_confidence_score` / `_build_test_report_analysis_summary`。
+
+- `src/hypothesis/hypothesis_engine.py`
+  - `_run_llm_closed_loop` 拆分为 `_can_run_llm_closed_loop` / `_run_single_hypothesis_closed_loop` / `_collect_feedback_metrics` / `_normalize_verification_score` / `_normalize_validation_action` / `_apply_feedback_revision`。
+  - 保持 LLM 闭环评分、动作归一化与 revise 回写语义不变。
+
+### 22.3 测试与验证
+
+- 扩展 `tests/test_hypothesis_engine.py`：新增闭环前置条件（未启用 llm_generation 时跳过）测试。
+- 回归通过：`tests/test_hypothesis_engine.py` + `tests/unit/test_architecture_cycle_quality.py`（144 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`47 -> 45`（下降 2）。

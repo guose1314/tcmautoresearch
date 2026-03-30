@@ -181,82 +181,141 @@ class HypothesisEngine(BaseModule):
         hypotheses: List[HypothesisCandidate],
         prepared: Dict[str, Any],
     ) -> List[ValidationIteration]:
-        if not hypotheses:
-            return []
-        if not prepared["context"].get("use_llm_generation"):
-            return []
-
         llm_service = self._resolve_llm_service(prepared)
-        if llm_service is None:
-            return []
-        if not (hasattr(llm_service, "generate") or hasattr(llm_service, "evaluate_hypothesis")):
+        if not self._can_run_llm_closed_loop(hypotheses, prepared, llm_service):
             return []
 
         iterations: List[ValidationIteration] = []
         max_rounds = max(0, self.closed_loop_iterations)
         for hypothesis in hypotheses:
-            running_score = hypothesis.final_score
-            for iteration_index in range(1, max_rounds + 1):
-                feedback = self._request_llm_feedback(llm_service, hypothesis, prepared, iteration_index)
-                if not feedback:
-                    continue
-
-                support_count = self._count_keyword_hits(hypothesis.keywords, prepared["evidence_pool"])
-                contradiction_count = self._count_keyword_hits(hypothesis.keywords, prepared["contradictions"])
-                evidence_coverage = min(
-                    1.0,
-                    (support_count + len(hypothesis.supporting_signals) + iteration_index)
-                    / max(1, len(hypothesis.keywords) + 2),
+            iterations.extend(
+                self._run_single_hypothesis_closed_loop(
+                    llm_service,
+                    hypothesis,
+                    prepared,
+                    max_rounds,
                 )
-
-                verification_score = float(feedback.get("verification_score", running_score))
-                verification_score = max(0.0, min(1.0, verification_score))
-                action = str(feedback.get("action") or self._choose_validation_action(verification_score, contradiction_count)).lower()
-                if action not in {"retain", "revise", "deprioritize"}:
-                    action = self._choose_validation_action(verification_score, contradiction_count)
-
-                revised_statement = str(feedback.get("revised_statement") or "").strip()
-                revised_plan = str(feedback.get("revised_plan") or "").strip()
-                if action == "revise" and revised_statement:
-                    hypothesis.statement = revised_statement
-                    hypothesis.title = revised_statement[:36] if len(revised_statement) > 36 else revised_statement
-                    hypothesis.keywords = self._extract_keywords([revised_statement]) or hypothesis.keywords
-                    if revised_plan:
-                        hypothesis.validation_plan = revised_plan
-                    hypothesis = self._score_hypothesis(hypothesis, prepared)
-
-                running_score = round((running_score + verification_score) / 2.0, 4)
-                hypothesis.validation_score = round(verification_score, 4)
-                hypothesis.final_score = running_score
-                hypothesis.iteration_count = max(hypothesis.iteration_count, iteration_index)
-                hypothesis.status = self._status_from_score(running_score, action)
-
-                notes = self._build_iteration_notes(
-                    support_count,
-                    contradiction_count,
-                    evidence_coverage,
-                    action,
-                )
-                llm_note = str(feedback.get("note") or "").strip()
-                if llm_note:
-                    notes.append(f"LLM评审: {llm_note}")
-
-                iterations.append(
-                    ValidationIteration(
-                        hypothesis_id=hypothesis.hypothesis_id,
-                        iteration_index=iteration_index,
-                        support_count=support_count,
-                        contradiction_count=contradiction_count,
-                        evidence_coverage=round(evidence_coverage, 4),
-                        verification_score=round(verification_score, 4),
-                        action=action,
-                        notes=notes,
-                    )
-                )
+            )
 
         if iterations:
             prepared["used_llm_closed_loop"] = True
         return iterations
+
+    def _can_run_llm_closed_loop(
+        self,
+        hypotheses: List[HypothesisCandidate],
+        prepared: Dict[str, Any],
+        llm_service: Any,
+    ) -> bool:
+        if not hypotheses:
+            return False
+        if not prepared["context"].get("use_llm_generation"):
+            return False
+        if llm_service is None:
+            return False
+        return hasattr(llm_service, "generate") or hasattr(llm_service, "evaluate_hypothesis")
+
+    def _run_single_hypothesis_closed_loop(
+        self,
+        llm_service: Any,
+        hypothesis: HypothesisCandidate,
+        prepared: Dict[str, Any],
+        max_rounds: int,
+    ) -> List[ValidationIteration]:
+        iterations: List[ValidationIteration] = []
+        running_score = hypothesis.final_score
+        for iteration_index in range(1, max_rounds + 1):
+            feedback = self._request_llm_feedback(llm_service, hypothesis, prepared, iteration_index)
+            if not feedback:
+                continue
+
+            support_count, contradiction_count, evidence_coverage = self._collect_feedback_metrics(
+                hypothesis,
+                prepared,
+                iteration_index,
+            )
+            verification_score = self._normalize_verification_score(feedback, running_score)
+            action = self._normalize_validation_action(feedback, verification_score, contradiction_count)
+            hypothesis = self._apply_feedback_revision(hypothesis, prepared, feedback, action)
+
+            running_score = round((running_score + verification_score) / 2.0, 4)
+            hypothesis.validation_score = round(verification_score, 4)
+            hypothesis.final_score = running_score
+            hypothesis.iteration_count = max(hypothesis.iteration_count, iteration_index)
+            hypothesis.status = self._status_from_score(running_score, action)
+
+            notes = self._build_iteration_notes(
+                support_count,
+                contradiction_count,
+                evidence_coverage,
+                action,
+            )
+            llm_note = str(feedback.get("note") or "").strip()
+            if llm_note:
+                notes.append(f"LLM评审: {llm_note}")
+
+            iterations.append(
+                ValidationIteration(
+                    hypothesis_id=hypothesis.hypothesis_id,
+                    iteration_index=iteration_index,
+                    support_count=support_count,
+                    contradiction_count=contradiction_count,
+                    evidence_coverage=round(evidence_coverage, 4),
+                    verification_score=round(verification_score, 4),
+                    action=action,
+                    notes=notes,
+                )
+            )
+        return iterations
+
+    def _collect_feedback_metrics(
+        self,
+        hypothesis: HypothesisCandidate,
+        prepared: Dict[str, Any],
+        iteration_index: int,
+    ) -> tuple[int, int, float]:
+        support_count = self._count_keyword_hits(hypothesis.keywords, prepared["evidence_pool"])
+        contradiction_count = self._count_keyword_hits(hypothesis.keywords, prepared["contradictions"])
+        evidence_coverage = min(
+            1.0,
+            (support_count + len(hypothesis.supporting_signals) + iteration_index)
+            / max(1, len(hypothesis.keywords) + 2),
+        )
+        return support_count, contradiction_count, evidence_coverage
+
+    def _normalize_verification_score(self, feedback: Dict[str, Any], running_score: float) -> float:
+        verification_score = float(feedback.get("verification_score", running_score))
+        return max(0.0, min(1.0, verification_score))
+
+    def _normalize_validation_action(
+        self,
+        feedback: Dict[str, Any],
+        verification_score: float,
+        contradiction_count: int,
+    ) -> str:
+        fallback_action = self._choose_validation_action(verification_score, contradiction_count)
+        action = str(feedback.get("action") or fallback_action).lower()
+        if action in {"retain", "revise", "deprioritize"}:
+            return action
+        return fallback_action
+
+    def _apply_feedback_revision(
+        self,
+        hypothesis: HypothesisCandidate,
+        prepared: Dict[str, Any],
+        feedback: Dict[str, Any],
+        action: str,
+    ) -> HypothesisCandidate:
+        revised_statement = str(feedback.get("revised_statement") or "").strip()
+        revised_plan = str(feedback.get("revised_plan") or "").strip()
+        if action == "revise" and revised_statement:
+            hypothesis.statement = revised_statement
+            hypothesis.title = revised_statement[:36] if len(revised_statement) > 36 else revised_statement
+            hypothesis.keywords = self._extract_keywords([revised_statement]) or hypothesis.keywords
+            if revised_plan:
+                hypothesis.validation_plan = revised_plan
+            return self._score_hypothesis(hypothesis, prepared)
+        return hypothesis
 
     def _request_llm_feedback(
         self,

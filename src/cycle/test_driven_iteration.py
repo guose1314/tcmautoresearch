@@ -915,22 +915,14 @@ class TestDrivenIterationManager(PhaseTrackerMixin):
         """获取测试性能报告"""
         if not self.iteration_history:
             return {"message": "还没有执行任何测试驱动迭代"}
-        
-        completed_iterations = [i for i in self.iteration_history if i.status == "completed"]
-        failed_iterations = [i for i in self.iteration_history if i.status == "failed"]
-        
-        # 计算平均性能指标
-        execution_times = [i.duration for i in completed_iterations]
-        avg_execution_time = sum(execution_times) / len(execution_times) if execution_times else 0
-        
-        # 计算平均置信度
-        confidence_scores = []
-        for i in completed_iterations:
-            if i.confidence_scores:
-                overall_confidence = i.confidence_scores.get("overall", 0.0)
-                confidence_scores.append(overall_confidence)
-        
-        avg_confidence_score = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.0
+
+        completed_iterations, failed_iterations = self._partition_iterations()
+        avg_execution_time = self._average_execution_time(completed_iterations)
+        avg_confidence_score = self._average_confidence_score(completed_iterations)
+        analysis_summary = self._build_test_report_analysis_summary(
+            len(failed_iterations),
+            avg_confidence_score,
+        )
         
         return {
             "total_iterations": len(self.iteration_history),
@@ -939,20 +931,49 @@ class TestDrivenIterationManager(PhaseTrackerMixin):
             "average_execution_time": avg_execution_time,
             "average_confidence_score": avg_confidence_score,
             "performance_metrics": self._serialize_value(self.performance_metrics),
-            "analysis_summary": {
-                "status": "stable"
-                if len(failed_iterations) == 0 and avg_confidence_score >= self.governance_config["minimum_stable_pass_rate"]
-                else "needs_followup",
-                "failed_operation_count": len(self.failed_operations),
-                "failed_phase": self.iteration_metadata.get("failed_phase"),
-                "last_completed_phase": self.iteration_metadata.get("last_completed_phase"),
-                "final_status": self.iteration_metadata.get("final_status", "initialized"),
-            },
+            "analysis_summary": analysis_summary,
             "failed_operations": self._serialize_value(self.failed_operations),
             "metadata": self._serialize_value(self.iteration_metadata),
             "latest_results": [self._serialize_iteration(i) for i in self.iteration_history[-3:]] if self.iteration_history else [],
             "failed_iterations_details": [self._serialize_iteration(i) for i in failed_iterations],
             "report_metadata": self._build_report_metadata(),
+        }
+
+    def _partition_iterations(self) -> tuple[List[TestDrivenIteration], List[TestDrivenIteration]]:
+        completed = [iteration for iteration in self.iteration_history if iteration.status == "completed"]
+        failed = [iteration for iteration in self.iteration_history if iteration.status == "failed"]
+        return completed, failed
+
+    def _average_execution_time(self, completed_iterations: List[TestDrivenIteration]) -> float:
+        if not completed_iterations:
+            return 0.0
+        return sum(iteration.duration for iteration in completed_iterations) / len(completed_iterations)
+
+    def _average_confidence_score(self, completed_iterations: List[TestDrivenIteration]) -> float:
+        confidence_scores = [
+            iteration.confidence_scores.get("overall", 0.0)
+            for iteration in completed_iterations
+            if iteration.confidence_scores
+        ]
+        if not confidence_scores:
+            return 0.0
+        return sum(confidence_scores) / len(confidence_scores)
+
+    def _build_test_report_analysis_summary(
+        self,
+        failed_iteration_count: int,
+        avg_confidence_score: float,
+    ) -> Dict[str, Any]:
+        is_stable = (
+            failed_iteration_count == 0
+            and avg_confidence_score >= self.governance_config["minimum_stable_pass_rate"]
+        )
+        return {
+            "status": "stable" if is_stable else "needs_followup",
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.iteration_metadata.get("failed_phase"),
+            "last_completed_phase": self.iteration_metadata.get("last_completed_phase"),
+            "final_status": self.iteration_metadata.get("final_status", "initialized"),
         }
     
     def export_test_data(self, output_path: str) -> bool:
