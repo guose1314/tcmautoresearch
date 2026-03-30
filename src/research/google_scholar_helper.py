@@ -232,7 +232,7 @@ def _fallback_related_works(papers: List[ScholarPaperItem], target_lang: str) ->
         return header + "未提取到可用文献条目。\n"
 
     lines = [header]
-    for i, p in enumerate(papers, 1):
+    for p in papers:
         lines.append(
             f"{p.author_year_citation} {p.title} 提出了相关方法；"
             f"其摘要片段显示研究重点为：{p.snippet or 'N/A'}。"
@@ -241,18 +241,48 @@ def _fallback_related_works(papers: List[ScholarPaperItem], target_lang: str) ->
     return "\n".join(lines)
 
 
+def _resolve_related_works_options(*legacy_args: Any, **options: Any) -> Dict[str, Any]:
+    defaults = {
+        "max_papers": 20,
+        "topic_hint": "",
+        "target_lang": "Chinese",
+        "use_llm": True,
+        "llm_engine": None,
+        "additional_prompt": "",
+    }
+    ordered_keys = [
+        "max_papers",
+        "topic_hint",
+        "target_lang",
+        "use_llm",
+        "llm_engine",
+        "additional_prompt",
+    ]
+
+    resolved = dict(defaults)
+    for index, value in enumerate(legacy_args[: len(ordered_keys)]):
+        resolved[ordered_keys[index]] = value
+    for key in ordered_keys:
+        if key in options:
+            resolved[key] = options[key]
+
+    resolved["max_papers"] = int(resolved["max_papers"])
+    resolved["use_llm"] = bool(resolved["use_llm"])
+    resolved["target_lang"] = str(resolved["target_lang"])
+    resolved["topic_hint"] = str(resolved["topic_hint"])
+    resolved["additional_prompt"] = str(resolved["additional_prompt"])
+    return resolved
+
+
 def run_google_scholar_related_works(
     scholar_url: str,
     output_dir: str = "./output/google_scholar_helper",
-    max_papers: int = 20,
-    topic_hint: str = "",
-    target_lang: str = "Chinese",
-    use_llm: bool = True,
-    llm_engine=None,
-    additional_prompt: str = "",
+    *legacy_args: Any,
+    **options: Any,
 ) -> GoogleScholarHelperResult:
     """运行 Google Scholar related-works 辅助流程。"""
     result = GoogleScholarHelperResult(query_url=scholar_url)
+    resolved = _resolve_related_works_options(*legacy_args, **options)
 
     if not scholar_url or "scholar.google" not in scholar_url:
         result.status = "error"
@@ -264,7 +294,7 @@ def run_google_scholar_related_works(
         response = session.get(scholar_url, timeout=30)
         response.raise_for_status()
 
-        papers = _parse_google_scholar_html(response.text, max_papers=max_papers)
+        papers = _parse_google_scholar_html(response.text, max_papers=resolved["max_papers"])
         result.total_papers = len(papers)
         result.papers = [asdict(p) for p in papers]
 
@@ -274,17 +304,17 @@ def run_google_scholar_related_works(
             return result
 
         related_works = ""
-        if use_llm:
+        if resolved["use_llm"]:
             prompt = _build_related_works_prompt(
-                topic_hint=topic_hint,
+                topic_hint=resolved["topic_hint"],
                 papers=papers,
-                target_lang=target_lang,
-                additional_prompt=additional_prompt,
+                target_lang=resolved["target_lang"],
+                additional_prompt=resolved["additional_prompt"],
             )
-            related_works = _run_llm_prompt(llm_engine, prompt).strip()
+            related_works = _run_llm_prompt(resolved["llm_engine"], prompt).strip()
 
         if not related_works:
-            related_works = _fallback_related_works(papers, target_lang=target_lang)
+            related_works = _fallback_related_works(papers, target_lang=resolved["target_lang"])
 
         result.related_works_md = related_works
 

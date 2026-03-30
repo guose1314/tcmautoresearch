@@ -268,14 +268,7 @@ class CachedLLMService(LLMService):
     def from_engine_config(
         cls,
         model_path: Optional[str] = None,
-        n_gpu_layers: int = -1,
-        n_ctx: int = 4096,
-        temperature: float = 0.3,
-        max_tokens: int = 1024,
-        verbose: bool = False,
-        cache_dir: str | Path = "./cache/llm",
-        cache_ttl_seconds: Optional[float] = None,
-        cache_enabled: bool = True,
+        **engine_options: Any,
     ) -> "CachedLLMService":
         """
         便捷工厂：直接从 engine 参数创建 ``CachedLLMService``。
@@ -289,6 +282,15 @@ class CachedLLMService(LLMService):
         """
         # 延迟导入，避免 llama-cpp-python 未安装时影响其他模块
         from src.llm.llm_engine import LLMEngine  # noqa: PLC0415
+
+        n_gpu_layers = int(engine_options.get("n_gpu_layers", -1))
+        n_ctx = int(engine_options.get("n_ctx", 4096))
+        temperature = float(engine_options.get("temperature", 0.3))
+        max_tokens = int(engine_options.get("max_tokens", 1024))
+        verbose = bool(engine_options.get("verbose", False))
+        cache_dir = engine_options.get("cache_dir", "./cache/llm")
+        cache_ttl_seconds = engine_options.get("cache_ttl_seconds", None)
+        cache_enabled = bool(engine_options.get("cache_enabled", True))
 
         engine = LLMEngine(
             model_path=model_path,
@@ -307,16 +309,18 @@ class CachedLLMService(LLMService):
         cls,
         api_url: str,
         model: str,
-        api_key: Optional[str] = None,
-        timeout_seconds: float = 60.0,
-        temperature: float = 0.3,
-        max_tokens: int = 1024,
-        cache_dir: str | Path = "./cache/llm",
-        cache_ttl_seconds: Optional[float] = None,
-        cache_enabled: bool = True,
-        extra_headers: Optional[dict[str, str]] = None,
+        **api_options: Any,
     ) -> "CachedLLMService":
         """便捷工厂：从 OpenAI 兼容 API 配置创建服务。"""
+        api_key = api_options.get("api_key")
+        timeout_seconds = float(api_options.get("timeout_seconds", 60.0))
+        temperature = float(api_options.get("temperature", 0.3))
+        max_tokens = int(api_options.get("max_tokens", 1024))
+        cache_dir = api_options.get("cache_dir", "./cache/llm")
+        cache_ttl_seconds = api_options.get("cache_ttl_seconds", None)
+        cache_enabled = bool(api_options.get("cache_enabled", True))
+        extra_headers = api_options.get("extra_headers")
+
         engine = APILLMEngine(
             api_url=api_url,
             model=model,

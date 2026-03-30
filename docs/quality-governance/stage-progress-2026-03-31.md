@@ -514,3 +514,29 @@
 - 回归通过：`tests/test_cache_service.py` + `tests/unit/test_literature_retriever_pubmed_helpers.py` + `tests/test_research_pipeline_literature.py`（104 passed）。
 - `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
 - `code_quality` 告警：`43 -> 40`（下降 3）。
+
+## 25. 当日增量（S2-6 后续：warning TopN 精修第 14 轮，research/infra）
+
+### 25.1 精修目标
+
+- `src/infra/llm_service.py`：`from_engine_config` 参数过多告警（10 > 7）。
+- `src/infra/llm_service.py`：`from_api_config` 参数过多告警（11 > 7）。
+- `src/research/google_scholar_helper.py`：`run_google_scholar_related_works` 参数过多告警（8 > 7）。
+
+### 25.2 代码重构
+
+- `src/infra/llm_service.py`
+  - `from_engine_config` 改为 `model_path + **engine_options`，内部解析 engine/cache 配置，保持旧 kwargs 调用兼容。
+  - `from_api_config` 改为 `api_url/model + **api_options`，内部解析 API 与缓存参数，保持行为不变。
+
+- `src/research/google_scholar_helper.py`
+  - 新增 `_resolve_related_works_options`，统一解析旧位置参数与新 kwargs。
+  - `run_google_scholar_related_works` 改为 `*legacy_args/**options` 兼容入口，保留既有流程与产出契约。
+  - 清理 fallback 生成中的无用循环变量。
+
+### 25.3 测试与验证
+
+- 新增 `tests/unit/test_google_scholar_helper_options.py`：验证旧位置参数调用兼容与 `max_papers` 生效。
+- 回归通过：`tests/test_llm_service.py` + `tests/unit/test_google_scholar_helper_options.py` + `tests/test_google_scholar_helper_smoke.py`（117 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`40 -> 37`（下降 3）。
