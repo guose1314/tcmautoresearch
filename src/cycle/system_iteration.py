@@ -11,7 +11,6 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
 import networkx as nx
@@ -428,13 +427,16 @@ class SystemIterationCycle(PhaseTrackerMixin):
             academic_insights = self._generate_academic_insights(module_results, system_test_results)
             recommendations = self._generate_system_recommendations(module_results, system_test_results)
             confidence_scores = self._calculate_system_confidence_scores(module_results, system_test_results)
+            analysis_payload = {
+                "quality_metrics": quality_metrics,
+                "system_insights": system_insights,
+                "academic_insights": academic_insights,
+                "recommendations": recommendations,
+                "confidence_scores": confidence_scores,
+            }
             analysis_results = self._build_analysis_results(
                 module_results,
-                quality_metrics,
-                system_insights,
-                academic_insights,
-                recommendations,
-                confidence_scores,
+                analysis_payload,
                 start_time,
             )
             
@@ -448,24 +450,20 @@ class SystemIterationCycle(PhaseTrackerMixin):
     def _build_analysis_results(
         self,
         module_results: Dict[str, Any],
-        quality_metrics: Dict[str, Any],
-        system_insights: List[Dict[str, Any]],
-        academic_insights: List[Dict[str, Any]],
-        recommendations: List[Dict[str, Any]],
-        confidence_scores: Dict[str, float],
+        analysis_payload: Dict[str, Any],
         start_time: float,
     ) -> Dict[str, Any]:
         return {
-            "quality_metrics": quality_metrics,
-            "system_insights": system_insights,
-            "academic_insights": academic_insights,
-            "recommendations": recommendations,
-            "confidence_scores": confidence_scores,
+            "quality_metrics": analysis_payload["quality_metrics"],
+            "system_insights": analysis_payload["system_insights"],
+            "academic_insights": analysis_payload["academic_insights"],
+            "recommendations": analysis_payload["recommendations"],
+            "confidence_scores": analysis_payload["confidence_scores"],
             "analysis_summary": self._build_analysis_summary(
                 module_results,
-                quality_metrics,
-                recommendations,
-                academic_insights,
+                analysis_payload["quality_metrics"],
+                analysis_payload["recommendations"],
+                analysis_payload["academic_insights"],
             ),
             "analysis_time": round(time.time() - start_time, 6),
         }

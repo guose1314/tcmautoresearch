@@ -465,3 +465,27 @@
 - 回归通过：`tests/test_hypothesis_engine.py` + `tests/unit/test_architecture_cycle_quality.py`（144 passed）。
 - `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
 - `code_quality` 告警：`47 -> 45`（下降 2）。
+
+## 23. 当日增量（S2-6 后续：warning TopN 精修第 12 轮）
+
+### 23.1 精修目标
+
+- `src/cycle/system_iteration.py`：`_build_analysis_results` 参数过多告警（8 > 7）。
+- `src/hypothesis/hypothesis_engine.py`：`_build_candidate` 参数过多告警（10 > 7）。
+
+### 23.2 代码重构
+
+- `src/cycle/system_iteration.py`
+  - `_analyze_system_results` 新增 `analysis_payload` 聚合对象。
+  - `_build_analysis_results` 改为接收 `analysis_payload`，将多个分析产物参数收敛为单入参。
+  - 同步清理未使用导入 `Enum`。
+
+- `src/hypothesis/hypothesis_engine.py`
+  - 新增 `HypothesisCandidateInput` dataclass，统一候选假设构造输入。
+  - `_build_candidate` 改为接收单个 `HypothesisCandidateInput`，并更新 LLM/启发式路径所有调用点。
+
+### 23.3 测试与验证
+
+- 回归通过：`tests/test_hypothesis_engine.py` + `tests/unit/test_architecture_cycle_quality.py`（144 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`45 -> 43`（下降 2）。

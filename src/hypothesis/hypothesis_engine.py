@@ -80,6 +80,19 @@ class ValidationIteration:
         }
 
 
+@dataclass
+class HypothesisCandidateInput:
+    title: str
+    statement: str
+    domain: str
+    rationale: str
+    validation_plan: str
+    keywords: List[str]
+    supporting_signals: List[str]
+    contradiction_signals: List[str]
+    generated_at: str
+
+
 class HypothesisEngine(BaseModule):
     """研究假设引擎，负责生成、评分与多轮验证。"""
 
@@ -448,15 +461,17 @@ class HypothesisEngine(BaseModule):
             title = item[:36] if len(item) > 36 else item
             candidates.append(
                 self._build_candidate(
-                    title=title or f"研究假设 {idx + 1}",
-                    statement=item,
-                    domain=prepared["research_domain"],
-                    rationale="基于 LLM 对观察结果、研究目标和既有研究的综合生成。",
-                    validation_plan="通过古籍证据比对、结构化抽取结果复核与文献回溯验证。",
-                    keywords=self._extract_keywords([item]),
-                    supporting_signals=prepared["evidence_pool"][:3],
-                    contradiction_signals=prepared["contradictions"][:2],
-                    generated_at=prepared["generated_at"],
+                    HypothesisCandidateInput(
+                        title=title or f"研究假设 {idx + 1}",
+                        statement=item,
+                        domain=prepared["research_domain"],
+                        rationale="基于 LLM 对观察结果、研究目标和既有研究的综合生成。",
+                        validation_plan="通过古籍证据比对、结构化抽取结果复核与文献回溯验证。",
+                        keywords=self._extract_keywords([item]),
+                        supporting_signals=prepared["evidence_pool"][:3],
+                        contradiction_signals=prepared["contradictions"][:2],
+                        generated_at=prepared["generated_at"],
+                    )
                 )
             )
         return candidates
@@ -475,50 +490,56 @@ class HypothesisEngine(BaseModule):
 
         candidates.append(
             self._build_candidate(
-                title=f"{primary_formula} 与 {primary_syndrome} 的配伍效应假设",
-                statement=(
-                    f"假设 {primary_formula} 的核心配伍结构与 {primary_syndrome} 的治疗效果存在稳定对应关系，"
-                    f"且这种关系可通过 {primary_efficacy} 等语义线索重复验证。"
-                ),
-                domain=prepared["research_domain"],
-                rationale="观察结果显示方剂、证候和功效线索具有可复用的关联模式。",
-                validation_plan="对古籍文本中的方剂-证候-功效三元组进行抽取、统计和交叉验证。",
-                keywords=[primary_formula, primary_syndrome, primary_efficacy],
-                supporting_signals=self._select_supporting_signals(prepared, [primary_formula, primary_syndrome, primary_efficacy]),
-                contradiction_signals=prepared["contradictions"][:2],
-                generated_at=prepared["generated_at"],
+                HypothesisCandidateInput(
+                    title=f"{primary_formula} 与 {primary_syndrome} 的配伍效应假设",
+                    statement=(
+                        f"假设 {primary_formula} 的核心配伍结构与 {primary_syndrome} 的治疗效果存在稳定对应关系，"
+                        f"且这种关系可通过 {primary_efficacy} 等语义线索重复验证。"
+                    ),
+                    domain=prepared["research_domain"],
+                    rationale="观察结果显示方剂、证候和功效线索具有可复用的关联模式。",
+                    validation_plan="对古籍文本中的方剂-证候-功效三元组进行抽取、统计和交叉验证。",
+                    keywords=[primary_formula, primary_syndrome, primary_efficacy],
+                    supporting_signals=self._select_supporting_signals(prepared, [primary_formula, primary_syndrome, primary_efficacy]),
+                    contradiction_signals=prepared["contradictions"][:2],
+                    generated_at=prepared["generated_at"],
+                )
             )
         )
 
         candidates.append(
             self._build_candidate(
-                title=f"{primary_herb} 的功效机制可迁移假设",
-                statement=(
-                    f"假设 {primary_herb} 在不同方剂中的角色变化会改变其 {primary_efficacy} 相关功效表达，"
-                    "这种变化可通过知识图谱路径与文献证据联合验证。"
-                ),
-                domain=prepared["research_domain"],
-                rationale="实体与观察结果同时指向药物角色和功效表达之间的耦合关系。",
-                validation_plan="比较同一药物在多方剂中的角色分布、关联功效和证候覆盖度。",
-                keywords=[primary_herb, primary_efficacy] + formulas[:1],
-                supporting_signals=self._select_supporting_signals(prepared, [primary_herb, primary_efficacy]),
-                contradiction_signals=prepared["contradictions"][:2],
-                generated_at=prepared["generated_at"],
+                HypothesisCandidateInput(
+                    title=f"{primary_herb} 的功效机制可迁移假设",
+                    statement=(
+                        f"假设 {primary_herb} 在不同方剂中的角色变化会改变其 {primary_efficacy} 相关功效表达，"
+                        "这种变化可通过知识图谱路径与文献证据联合验证。"
+                    ),
+                    domain=prepared["research_domain"],
+                    rationale="实体与观察结果同时指向药物角色和功效表达之间的耦合关系。",
+                    validation_plan="比较同一药物在多方剂中的角色分布、关联功效和证候覆盖度。",
+                    keywords=[primary_herb, primary_efficacy] + formulas[:1],
+                    supporting_signals=self._select_supporting_signals(prepared, [primary_herb, primary_efficacy]),
+                    contradiction_signals=prepared["contradictions"][:2],
+                    generated_at=prepared["generated_at"],
+                )
             )
         )
 
         if self._looks_historical(prepared):
             candidates.append(
                 self._build_candidate(
-                    title="古籍剂量与证候表述演变假设",
-                    statement="假设古籍中剂量、功效与证候表述存在可量化的历史演变轨迹，并影响后续配伍决策。",
-                    domain=prepared["research_domain"],
-                    rationale="研究范围和观察结果包含明显的历史比较与文本演化线索。",
-                    validation_plan="按时代切分语料，对剂量词、证候词和配伍词进行时间序列比较。",
-                    keywords=["剂量", "证候", "演变"],
-                    supporting_signals=self._select_supporting_signals(prepared, ["历史", "演变", "朝代", "剂量"]),
-                    contradiction_signals=prepared["contradictions"][:2],
-                    generated_at=prepared["generated_at"],
+                    HypothesisCandidateInput(
+                        title="古籍剂量与证候表述演变假设",
+                        statement="假设古籍中剂量、功效与证候表述存在可量化的历史演变轨迹，并影响后续配伍决策。",
+                        domain=prepared["research_domain"],
+                        rationale="研究范围和观察结果包含明显的历史比较与文本演化线索。",
+                        validation_plan="按时代切分语料，对剂量词、证候词和配伍词进行时间序列比较。",
+                        keywords=["剂量", "证候", "演变"],
+                        supporting_signals=self._select_supporting_signals(prepared, ["历史", "演变", "朝代", "剂量"]),
+                        contradiction_signals=prepared["contradictions"][:2],
+                        generated_at=prepared["generated_at"],
+                    )
                 )
             )
 
@@ -526,15 +547,17 @@ class HypothesisEngine(BaseModule):
             seed_index = len(candidates) + 1
             candidates.append(
                 self._build_candidate(
-                    title=f"研究目标驱动假设 {seed_index}",
-                    statement=f"假设围绕“{prepared['research_objective']}”可以形成可重复检验的结构化证据链。",
-                    domain=prepared["research_domain"],
-                    rationale="在观测线索不足时，以研究目标为中心生成保守假设。",
-                    validation_plan="补充抽取结果与文献背景后，对假设进行再次评分与收敛。",
-                    keywords=self._extract_keywords([prepared["research_objective"]]),
-                    supporting_signals=prepared["evidence_pool"][:2],
-                    contradiction_signals=prepared["contradictions"][:2],
-                    generated_at=prepared["generated_at"],
+                    HypothesisCandidateInput(
+                        title=f"研究目标驱动假设 {seed_index}",
+                        statement=f"假设围绕“{prepared['research_objective']}”可以形成可重复检验的结构化证据链。",
+                        domain=prepared["research_domain"],
+                        rationale="在观测线索不足时，以研究目标为中心生成保守假设。",
+                        validation_plan="补充抽取结果与文献背景后，对假设进行再次评分与收敛。",
+                        keywords=self._extract_keywords([prepared["research_objective"]]),
+                        supporting_signals=prepared["evidence_pool"][:2],
+                        contradiction_signals=prepared["contradictions"][:2],
+                        generated_at=prepared["generated_at"],
+                    )
                 )
             )
 
@@ -629,30 +652,22 @@ class HypothesisEngine(BaseModule):
 
         return iterations
 
-    def _build_candidate(
-        self,
-        title: str,
-        statement: str,
-        domain: str,
-        rationale: str,
-        validation_plan: str,
-        keywords: List[str],
-        supporting_signals: List[str],
-        contradiction_signals: List[str],
-        generated_at: str,
-    ) -> HypothesisCandidate:
-        stable_text = f"{title}|{statement}|{domain}|{generated_at}"
+    def _build_candidate(self, candidate_input: HypothesisCandidateInput) -> HypothesisCandidate:
+        stable_text = (
+            f"{candidate_input.title}|{candidate_input.statement}|"
+            f"{candidate_input.domain}|{candidate_input.generated_at}"
+        )
         hypothesis_id = hashlib.md5(stable_text.encode("utf-8")).hexdigest()[:12]
         return HypothesisCandidate(
             hypothesis_id=hypothesis_id,
-            title=title,
-            statement=statement,
-            domain=domain,
-            rationale=rationale,
-            validation_plan=validation_plan,
-            keywords=[item for item in keywords if item],
-            supporting_signals=supporting_signals,
-            contradiction_signals=contradiction_signals,
+            title=candidate_input.title,
+            statement=candidate_input.statement,
+            domain=candidate_input.domain,
+            rationale=candidate_input.rationale,
+            validation_plan=candidate_input.validation_plan,
+            keywords=[item for item in candidate_input.keywords if item],
+            supporting_signals=candidate_input.supporting_signals,
+            contradiction_signals=candidate_input.contradiction_signals,
         )
 
     def _extract_existing_hypothesis_texts(self, hypotheses: Any) -> List[str]:
