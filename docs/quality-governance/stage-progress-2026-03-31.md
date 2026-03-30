@@ -306,3 +306,25 @@
 - 回归通过：`tests/test_embedding_service.py` + `tests/test_citation_manager.py` + `tests/test_research_pipeline_quality.py`（129 passed）。
 - `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
 - `code_quality` 告警：`61 -> 59`（下降 2）。
+
+## 16. 当日增量（S2-6 后续：warning TopN 精修第 5 轮）
+
+### 16.1 精修目标
+
+- `src/learning/pattern_recognizer.py`：`_ingest` 复杂度告警（17 > 12）。
+- `src/orchestration/research_orchestrator.py`：`run` 复杂度告警（17 > 12）。
+
+### 16.2 代码重构
+
+- `src/learning/pattern_recognizer.py`
+  - `_ingest` 拆分为 `_ingest_entities` / `_ingest_topic_sequence` / `_ingest_numeric_features` / `_trim_feature_history`。
+
+- `src/orchestration/research_orchestrator.py`
+  - `run` 拆分为 `_prepare_pipeline_and_cycle` / `_execute_phases` / `_build_skipped_outcomes`。
+  - 维持阶段失败中断策略与返回契约不变。
+
+### 16.3 测试与验证
+
+- 回归通过：`tests/unit/test_learning_optimization_features.py` + `tests/test_research_orchestrator.py` + `tests/test_research_pipeline_quality.py`（165 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`59 -> 57`（下降 2）。

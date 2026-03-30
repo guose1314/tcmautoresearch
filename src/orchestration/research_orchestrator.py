@@ -153,19 +153,12 @@ class ResearchOrchestrator:
         started_at = datetime.now().isoformat()
         t0 = time.perf_counter()
 
-        pipeline = ResearchPipeline(self.pipeline_config)
-        cycle_name = cycle_name or _slug_topic(topic)
-        description = description or topic
-        scope = scope or self._infer_scope(topic)
-
-        cycle = pipeline.create_research_cycle(
+        pipeline, cycle_id, cycle_name, description, scope = self._prepare_pipeline_and_cycle(
+            topic=topic,
             cycle_name=cycle_name,
             description=description,
-            objective=topic,
             scope=scope,
-            researchers=self.researchers,
         )
-        cycle_id = cycle.cycle_id
 
         if not pipeline.start_research_cycle(cycle_id):
             completed_at = datetime.now().isoformat()
@@ -185,27 +178,12 @@ class ResearchOrchestrator:
         overall_status = "completed"
 
         try:
-            for phase in self._phases:
-                ctx = self._build_phase_context(topic, phase, phase_contexts)
-                outcome = self._run_single_phase(pipeline, cycle_id, phase, ctx)
-                phase_outcomes.append(outcome)
-
-                if outcome.status == "failed":
-                    if self.stop_on_failure:
-                        # 将剩余阶段标记为 skipped
-                        remaining = self._phases[self._phases.index(phase) + 1:]
-                        for remaining_phase in remaining:
-                            phase_outcomes.append(PhaseOutcome(
-                                phase=remaining_phase.value,
-                                status="skipped",
-                                duration_sec=0.0,
-                                summary={"reason": f"前置阶段 {phase.value} 失败"},
-                            ))
-                        overall_status = "partial"
-                        break
-                    else:
-                        overall_status = "partial"
-
+            phase_outcomes, overall_status = self._execute_phases(
+                pipeline=pipeline,
+                cycle_id=cycle_id,
+                topic=topic,
+                phase_contexts=phase_contexts,
+            )
         finally:
             pipeline.cleanup()
 
@@ -230,6 +208,69 @@ class ResearchOrchestrator:
                 "phases_requested": [p.value for p in self._phases],
             },
         )
+
+    def _prepare_pipeline_and_cycle(
+        self,
+        topic: str,
+        cycle_name: Optional[str],
+        description: Optional[str],
+        scope: Optional[str],
+    ) -> tuple[ResearchPipeline, str, str, str, str]:
+        """创建 pipeline 与 cycle，并返回运行所需元信息。"""
+        pipeline = ResearchPipeline(self.pipeline_config)
+        resolved_cycle_name = cycle_name or _slug_topic(topic)
+        resolved_description = description or topic
+        resolved_scope = scope or self._infer_scope(topic)
+
+        cycle = pipeline.create_research_cycle(
+            cycle_name=resolved_cycle_name,
+            description=resolved_description,
+            objective=topic,
+            scope=resolved_scope,
+            researchers=self.researchers,
+        )
+        return pipeline, cycle.cycle_id, resolved_cycle_name, resolved_description, resolved_scope
+
+    def _execute_phases(
+        self,
+        pipeline: ResearchPipeline,
+        cycle_id: str,
+        topic: str,
+        phase_contexts: Dict[str, Dict[str, Any]],
+    ) -> tuple[List[PhaseOutcome], str]:
+        """顺序执行阶段并处理失败后的中断/继续策略。"""
+        outcomes: List[PhaseOutcome] = []
+        overall_status = "completed"
+
+        for phase in self._phases:
+            ctx = self._build_phase_context(topic, phase, phase_contexts)
+            outcome = self._run_single_phase(pipeline, cycle_id, phase, ctx)
+            outcomes.append(outcome)
+
+            if outcome.status != "failed":
+                continue
+
+            overall_status = "partial"
+            if self.stop_on_failure:
+                outcomes.extend(self._build_skipped_outcomes(phase))
+                break
+
+        return outcomes, overall_status
+
+    def _build_skipped_outcomes(self, failed_phase: ResearchPhase) -> List[PhaseOutcome]:
+        """在 stop_on_failure 生效时为剩余阶段生成 skipped 结果。"""
+        skipped: List[PhaseOutcome] = []
+        remaining = self._phases[self._phases.index(failed_phase) + 1 :]
+        for phase in remaining:
+            skipped.append(
+                PhaseOutcome(
+                    phase=phase.value,
+                    status="skipped",
+                    duration_sec=0.0,
+                    summary={"reason": f"前置阶段 {failed_phase.value} 失败"},
+                )
+            )
+        return skipped
 
     # ── 阶段驱动 ──────────────────────────────────────────────────────────  #
 
