@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List
 
+from src.core.phase_tracker import PhaseTrackerMixin
+
 try:
     import pytest  # type: ignore
 except ImportError:
@@ -60,7 +62,7 @@ class TestDrivenIteration:
     confidence_scores: Dict[str, float] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-class TestDrivenIterationManager:
+class TestDrivenIterationManager(PhaseTrackerMixin):
     """
     测试驱动迭代管理器
     
@@ -140,24 +142,6 @@ class TestDrivenIterationManager:
                 "duration_seconds": round(duration, 6),
             }
         )
-
-    def _serialize_value(self, value: Any) -> Any:
-        if isinstance(value, datetime):
-            return value.isoformat()
-        if isinstance(value, dict):
-            return {str(key): self._serialize_value(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [self._serialize_value(item) for item in value]
-        if isinstance(value, tuple):
-            return [self._serialize_value(item) for item in value]
-        if hasattr(value, "__dataclass_fields__"):
-            return {
-                field_name: self._serialize_value(getattr(value, field_name))
-                for field_name in value.__dataclass_fields__
-            }
-        if callable(value):
-            return getattr(value, "__name__", "callable")
-        return value
 
     def _start_manager_phase(self, phase_name: str, context: Dict[str, Any] | None = None) -> Dict[str, Any]:
         phase_entry = {

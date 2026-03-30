@@ -18,6 +18,8 @@ from .arxiv_quick_helper import (
 )
 from .ctext_corpus_collector import CTextCorpusCollector
 from .ctext_whitelist import build_batch_manifest, load_whitelist
+from .data_miner import DataMiner
+from .gap_analyzer import GapAnalysisRequest, GapAnalyzer
 from .google_scholar_helper import (
     GoogleScholarHelperResult,
     run_google_scholar_related_works,
@@ -64,6 +66,9 @@ __all__ = [
     'run_arxiv_quick_helper',
     'GoogleScholarHelperResult',
     'run_google_scholar_related_works',
+    'DataMiner',
+    'GapAnalyzer',
+    'GapAnalysisRequest',
     'CTextCorpusCollector',
     'LiteratureRetriever',
     'LiteratureRecord',

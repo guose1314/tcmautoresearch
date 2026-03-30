@@ -4,26 +4,25 @@
 
 - 当前分支：stage2-s2_1-preprocessor-opt
 - 当前基线 HEAD：e777eb5（stage1 D28 system iteration refresh）
-- 当前阶段收口：D91-D95 已连续完成，quality_feedback 公开 issue 合同已收缩到只保留 `issue_body` 作为公开语义载体；issue 身份、排序、文件与模板信息统一从 `issue_body.summary` 与 `issue_body.artifact_references` 读取，不再保留顶层平铺兼容字段或 report_metadata 镜像数组。
-- 当前质量反馈合同版本：`d73.v1`。公开输出中 `issue_drafts[*]` 与 `issue_index_payload.items[*]` 均只暴露 `issue_body`；`feedback report_metadata` 与 `issue index report_metadata` 已不再复制 `issue_draft_bodies / issue_bodies` 等批量正文镜像。
+- 当前阶段治理范围：D29-D99 持续推进，多数改动集中在统一治理合同、质量链三档案、stage runner 合同、inventory 扫描扩围、AutoResearch runner 治理与 issue 合同连续收缩。
 - 当前语义基线保持不变：当 `inventory_trend = regressing` 时，feedback 与 stage runners 同时 loud；当 `inventory_trend = improving/stable` 但 residual risk 尚未清零时，feedback 仍可继续 loud 并保留 issue/action 线索，而 stage1/stage2 runners 保持 quiet。
 - 当前分支名已经落后于实际工作范围；本轮实际推进已覆盖 D29-D62，多数改动集中在统一治理合同、质量链三档案、stage runner 合同、inventory 扫描扩围与 AutoResearch runner 治理。
 
 ## 1.1 快速续接卡
 
-- 权威台账：`docs/quality-governance/refactor-quality-templates.md`，当前已记录到 D95。
+- 权威台账：`docs/quality-governance/refactor-quality-templates.md`，当前已记录到 D99。
 - 阶段摘要：`docs/quality-governance/stage-progress-2026-03-30.md`，用于快速恢复上下文。
-- 当前稳定态：`output/quality-feedback.json` 中 `report_metadata.contract_version = d73.v1`；公开 `issue_drafts[*]` 仅含 `issue_body`；`output/quality-feedback-issues.json` 顶层 `report_metadata` 仅保留 `issue_index_path` 与 `issue_dir`。
+- 当前稳定态：`output/quality-feedback.json` 中 `report_metadata.contract_version = d77.v1`；公开 JSON 不再包含 `issue_drafts`、`issue_index_payload` 与 `analysis_summary.issue_draft_count`；`output/quality-feedback-issues.json` 仅含 `count` 与 `items`，不再有 `report_metadata`。
 - 当前稳定态：最新 stage1/stage2 全局 dry-run 报告不包含 `governance_alerts`。
 - 最新实测基线：定向治理测试已通过 `114 passed, 0 failed`；真实命令 `c:/Users/hgk/tcmautoresearch/venv/Scripts/python.exe tools/quality_gate.py --report output/quality-gate.json` 已成功执行，`overall_success = True`、`quality_feedback.success = True`。
 - 关键验证入口：`tests/unit/test_inventory_signal_quality_gate_replay.py` 负责九端一致性并已覆盖 improving recovery、mixed residual-risk recovery、target-cleared recovery quiet replay，现也负责 gate / assessment / continuous improvement / archive / feedback 之间的 artifact 路径同构护栏、export phase details 与 `report_metadata` 路径同构护栏、feedback Markdown / archive dossier 正文路径文本护栏，以及 issue index / issue draft 的 `issue_body` 单对象可逆恢复护栏；`tests/unit/test_inventory_signal_end_to_end.py` 负责 feedback 与 runner 的 quiet/loud 联动；`tests/unit/test_quality_feedback.py` 负责 feedback JSON / Markdown / issue draft / issue index 的 `issue_body`、artifact references 与公开合同收缩护栏；`tests/unit/test_quality_assessment.py`、`tests/unit/test_continuous_improvement_loop.py`、`tests/unit/test_quality_improvement_archive.py`、`tests/unit/test_quality_gate.py` 继续承担模块级稳定列表与导出相位路径护栏。
-- 继续推进前的最小复核顺序：先看台账 D89-D95，再读 latest 工件，再跑定向治理测试，最后视需要补真实仓库可控样本回放。
-- 下一个自然续接点：D95 已基本收尽 issue 合同镜像面，若继续做 D96，更自然的方向将转向剩余跨模块镜像语义清理，或补更细粒度的 residual-risk / recommended_next_target / 多 owner 分支，而不是继续在公开 issue item 上做同类收缩。
+- 继续推进前的最小复核顺序：先看台账 D89-D99，再读 latest 工件，再跑定向治理测试，最后视需要补真实仓库可控样本回放。
+- 下一个自然续接点：D99 已移除 issue index 的 `report_metadata` 自引用块；若继续做 D100，更自然的方向将转向 feedback `report_metadata.issue_dir` 导航镜像清理（可由 `issue_index_path` 推导），或补更细粒度的 residual-risk / recommended_next_target / 多 owner 分支。
 
 ## 1.2 本阶段收口摘要
 
-- 已完成 D89-D95 一条连续收缩线，核心目标是把 quality_feedback 的 issue 语义收敛到单一 `issue_body` 事实源，并逐层删除公开兼容字段、内部投影层、report_metadata 镜像列表与 issue body 批量镜像数组。
-- 当前对外最小事实面已经稳定：公开消费者若需要 owner、title、labels、template、issue 文件、排序位置，只应从 `issue_body.summary` 与 `issue_body.artifact_references` 读取；不应再依赖 `issue_drafts[*]` 或 `issue_index_payload.items[*]` 顶层字段。
+- 已完成 D89-D99 一条连续收缩线，核心目标是把 quality_feedback 的 issue 语义收敛到独立 issue index 文件中的单一 `issue_body` 事实源，并逐层删除公开兼容字段、内部投影层、report_metadata 镜像列表、issue body 批量镜像数组、feedback JSON 内嵌的整块 issue index 载荷、feedback JSON 顶层公开 issue 列表、最后一个公开 issue 批量派生计数镜像，以及 issue index 的 `report_metadata` 自引用块。
+- 当前对外最小事实面已经稳定：公开消费者若需要批量 issue，只应读取 `report_metadata.issue_index_path` 指向的独立文件；若需要 owner、title、labels、template、issue 文件、排序位置，只应从 `output/quality-feedback-issues.json.items[*].issue_body.summary` 与 `issue_body.artifact_references` 读取，而不应再依赖 feedback JSON 中的任何 issue 镜像。
 - 当前验证闭环已经稳定覆盖模块级单测、end-to-end、quality_gate replay harness 与真实仓库 quality_gate 回放，因此后续任意一天续接时，可以直接把 D95 视为新的公开合同基线，而不必再回溯旧平铺字段。
 - 当前最重要的历史语义不要回退：improving / stable 场景下即使 feedback 继续 loud，也不能让 stage1/stage2 runners 误抬升 `governance_alerts`；只有 `inventory_trend.status = regressing` 才允许 runner 进入 loud 分支。
 
@@ -63,7 +62,7 @@
 - quality_assessment: d49.v1
 - continuous_improvement: d66.v1
 - quality_improvement_archive: d65.v1
-- quality_feedback: d73.v1
+- quality_feedback: d77.v1
 - quality_consumer_inventory: d62.v1
 
 本轮新增的主链桥接点：
@@ -75,6 +74,9 @@
 - quality_feedback 已删除 feedback / issue index report_metadata 中的 issue 引用影子列表，改为仅保留 issue_draft_bodies / issue_bodies，并从 artifact_references 反推总报告中的 issue draft 文件清单。
 - quality_feedback 已进一步删除公开 issue_drafts 与 issue index items 的顶层身份/路径兼容字段，外部消费者统一改由 issue_body.summary 与 issue_body.artifact_references 读取公开语义。
 - quality_feedback 已进一步删除 feedback / issue index report_metadata 中最后一层 issue body 批量影子数组，改为直接以公开 issue_drafts / issue_index_payload.items 作为唯一 issue body 列表事实源。
+- quality_feedback 已进一步删除 feedback JSON 内嵌的 `issue_index_payload` 整块镜像，公开 issue index 统一只通过 `report_metadata.issue_index_path` 指向独立文件。
+- quality_feedback 已进一步删除 feedback JSON 顶层 `issue_drafts` 列表，公开批量 issue 统一只通过独立 issue index 提供，feedback JSON 仅保留 issue draft 摘要计数与导航路径。
+- quality_feedback 已进一步删除 feedback JSON `analysis_summary.issue_draft_count` 派生计数镜像，quality_gate 与 CLI 统一改为直接从独立 issue index 的 `count` 字段读取计数。
 - quality_improvement_archive 已新增 inventory_summary，并在 dossier 中沉淀 Inventory Governance 区块。
 - quality_improvement_archive 已新增 inventory_trend，并开始从 archive history 计算 inventory 历史变化。
 - continuous_improvement 已新增 inventory_focus，并会把 archive history 中的 inventory_trend 转成后续 action/target。
@@ -108,8 +110,7 @@
 - 已补一类 improving residual-risk 样本：`inventory_trend.status = improving` 但 `uncategorized_root_script` 当前仍为 1。当前该语义已在模块级单测、end-to-end、quality_gate replay harness 三层验证为“feedback 继续产生 quality-governance draft，stage1/stage2 runners 仍不抬升 governance_alerts”，且 issue draft 正文不会误带 `## Inventory Trend` 区块。
 - 已把 issue index、feedback `report_metadata`、导出 `issue_drafts[*]` 中仍保留的平铺 issue 字段统一改为从 `issue_body.summary / inventory_context / action_items / acceptance_checks / artifact_references` 反向投影，确保正文语义与兼容字段共享单一事实源。
 - 已在 `issue_body` 中补齐稳定的 `inventory_context`，使 improving / stable 等非 regressing 样本即便不渲染 `## Inventory Trend`，也能为兼容平铺字段与回放护栏提供统一来源。
-- 已补一类 improving mixed residual-risk 样本：`missing_contract_count = 1` 且 `uncategorized_root_script = 1` 同时残留。当前该语义已在模块级单测、end-to-end、quality_gate replay harness 三层验证为“feedback 继续产生 quality-governance draft 且保留有序双 action，stage1/stage2 runners 仍不抬升 governance_alerts”。
-
+- 已补一类 improving mixed residual-risk 样本：`missing_contract_count = 1` 且 `uncategorized_root_script = 1` 同时残留。当前该语义已在模块级单测、end-to-end、quality_gate replay harness 三层验证为“feedback 继续产生 quality-governance draft 且保留有序双 action，stage1/stage2 runners 仍不抬升 governance_alerts”。- 已移除 issue index (`quality-feedback-issues.json`) 的 `report_metadata` 自引用块，issue index 顶层缩减为 `{"count": N, "items": [...]}`。原 `report_metadata.issue_index_path`（自引用）与 `report_metadata.issue_dir`（与每条 item artifact_references 重复）均由 feedback `report_metadata` 和 per-item `artifact_references` 取代。跨文件同构护栏已从 issue index `report_metadata` 改为对比 item `artifact_references` 与 feedback `report_metadata`。
 ### 2.3 Stage runner 治理
 
 - tools/stage1_d1_d10_runner.ps1 已扩展到 D67，并在 day/global 汇总中按需暴露 inventory 回退治理提示。

@@ -9,6 +9,8 @@ from typing import Any, Dict, List
 import networkx as nx
 
 from src.core.module_base import BaseModule
+from src.extraction.relation_extractor import RelationExtractor
+from src.knowledge.ontology_manager import OntologyManager
 from src.semantic_modeling.research_methods import (
     ClassicalLiteratureArchaeologyAnalyzer,
     ComplexityNonlinearDynamicsAnalyzer,
@@ -21,10 +23,6 @@ from src.semantic_modeling.research_methods import (
     ResearchScoringPanel,
     SummaryAnalysisEngine,
     SupramolecularPhysicochemicalAnalyzer,
-)
-from src.semantic_modeling.tcm_relationships import (
-    RelationshipType,
-    TCMRelationshipDefinitions,
 )
 
 
@@ -39,6 +37,8 @@ class SemanticGraphBuilder(BaseModule):
         self.entity_types = {}
         self.entity_map = {}  # 实体名称到节点ID的映射，支持关系识别
         self.relationships_used = {}  # 记录已使用的关系类型
+        self.relation_extractor = RelationExtractor()
+        self.ontology = OntologyManager()
         
     def _do_initialize(self) -> bool:
         """初始化语义图构建器"""
@@ -175,117 +175,40 @@ class SemanticGraphBuilder(BaseModule):
         添加节点到图中
         """
         # 使用实体名称作为节点ID（更易读）
-        node_id = f"{entity['type']}:{entity['name']}"
+        entity_type = self.ontology.normalize_node_type(str(entity.get("type") or ""))
+        entity_name = str(entity.get("name") or "").strip()
+        if not entity_name:
+            return
+        node_id = self.ontology.make_node_id(entity_type, entity_name)
         
         node_data = {
-            "type": entity["type"],
-            "name": entity["name"],
+            "type": entity_type,
+            "name": entity_name,
             "confidence": entity.get("confidence", 0.5),
             "position": entity.get("position", 0),
-            "length": entity.get("length", len(entity['name']))
+            "length": entity.get("length", len(entity_name))
         }
         
         self.graph.add_node(node_id, **node_data)
-        self.entity_types[node_id] = entity["type"]
+        self.entity_types[node_id] = entity_type
         
         # 建立实体名称到节点ID的映射（支持多类型实体同名）
-        if entity['name'] not in self.entity_map:
-            self.entity_map[entity['name']] = []
-        self.entity_map[entity['name']].append(node_id)
+        if entity_name not in self.entity_map:
+            self.entity_map[entity_name] = []
+        self.entity_map[entity_name].append(node_id)
     
     def _add_relationships(self, entities: List[Dict]):
         """
-        添加语义关系边（核心逻辑）
+        添加语义关系边（委托给独立 RelationExtractor）
         """
-        # 提取方剂实体，用于君臣佐使推断
-        formulas = [e for e in entities if e.get("type") == "formula"]
-        herbs = [e for e in entities if e.get("type") == "herb"]
-        herb_name_to_node = {
-            h["name"]: f"herb:{h['name']}"
-            for h in herbs
-            if h.get("name")
-        }
-        
-        # 【策略1】方剂 → 药物 的君臣佐使关系
-        for formula in formulas:
-            formula_name = formula['name']
-            formula_node = f"formula:{formula_name}"
-            
-            composition = TCMRelationshipDefinitions.get_formula_composition(formula_name)
-            if composition:
-                role_groups = {
-                    RelationshipType.SOVEREIGN: composition.get("sovereign", []),
-                    RelationshipType.MINISTER: composition.get("minister", []),
-                    RelationshipType.ASSISTANT: composition.get("assistant", []),
-                    RelationshipType.ENVOY: composition.get("envoy", []),
-                }
-
-                for role, herb_names in role_groups.items():
-                    for herb_name in herb_names:
-                        herb_node = herb_name_to_node.get(herb_name)
-                        if not herb_node:
-                            continue
-                        self.graph.add_edge(
-                            formula_node, herb_node,
-                            relationship_type=role.value,
-                            relationship_name=role.name,
-                            description=TCMRelationshipDefinitions.get_relationship_description(role),
-                            confidence=0.95
-                        )
-                        self._record_relationship(role.value)
-        
-        # 【策略2】药物 → 功效 的关系
-        for herb in herbs:
-            herb_name = herb['name']
-            herb_node = f"herb:{herb_name}"
-            
-            efficacies = TCMRelationshipDefinitions.get_herb_efficacy(herb_name)
-            for efficacy in efficacies:
-                efficacy_node = f"efficacy:{efficacy}"
-                
-                self.graph.add_edge(
-                    herb_node, efficacy_node,
-                    relationship_type=RelationshipType.EFFICACY.value,
-                    relationship_name=RelationshipType.EFFICACY.name,
-                    description=TCMRelationshipDefinitions.get_relationship_description(
-                        RelationshipType.EFFICACY
-                    ),
-                    confidence=0.90
-                )
-                self._record_relationship(RelationshipType.EFFICACY.value)
-        
-        # 【策略3】药物/方剂 → 证候 的治疗关系
-        syndromes = [e for e in entities if e.get("type") == "syndrome"]
-        for syndrome in syndromes:
-            syndrome_node = f"syndrome:{syndrome['name']}"
-            
-            # 方剂治疗证候
-            for formula in formulas:
-                formula_node = f"formula:{formula['name']}"
-                self.graph.add_edge(
-                    formula_node, syndrome_node,
-                    relationship_type=RelationshipType.TREATS.value,
-                    relationship_name=RelationshipType.TREATS.name,
-                    description=TCMRelationshipDefinitions.get_relationship_description(
-                        RelationshipType.TREATS
-                    ),
-                    confidence=0.75
-                )
-                self._record_relationship(RelationshipType.TREATS.value)
-            
-            # 部分药物治疗证候
-            for herb in herbs:
-                herb_node = f"herb:{herb['name']}"
-                self.graph.add_edge(
-                    herb_node, syndrome_node,
-                    relationship_type=RelationshipType.TREATS.value,
-                    relationship_name=RelationshipType.TREATS.name,
-                    description=TCMRelationshipDefinitions.get_relationship_description(
-                        RelationshipType.TREATS
-                    ),
-                    confidence=0.60
-                )
-                self._record_relationship(RelationshipType.TREATS.value)
+        extracted_edges = self.relation_extractor.extract(entities)
+        for edge in extracted_edges:
+            self.graph.add_edge(
+                edge["source"],
+                edge["target"],
+                **edge["attributes"],
+            )
+        self.relationships_used = dict(self.relation_extractor.relationship_counts)
     
     def _record_relationship(self, rel_type_value: str):
         """记录已使用的关系类型及其计数"""
@@ -297,16 +220,7 @@ class SemanticGraphBuilder(BaseModule):
         """
         计算关系类型统计信息
         """
-        stats = {}
-        for rel_type, count in self.relationships_used.items():
-            stats[rel_type] = {
-                "count": count,
-                "description": TCMRelationshipDefinitions.get_relationship_description(
-                    RelationshipType[rel_type.upper()] if rel_type.upper() in [r.name for r in RelationshipType]
-                    else RelationshipType.COMBINES_WITH
-                )
-            }
-        return stats
+        return self.relation_extractor.relationship_statistics()
     
     def _generate_research_perspectives(self, formulas: List[Dict]) -> Dict:
         """生成方剂结构分析 - Formula Structure Analysis"""

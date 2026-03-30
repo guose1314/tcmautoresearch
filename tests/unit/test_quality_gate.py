@@ -251,7 +251,7 @@ class TestQualityGate(unittest.TestCase):
             (root / "config.yml").write_text(
                 "governance:\n"
                 "  quality_feedback:\n"
-                "    export_contract_version: \"d73.v1\"\n",
+                "    export_contract_version: \"d77.v1\"\n",
                 encoding="utf-8",
             )
             (root / "output" / "quality-assessment.json").write_text(
@@ -280,11 +280,14 @@ class TestQualityGate(unittest.TestCase):
             self.assertTrue((root / result.details["feedback_issue_dir"]).exists())
             self.assertGreaterEqual(result.metrics["owner_count"], 1)
             feedback = json.loads((root / result.details["feedback_json"]).read_text(encoding="utf-8"))
-            self.assertEqual(feedback["report_metadata"]["contract_version"], "d73.v1")
+            self.assertEqual(feedback["report_metadata"]["contract_version"], "d77.v1")
             self.assertEqual(feedback["metadata"]["last_completed_phase"], "export_quality_feedback_report")
             self.assertGreaterEqual(result.metrics["issue_draft_count"], 1)
             self.assertEqual(feedback["inventory_summary"]["status"], "healthy")
             self.assertEqual(feedback["inventory_trend"]["status"], "regressing")
+            self.assertNotIn("issue_index_payload", feedback)
+            self.assertNotIn("issue_drafts", feedback)
+            self.assertNotIn("issue_draft_count", feedback["analysis_summary"])
 
     def test_run_quality_consumer_inventory_gate_generates_inventory_report(self):
         with tempfile.TemporaryDirectory() as tmp:

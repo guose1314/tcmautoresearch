@@ -20,6 +20,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from src.core.phase_tracker import PhaseTrackerMixin
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,7 +71,7 @@ class AlgorithmProfile:
         }
 
 
-class AlgorithmOptimizer:
+class AlgorithmOptimizer(PhaseTrackerMixin):
     """
     算法优化器：持续跟踪多个候选算法的性能，并以 UCB1 决策选最优候选。
 
@@ -146,34 +148,7 @@ class AlgorithmOptimizer:
             )
 
     def _build_runtime_metadata(self) -> Dict[str, Any]:
-        return {
-            "phase_history": self._serialize_value(self._metadata.get("phase_history", [])),
-            "phase_timings": self._serialize_value(self._metadata.get("phase_timings", {})),
-            "completed_phases": list(self._metadata.get("completed_phases", [])),
-            "failed_phase": self._metadata.get("failed_phase"),
-            "final_status": self._metadata.get("final_status", "initialized"),
-            "last_completed_phase": self._metadata.get("last_completed_phase"),
-        }
-
-    def _serialize_value(self, value: Any) -> Any:
-        if isinstance(value, Enum):
-            return value.value
-        if isinstance(value, datetime):
-            return value.isoformat()
-        if isinstance(value, dict):
-            return {str(key): self._serialize_value(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [self._serialize_value(item) for item in value]
-        if isinstance(value, tuple):
-            return [self._serialize_value(item) for item in value]
-        if hasattr(value, "__dataclass_fields__"):
-            return {
-                field_name: self._serialize_value(getattr(value, field_name))
-                for field_name in value.__dataclass_fields__
-            }
-        if callable(value):
-            return getattr(value, "__name__", "callable")
-        return value
+        return self._build_runtime_metadata_from_dict(self._metadata)
 
     def _build_analysis_summary(self) -> Dict[str, Any]:
         profiled = list(self._profiles.values())

@@ -202,29 +202,22 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertIn("error", result)
 
     def test_run_clinical_gap_analysis_success_and_error(self):
-        class _GoodEngine:
-            def __init__(self, **kwargs):
-                _ = kwargs
+        from src.llm.llm_service import CachedLLMService
 
-            def load(self):
-                return None
+        class _GoodService:
+            def load(self): return None
+            def generate(self, prompt, system_prompt=""): return "ok"
+            def unload(self): return None
+            def cache_stats(self): return {"session_hits": 0, "session_misses": 1}
 
-            def clinical_gap_analysis(self, **kwargs):
-                _ = kwargs
-                return "ok"
+        class _BadService(_GoodService):
+            def load(self): raise RuntimeError("load failed")
 
-            def unload(self):
-                return None
-
-        class _BadEngine(_GoodEngine):
-            def load(self):
-                raise RuntimeError("load failed")
-
-        with patch("src.research.research_pipeline.LLMEngine", _GoodEngine):
+        with patch.object(CachedLLMService, "from_gap_config", return_value=_GoodService()):
             ok = self.pipeline._run_clinical_gap_analysis({}, [], {})
             self.assertEqual(ok.get("report"), "ok")
 
-        with patch("src.research.research_pipeline.LLMEngine", _BadEngine):
+        with patch.object(CachedLLMService, "from_gap_config", return_value=_BadService()):
             bad = self.pipeline._run_clinical_gap_analysis({}, [], {})
             self.assertIn("error", bad)
 

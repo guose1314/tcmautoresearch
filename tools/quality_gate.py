@@ -581,7 +581,7 @@ def run_quality_feedback_gate(root: Path) -> GateResult:
         issue_dir = root / "output" / "quality-feedback-issues"
         issue_index = root / "output" / "quality-feedback-issues.json"
         feedback = export_feedback_report(feedback, json_path, md_path, issue_dir, issue_index)
-        issue_index_payload = feedback.pop("issue_index_payload", {"count": 0})
+        issue_index_payload = json.loads(issue_index.read_text(encoding="utf-8"))
     except Exception as error:
         return GateResult(
             name="quality_feedback",
@@ -603,7 +603,7 @@ def run_quality_feedback_gate(root: Path) -> GateResult:
             "priority_action_count": priority_count,
             "owner_count": owner_count,
             "owner_todo_count": owner_todo_count,
-            "issue_draft_count": issue_index_payload.get("count", 0),
+            "issue_draft_count": int(issue_index_payload.get("count", 0)),
         },
         details={
             "feedback_json": str(json_path.relative_to(root)).replace("\\", "/"),

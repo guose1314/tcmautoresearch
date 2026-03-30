@@ -18,6 +18,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from src.core.module_base import get_global_executor
+from src.core.phase_tracker import PhaseTrackerMixin
 
 try:
     import pytest
@@ -90,7 +91,7 @@ class TestSuite:
     coverage_rate: float = 0.0
     quality_score: float = 0.0
 
-class AutomatedTester:
+class AutomatedTester(PhaseTrackerMixin):
     """
     中医古籍全自动研究系统自动化测试框架
     
@@ -234,14 +235,16 @@ class AutomatedTester:
         })
 
     def _build_runtime_metadata(self) -> Dict[str, Any]:
-        return {
-            "phase_history": self._serialize_value(self.phase_history),
-            "phase_timings": self._serialize_value(self.phase_timings),
-            "completed_phases": list(self.completed_phases),
-            "failed_phase": self.failed_phase,
-            "final_status": self.final_status,
-            "last_completed_phase": self.last_completed_phase,
-        }
+        return self._build_runtime_metadata_from_dict(
+            {
+                "phase_history": self.phase_history,
+                "phase_timings": self.phase_timings,
+                "completed_phases": self.completed_phases,
+                "failed_phase": self.failed_phase,
+                "final_status": self.final_status,
+                "last_completed_phase": self.last_completed_phase,
+            }
+        )
 
     def _serialize_value(self, value: Any) -> Any:
         if isinstance(value, Enum):

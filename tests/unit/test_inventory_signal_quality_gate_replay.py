@@ -68,53 +68,10 @@ class TestInventorySignalQualityGateReplay(unittest.TestCase):
         return draft_texts
 
     def _assert_issue_reference_order_isomorphic(self, feedback_payload: dict, issue_index_payload: dict) -> None:
-        self.assertEqual(
-            [self._issue_owner(item) for item in feedback_payload.get("issue_drafts", [])],
-            [self._issue_owner(item) for item in issue_index_payload.get("items", [])],
-        )
-        self.assertEqual(
-            [self._issue_reference(item, "title", "") for item in feedback_payload.get("issue_drafts", [])],
-            [self._issue_reference(item, "title", "") for item in issue_index_payload.get("items", [])],
-        )
-        self.assertEqual(
-            [self._issue_reference(item, "issue_draft_file", "") for item in feedback_payload.get("issue_drafts", [])],
-            [self._issue_reference(item, "issue_draft_file", "") for item in issue_index_payload.get("items", [])],
-        )
-        self.assertEqual(
-            [self._issue_reference(item, "index_position", 0) for item in feedback_payload.get("issue_drafts", [])],
-            list(range(1, issue_index_payload.get("count", 0) + 1)),
-        )
-        self.assertEqual(
-            [self._issue_reference(item, "template", "") for item in feedback_payload.get("issue_drafts", [])],
-            [self._issue_reference(item, "template", "") for item in issue_index_payload.get("items", [])],
-        )
-        self.assertEqual(
-            [self._issue_reference(item, "labels", []) for item in feedback_payload.get("issue_drafts", [])],
-            [self._issue_reference(item, "labels", []) for item in issue_index_payload.get("items", [])],
-        )
-        self.assertEqual(
-            [item.get("issue_body") for item in feedback_payload.get("issue_drafts", [])],
-            [item.get("issue_body") for item in issue_index_payload.get("items", [])],
-        )
-        self.assertEqual(
-            (issue_index_payload.get("report_metadata") or {}).get("issue_index_path", ""),
-            (feedback_payload.get("report_metadata") or {}).get("issue_index_path", ""),
-        )
-        self.assertEqual(
-            (issue_index_payload.get("report_metadata") or {}).get("issue_dir", ""),
-            (feedback_payload.get("report_metadata") or {}).get("issue_dir", ""),
-        )
-        removed_issue_metadata_keys = [
-            "issue_quality_scores",
-            "issue_trend_statuses",
-            "issue_inventory_trend_statuses",
-            "issue_inventory_history_points",
-            "issue_inventory_missing_contract_deltas",
-            "issue_inventory_uncategorized_root_script_deltas",
-            "issue_inventory_recommended_next_targets",
-            "issue_action_items",
-            "issue_acceptance_checks",
-        ]
+        self.assertNotIn("issue_index_payload", feedback_payload)
+        self.assertNotIn("issue_drafts", feedback_payload)
+        self.assertNotIn("issue_draft_count", feedback_payload.get("analysis_summary") or {})
+        self.assertNotIn("report_metadata", issue_index_payload)
         removed_feedback_metadata_keys = [
             "issue_draft_bodies",
             "issue_draft_owners",
@@ -133,13 +90,6 @@ class TestInventorySignalQualityGateReplay(unittest.TestCase):
             "issue_draft_action_items",
             "issue_draft_acceptance_checks",
         ]
-        for item in feedback_payload.get("issue_drafts", []):
-            self.assertNotIn("owner", item)
-            self.assertNotIn("title", item)
-            self.assertNotIn("template", item)
-            self.assertNotIn("labels", item)
-            self.assertNotIn("file", item)
-            self.assertNotIn("index_position", item)
         for item in issue_index_payload.get("items", []):
             self.assertNotIn("owner", item)
             self.assertNotIn("title", item)
@@ -148,19 +98,6 @@ class TestInventorySignalQualityGateReplay(unittest.TestCase):
             self.assertNotIn("file", item)
             self.assertNotIn("index_position", item)
 
-        removed_issue_reference_metadata_keys = [
-            "issue_bodies",
-            "issue_files",
-            "issue_owners",
-            "issue_titles",
-            "issue_templates",
-            "issue_labels",
-            "issue_index_positions",
-        ]
-        for key in removed_issue_reference_metadata_keys:
-            self.assertNotIn(key, issue_index_payload.get("report_metadata") or {})
-        for key in removed_issue_metadata_keys:
-            self.assertNotIn(key, issue_index_payload.get("report_metadata") or {})
         for key in removed_feedback_metadata_keys:
             self.assertNotIn(key, feedback_payload.get("report_metadata") or {})
 
@@ -368,6 +305,7 @@ class TestInventorySignalQualityGateReplay(unittest.TestCase):
             feedback_metadata.get("phase_history", [])[-1]["details"]["issue_index"],
             feedback_report_metadata.get("issue_index_path"),
         )
+        self.assertNotIn("issue_draft_count", feedback_metadata.get("phase_history", [])[-1]["details"])
         self.assertEqual(
             gate_metadata.get("phase_history", [])[-1]["details"]["output_path"],
             gate_report_metadata.get("output_path"),
@@ -396,8 +334,10 @@ class TestInventorySignalQualityGateReplay(unittest.TestCase):
             "- Issue Directory: {0}".format(feedback_report_metadata.get("issue_dir", "")),
             feedback_markdown,
         )
-        for item in [draft.get("file", "") for draft in (outputs["feedback"].get("issue_drafts") or []) if draft.get("file")]:
-            self.assertIn("  - {0}".format(item), feedback_markdown)
+        for item in outputs["issue_index"].get("items", []):
+            draft_file = self._issue_reference(item, "issue_draft_file", "")
+            if draft_file:
+                self.assertIn("  - {0}".format(draft_file), feedback_markdown)
 
         self.assertIn("## Artifact References", dossier_text)
         self.assertIn(
@@ -415,7 +355,7 @@ class TestInventorySignalQualityGateReplay(unittest.TestCase):
 
     def _assert_issue_body_artifact_references_isomorphic(self, outputs: dict) -> None:
         issue_index_payload = outputs["issue_index"]
-        issue_index_metadata = issue_index_payload.get("report_metadata") or {}
+        feedback_report_metadata = (outputs["feedback"].get("report_metadata") or {})
         draft_texts = outputs["issue_drafts"]
 
         for item in issue_index_payload.get("items", []):
@@ -476,16 +416,16 @@ class TestInventorySignalQualityGateReplay(unittest.TestCase):
             artifact_references = issue_body.get("artifact_references", {})
             self.assertIn("## Artifact References", draft_text)
             self.assertIn(
-                "- Issue Index: {0}".format(issue_index_metadata.get("issue_index_path", "")),
+                "- Issue Index: {0}".format(feedback_report_metadata.get("issue_index_path", "")),
                 draft_text,
             )
             self.assertEqual(
                 artifact_references.get("issue_index_path", ""),
-                issue_index_metadata.get("issue_index_path", ""),
+                feedback_report_metadata.get("issue_index_path", ""),
             )
             self.assertEqual(
                 artifact_references.get("issue_dir", ""),
-                issue_index_metadata.get("issue_dir", ""),
+                feedback_report_metadata.get("issue_dir", ""),
             )
             self.assertEqual(artifact_references.get("issue_draft_file", ""), self._issue_reference(item, "issue_draft_file", ""))
             self.assertEqual(artifact_references.get("owner", ""), self._issue_owner(item))
@@ -543,7 +483,7 @@ class TestInventorySignalQualityGateReplay(unittest.TestCase):
             "    export_contract_version: \"d65.v1\"\n"
             "  quality_feedback:\n"
             "    minimum_stable_overall_score: 85.0\n"
-            "    export_contract_version: \"d73.v1\"\n"
+            "    export_contract_version: \"d77.v1\"\n"
             "  stage1_runner:\n"
             "    minimum_stable_pass_rate: 85.0\n"
             "    export_contract_version: \"d67.v1\"\n"

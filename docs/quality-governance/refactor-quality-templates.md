@@ -281,6 +281,34 @@ write_md("docs/quality-archive/entry-xxx.md", entry)
 - [ ] feedback Markdown 中的 issue draft 文件清单已改为从公开 `issue_drafts[*].issue_body.artifact_references.issue_draft_file` 反向恢复，不再依赖任何 issue body 元数据镜像
 - [ ] quality_feedback 合同版本已提升到 d73.v1，以标识 issue body 批量影子数组已被完全移除
 
+## 96. D96 Embedded Issue Index Payload Elimination
+
+- [ ] quality_feedback 公开 JSON 已移除内嵌 `issue_index_payload` 镜像，公开 issue index 只再通过 `report_metadata.issue_index_path` 指向独立 `quality-feedback-issues.json`
+- [ ] export 阶段与 quality_gate 已不再依赖返回值中的 `issue_index_payload.count` 做计数，而是直接从公开 `issue_drafts` 或独立 issue index 文件推导
+- [ ] `_build_report_metadata(...)` 已删除未消费的 `issue_index_items` 死参数，避免 D95 之后继续保留伪装的内部投影接口
+- [ ] quality_feedback 合同版本已提升到 d74.v1，以标识 feedback JSON 已不再重复嵌入整块 issue index 载荷
+
+## 97. D97 Public Feedback Issue List Elimination
+
+- [ ] quality_feedback 公开 JSON 已移除顶层 `issue_drafts` 列表，公开批量 issue 事实面只再通过 `report_metadata.issue_index_path` 指向独立 `quality-feedback-issues.json`
+- [ ] export 阶段仍可内部生成 issue drafts 与 Markdown 文件清单，但不再把该列表写回公开 feedback JSON 返回值
+- [ ] `analysis_summary.issue_draft_count` 与 quality_gate `issue_draft_count` 已改为直接由独立 issue index 计数回填，避免继续依赖公开 `issue_drafts`
+- [ ] quality_feedback 合同版本已提升到 d75.v1，以标识 feedback JSON 已不再暴露任何批量 issue 列表
+
+## 98. D98 Feedback Issue Count Mirror Elimination
+
+- [ ] quality_feedback 公开 JSON 的 `analysis_summary` 已移除 `issue_draft_count`，避免在 feedback JSON 中继续保留可由独立 issue index `count` 直接恢复的批量计数镜像
+- [ ] quality_feedback CLI 与 quality_gate `issue_draft_count` 已改为直接读取独立 `quality-feedback-issues.json.count`，不再依赖 feedback JSON 的摘要计数
+- [ ] replay harness 与模块级单测已改为只要求 feedback JSON 暴露 `report_metadata.issue_index_path`，并从 issue index 反向校验计数一致性
+- [ ] quality_feedback 合同版本已提升到 d76.v1，以标识 feedback JSON 已不再暴露任何 issue 批量派生计数
+
+## 99. D99 Issue Index Report Metadata Elimination
+
+- [ ] `quality-feedback-issues.json` 已移除 `report_metadata` 自引用块，issue index 顶层缩减为 `{"count": N, "items": [...]}`
+- [ ] 原 `report_metadata.issue_index_path`（自引用）与 `report_metadata.issue_dir`（与每条 item artifact_references 重复）均已删除，外部消费者改由 `quality-feedback.json.report_metadata.issue_index_path / issue_dir` 获取导航信息
+- [ ] replay harness 与模块级单测已改为断言 issue index 不再包含 `report_metadata`，跨文件同构护栏改为对比 item `artifact_references` 与 feedback `report_metadata`
+- [ ] quality_feedback 合同版本已提升到 d77.v1，以标识 issue index 已不再包含自引用元数据
+
 ## 25. D29 迭代循环二次治理补充检查项
 
 - [ ] cycle 级 phase_history、phase_timings、completed_phases 已落地，且不覆盖单次 iteration 元数据

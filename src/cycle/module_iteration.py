@@ -14,6 +14,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 import networkx as nx
 
+from src.core.phase_tracker import PhaseTrackerMixin
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,7 +42,7 @@ class ModuleIterationResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-class ModuleIterationCycle:
+class ModuleIterationCycle(PhaseTrackerMixin):
     """模块级迭代循环管理器。"""
 
     def __init__(self, module_name: str, module_config: Dict[str, Any] = None):
@@ -87,16 +89,7 @@ class ModuleIterationCycle:
         iteration_result.metadata["failed_operations"] = []
 
     def _build_runtime_metadata(self) -> Dict[str, Any]:
-        return self._serialize_value(
-            {
-                "phase_history": self.module_metadata.get("phase_history", []),
-                "phase_timings": self.module_metadata.get("phase_timings", {}),
-                "completed_phases": self.module_metadata.get("completed_phases", []),
-                "failed_phase": self.module_metadata.get("failed_phase"),
-                "final_status": self.module_metadata.get("final_status", "initialized"),
-                "last_completed_phase": self.module_metadata.get("last_completed_phase"),
-            }
-        )
+        return self._build_runtime_metadata_from_dict(self.module_metadata)
 
     def _record_failed_operation(
         self,
@@ -117,24 +110,6 @@ class ModuleIterationCycle:
         if details:
             failure_entry["details"] = self._serialize_value(details)
         container.append(failure_entry)
-
-    def _serialize_value(self, value: Any) -> Any:
-        if isinstance(value, datetime):
-            return value.isoformat()
-        if isinstance(value, dict):
-            return {str(key): self._serialize_value(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [self._serialize_value(item) for item in value]
-        if isinstance(value, tuple):
-            return [self._serialize_value(item) for item in value]
-        if hasattr(value, "__dataclass_fields__"):
-            return {
-                field_name: self._serialize_value(getattr(value, field_name))
-                for field_name in value.__dataclass_fields__
-            }
-        if callable(value):
-            return getattr(value, "__name__", "callable")
-        return value
 
     def _start_module_phase(self, phase_name: str, context: Dict[str, Any] | None = None) -> Dict[str, Any]:
         phase_entry = {

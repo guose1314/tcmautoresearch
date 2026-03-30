@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional
 import networkx as nx
 import numpy as np
 
+from src.core.phase_tracker import PhaseTrackerMixin
+
 # 配置日志
 logger = logging.getLogger(__name__)
 
@@ -379,7 +381,7 @@ class ResearchInsight:
             keywords=data.get("keywords", [])
         )
 
-class TheoreticalFramework:
+class TheoreticalFramework(PhaseTrackerMixin):
     """
     中医古籍全自动研究系统的理论框架
     
@@ -480,34 +482,7 @@ class TheoreticalFramework:
             )
 
     def _build_runtime_metadata(self) -> Dict[str, Any]:
-        return {
-            "phase_history": self._serialize_value(self.framework_metadata.get("phase_history", [])),
-            "phase_timings": self._serialize_value(self.framework_metadata.get("phase_timings", {})),
-            "completed_phases": list(self.framework_metadata.get("completed_phases", [])),
-            "failed_phase": self.framework_metadata.get("failed_phase"),
-            "final_status": self.framework_metadata.get("final_status", "initialized"),
-            "last_completed_phase": self.framework_metadata.get("last_completed_phase"),
-        }
-
-    def _serialize_value(self, value: Any) -> Any:
-        if isinstance(value, Enum):
-            return value.value
-        if isinstance(value, datetime):
-            return value.isoformat()
-        if isinstance(value, dict):
-            return {str(key): self._serialize_value(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [self._serialize_value(item) for item in value]
-        if isinstance(value, tuple):
-            return [self._serialize_value(item) for item in value]
-        if hasattr(value, "__dataclass_fields__"):
-            return {
-                field_name: self._serialize_value(getattr(value, field_name))
-                for field_name in value.__dataclass_fields__
-            }
-        if callable(value):
-            return getattr(value, "__name__", "callable")
-        return value
+        return self._build_runtime_metadata_from_dict(self.framework_metadata)
 
     def _build_analysis_summary(self) -> Dict[str, Any]:
         validated_hypotheses = sum(1 for h in self.hypotheses.values() if h.status == HypothesisStatus.VALIDATED)

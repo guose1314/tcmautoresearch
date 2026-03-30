@@ -5,23 +5,36 @@ from src.research.research_pipeline import ResearchPhase, ResearchPipeline
 
 
 class TestResearchPipelineClinicalGap(unittest.TestCase):
-    @patch("src.research.research_pipeline.LLMEngine.unload")
-    @patch("src.research.research_pipeline.LLMEngine.clinical_gap_analysis")
-    @patch("src.research.research_pipeline.LLMEngine.load")
+    @patch("src.research.research_pipeline.CachedLLMService.from_gap_config")
+    @patch("src.research.research_pipeline.GapAnalyzer.cleanup")
+    @patch("src.research.research_pipeline.GapAnalyzer.analyze")
+    @patch("src.research.research_pipeline.GapAnalyzer.initialize")
     @patch("src.research.research_pipeline.LiteratureRetriever.close")
     @patch("src.research.research_pipeline.LiteratureRetriever.search")
     def test_observe_phase_runs_qwen_clinical_gap_analysis(
         self,
         mock_search,
         mock_close,
-        mock_load,
+        mock_init,
         mock_gap,
-        mock_unload,
+        mock_cleanup,
+        mock_gap_service,
     ):
+        class _FakeService:
+            def load(self):
+                return None
+
+            def unload(self):
+                return None
+
+            def cache_stats(self):
+                return {"session_hits": 0, "session_misses": 1}
+
         mock_close.return_value = None
-        mock_load.return_value = None
-        mock_unload.return_value = None
+        mock_init.return_value = True
+        mock_cleanup.return_value = True
         mock_gap.return_value = """临床问题重述: ...\n关键缺口: ...\n研究建议: ..."""
+        mock_gap_service.return_value = _FakeService()
 
         mock_search.return_value = {
             "query": "tcm covid efficacy",
@@ -89,9 +102,10 @@ class TestResearchPipelineClinicalGap(unittest.TestCase):
         self.assertIn("关键缺口", literature["clinical_gap_analysis"]["report"])
 
         mock_search.assert_called_once()
-        mock_load.assert_called_once()
+        mock_gap_service.assert_called_once()
+        mock_init.assert_called_once()
         mock_gap.assert_called_once()
-        mock_unload.assert_called_once()
+        mock_cleanup.assert_called_once()
 
 
 if __name__ == "__main__":

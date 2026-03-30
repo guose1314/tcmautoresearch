@@ -15,6 +15,7 @@ from enum import Enum
 from typing import Any, Callable, Dict, List
 
 from src.core.module_base import get_global_executor
+from src.core.phase_tracker import PhaseTrackerMixin
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ class IterationConfig:
     minimum_stable_quality: float = 0.8
     export_contract_version: str = "d40.v1"
 
-class IterationCycle:
+class IterationCycle(PhaseTrackerMixin):
     """
     生成-测试-修复迭代循环管理器
     
@@ -187,37 +188,8 @@ class IterationCycle:
         container.append(failure_entry)
 
     def _build_runtime_metadata(self) -> Dict[str, Any]:
-        return self._serialize_value(
-            {
-                "phase_history": self.cycle_metadata.get("phase_history", []),
-                "phase_timings": self.cycle_metadata.get("phase_timings", {}),
-                "completed_phases": self.cycle_metadata.get("completed_phases", []),
-                "failed_phase": self.cycle_metadata.get("failed_phase"),
-                "final_status": self.cycle_metadata.get("final_status", "initialized"),
-                "last_completed_phase": self.cycle_metadata.get("last_completed_phase"),
-            }
-        )
+        return self._build_runtime_metadata_from_dict(self.cycle_metadata)
 
-    def _serialize_value(self, value: Any) -> Any:
-        if isinstance(value, Enum):
-            return value.value
-        if isinstance(value, datetime):
-            return value.isoformat()
-        if isinstance(value, dict):
-            return {str(key): self._serialize_value(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [self._serialize_value(item) for item in value]
-        if isinstance(value, tuple):
-            return [self._serialize_value(item) for item in value]
-        if hasattr(value, "__dataclass_fields__"):
-            return {
-                field_name: self._serialize_value(getattr(value, field_name))
-                for field_name in value.__dataclass_fields__
-            }
-        if callable(value):
-            return getattr(value, "__name__", "callable")
-        return value
-    
     def start_cycle(self) -> bool:
         """启动迭代循环"""
         try:

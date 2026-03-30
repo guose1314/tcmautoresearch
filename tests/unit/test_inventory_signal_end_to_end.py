@@ -19,6 +19,9 @@ class TestInventorySignalEndToEnd(unittest.TestCase):
     def _find_issue_by_owner(self, items: list[dict], owner: str) -> dict:
         return next(item for item in items if self._issue_owner(item) == owner)
 
+    def _load_issue_index(self, root: Path, feedback: dict) -> dict:
+        return json.loads(Path(feedback["report_metadata"]["issue_index_path"]).read_text(encoding="utf-8"))
+
     def _prepare_workspace(self, root: Path, archive_latest: dict) -> None:
         (root / "tools").mkdir(parents=True)
         (root / "output").mkdir(parents=True)
@@ -29,7 +32,7 @@ class TestInventorySignalEndToEnd(unittest.TestCase):
             "governance:\n"
             "  quality_feedback:\n"
             "    minimum_stable_overall_score: 85.0\n"
-            "    export_contract_version: \"d73.v1\"\n"
+            "    export_contract_version: \"d77.v1\"\n"
             "  stage1_runner:\n"
             "    minimum_stable_pass_rate: 85.0\n"
             "    export_contract_version: \"d67.v1\"\n"
@@ -174,6 +177,7 @@ class TestInventorySignalEndToEnd(unittest.TestCase):
             self.assertEqual(stage2_result.returncode, 0, msg=stage2_result.stderr or stage2_result.stdout)
 
             feedback = json.loads((root / "output" / "quality-feedback.json").read_text(encoding="utf-8"))
+            issue_index = self._load_issue_index(root, feedback)
             stage1_reports = sorted((root / "logs" / "stage1").glob("stage1_all_*.json"))
             stage2_reports = sorted((root / "logs" / "stage2").glob("stage2_all_*.json"))
             self.assertTrue(stage1_reports)
@@ -183,7 +187,8 @@ class TestInventorySignalEndToEnd(unittest.TestCase):
 
             self.assertEqual(feedback["inventory_trend"]["status"], "stable")
             self.assertFalse(any(item["dimension"] == "quality_consumer_inventory_trend" for item in feedback["priority_actions"]))
-            self.assertFalse(any(self._issue_owner(item) == "quality-governance" for item in feedback["issue_drafts"]))
+            self.assertNotIn("issue_drafts", feedback)
+            self.assertFalse(any(self._issue_owner(item) == "quality-governance" for item in issue_index["items"]))
             self.assertNotIn("governance_alerts", stage1_global)
             self.assertNotIn("governance_alerts", stage2_global)
 
@@ -215,6 +220,7 @@ class TestInventorySignalEndToEnd(unittest.TestCase):
             self.assertEqual(stage2_result.returncode, 0, msg=stage2_result.stderr or stage2_result.stdout)
 
             feedback = json.loads((root / "output" / "quality-feedback.json").read_text(encoding="utf-8"))
+            issue_index = self._load_issue_index(root, feedback)
             feedback_markdown = (root / "output" / "quality-feedback.md").read_text(encoding="utf-8")
             stage1_global = self._load_stage_global(root, "stage1")
             stage2_global = self._load_stage_global(root, "stage2")
@@ -223,7 +229,8 @@ class TestInventorySignalEndToEnd(unittest.TestCase):
             self.assertTrue(feedback["inventory_trend"]["recommended_next_target_changed"])
             self.assertEqual(feedback["inventory_summary"]["recommended_next_target"], "tools/missing_consumer.py")
             self.assertFalse(any(item["dimension"] == "quality_consumer_inventory_trend" for item in feedback["priority_actions"]))
-            self.assertFalse(any(self._issue_owner(item) == "quality-governance" for item in feedback["issue_drafts"]))
+            self.assertNotIn("issue_drafts", feedback)
+            self.assertFalse(any(self._issue_owner(item) == "quality-governance" for item in issue_index["items"]))
             self.assertIn("- Recommended Next Target: tools/missing_consumer.py", feedback_markdown)
             self.assertNotIn("quality_consumer_inventory_trend", feedback_markdown)
             self.assertNotIn("governance_alerts", stage1_global)
@@ -257,6 +264,7 @@ class TestInventorySignalEndToEnd(unittest.TestCase):
             self.assertEqual(stage2_result.returncode, 0, msg=stage2_result.stderr or stage2_result.stdout)
 
             feedback = json.loads((root / "output" / "quality-feedback.json").read_text(encoding="utf-8"))
+            issue_index = self._load_issue_index(root, feedback)
             feedback_markdown = (root / "output" / "quality-feedback.md").read_text(encoding="utf-8")
             stage1_global = self._load_stage_global(root, "stage1")
             stage2_global = self._load_stage_global(root, "stage2")
@@ -265,7 +273,8 @@ class TestInventorySignalEndToEnd(unittest.TestCase):
             self.assertTrue(feedback["inventory_trend"]["recommended_next_target_changed"])
             self.assertEqual(feedback["inventory_summary"]["recommended_next_target"], "tools/missing_consumer.py")
             self.assertFalse(any(item["dimension"] == "quality_consumer_inventory_trend" for item in feedback["priority_actions"]))
-            self.assertFalse(any(self._issue_owner(item) == "quality-governance" for item in feedback["issue_drafts"]))
+            self.assertNotIn("issue_drafts", feedback)
+            self.assertFalse(any(self._issue_owner(item) == "quality-governance" for item in issue_index["items"]))
             self.assertIn("- Status: improving", feedback_markdown)
             self.assertIn("- Recommended Next Target: tools/missing_consumer.py", feedback_markdown)
             self.assertNotIn("quality_consumer_inventory_trend", feedback_markdown)
@@ -306,6 +315,7 @@ class TestInventorySignalEndToEnd(unittest.TestCase):
             self.assertEqual(stage2_result.returncode, 0, msg=stage2_result.stderr or stage2_result.stdout)
 
             feedback = json.loads((root / "output" / "quality-feedback.json").read_text(encoding="utf-8"))
+            issue_index = self._load_issue_index(root, feedback)
             feedback_markdown = (root / "output" / "quality-feedback.md").read_text(encoding="utf-8")
             stage1_global = self._load_stage_global(root, "stage1")
             stage2_global = self._load_stage_global(root, "stage2")
@@ -314,7 +324,8 @@ class TestInventorySignalEndToEnd(unittest.TestCase):
             self.assertTrue(feedback["inventory_trend"]["recommended_next_target_changed"])
             self.assertIsNone(feedback["inventory_summary"]["recommended_next_target"])
             self.assertFalse(any(item["dimension"] == "quality_consumer_inventory_trend" for item in feedback["priority_actions"]))
-            self.assertFalse(any(self._issue_owner(item) == "quality-governance" for item in feedback["issue_drafts"]))
+            self.assertNotIn("issue_drafts", feedback)
+            self.assertFalse(any(self._issue_owner(item) == "quality-governance" for item in issue_index["items"]))
             self.assertIn("- Status: improving", feedback_markdown)
             self.assertIn("- Recommended Next Target: none", feedback_markdown)
             self.assertNotIn("quality_consumer_inventory_trend", feedback_markdown)
@@ -366,7 +377,7 @@ class TestInventorySignalEndToEnd(unittest.TestCase):
             self.assertTrue(feedback["inventory_trend"]["recommended_next_target_changed"])
             self.assertTrue(any(item["dimension"] == "quality_consumer_inventory" for item in feedback["priority_actions"]))
             self.assertFalse(any(item["dimension"] == "quality_consumer_inventory_trend" for item in feedback["priority_actions"]))
-            self.assertTrue(any(self._issue_owner(item) == "quality-governance" for item in feedback["issue_drafts"]))
+            self.assertNotIn("issue_drafts", feedback)
             self.assertTrue(any(self._issue_owner(item) == "quality-governance" for item in issue_index["items"]))
             self.assertIn("- Status: improving", feedback_markdown)
             self.assertIn("- Missing Contracts: 1", feedback_markdown)
@@ -421,7 +432,7 @@ class TestInventorySignalEndToEnd(unittest.TestCase):
             self.assertEqual(feedback["inventory_trend"]["status"], "improving")
             self.assertTrue(any(item["dimension"] == "quality_consumer_inventory" for item in feedback["priority_actions"]))
             self.assertFalse(any(item["dimension"] == "quality_consumer_inventory_trend" for item in feedback["priority_actions"]))
-            self.assertTrue(any(self._issue_owner(item) == "quality-governance" for item in feedback["issue_drafts"]))
+            self.assertNotIn("issue_drafts", feedback)
             governance_item = self._find_issue_by_owner(issue_index["items"], "quality-governance")
             self.assertIsNone(governance_item["issue_body"]["inventory_trend"])
             self.assertTrue(
@@ -527,7 +538,9 @@ class TestInventorySignalEndToEnd(unittest.TestCase):
             self.assertEqual(feedback["inventory_trend"]["status"], "regressing")
             self.assertEqual(feedback["inventory_summary"]["status"], "healthy")
             self.assertTrue(any(item["dimension"] == "quality_consumer_inventory_trend" for item in feedback["priority_actions"]))
-            self.assertTrue(any(self._issue_owner(item) == "quality-governance" for item in feedback["issue_drafts"]))
+            self.assertNotIn("issue_drafts", feedback)
+            issue_index = self._load_issue_index(root, feedback)
+            self.assertTrue(any(self._issue_owner(item) == "quality-governance" for item in issue_index["items"]))
             self.assertEqual(
                 [item["owner"] for item in feedback["owner_notifications"]],
                 ["quality-governance"],

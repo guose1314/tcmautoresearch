@@ -27,6 +27,7 @@ torchvision
 torchaudio
 transformers>=4.20,<5.0
 sentence-transformers>=2.0,<3.0
+# faiss-cpu>=1.8,<2.0            # 可选：向量检索加速；未安装时 embedding_service 自动回退 numpy
 accelerate>=0.10,<1.0
 peft>=0.10,<1.0
 

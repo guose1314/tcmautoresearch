@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 import networkx as nx
 
 from src.core.module_base import get_global_executor
+from src.core.phase_tracker import PhaseTrackerMixin
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ class TestEnvironment:
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     test_results: List[IntegrationTest] = field(default_factory=list)
 
-class IntegrationTester:
+class IntegrationTester(PhaseTrackerMixin):
     """
     中医古籍全自动研究系统集成测试框架
     
@@ -237,36 +238,16 @@ class IntegrationTester:
         })
 
     def _build_runtime_metadata(self) -> Dict[str, Any]:
-        return {
-            "phase_history": self._serialize_value(self.phase_history),
-            "phase_timings": self._serialize_value(self.phase_timings),
-            "completed_phases": list(self.completed_phases),
-            "failed_phase": self.failed_phase,
-            "final_status": self.final_status,
-            "last_completed_phase": self.last_completed_phase,
-        }
-
-    def _serialize_value(self, value: Any) -> Any:
-        if isinstance(value, Enum):
-            return value.value
-        if isinstance(value, datetime):
-            return value.isoformat()
-        if isinstance(value, defaultdict):
-            return {key: self._serialize_value(item) for key, item in value.items()}
-        if isinstance(value, dict):
-            return {str(key): self._serialize_value(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [self._serialize_value(item) for item in value]
-        if isinstance(value, tuple):
-            return [self._serialize_value(item) for item in value]
-        if hasattr(value, "__dataclass_fields__"):
-            return {
-                field_name: self._serialize_value(getattr(value, field_name))
-                for field_name in value.__dataclass_fields__
+        return self._build_runtime_metadata_from_dict(
+            {
+                "phase_history": self.phase_history,
+                "phase_timings": self.phase_timings,
+                "completed_phases": self.completed_phases,
+                "failed_phase": self.failed_phase,
+                "final_status": self.final_status,
+                "last_completed_phase": self.last_completed_phase,
             }
-        if callable(value):
-            return getattr(value, "__name__", "callable")
-        return value
+        )
 
     def _serialize_integration_test(self, test: IntegrationTest) -> Dict[str, Any]:
         return self._serialize_value(test)

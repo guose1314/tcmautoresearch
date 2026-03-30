@@ -18,6 +18,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 import networkx as nx
 
+from src.core.phase_tracker import PhaseTrackerMixin
+
 # 配置日志
 logger = logging.getLogger(__name__)
 
@@ -90,7 +92,7 @@ class FixingStageResult:
     confidence_scores: Dict[str, float] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-class FixingStage:
+class FixingStage(PhaseTrackerMixin):
     """
     修复阶段管理器
     
@@ -172,36 +174,7 @@ class FixingStage:
         container.append(failure_entry)
 
     def _build_runtime_metadata(self) -> Dict[str, Any]:
-        return self._serialize_value(
-            {
-                "phase_history": self.stage_metadata.get("phase_history", []),
-                "phase_timings": self.stage_metadata.get("phase_timings", {}),
-                "completed_phases": self.stage_metadata.get("completed_phases", []),
-                "failed_phase": self.stage_metadata.get("failed_phase"),
-                "final_status": self.stage_metadata.get("final_status", "initialized"),
-                "last_completed_phase": self.stage_metadata.get("last_completed_phase"),
-            }
-        )
-
-    def _serialize_value(self, value: Any) -> Any:
-        if isinstance(value, Enum):
-            return value.value
-        if isinstance(value, datetime):
-            return value.isoformat()
-        if isinstance(value, dict):
-            return {str(key): self._serialize_value(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [self._serialize_value(item) for item in value]
-        if isinstance(value, tuple):
-            return [self._serialize_value(item) for item in value]
-        if hasattr(value, "__dataclass_fields__"):
-            return {
-                field_name: self._serialize_value(getattr(value, field_name))
-                for field_name in value.__dataclass_fields__
-            }
-        if callable(value):
-            return getattr(value, "__name__", "callable")
-        return value
+        return self._build_runtime_metadata_from_dict(self.stage_metadata)
 
     def _start_stage_phase(self, phase_name: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         phase_entry = {

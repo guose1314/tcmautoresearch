@@ -33,7 +33,7 @@ DEFAULT_GOVERNANCE_CONFIG = {
     "enable_phase_tracking": True,
     "persist_failed_operations": True,
     "minimum_stable_overall_score": 85.0,
-    "export_contract_version": "d73.v1",
+    "export_contract_version": "d77.v1",
 }
 
 DIMENSION_OWNER_MAP = {
@@ -181,7 +181,6 @@ def _build_analysis_summary(
         "inventory_trend_status": (report.get("inventory_trend") or {}).get("status", "unknown"),
         "priority_action_count": len(report.get("priority_actions", [])),
         "owner_count": len(report.get("owner_notifications", [])),
-        "issue_draft_count": len(report.get("issue_drafts", [])),
         "failed_operation_count": len(failed_operations),
         "failed_phase": runtime_metadata.get("failed_phase"),
         "final_status": runtime_metadata.get("final_status", "initialized"),
@@ -197,7 +196,6 @@ def _build_report_metadata(
     markdown_path: Path | None = None,
     issue_index: Path | None = None,
     issue_dir: Path | None = None,
-    issue_index_items: List[Dict[str, object]] | None = None,
 ) -> Dict[str, Any]:
     report_metadata = {
         "contract_version": governance_config["export_contract_version"],
@@ -227,7 +225,12 @@ def _assemble_feedback_report(
 ) -> Dict[str, Any]:
     export_targets = export_targets or {}
     payload = dict(report)
-    payload["analysis_summary"] = _build_analysis_summary(payload, governance_config, runtime_metadata, failed_operations)
+    payload["analysis_summary"] = _build_analysis_summary(
+        payload,
+        governance_config,
+        runtime_metadata,
+        failed_operations,
+    )
     payload["failed_operations"] = _serialize_value(failed_operations)
     payload["metadata"] = _build_runtime_metadata(runtime_metadata)
     payload["report_metadata"] = _build_report_metadata(
@@ -238,7 +241,6 @@ def _assemble_feedback_report(
         export_targets.get("markdown_path"),
         export_targets.get("issue_index"),
         export_targets.get("issue_dir"),
-        payload.get("issue_index_payload", {}).get("items", []),
     )
     return payload
 
@@ -737,10 +739,6 @@ def write_issue_drafts(issue_drafts: List[Dict[str, object]], issue_dir: Path, i
     index_payload = {
         "count": len(items),
         "items": items,
-        "report_metadata": {
-            "issue_index_path": issue_index_path,
-            "issue_dir": issue_dir_path,
-        },
     }
     issue_index.write_text(json.dumps(index_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return index_payload
@@ -858,7 +856,7 @@ def build_feedback_report(
     return _assemble_feedback_report(report, governance_config, runtime_metadata, failed_operations)
 
 
-def _to_markdown(report: Dict[str, object]) -> str:
+def _to_markdown(report: Dict[str, object], issue_index_items: List[Dict[str, object]] | None = None) -> str:
     report_metadata = report.get("report_metadata") or {}
     lines = [
         "# Quality Feedback Report",
@@ -893,7 +891,7 @@ def _to_markdown(report: Dict[str, object]) -> str:
     ]
 
     issue_draft_files = []
-    for item in list(report.get("issue_drafts", [])):
+    for item in list(issue_index_items or []):
         issue_body = dict(item.get("issue_body", {}))
         issue_draft_file = str(_issue_body_artifact_references(issue_body).get("issue_draft_file", ""))
         if issue_draft_file:
@@ -999,18 +997,12 @@ def export_feedback_report(
             "markdown_path": _normalize_reference_path(markdown_path),
             "issue_dir": _normalize_reference_path(issue_dir),
             "issue_index": _normalize_reference_path(issue_index),
-            "issue_draft_count": issue_index_payload.get("count", 0),
         },
         final_status="completed" if metadata.get("final_status") != "cleaned" else metadata.get("final_status"),
     )
 
     payload["metadata"] = _build_runtime_metadata(metadata)
-    payload["analysis_summary"] = _build_analysis_summary(payload, governance_config, metadata, failed_operations)
-    payload["issue_drafts"] = [
-        _public_issue_item({"issue_body": item.get("issue_body", {})})
-        for item in issue_index_payload.get("items", [])
-    ]
-    payload["issue_index_payload"] = issue_index_payload
+    payload.pop("issue_drafts", None)
 
     payload = _assemble_feedback_report(
         payload,
@@ -1026,8 +1018,7 @@ def export_feedback_report(
     )
 
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    markdown_path.write_text(_to_markdown(payload), encoding="utf-8")
-    payload["issue_index_payload"] = issue_index_payload
+    markdown_path.write_text(_to_markdown(payload, issue_index_payload.get("items", [])), encoding="utf-8")
     return payload
 
 
@@ -1057,7 +1048,7 @@ def main() -> int:
     issue_dir = Path(args.issue_dir).resolve()
     issue_index = Path(args.issue_index).resolve()
     report = export_feedback_report(report, output_path, markdown_path, issue_dir, issue_index)
-    issue_index_payload = report.pop("issue_index_payload", {"count": 0})
+    issue_index_payload = _safe_load_json(issue_index)
 
     print("[quality-feedback] level={level} score={score}".format(
         level=report.get("feedback_level", "unknown"),

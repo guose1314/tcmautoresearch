@@ -496,59 +496,9 @@ class TestQualityFeedback(unittest.TestCase):
                 [self._issue_owner(item) for item in issue_index["items"]],
                 ["architecture-maintainers", "module-owners", "quality-governance"],
             )
-            self.assertEqual(
-                [self._issue_owner(item) for item in exported["issue_drafts"]],
-                [self._issue_owner(item) for item in issue_index["items"]],
-            )
-            self.assertEqual(
-                [self._issue_reference(item, "title", "") for item in exported["issue_drafts"]],
-                [self._issue_reference(item, "title", "") for item in issue_index["items"]],
-            )
-            self.assertEqual(
-                [self._issue_reference(item, "issue_draft_file", "") for item in exported["issue_drafts"]],
-                [self._issue_reference(item, "issue_draft_file", "") for item in issue_index["items"]],
-            )
-            self.assertEqual(
-                [self._issue_reference(item, "index_position", 0) for item in exported["issue_drafts"]],
-                [1, 2, 3],
-            )
-            self.assertEqual(
-                [self._issue_reference(item, "template", "") for item in exported["issue_drafts"]],
-                [self._issue_reference(item, "template", "") for item in issue_index["items"]],
-            )
-            self.assertEqual(
-                [self._issue_reference(item, "labels", []) for item in exported["issue_drafts"]],
-                [self._issue_reference(item, "labels", []) for item in issue_index["items"]],
-            )
-            self.assertEqual(
-                issue_index["report_metadata"]["issue_index_path"],
-                exported["report_metadata"]["issue_index_path"],
-            )
-            self.assertEqual(
-                issue_index["report_metadata"]["issue_dir"],
-                exported["report_metadata"]["issue_dir"],
-            )
-            for item in exported["issue_drafts"]:
-                self.assertNotIn("output_file", item)
-                self.assertNotIn("owner", item)
-                self.assertNotIn("title", item)
-                self.assertNotIn("template", item)
-                self.assertNotIn("labels", item)
-                self.assertNotIn("file", item)
-                self.assertNotIn("index_position", item)
-            self._assert_removed_flat_issue_metadata(issue_index["report_metadata"], "issue")
+            self.assertNotIn("issue_drafts", exported)
+            self.assertNotIn("report_metadata", issue_index)
             self._assert_removed_flat_issue_metadata(exported["report_metadata"], "issue_draft")
-            self._assert_removed_issue_reference_metadata(
-                issue_index["report_metadata"],
-                [
-                    "issue_files",
-                    "issue_owners",
-                    "issue_titles",
-                    "issue_templates",
-                    "issue_labels",
-                    "issue_index_positions",
-                ],
-            )
             self._assert_removed_issue_reference_metadata(
                 exported["report_metadata"],
                 [
@@ -561,14 +511,7 @@ class TestQualityFeedback(unittest.TestCase):
                     "issue_draft_bodies",
                 ],
             )
-            self._assert_removed_issue_reference_metadata(
-                issue_index["report_metadata"],
-                ["issue_bodies"],
-            )
-            self.assertEqual(
-                [item["issue_body"] for item in exported["issue_drafts"]],
-                [item["issue_body"] for item in issue_index["items"]],
-            )
+            self.assertNotIn("issue_draft_count", exported["analysis_summary"])
             self.assertIn("## Artifact References", markdown)
             self.assertIn(
                 "- Feedback JSON: {0}".format(exported["report_metadata"]["output_path"]),
@@ -645,7 +588,7 @@ class TestQualityFeedback(unittest.TestCase):
                 "governance:\n"
                 "  quality_feedback:\n"
                 "    minimum_stable_overall_score: 85.0\n"
-                "    export_contract_version: \"d73.v1\"\n",
+                "    export_contract_version: \"d77.v1\"\n",
                 encoding="utf-8",
             )
             report = build_feedback_report(
@@ -665,8 +608,9 @@ class TestQualityFeedback(unittest.TestCase):
         self.assertIn("report_metadata", report)
         self.assertIn("analysis_summary", report)
         self.assertIn("failed_operations", report)
-        self.assertEqual(report["report_metadata"]["contract_version"], "d73.v1")
+        self.assertEqual(report["report_metadata"]["contract_version"], "d77.v1")
         self.assertEqual(report["metadata"]["last_completed_phase"], "build_feedback_report")
+        self.assertNotIn("issue_draft_count", report["analysis_summary"])
 
     def test_export_feedback_report_updates_export_phase(self):
         with TemporaryDirectory() as tmp:
@@ -694,7 +638,7 @@ class TestQualityFeedback(unittest.TestCase):
                     "last_completed_phase": "build_feedback_report",
                 },
                 "failed_operations": [],
-                "report_metadata": {"contract_version": "d73.v1"},
+                "report_metadata": {"contract_version": "d77.v1"},
             }
 
             exported = export_feedback_report(
@@ -706,10 +650,12 @@ class TestQualityFeedback(unittest.TestCase):
             )
 
             self.assertEqual(exported["metadata"]["last_completed_phase"], "export_quality_feedback_report")
-            self.assertEqual(exported["report_metadata"]["contract_version"], "d73.v1")
+            self.assertEqual(exported["report_metadata"]["contract_version"], "d77.v1")
             self.assertTrue((root / "output" / "quality-feedback.json").exists())
             self.assertTrue((root / "output" / "quality-feedback.md").exists())
             self.assertTrue((root / "output" / "quality-feedback-issues.json").exists())
+            self.assertNotIn("issue_index_payload", exported)
+            self.assertNotIn("issue_drafts", exported)
             self.assertEqual(
                 exported["metadata"]["phase_history"][-1]["details"]["output_path"],
                 exported["report_metadata"]["output_path"],
@@ -726,8 +672,14 @@ class TestQualityFeedback(unittest.TestCase):
                 exported["metadata"]["phase_history"][-1]["details"]["issue_index"],
                 exported["report_metadata"]["issue_index_path"],
             )
+            self.assertNotIn("issue_draft_count", exported["metadata"]["phase_history"][-1]["details"])
             markdown = (root / "output" / "quality-feedback.md").read_text(encoding="utf-8")
+            feedback_json = json.loads((root / "output" / "quality-feedback.json").read_text(encoding="utf-8"))
             issue_index = json.loads((root / "output" / "quality-feedback-issues.json").read_text(encoding="utf-8"))
+            self.assertNotIn("issue_index_payload", feedback_json)
+            self.assertNotIn("issue_drafts", feedback_json)
+            self.assertNotIn("issue_draft_count", feedback_json["analysis_summary"])
+            self.assertNotIn("issue_draft_count", feedback_json["metadata"]["phase_history"][-1]["details"])
             self.assertIn(
                 "- Feedback JSON: {0}".format(exported["report_metadata"]["output_path"]),
                 markdown,
@@ -736,26 +688,7 @@ class TestQualityFeedback(unittest.TestCase):
                 "- Issue Index: {0}".format(exported["report_metadata"]["issue_index_path"]),
                 markdown,
             )
-            self.assertEqual(
-                issue_index["report_metadata"]["issue_index_path"],
-                exported["report_metadata"]["issue_index_path"],
-            )
-            self.assertEqual(
-                issue_index["report_metadata"]["issue_dir"],
-                exported["report_metadata"]["issue_dir"],
-            )
-            self._assert_removed_issue_reference_metadata(
-                issue_index["report_metadata"],
-                [
-                    "issue_files",
-                    "issue_owners",
-                    "issue_titles",
-                    "issue_templates",
-                    "issue_labels",
-                    "issue_index_positions",
-                    "issue_bodies",
-                ],
-            )
+            self.assertNotIn("report_metadata", issue_index)
             self._assert_removed_issue_reference_metadata(
                 exported["report_metadata"],
                 ["issue_draft_bodies"],
@@ -772,7 +705,6 @@ class TestQualityFeedback(unittest.TestCase):
                     "issue_draft_bodies",
                 ],
             )
-            self._assert_removed_flat_issue_metadata(issue_index["report_metadata"], "issue")
             self._assert_removed_flat_issue_metadata(exported["report_metadata"], "issue_draft")
 
 

@@ -13,6 +13,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from src.core.phase_tracker import PhaseTrackerMixin
+
 # 配置日志
 logger = logging.getLogger(__name__)
 
@@ -72,7 +74,7 @@ class ModuleOutput:
     tags: List[str] = field(default_factory=list)
 
 @dataclass
-class ModuleInterface:
+class ModuleInterface(PhaseTrackerMixin):
     """
     模块接口定义
     
@@ -114,122 +116,6 @@ class ModuleInterface:
         self.failed_operations: List[Dict[str, Any]] = []
         self.final_status = self.status.value
         self.last_completed_phase: Optional[str] = None
-
-    def _start_phase(self, phase_name: str, details: Optional[Dict[str, Any]] = None) -> float:
-        started_at = time.time()
-        if self.governance_config.get("enable_phase_tracking", True):
-            self.phase_history.append(
-                {
-                    "phase": phase_name,
-                    "status": "in_progress",
-                    "started_at": datetime.now().isoformat(),
-                    "details": self._serialize_value(details or {}),
-                }
-            )
-        return started_at
-
-    def _complete_phase(
-        self,
-        phase_name: str,
-        phase_started_at: float,
-        details: Optional[Dict[str, Any]] = None,
-        final_status: Optional[str] = None,
-    ) -> None:
-        duration = max(0.0, time.time() - phase_started_at)
-        self.phase_timings[phase_name] = round(duration, 6)
-        if phase_name not in self.completed_phases:
-            self.completed_phases.append(phase_name)
-        self.last_completed_phase = phase_name
-        self.failed_phase = None
-        self.final_status = final_status or self.final_status
-
-        if not self.governance_config.get("enable_phase_tracking", True):
-            return
-
-        for phase in reversed(self.phase_history):
-            if phase.get("phase") == phase_name and phase.get("status") == "in_progress":
-                phase["status"] = "completed"
-                phase["ended_at"] = datetime.now().isoformat()
-                phase["duration_seconds"] = round(duration, 6)
-                if details:
-                    phase["details"] = self._serialize_value({**phase.get("details", {}), **details})
-                break
-
-    def _fail_phase(
-        self,
-        phase_name: str,
-        phase_started_at: float,
-        error: Exception,
-        details: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        duration = max(0.0, time.time() - phase_started_at)
-        self.phase_timings[phase_name] = round(duration, 6)
-        self.failed_phase = phase_name
-        self.final_status = "failed"
-        self._record_failed_operation(phase_name, error, details, duration)
-
-        if not self.governance_config.get("enable_phase_tracking", True):
-            return
-
-        for phase in reversed(self.phase_history):
-            if phase.get("phase") == phase_name and phase.get("status") == "in_progress":
-                phase["status"] = "failed"
-                phase["ended_at"] = datetime.now().isoformat()
-                phase["duration_seconds"] = round(duration, 6)
-                phase["error"] = str(error)
-                if details:
-                    phase["details"] = self._serialize_value({**phase.get("details", {}), **details})
-                break
-
-    def _record_failed_operation(
-        self,
-        operation_name: str,
-        error: Exception,
-        details: Optional[Dict[str, Any]] = None,
-        duration_seconds: Optional[float] = None,
-    ) -> None:
-        if not self.governance_config.get("persist_failed_operations", True):
-            return
-
-        self.failed_operations.append(
-            {
-                "operation": operation_name,
-                "error": str(error),
-                "details": self._serialize_value(details or {}),
-                "timestamp": datetime.now().isoformat(),
-                "duration_seconds": round(duration_seconds or 0.0, 6),
-            }
-        )
-
-    def _serialize_value(self, value: Any) -> Any:
-        if isinstance(value, Enum):
-            return value.value
-        if isinstance(value, datetime):
-            return value.isoformat()
-        if isinstance(value, dict):
-            return {str(key): self._serialize_value(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [self._serialize_value(item) for item in value]
-        if isinstance(value, tuple):
-            return [self._serialize_value(item) for item in value]
-        if hasattr(value, "__dataclass_fields__"):
-            return {
-                field_name: self._serialize_value(getattr(value, field_name))
-                for field_name in value.__dataclass_fields__
-            }
-        if callable(value):
-            return getattr(value, "__name__", "callable")
-        return value
-
-    def _build_runtime_metadata(self) -> Dict[str, Any]:
-        return {
-            "phase_history": self._serialize_value(self.phase_history),
-            "phase_timings": self._serialize_value(self.phase_timings),
-            "completed_phases": list(self.completed_phases),
-            "failed_phase": self.failed_phase,
-            "final_status": self.final_status,
-            "last_completed_phase": self.last_completed_phase,
-        }
 
     def _build_analysis_summary(self) -> Dict[str, Any]:
         total_executions = int(self.metrics.get("execution_count", 0) or 0)

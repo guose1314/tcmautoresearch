@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional
 
 import networkx as nx
 
+from src.core.phase_tracker import PhaseTrackerMixin
+
 # ModuleStatus 唯一来源：module_interface.py，此处直接引用，不重复定义
 from .module_interface import ModuleStatus
 
@@ -356,7 +358,7 @@ class ModuleRegistry:
         
         return health_info
 
-class SystemArchitecture:
+class SystemArchitecture(PhaseTrackerMixin):
     """
     中医古籍全自动研究系统架构
     
@@ -541,35 +543,16 @@ class SystemArchitecture:
         })
 
     def _build_runtime_metadata(self) -> Dict[str, Any]:
-        return {
-            "phase_history": self._serialize_value(self.phase_history),
-            "phase_timings": self._serialize_value(self.phase_timings),
-            "completed_phases": list(self.completed_phases),
-            "failed_phase": self.failed_phase,
-            "final_status": self.final_status,
-            "last_completed_phase": self.last_completed_phase,
-        }
-
-    def _serialize_value(self, value: Any) -> Any:
-        """将复杂对象转换为 JSON 安全结构。"""
-        if isinstance(value, Enum):
-            return value.value
-        if isinstance(value, datetime):
-            return value.isoformat()
-        if isinstance(value, defaultdict):
-            return {key: self._serialize_value(item) for key, item in value.items()}
-        if isinstance(value, dict):
-            return {str(key): self._serialize_value(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [self._serialize_value(item) for item in value]
-        if isinstance(value, tuple):
-            return [self._serialize_value(item) for item in value]
-        if hasattr(value, "__dataclass_fields__"):
-            return {
-                field_name: self._serialize_value(getattr(value, field_name))
-                for field_name in value.__dataclass_fields__
+        return self._build_runtime_metadata_from_dict(
+            {
+                "phase_history": self.phase_history,
+                "phase_timings": self.phase_timings,
+                "completed_phases": self.completed_phases,
+                "failed_phase": self.failed_phase,
+                "final_status": self.final_status,
+                "last_completed_phase": self.last_completed_phase,
             }
-        return value
+        )
 
     def _module_to_dict(self, module_info: ModuleInfo) -> Dict[str, Any]:
         """输出稳定的模块序列化结构。"""
