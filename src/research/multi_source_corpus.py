@@ -45,25 +45,44 @@ def recognize_classical_format(
     content_type: str = "",
     sample_text: str = ""
 ) -> str:
+    by_suffix = _recognize_by_suffix(file_name)
+    if by_suffix:
+        return by_suffix
+
+    by_media_type = _recognize_by_media_type(file_name, content_type, sample_text)
+    if by_media_type:
+        return by_media_type
+
+    by_sample_text = _recognize_by_sample_text(sample_text)
+    if by_sample_text:
+        return by_sample_text
+    return "txt"
+
+
+def _recognize_by_suffix(file_name: str) -> str:
     normalized = file_name.lower()
     for format_name, suffixes in FORMAT_RULES.items():
         for suffix in suffixes:
             if normalized.endswith(suffix):
                 return format_name
+    return ""
 
+
+def _recognize_by_media_type(file_name: str, content_type: str, sample_text: str) -> str:
     guessed_type, _ = mimetypes.guess_type(file_name)
     media_type = (content_type or guessed_type or "").lower()
     if "html" in media_type:
         return "html"
-    if "xml" in media_type and "tei" in sample_text.lower():
-        return "tei_xml"
     if "xml" in media_type:
-        return "xml"
+        return "tei_xml" if "tei" in sample_text.lower() else "xml"
     if "pdf" in media_type:
         return "pdf"
     if "json" in media_type:
         return "json"
+    return ""
 
+
+def _recognize_by_sample_text(sample_text: str) -> str:
     stripped = sample_text.strip().lower()
     if stripped.startswith("<tei") or "<teiheader" in stripped:
         return "tei_xml"
@@ -71,8 +90,7 @@ def recognize_classical_format(
         return "html"
     if stripped.startswith("{") or stripped.startswith("["):
         return "json"
-
-    return "txt"
+    return ""
 
 
 def build_source_collection_plan(

@@ -983,54 +983,61 @@ class FixingStage(PhaseTrackerMixin):
             "academic_confidence": 0.0,
             "overall": 0.0
         }
-        
-        # 计算修复置信度
-        if repair_actions:
-            repair_confidences = [a.confidence for a in repair_actions if a.success]
-            if repair_confidences:
-                confidence_scores["repair_confidence"] = sum(repair_confidences) / len(repair_confidences)
-        
-        # 计算质量置信度（基于修复成功率）
-        if repair_actions:
-            success_rate = sum(1 for a in repair_actions if a.success) / len(repair_actions)
-            confidence_scores["quality_confidence"] = success_rate
-        
-        # 计算学术置信度（基于修复质量）
-        if repair_actions:
-            # 假设高质量修复具有更高的学术价值
-            quality_scores = []
-            for action in repair_actions:
-                if action.success:
-                    # 基于修复类型和优先级计算质量得分
-                    quality = 0.0
-                    if action.priority == RepairPriority.CRITICAL:
-                        quality = 0.9
-                    elif action.priority == RepairPriority.HIGH:
-                        quality = 0.8
-                    elif action.priority == RepairPriority.MEDIUM:
-                        quality = 0.7
-                    else:
-                        quality = 0.6
-                    quality_scores.append(quality)
-            
-            if quality_scores:
-                confidence_scores["academic_confidence"] = sum(quality_scores) / len(quality_scores)
-        
+
+        confidence_scores["repair_confidence"] = self._calculate_repair_confidence(repair_actions)
+        confidence_scores["quality_confidence"] = self._calculate_success_rate(repair_actions)
+        confidence_scores["academic_confidence"] = self._calculate_academic_confidence(repair_actions)
+
         # 计算综合置信度
         weights = {
             "repair_confidence": 0.4,
             "quality_confidence": 0.3,
             "academic_confidence": 0.3
         }
-        
+
         scores = []
         for metric, weight in weights.items():
             if metric in confidence_scores:
                 scores.append(confidence_scores[metric] * weight)
-        
+
         confidence_scores["overall"] = sum(scores) if scores else 0.0
-        
+
         return confidence_scores
+
+    def _calculate_repair_confidence(self, repair_actions: List[RepairAction]) -> float:
+        if not repair_actions:
+            return 0.0
+        repair_confidences = [a.confidence for a in repair_actions if a.success]
+        if not repair_confidences:
+            return 0.0
+        return sum(repair_confidences) / len(repair_confidences)
+
+    def _calculate_success_rate(self, repair_actions: List[RepairAction]) -> float:
+        if not repair_actions:
+            return 0.0
+        successful_count = sum(1 for action in repair_actions if action.success)
+        return successful_count / len(repair_actions)
+
+    def _calculate_academic_confidence(self, repair_actions: List[RepairAction]) -> float:
+        if not repair_actions:
+            return 0.0
+        quality_scores = [
+            self._priority_academic_score(action.priority)
+            for action in repair_actions
+            if action.success
+        ]
+        if not quality_scores:
+            return 0.0
+        return sum(quality_scores) / len(quality_scores)
+
+    def _priority_academic_score(self, priority: RepairPriority) -> float:
+        mapping = {
+            RepairPriority.CRITICAL: 0.9,
+            RepairPriority.HIGH: 0.8,
+            RepairPriority.MEDIUM: 0.7,
+            RepairPriority.LOW: 0.6,
+        }
+        return mapping.get(priority, 0.6)
     
     def _update_performance_metrics(self, total_repairs: int, successful_repairs: int, duration: float):
         """更新性能指标"""

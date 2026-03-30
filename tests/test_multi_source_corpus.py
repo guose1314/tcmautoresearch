@@ -22,6 +22,17 @@ class TestMultiSourceCorpus(unittest.TestCase):
             "pdf"
         )
 
+    def test_format_recognition_by_sample_and_media_type(self):
+        self.assertEqual(
+            recognize_classical_format(content_type="application/xml", sample_text="<TEI><teiHeader>...</teiHeader></TEI>"),
+            "tei_xml",
+        )
+        self.assertEqual(
+            recognize_classical_format(content_type="application/xml", sample_text="<root>plain xml</root>"),
+            "xml",
+        )
+        self.assertEqual(recognize_classical_format(sample_text="{"), "json")
+
     def test_cross_validation(self):
         witnesses = build_witnesses_from_records(
             [

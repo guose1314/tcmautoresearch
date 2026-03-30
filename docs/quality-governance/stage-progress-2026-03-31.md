@@ -374,3 +374,27 @@
 - 回归通过：`tests/test_ctext_whitelist.py` + `tests/unit/test_literature_retriever_query_plan.py` + `tests/test_research_pipeline_literature.py`（15 passed）。
 - `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
 - `code_quality` 告警：`55 -> 53`（下降 2）。
+
+## 19. 当日增量（S2-6 后续：warning TopN 精修第 8 轮）
+
+### 19.1 精修目标
+
+- `src/research/multi_source_corpus.py`：`recognize_classical_format` 复杂度告警（16 > 12）。
+- `src/cycle/fixing_stage.py`：`_calculate_comprehensive_confidence` 复杂度告警（15 > 12）。
+
+### 19.2 代码重构
+
+- `src/research/multi_source_corpus.py`
+  - `recognize_classical_format` 拆分为 `_recognize_by_suffix` / `_recognize_by_media_type` / `_recognize_by_sample_text`，统一后缀、MIME 与文本内容三层判定流程。
+
+- `src/cycle/fixing_stage.py`
+  - `_calculate_comprehensive_confidence` 拆分为 `_calculate_repair_confidence` / `_calculate_success_rate` / `_calculate_academic_confidence` / `_priority_academic_score`。
+  - 保持权重规则不变：repair 0.4、quality 0.3、academic 0.3。
+
+### 19.3 测试与验证
+
+- 扩展 `tests/test_multi_source_corpus.py`：新增 XML/TEI 与 sample_text JSON 判定测试。
+- 扩展 `tests/unit/test_fixing_stage_classification.py`：新增综合置信度精确数值断言。
+- 回归通过：`tests/test_multi_source_corpus.py` + `tests/unit/test_fixing_stage_classification.py` + `tests/unit/test_architecture_cycle_quality.py`（145 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`53 -> 51`（下降 2）。
