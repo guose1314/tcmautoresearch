@@ -273,3 +273,31 @@ class TestResearchDataMinerExtraction:
         result = StatisticalDataMiner.association_rules(transactions)
         assert "rules" in result
         assert isinstance(result["rules"], list)
+
+    def test_time_series_and_dose_response_with_context_data(self):
+        result = StatisticalDataMiner.time_series_and_dose_response(
+            RECORDS,
+            {
+                "time_series_data": [
+                    {"time": 2020, "value": 0.2},
+                    {"time": 2021, "value": 0.4},
+                    {"time": 2022, "value": 0.6},
+                ],
+                "dose_response_data": [
+                    {"dose": 10, "response": 0.2},
+                    {"dose": 20, "response": 0.4},
+                    {"dose": 30, "response": 0.6},
+                ],
+            },
+        )
+        assert "time_series_trend" in result
+        assert "dose_response" in result
+        assert result["time_series_trend"]["direction"] in {"up", "down", "flat"}
+        assert "model" in result["dose_response"]
+
+    def test_time_series_and_dose_response_insufficient_dose_data(self):
+        result = StatisticalDataMiner.time_series_and_dose_response(
+            [{"year": 2020, "response": 0.3}],
+            {},
+        )
+        assert result["dose_response"]["model"] == "insufficient_data"

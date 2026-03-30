@@ -35,26 +35,54 @@ class PhaseTrackerMixin:
 
     def _serialize_value(self, value: Any) -> Any:
         """将嵌套对象递归转换为 JSON 安全结构。"""
+        primitive = self._serialize_primitive(value)
+        if primitive is not None:
+            return primitive
+
+        mapping_like = self._serialize_mapping_like(value)
+        if mapping_like is not None:
+            return mapping_like
+
+        sequence_like = self._serialize_sequence_like(value)
+        if sequence_like is not None:
+            return sequence_like
+
+        dataclass_like = self._serialize_dataclass_like(value)
+        if dataclass_like is not None:
+            return dataclass_like
+
+        if callable(value):
+            return getattr(value, "__name__", "callable")
+        return value
+
+    def _serialize_primitive(self, value: Any) -> Any:
+        """序列化基础类型，无法处理时返回 None。"""
         if isinstance(value, Enum):
             return value.value
         if isinstance(value, datetime):
             return value.isoformat()
-        if isinstance(value, defaultdict):
+        return None
+
+    def _serialize_mapping_like(self, value: Any) -> Optional[Dict[str, Any]]:
+        """序列化映射类型（dict/defaultdict）。"""
+        if isinstance(value, (defaultdict, dict)):
             return {str(k): self._serialize_value(v) for k, v in value.items()}
-        if isinstance(value, dict):
-            return {str(k): self._serialize_value(v) for k, v in value.items()}
-        if isinstance(value, list):
+        return None
+
+    def _serialize_sequence_like(self, value: Any) -> Optional[List[Any]]:
+        """序列化列表与元组。"""
+        if isinstance(value, (list, tuple)):
             return [self._serialize_value(i) for i in value]
-        if isinstance(value, tuple):
-            return [self._serialize_value(i) for i in value]
+        return None
+
+    def _serialize_dataclass_like(self, value: Any) -> Optional[Dict[str, Any]]:
+        """序列化 dataclass 实例。"""
         if hasattr(value, "__dataclass_fields__"):
             return {
                 fn: self._serialize_value(getattr(value, fn))
                 for fn in value.__dataclass_fields__
             }
-        if callable(value):
-            return getattr(value, "__name__", "callable")
-        return value
+        return None
 
     # ──────────────────────────────────────────────────────────────────
     # 运行时元数据快照辅助（所有模块调用）

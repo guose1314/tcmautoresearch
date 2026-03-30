@@ -214,3 +214,27 @@
 
 - 新增合并就绪文档：`docs/quality-governance/s2-6-merge-readiness-2026-03-31.md`
   - 包含：可合并结论、验证证据、改动范围、排除项、提交前执行清单。
+
+## 12. 当日增量（S2-6 后续：warning TopN 精修第 1 轮）
+
+### 12.1 精修目标
+
+- `src/core/phase_tracker.py`：`_serialize_value` 复杂度告警（13 > 12）。
+- `src/research/data_miner.py`：`frequency_and_chi_square`（20 > 12）与 `time_series_and_dose_response`（17 > 12）。
+
+### 12.2 代码重构
+
+- `src/core/phase_tracker.py`
+  - `_serialize_value` 拆分为 `_serialize_primitive` / `_serialize_mapping_like` / `_serialize_sequence_like` / `_serialize_dataclass_like`，降低分支密度并保持序列化契约一致。
+
+- `src/research/data_miner.py`
+  - 统计卡方链路拆分：`_build_herb_frequency` / `_collect_syndrome_values` / `_build_contingency_counts` / `_compute_chi_square` / `_chi2_fallback`。
+  - 时间-剂量链路拆分：`_extract_time_series` / `_fit_linear_trend` / `_extract_dose_response` / `_fit_dose_response_model` / `_try_fit_hill`。
+
+### 12.3 测试与验证
+
+- 新增：`tests/unit/test_phase_tracker_mixin.py`（序列化行为 + 阶段生命周期）。
+- 扩展：`tests/test_data_miner.py`（time_series+dose_response 场景覆盖）。
+- 回归通过：`tests/test_data_miner.py` + `tests/unit/test_phase_tracker_mixin.py` + `tests/test_research_pipeline_quality.py`（173 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`68 -> 65`（下降 3）。

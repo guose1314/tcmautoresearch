@@ -78,35 +78,15 @@ class StatisticalDataMiner:
 
     @classmethod
     def frequency_and_chi_square(cls, records: List[Dict[str, Any]], herbs: List[str]) -> Dict[str, Any]:
-        herb_freq: Dict[str, int] = {h: 0 for h in herbs}
-        syndrome_values = sorted(list({r.get("syndrome", "unknown") for r in records}))
-
-        for r in records:
-            for h in r.get("herbs", []):
-                herb_freq[h] = herb_freq.get(h, 0) + 1
+        herb_freq = cls._build_herb_frequency(records, herbs)
+        syndrome_values = cls._collect_syndrome_values(records)
 
         chi_square_items: List[Dict[str, Any]] = []
 
-        def _chi2_fallback(a: int, b: int, c: int, d: int) -> Tuple[float, Any]:
-            n = a + b + c + d
-            num = n * (a * d - b * c) ** 2
-            den = (a + b) * (c + d) * (a + c) * (b + d)
-            return (float(num / den) if den > 0 else 0.0), None
-
         for herb in herbs:
             for syndrome in syndrome_values:
-                a = sum(1 for r in records if herb in r.get("herbs", []) and r.get("syndrome") == syndrome)
-                b = sum(1 for r in records if herb in r.get("herbs", []) and r.get("syndrome") != syndrome)
-                c = sum(1 for r in records if herb not in r.get("herbs", []) and r.get("syndrome") == syndrome)
-                d = sum(1 for r in records if herb not in r.get("herbs", []) and r.get("syndrome") != syndrome)
-                if _HAS_SCIPY and _chi2_contingency is not None:
-                    try:
-                        chi2_result: Any = _chi2_contingency([[a, b], [c, d]])
-                        chi2, p = float(chi2_result[0]), float(chi2_result[1])
-                    except Exception:
-                        chi2, p = _chi2_fallback(a, b, c, d)
-                else:
-                    chi2, p = _chi2_fallback(a, b, c, d)
+                a, b, c, d = cls._build_contingency_counts(records, herb, syndrome)
+                chi2, p = cls._compute_chi_square(a, b, c, d)
                 chi_square_items.append(
                     {
                         "herb": herb,
@@ -123,6 +103,53 @@ class StatisticalDataMiner:
             "herb_frequency": [{"herb": h, "count": c} for h, c in top_freq],
             "chi_square_top": chi_square_items,
         }
+
+    @classmethod
+    def _build_herb_frequency(cls, records: List[Dict[str, Any]], herbs: List[str]) -> Dict[str, int]:
+        """统计药物频次。"""
+        herb_freq: Dict[str, int] = {h: 0 for h in herbs}
+        for record in records:
+            for herb in record.get("herbs", []):
+                herb_freq[herb] = herb_freq.get(herb, 0) + 1
+        return herb_freq
+
+    @classmethod
+    def _collect_syndrome_values(cls, records: List[Dict[str, Any]]) -> List[str]:
+        """提取症候值集合。"""
+        return sorted(list({record.get("syndrome", "unknown") for record in records}))
+
+    @classmethod
+    def _build_contingency_counts(
+        cls,
+        records: List[Dict[str, Any]],
+        herb: str,
+        syndrome: str,
+    ) -> Tuple[int, int, int, int]:
+        """构建 2x2 列联表计数。"""
+        a = sum(1 for r in records if herb in r.get("herbs", []) and r.get("syndrome") == syndrome)
+        b = sum(1 for r in records if herb in r.get("herbs", []) and r.get("syndrome") != syndrome)
+        c = sum(1 for r in records if herb not in r.get("herbs", []) and r.get("syndrome") == syndrome)
+        d = sum(1 for r in records if herb not in r.get("herbs", []) and r.get("syndrome") != syndrome)
+        return a, b, c, d
+
+    @classmethod
+    def _compute_chi_square(cls, a: int, b: int, c: int, d: int) -> Tuple[float, Any]:
+        """计算卡方值，优先使用 scipy，失败时回退公式计算。"""
+        if _HAS_SCIPY and _chi2_contingency is not None:
+            try:
+                chi2_result: Any = _chi2_contingency([[a, b], [c, d]])
+                return float(chi2_result[0]), float(chi2_result[1])
+            except Exception:
+                return cls._chi2_fallback(a, b, c, d)
+        return cls._chi2_fallback(a, b, c, d)
+
+    @classmethod
+    def _chi2_fallback(cls, a: int, b: int, c: int, d: int) -> Tuple[float, Any]:
+        """无 scipy 时的卡方近似回退。"""
+        n = a + b + c + d
+        num = n * (a * d - b * c) ** 2
+        den = (a + b) * (c + d) * (a + c) * (b + d)
+        return (float(num / den) if den > 0 else 0.0), None
 
     @classmethod
     def association_rules(cls, transactions: List[List[str]]) -> Dict[str, Any]:
@@ -209,48 +236,11 @@ class StatisticalDataMiner:
 
     @classmethod
     def time_series_and_dose_response(cls, records: List[Dict[str, Any]], context: Dict[str, Any]) -> Dict[str, Any]:
-        ts_data = context.get("time_series_data")
-        if ts_data:
-            years = np.array([float(p.get("time")) for p in ts_data])
-            values = np.array([float(p.get("value")) for p in ts_data])
-        else:
-            years = np.array([float(r.get("year") or 0.0) for r in records])
-            values = np.array([float(r.get("response", 0.0)) for r in records])
+        years, values = cls._extract_time_series(records, context)
+        slope, intercept = cls._fit_linear_trend(years, values)
 
-        if len(years) >= 2:
-            coeff = np.polyfit(years, values, deg=1)
-            slope, intercept = float(coeff[0]), float(coeff[1])
-        else:
-            slope, intercept = 0.0, float(values[0]) if len(values) else 0.0
-
-        dr_data = context.get("dose_response_data")
-        if dr_data:
-            doses = np.array([float(p.get("dose")) for p in dr_data])
-            responses = np.array([float(p.get("response")) for p in dr_data])
-        else:
-            doses = np.array([float(r.get("dose_total", 0.0)) for r in records if r.get("dose_total") is not None])
-            responses = np.array([float(r.get("response", 0.0)) for r in records if r.get("dose_total") is not None])
-
-        dose_model: Dict[str, Any] = {}
-        if len(doses) >= 3:
-            try:
-                from scipy.optimize import curve_fit
-
-                def hill(x, emax, ec50, h):
-                    return emax * (x ** h) / (ec50 ** h + x ** h + 1e-9)
-
-                popt, _ = curve_fit(hill, doses, responses, bounds=(0, [1.5, 200.0, 5.0]), maxfev=20000)
-                dose_model = {
-                    "model": "hill",
-                    "emax": round(float(popt[0]), 4),
-                    "ec50": round(float(popt[1]), 4),
-                    "hill_coefficient": round(float(popt[2]), 4),
-                }
-            except Exception:
-                c = np.polyfit(doses, responses, deg=1)
-                dose_model = {"model": "linear", "slope": round(float(c[0]), 4), "intercept": round(float(c[1]), 4)}
-        else:
-            dose_model = {"model": "insufficient_data"}
+        doses, responses = cls._extract_dose_response(records, context)
+        dose_model = cls._fit_dose_response_model(doses, responses)
 
         return {
             "time_series_trend": {
@@ -260,6 +250,84 @@ class StatisticalDataMiner:
             },
             "dose_response": dose_model,
         }
+
+    @classmethod
+    def _extract_time_series(
+        cls,
+        records: List[Dict[str, Any]],
+        context: Dict[str, Any],
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """提取时间序列输入。"""
+        ts_data = context.get("time_series_data")
+        if ts_data:
+            years = np.array([float(point.get("time")) for point in ts_data])
+            values = np.array([float(point.get("value")) for point in ts_data])
+            return years, values
+
+        years = np.array([float(record.get("year") or 0.0) for record in records])
+        values = np.array([float(record.get("response", 0.0)) for record in records])
+        return years, values
+
+    @classmethod
+    def _fit_linear_trend(cls, years: np.ndarray, values: np.ndarray) -> Tuple[float, float]:
+        """拟合线性趋势。"""
+        if len(years) >= 2:
+            coeff = np.polyfit(years, values, deg=1)
+            return float(coeff[0]), float(coeff[1])
+        return 0.0, float(values[0]) if len(values) else 0.0
+
+    @classmethod
+    def _extract_dose_response(
+        cls,
+        records: List[Dict[str, Any]],
+        context: Dict[str, Any],
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """提取剂量-响应输入。"""
+        dr_data = context.get("dose_response_data")
+        if dr_data:
+            doses = np.array([float(point.get("dose")) for point in dr_data])
+            responses = np.array([float(point.get("response")) for point in dr_data])
+            return doses, responses
+
+        doses = np.array([float(record.get("dose_total", 0.0)) for record in records if record.get("dose_total") is not None])
+        responses = np.array([float(record.get("response", 0.0)) for record in records if record.get("dose_total") is not None])
+        return doses, responses
+
+    @classmethod
+    def _fit_dose_response_model(cls, doses: np.ndarray, responses: np.ndarray) -> Dict[str, Any]:
+        """拟合剂量响应模型，优先 hill，失败时线性回退。"""
+        if len(doses) < 3:
+            return {"model": "insufficient_data"}
+
+        hill_fit = cls._try_fit_hill(doses, responses)
+        if hill_fit is not None:
+            return hill_fit
+
+        coeff = np.polyfit(doses, responses, deg=1)
+        return {
+            "model": "linear",
+            "slope": round(float(coeff[0]), 4),
+            "intercept": round(float(coeff[1]), 4),
+        }
+
+    @classmethod
+    def _try_fit_hill(cls, doses: np.ndarray, responses: np.ndarray) -> Dict[str, Any] | None:
+        """尝试 hill 曲线拟合，失败返回 None。"""
+        try:
+            from scipy.optimize import curve_fit
+
+            def hill(x, emax, ec50, h):
+                return emax * (x ** h) / (ec50 ** h + x ** h + 1e-9)
+
+            popt, _ = curve_fit(hill, doses, responses, bounds=(0, [1.5, 200.0, 5.0]), maxfev=20000)
+            return {
+                "model": "hill",
+                "emax": round(float(popt[0]), 4),
+                "ec50": round(float(popt[1]), 4),
+                "hill_coefficient": round(float(popt[2]), 4),
+            }
+        except Exception:
+            return None
 
     @classmethod
     def bayesian_network_analysis(cls, records: List[Dict[str, Any]]) -> Dict[str, Any]:
