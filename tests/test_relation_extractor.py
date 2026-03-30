@@ -44,6 +44,11 @@ class TestRelationExtractor(unittest.TestCase):
         treats_edges = [e for e in edges if e["attributes"]["relationship_type"] == "treats"]
         self.assertGreaterEqual(len(treats_edges), 2)
 
+    def test_extract_ignores_non_dict_items(self):
+        entities = self._sample_entities() + ["bad-item", 123, None]
+        edges = self.extractor.extract(entities)
+        self.assertGreater(len(edges), 0)
+
     def test_relationship_statistics(self):
         self.extractor.extract(self._sample_entities())
         stats = self.extractor.relationship_statistics()

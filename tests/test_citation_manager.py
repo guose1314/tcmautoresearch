@@ -67,6 +67,29 @@ class TestCitationManager(unittest.TestCase):
         self.assertEqual(entry["year"], "2023")
         self.assertIn("author = {张三 and 李四}", result["bibtex"])
 
+    def test_normalize_record_field_fallbacks(self):
+        result = self.manager.execute(
+            {
+                "records": [
+                    {
+                        "name": "Fallback Title",
+                        "author": "Ada Lovelace",
+                        "published": "2022-02-01",
+                        "venue": "Fallback Venue",
+                        "link": "https://example.org/fallback",
+                        "page": "12-18",
+                        "issue": "9",
+                    }
+                ]
+            }
+        )
+        entry = result["entries"][0]
+        self.assertEqual(entry["title"], "Fallback Title")
+        self.assertEqual(entry["journal"], "Fallback Venue")
+        self.assertEqual(entry["url"], "https://example.org/fallback")
+        self.assertEqual(entry["pages"], "12-18")
+        self.assertEqual(entry["number"], "9")
+
     def test_generate_gbt7714_from_article_record(self):
         manager = CitationManager({"format": "GB/T 7714-2015"})
         manager.initialize()

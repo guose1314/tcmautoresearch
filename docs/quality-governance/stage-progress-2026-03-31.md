@@ -238,3 +238,28 @@
 - 回归通过：`tests/test_data_miner.py` + `tests/unit/test_phase_tracker_mixin.py` + `tests/test_research_pipeline_quality.py`（173 passed）。
 - `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
 - `code_quality` 告警：`68 -> 65`（下降 3）。
+
+## 13. 当日增量（S2-6 后续：warning TopN 精修第 2 轮）
+
+### 13.1 精修目标
+
+- `src/extraction/relation_extractor.py`：`extract` 复杂度告警（24 > 12）。
+- `src/output/citation_manager.py`：`_normalize_record` 复杂度告警（18 > 12）。
+
+### 13.2 代码重构
+
+- `src/extraction/relation_extractor.py`
+  - `extract` 拆分为 `_filter_entities_by_type`、`_build_name_to_node_map`、`_extract_formula_herb_edges`、`_extract_herb_efficacy_edges`、`_extract_treats_edges`。
+  - 对非 dict 实体输入增加兼容过滤，避免异常项污染关系抽取流程。
+
+- `src/output/citation_manager.py`
+  - `_normalize_record` 拆分字段提取逻辑：新增 `_collect_record_text_fields` 与 `_read_first_text`。
+  - 保持 BibTeX / GB-T 输出契约与字段语义不变。
+
+### 13.3 测试与验证
+
+- 扩展 `tests/test_relation_extractor.py`：新增非 dict 输入兼容测试。
+- 扩展 `tests/test_citation_manager.py`：新增字段回退（venue/link/page/issue）行为测试。
+- 回归通过：`tests/test_relation_extractor.py` + `tests/test_citation_manager.py` + `tests/test_research_pipeline_quality.py`（104 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`65 -> 63`（下降 2）。
