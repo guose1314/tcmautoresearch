@@ -46,53 +46,68 @@ class DataMiner:
         if not records or not herbs:
             return {"clusters": [], "factors": []}
 
-        X = np.array(
-            [[1.0 if h in r.get("herbs", []) else 0.0 for h in herbs] for r in records]
-        )
+        X = cls._build_binary_matrix(records, herbs)
         n_clusters = min(3, len(records))
 
-        # ---- 聚类 ----
-        clusters_out: List[Dict[str, Any]] = []
-        try:
-            labels = cls._numpy_kmeans(X, k=n_clusters)
-            for i, label in enumerate(labels):
-                clusters_out.append(
-                    {"formula": records[i].get("formula"), "cluster": int(label)}
-                )
-        except Exception:
-            clusters_out = [
-                {"formula": r.get("formula"), "cluster": 0} for r in records
-            ]
-
-        # ---- 因子分析 ----
-        factors_out: List[Dict[str, Any]] = []
-        if _HAS_SKLEARN and _FactorAnalysis is not None:
-            try:
-                n_components = min(2, X.shape[1], X.shape[0])
-                fa = _FactorAnalysis(n_components=n_components, random_state=42)
-                fa.fit(X)
-                loadings = fa.components_
-                for idx, comp in enumerate(loadings):
-                    pairs = sorted(
-                        [(herbs[j], abs(float(comp[j]))) for j in range(len(herbs))],
-                        key=lambda x: x[1],
-                        reverse=True,
-                    )
-                    factors_out.append(
-                        {
-                            "factor": idx,
-                            "top_herbs": [
-                                {"herb": h, "loading": round(v, 4)}
-                                for h, v in pairs[:5]
-                            ],
-                        }
-                    )
-            except Exception:
-                factors_out = cls._svd_fallback_factors(X, herbs)
-        else:
-            factors_out = cls._svd_fallback_factors(X, herbs)
+        clusters_out = cls._cluster_records(records, X, n_clusters)
+        factors_out = cls._analyze_factors(X, herbs)
 
         return {"clusters": clusters_out, "factors": factors_out}
+
+    @classmethod
+    def _build_binary_matrix(cls, records: List[Dict[str, Any]], herbs: List[str]) -> np.ndarray:
+        """构建方剂-药物二值矩阵。"""
+        return np.array(
+            [[1.0 if herb in record.get("herbs", []) else 0.0 for herb in herbs] for record in records]
+        )
+
+    @classmethod
+    def _cluster_records(
+        cls,
+        records: List[Dict[str, Any]],
+        matrix: np.ndarray,
+        n_clusters: int,
+    ) -> List[Dict[str, Any]]:
+        """执行 KMeans 聚类并封装输出。"""
+        try:
+            labels = cls._numpy_kmeans(matrix, k=n_clusters)
+            return [
+                {"formula": records[index].get("formula"), "cluster": int(label)}
+                for index, label in enumerate(labels)
+            ]
+        except Exception:
+            return [{"formula": record.get("formula"), "cluster": 0} for record in records]
+
+    @classmethod
+    def _analyze_factors(cls, matrix: np.ndarray, herbs: List[str]) -> List[Dict[str, Any]]:
+        """执行因子分析，失败时回退 SVD。"""
+        if _HAS_SKLEARN and _FactorAnalysis is not None:
+            try:
+                n_components = min(2, matrix.shape[1], matrix.shape[0])
+                fa = _FactorAnalysis(n_components=n_components, random_state=42)
+                fa.fit(matrix)
+                return cls._format_factor_loadings(fa.components_, herbs)
+            except Exception:
+                return cls._svd_fallback_factors(matrix, herbs)
+        return cls._svd_fallback_factors(matrix, herbs)
+
+    @classmethod
+    def _format_factor_loadings(cls, loadings: Any, herbs: List[str]) -> List[Dict[str, Any]]:
+        """将因子载荷矩阵转换为统一输出结构。"""
+        factors_out: List[Dict[str, Any]] = []
+        for idx, comp in enumerate(loadings):
+            pairs = sorted(
+                [(herbs[j], abs(float(comp[j]))) for j in range(len(herbs))],
+                key=lambda x: x[1],
+                reverse=True,
+            )
+            factors_out.append(
+                {
+                    "factor": idx,
+                    "top_herbs": [{"herb": herb, "loading": round(value, 4)} for herb, value in pairs[:5]],
+                }
+            )
+        return factors_out
 
     @classmethod
     def latent_topics(

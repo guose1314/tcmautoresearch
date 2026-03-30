@@ -143,15 +143,7 @@ class EmbeddingService:
         min_score: float = 0.0,
         exclude_item_id: Optional[str] = None,
     ) -> List[SearchResult]:
-        if not query or not str(query).strip():
-            raise ValueError("query 不能为空")
-        if top_k <= 0:
-            raise ValueError("top_k 必须大于 0")
-        normalized_item_type = (
-            self._ontology.normalize_node_type(item_type, strict=True) if item_type else None
-        )
-        if normalized_item_type and not self._ontology.validate_embedding_item_type(normalized_item_type):
-            raise ValueError(f"不支持的 item_type: {item_type}")
+        normalized_item_type = self._validate_search_request(query, top_k, item_type)
         if not self._items:
             return []
         if self._embeddings is None:
@@ -165,24 +157,60 @@ class EmbeddingService:
         if not candidate_indexes:
             return []
 
-        query_vector = self._encode([query])
-        query_vector = np.asarray(query_vector, dtype=np.float32)
+        query_vector = self._prepare_query_vector(query)
+        ranked_pairs = self._rank_candidates(query_vector, top_k)
+
+        return self._build_search_results(ranked_pairs, candidate_indexes, min_score, top_k)
+
+    def _validate_search_request(
+        self,
+        query: str,
+        top_k: int,
+        item_type: Optional[str],
+    ) -> Optional[str]:
+        """校验 search 输入并返回标准化 item_type。"""
+        if not query or not str(query).strip():
+            raise ValueError("query 不能为空")
+        if top_k <= 0:
+            raise ValueError("top_k 必须大于 0")
+
+        normalized_item_type = self._ontology.normalize_node_type(item_type, strict=True) if item_type else None
+        if normalized_item_type and not self._ontology.validate_embedding_item_type(normalized_item_type):
+            raise ValueError(f"不支持的 item_type: {item_type}")
+        return normalized_item_type
+
+    def _prepare_query_vector(self, query: str) -> np.ndarray:
+        """编码并标准化查询向量。"""
+        query_vector = np.asarray(self._encode([query]), dtype=np.float32)
         if self.normalize_embeddings:
             query_vector = self._normalize(query_vector)
+        return query_vector
+
+    def _rank_candidates(self, query_vector: np.ndarray, top_k: int) -> List[tuple[int, float]]:
+        """按相似度生成候选排序。"""
+        assert self._embeddings is not None
 
         if self._faiss_enabled and self._index is not None:
             limit = min(max(top_k * 4, top_k), len(self._items))
             scores, indices = self._index.search(query_vector, limit)
-            ranked_pairs = [
+            return [
                 (int(index), float(score))
                 for index, score in zip(indices[0].tolist(), scores[0].tolist())
                 if index >= 0
             ]
-        else:
-            similarities = np.dot(self._embeddings, query_vector[0])
-            ranked_indexes = np.argsort(-similarities)
-            ranked_pairs = [(int(index), float(similarities[index])) for index in ranked_indexes.tolist()]
 
+        similarities = np.dot(self._embeddings, query_vector[0])
+        ranked_indexes = np.argsort(-similarities)
+        return [(int(index), float(similarities[index])) for index in ranked_indexes.tolist()]
+
+    def _build_search_results(
+        self,
+        ranked_pairs: List[tuple[int, float]],
+        candidate_indexes: List[int],
+        min_score: float,
+        top_k: int,
+    ) -> List[SearchResult]:
+        """将候选分数转换为 SearchResult 列表。"""
         allowed = set(candidate_indexes)
         results: List[SearchResult] = []
         for index, score in ranked_pairs:
@@ -289,25 +317,41 @@ class EmbeddingService:
         self._items = remaining + list(new_items)
 
     def _coerce_formula_item(self, item: Dict[str, Any]) -> EmbeddingItem:
-        formula_id = str(item.get("formula_id") or item.get("id") or item.get("name") or "").strip()
-        name = str(item.get("name") or item.get("formula") or "").strip()
-        if not formula_id or not name:
-            raise ValueError("formula 项必须包含 id/name")
-        herbs = item.get("herbs") or []
-        indications = item.get("indications") or item.get("syndromes") or []
-        text_parts = [name]
-        if isinstance(herbs, list) and herbs:
-            text_parts.append("药物:" + " ".join(str(part) for part in herbs if part))
-        if isinstance(indications, list) and indications:
-            text_parts.append("证候:" + " ".join(str(part) for part in indications if part))
-        if item.get("description"):
-            text_parts.append(str(item.get("description")))
+        formula_id, name = self._extract_formula_identity(item)
+        text_parts = self._build_formula_text_parts(item, name)
         return EmbeddingItem(
             item_id=formula_id,
             text="；".join(part for part in text_parts if part),
             item_type="formula",
             metadata={k: v for k, v in item.items() if k not in {"text"}},
         )
+
+    def _extract_formula_identity(self, item: Dict[str, Any]) -> tuple[str, str]:
+        """提取并校验 formula 的 id 与 name。"""
+        formula_id = str(item.get("formula_id") or item.get("id") or item.get("name") or "").strip()
+        name = str(item.get("name") or item.get("formula") or "").strip()
+        if not formula_id or not name:
+            raise ValueError("formula 项必须包含 id/name")
+        return formula_id, name
+
+    def _build_formula_text_parts(self, item: Dict[str, Any], name: str) -> List[str]:
+        """构建 formula 向量化文本片段。"""
+        text_parts = [name]
+        text_parts.extend(self._optional_list_text(item.get("herbs"), "药物:"))
+        text_parts.extend(self._optional_list_text(item.get("indications") or item.get("syndromes"), "证候:"))
+
+        description = str(item.get("description") or "").strip()
+        if description:
+            text_parts.append(description)
+        return text_parts
+
+    def _optional_list_text(self, value: Any, prefix: str) -> List[str]:
+        """将可选列表字段转换为文本片段。"""
+        if isinstance(value, list) and value:
+            text = " ".join(str(part) for part in value if part)
+            if text:
+                return [f"{prefix}{text}"]
+        return []
 
     def _coerce_syndrome_item(self, item: Dict[str, Any]) -> EmbeddingItem:
         syndrome_id = str(item.get("syndrome_id") or item.get("id") or item.get("name") or "").strip()

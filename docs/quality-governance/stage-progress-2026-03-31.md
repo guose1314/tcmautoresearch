@@ -263,3 +263,46 @@
 - 回归通过：`tests/test_relation_extractor.py` + `tests/test_citation_manager.py` + `tests/test_research_pipeline_quality.py`（104 passed）。
 - `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
 - `code_quality` 告警：`65 -> 63`（下降 2）。
+
+## 14. 当日增量（S2-6 后续：warning TopN 精修第 3 轮）
+
+### 14.1 精修目标
+
+- `src/analytics/data_miner.py`：`cluster` 复杂度告警（14 > 12）。
+- `src/knowledge/embedding_service.py`：`_coerce_formula_item` 复杂度告警（15 > 12）。
+
+### 14.2 代码重构
+
+- `src/analytics/data_miner.py`
+  - `cluster` 拆分为 `_build_binary_matrix` / `_cluster_records` / `_analyze_factors` / `_format_factor_loadings`。
+
+- `src/knowledge/embedding_service.py`
+  - `_coerce_formula_item` 拆分为 `_extract_formula_identity` / `_build_formula_text_parts` / `_optional_list_text`。
+
+### 14.3 测试与验证
+
+- 扩展 `tests/test_embedding_service.py`：增加 `syndromes` 回退构造文本测试。
+- 回归通过：`tests/test_data_miner.py` + `tests/test_embedding_service.py` + `tests/test_research_pipeline_quality.py`（143 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`63 -> 61`（下降 2）。
+
+## 15. 当日增量（S2-6 后续：warning TopN 精修第 4 轮）
+
+### 15.1 精修目标
+
+- `src/knowledge/embedding_service.py`：`search` 复杂度告警（18 > 12）。
+- `src/output/citation_manager.py`：`format_entry` 复杂度告警（16 > 12）。
+
+### 15.2 代码重构
+
+- `src/knowledge/embedding_service.py`
+  - `search` 拆分为 `_validate_search_request` / `_prepare_query_vector` / `_rank_candidates` / `_build_search_results`。
+
+- `src/output/citation_manager.py`
+  - `format_entry` 拆分字段收集逻辑：新增 `_collect_bibtex_fields`。
+
+### 15.3 测试与验证
+
+- 回归通过：`tests/test_embedding_service.py` + `tests/test_citation_manager.py` + `tests/test_research_pipeline_quality.py`（129 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`61 -> 59`（下降 2）。

@@ -249,6 +249,18 @@ class TestEmbeddingService(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.service.add_items([EmbeddingItem(item_id="x", text="bad", item_type="unsupported")])
 
+    def test_formula_item_uses_syndromes_fallback_when_indications_missing(self):
+        item = {
+            "formula_id": "f9",
+            "name": "测试方",
+            "herbs": ["黄芪"],
+            "syndromes": ["气虚"],
+        }
+        coerced = self.service._coerce_formula_item(item)
+        self.assertEqual(coerced.item_id, "f9")
+        self.assertIn("药物:黄芪", coerced.text)
+        self.assertIn("证候:气虚", coerced.text)
+
 
 class TestEmbeddingServiceSentenceTransformersIntegration(unittest.TestCase):
     @patch("src.knowledge.embedding_service.SentenceTransformer")
