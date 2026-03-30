@@ -132,6 +132,52 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertEqual(pipeline._resolve_whitelist_groups({}), ["jing"])
         pipeline.cleanup()
 
+    def test_collect_observe_corpus_prefers_bundle_over_fallback_error(self):
+        local_bundle = {
+            "schema_version": "1.0",
+            "bundle_id": "local-bundle",
+            "sources": ["local"],
+            "collected_at": "2026-03-31T00:00:00",
+            "stats": {"total_documents": 1},
+            "errors": [],
+            "documents": [],
+        }
+
+        with patch.object(self.pipeline, "_should_collect_ctext_corpus", return_value=True), patch.object(
+            self.pipeline, "_should_collect_local_corpus", return_value=True
+        ), patch.object(self.pipeline, "_collect_ctext_observation_corpus", return_value={"error": "ctext failed"}), patch.object(
+            self.pipeline, "_collect_local_observation_corpus", return_value=local_bundle
+        ):
+            result = self.pipeline._collect_observe_corpus_if_enabled({})
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get("sources"), ["local"])
+        self.assertNotIn("error", result)
+
+    def test_build_observe_metadata_marks_local_bundle_without_ctext(self):
+        local_bundle = {
+            "schema_version": "1.0",
+            "bundle_id": "local-bundle",
+            "sources": ["local"],
+            "collected_at": "2026-03-31T00:00:00",
+            "stats": {"total_documents": 2},
+            "errors": [],
+            "documents": [],
+        }
+
+        metadata = self.pipeline._build_observe_metadata(
+            context={"data_source": "local"},
+            observations=["o1"],
+            findings=["f1"],
+            corpus_result=local_bundle,
+            ingestion_result=None,
+            literature_result=None,
+        )
+
+        self.assertFalse(metadata["auto_collected_ctext"])
+        self.assertTrue(metadata["auto_collected_corpus"])
+        self.assertEqual(metadata["corpus_schema"], "bundle")
+
     @patch("src.research.research_pipeline.CTextCorpusCollector.cleanup")
     @patch("src.research.research_pipeline.CTextCorpusCollector.execute", side_effect=RuntimeError("x"))
     @patch("src.research.research_pipeline.CTextCorpusCollector.initialize", return_value=True)

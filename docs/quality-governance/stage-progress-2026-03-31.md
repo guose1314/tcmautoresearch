@@ -328,3 +328,25 @@
 - 回归通过：`tests/unit/test_learning_optimization_features.py` + `tests/test_research_orchestrator.py` + `tests/test_research_pipeline_quality.py`（165 passed）。
 - `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
 - `code_quality` 告警：`59 -> 57`（下降 2）。
+
+## 17. 当日增量（S2-6 后续：warning TopN 精修第 6 轮）
+
+### 17.1 精修目标
+
+- `src/research/research_pipeline.py`：`_collect_observe_corpus_if_enabled` 复杂度告警（14 > 12）。
+- `src/research/research_pipeline.py`：`_build_observe_metadata` 复杂度告警（13 > 12）。
+
+### 17.2 代码重构
+
+- `src/research/research_pipeline.py`
+  - `_collect_observe_corpus_if_enabled` 拆分为 `_register_observe_collection_result` / `_to_observe_corpus_bundle`，统一来源结果注册与错误回退逻辑。
+  - `_build_observe_metadata` 拆分为 `_is_ctext_corpus_collected` / `_build_observe_ingestion_flags` / `_has_observe_evidence_matrix`，降低分支密度并保持输出字段契约不变。
+
+### 17.3 测试与验证
+
+- 扩展 `tests/test_research_pipeline_quality.py`：
+  - 新增“ctext 失败 + local 成功”时优先返回 bundle 的回退行为测试。
+  - 新增 local-only bundle 的 observe metadata 标记测试（`auto_collected_ctext=False`）。
+- 回归通过：`tests/test_research_pipeline_quality.py` + `tests/test_research_orchestrator.py` + `tests/test_corpus_bundle.py`（164 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`57 -> 55`（下降 2）。

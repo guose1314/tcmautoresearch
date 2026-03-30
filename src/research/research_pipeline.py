@@ -770,25 +770,54 @@ class ResearchPipeline(PhaseTrackerMixin):
         bundles: List[CorpusBundle] = []
         fallback_error: Optional[Dict[str, Any]] = None
 
-        if collect_ctext:
-            ctext_result = self._collect_ctext_observation_corpus(context)
-            if ctext_result and ctext_result.get("error"):
-                fallback_error = ctext_result
-            elif ctext_result:
-                bundles.append(CorpusBundle.from_ctext_result(ctext_result))
+        ctext_result = self._collect_ctext_observation_corpus(context) if collect_ctext else None
+        fallback_error = self._register_observe_collection_result(
+            ctext_result,
+            "ctext",
+            bundles,
+            fallback_error,
+        )
 
-        if collect_local:
-            local_result = self._collect_local_observation_corpus(context)
-            if local_result and local_result.get("error"):
-                if fallback_error is None:
-                    fallback_error = local_result
-            elif local_result and is_corpus_bundle(local_result):
-                bundles.append(CorpusBundle.from_dict(local_result))
+        local_result = self._collect_local_observation_corpus(context) if collect_local else None
+        fallback_error = self._register_observe_collection_result(
+            local_result,
+            "local",
+            bundles,
+            fallback_error,
+        )
 
         if bundles:
             merged = CorpusBundle.merge(bundles) if len(bundles) > 1 else bundles[0]
             return merged.to_dict()
         return fallback_error
+
+    def _register_observe_collection_result(
+        self,
+        source_result: Optional[Dict[str, Any]],
+        source_type: str,
+        bundles: List[CorpusBundle],
+        fallback_error: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        if not source_result:
+            return fallback_error
+        if source_result.get("error"):
+            return fallback_error or source_result
+
+        bundle = self._to_observe_corpus_bundle(source_result, source_type)
+        if bundle:
+            bundles.append(bundle)
+        return fallback_error
+
+    def _to_observe_corpus_bundle(
+        self,
+        source_result: Dict[str, Any],
+        source_type: str,
+    ) -> Optional[CorpusBundle]:
+        if source_type == "ctext":
+            return CorpusBundle.from_ctext_result(source_result)
+        if source_type == "local" and is_corpus_bundle(source_result):
+            return CorpusBundle.from_dict(source_result)
+        return None
 
     def _run_observe_literature_if_enabled(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not self._should_run_observe_literature(context):
@@ -899,32 +928,53 @@ class ResearchPipeline(PhaseTrackerMixin):
         clinical_gap = ((literature_result or {}).get("clinical_gap_analysis") or {})
         ingestion_ok = bool(ingestion_result and not ingestion_result.get("error"))
         literature_ok = bool(literature_result and not literature_result.get("error"))
+        downstream_processing, semantic_modeling = self._build_observe_ingestion_flags(
+            ingestion_result,
+            ingestion_ok,
+        )
 
         return {
             "data_source": self._resolve_observe_data_source(context),
             "observation_count": len(observations),
             "finding_count": len(findings),
-            "auto_collected_ctext": bool(
-                corpus_result and (
-                    not is_corpus_bundle(corpus_result)
-                    or "ctext" in (corpus_result.get("sources") or [])
-                )
-            ),
+            "auto_collected_ctext": self._is_ctext_corpus_collected(corpus_result),
             "auto_collected_corpus": bool(corpus_result),
             "corpus_schema": "bundle" if is_corpus_bundle(corpus_result) else ("ctext_raw" if corpus_result else None),
             "ctext_groups": self._resolve_whitelist_groups(context),
-            "downstream_processing": bool(
-                ingestion_ok and ingestion_result.get("processed_document_count", 0) > 0
-            ),
-            "semantic_modeling": bool(
-                ingestion_ok and ingestion_result.get("aggregate", {}).get("semantic_graph_nodes", 0) > 0
-            ),
+            "downstream_processing": downstream_processing,
+            "semantic_modeling": semantic_modeling,
             "literature_retrieval": literature_ok,
-            "evidence_matrix": bool(
-                literature_ok and literature_result.get("evidence_matrix", {}).get("record_count", 0) > 0
-            ),
+            "evidence_matrix": self._has_observe_evidence_matrix(literature_result, literature_ok),
             "clinical_gap_analysis": bool(literature_ok and clinical_gap.get("report"))
         }
+
+    def _is_ctext_corpus_collected(self, corpus_result: Optional[Dict[str, Any]]) -> bool:
+        if not corpus_result:
+            return False
+        if not is_corpus_bundle(corpus_result):
+            return True
+        return "ctext" in (corpus_result.get("sources") or [])
+
+    def _build_observe_ingestion_flags(
+        self,
+        ingestion_result: Optional[Dict[str, Any]],
+        ingestion_ok: bool,
+    ) -> Tuple[bool, bool]:
+        if not ingestion_ok or not ingestion_result:
+            return False, False
+
+        downstream_processing = ingestion_result.get("processed_document_count", 0) > 0
+        semantic_modeling = ingestion_result.get("aggregate", {}).get("semantic_graph_nodes", 0) > 0
+        return bool(downstream_processing), bool(semantic_modeling)
+
+    def _has_observe_evidence_matrix(
+        self,
+        literature_result: Optional[Dict[str, Any]],
+        literature_ok: bool,
+    ) -> bool:
+        if not literature_ok or not literature_result:
+            return False
+        return bool(literature_result.get("evidence_matrix", {}).get("record_count", 0) > 0)
 
     def _should_run_observe_ingestion(self, context: Dict[str, Any]) -> bool:
         if "run_preprocess_and_extract" in context:
