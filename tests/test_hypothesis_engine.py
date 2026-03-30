@@ -125,6 +125,28 @@ class TestHypothesisEngine(unittest.TestCase):
             any("修订后假设" in item["statement"] for item in result["hypotheses"])
         )
 
+    def test_parse_llm_feedback_response_normalizes_cn_action_and_score(self):
+        payload = self.engine._parse_llm_feedback_response(
+            "verification_score: 评分约 0.76\n"
+            "action: 降低优先级\n"
+            "revised_statement:  修订语句  \n"
+            "revised_plan:  修订计划  \n"
+        )
+
+        self.assertEqual(payload["action"], "deprioritize")
+        self.assertAlmostEqual(payload["verification_score"], 0.76)
+        self.assertEqual(payload["revised_statement"], "修订语句")
+        self.assertEqual(payload["revised_plan"], "修订计划")
+
+    def test_parse_llm_feedback_response_keeps_invalid_score_text(self):
+        payload = self.engine._parse_llm_feedback_response(
+            "verification_score: not-a-number\n"
+            "action: retain\n"
+        )
+
+        self.assertEqual(payload["verification_score"], "not-a-number")
+        self.assertEqual(payload["action"], "retain")
+
 
 class TestHypothesisEnginePipelineIntegration(unittest.TestCase):
     def setUp(self):

@@ -418,3 +418,27 @@
 - 回归通过：`tests/unit/test_architecture_cycle_quality.py` + `tests/unit/test_cycle_demo_contract.py`（126 passed）。
 - `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
 - `code_quality` 告警：`51 -> 49`（下降 2）。
+
+## 21. 当日增量（S2-6 后续：warning TopN 精修第 10 轮）
+
+### 21.1 精修目标
+
+- `src/cycle/module_iteration.py`：`get_module_performance_report` 复杂度告警（13 > 12）。
+- `src/hypothesis/hypothesis_engine.py`：`_parse_llm_feedback_response` 复杂度告警（13 > 12）。
+
+### 21.2 代码重构
+
+- `src/cycle/module_iteration.py`
+  - `get_module_performance_report` 拆分为 `_partition_iteration_history` / `_build_module_average_metrics` / `_build_module_report_analysis_summary`。
+  - 保持模块报告输出契约不变（统计字段与 analysis_summary 语义保持一致）。
+
+- `src/hypothesis/hypothesis_engine.py`
+  - `_parse_llm_feedback_response` 拆分为 `_extract_feedback_payload` / `_normalize_feedback_score` / `_normalize_feedback_action` / `_normalize_feedback_revisions`。
+  - 保持英文与中文动作关键词映射策略不变（retain/revise/deprioritize）。
+
+### 21.3 测试与验证
+
+- 扩展 `tests/test_hypothesis_engine.py`：新增中文动作归一化与异常分值文本解析测试。
+- 回归通过：`tests/test_hypothesis_engine.py` + `tests/unit/test_architecture_cycle_quality.py`（139 passed）。
+- `tools/quality_gate.py`：通过，`overall_score=95.0`，`grade=A`，`failed_dimension_count=0`。
+- `code_quality` 告警：`49 -> 47`（下降 2）。

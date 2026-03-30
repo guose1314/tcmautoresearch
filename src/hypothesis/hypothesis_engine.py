@@ -312,6 +312,13 @@ class HypothesisEngine(BaseModule):
         )
 
     def _parse_llm_feedback_response(self, text: str) -> Dict[str, Any]:
+        payload = self._extract_feedback_payload(text)
+        self._normalize_feedback_score(payload)
+        self._normalize_feedback_action(payload)
+        self._normalize_feedback_revisions(payload)
+        return payload
+
+    def _extract_feedback_payload(self, text: str) -> Dict[str, Any]:
         payload: Dict[str, Any] = {}
         for raw_line in text.splitlines():
             line = raw_line.strip()
@@ -319,29 +326,37 @@ class HypothesisEngine(BaseModule):
                 continue
             key, value = line.split(":", 1)
             payload[key.strip().lower()] = value.strip()
+        return payload
 
+    def _normalize_feedback_score(self, payload: Dict[str, Any]) -> None:
         score_text = str(payload.get("verification_score", "")).strip()
-        if score_text:
-            match = re.search(r"[-+]?\d*\.?\d+", score_text)
-            if match:
-                try:
-                    payload["verification_score"] = float(match.group(0))
-                except ValueError:
-                    pass
+        if not score_text:
+            return
+        match = re.search(r"[-+]?\d*\.?\d+", score_text)
+        if not match:
+            return
+        try:
+            payload["verification_score"] = float(match.group(0))
+        except ValueError:
+            return
 
+    def _normalize_feedback_action(self, payload: Dict[str, Any]) -> None:
         action_text = str(payload.get("action", "")).lower()
+        if not action_text:
+            return
         if "retain" in action_text or "保留" in action_text:
             payload["action"] = "retain"
-        elif "deprioritize" in action_text or "降级" in action_text or "降低" in action_text:
+            return
+        if "deprioritize" in action_text or "降级" in action_text or "降低" in action_text:
             payload["action"] = "deprioritize"
-        elif action_text:
-            payload["action"] = "revise"
+            return
+        payload["action"] = "revise"
 
+    def _normalize_feedback_revisions(self, payload: Dict[str, Any]) -> None:
         if "revised_statement" in payload:
             payload["revised_statement"] = str(payload["revised_statement"]).strip()
         if "revised_plan" in payload:
             payload["revised_plan"] = str(payload["revised_plan"]).strip()
-        return payload
 
     def _generate_hypotheses(self, prepared: Dict[str, Any]) -> List[HypothesisCandidate]:
         llm_candidates = self._generate_hypotheses_with_llm(prepared)

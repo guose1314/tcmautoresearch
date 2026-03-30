@@ -686,41 +686,73 @@ class ModuleIterationCycle(PhaseTrackerMixin):
         if not self.iteration_history:
             return {"message": "还没有执行任何迭代"}
 
-        completed_iterations = [item for item in self.iteration_history if item.status == "completed"]
-        failed_iterations = [item for item in self.iteration_history if item.status == "failed"]
-
-        execution_times = [item.duration for item in completed_iterations]
-        avg_execution_time = sum(execution_times) / len(execution_times) if execution_times else 0
-
-        quality_scores = [item.quality_assessment.get("overall_quality", 0.0) for item in completed_iterations]
-        avg_quality_score = sum(quality_scores) / len(quality_scores) if quality_scores else 0
-
-        confidence_scores = [item.confidence_scores.get("overall", 0.0) for item in completed_iterations]
-        avg_confidence_score = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0
+        completed_iterations, failed_iterations = self._partition_iteration_history()
+        average_metrics = self._build_module_average_metrics(completed_iterations)
+        analysis_summary = self._build_module_report_analysis_summary(
+            len(failed_iterations),
+            average_metrics["average_quality_score"],
+        )
 
         return {
             "module_name": self.module_name,
             "total_iterations": len(self.iteration_history),
             "successful_iterations": len(completed_iterations),
             "failed_iterations": len(failed_iterations),
-            "average_execution_time": avg_execution_time,
-            "average_quality_score": avg_quality_score,
-            "average_confidence_score": avg_confidence_score,
+            "average_execution_time": average_metrics["average_execution_time"],
+            "average_quality_score": average_metrics["average_quality_score"],
+            "average_confidence_score": average_metrics["average_confidence_score"],
             "performance_metrics": self._serialize_value(self.performance_metrics),
-            "analysis_summary": {
-                "status": "stable"
-                if len(failed_iterations) == 0 and avg_quality_score >= self.governance_config["minimum_stable_quality"]
-                else "needs_followup",
-                "failed_operation_count": len(self.failed_operations),
-                "failed_phase": self.module_metadata.get("failed_phase"),
-                "last_completed_phase": self.module_metadata.get("last_completed_phase"),
-                "final_status": self.module_metadata.get("final_status", "initialized"),
-            },
+            "analysis_summary": analysis_summary,
             "failed_operations": self._serialize_value(self.failed_operations),
             "metadata": self._build_runtime_metadata(),
             "latest_results": [self._serialize_module_iteration_result(item) for item in self.iteration_history[-3:]],
             "failed_iterations_details": [self._serialize_module_iteration_result(item) for item in failed_iterations],
             "report_metadata": self._build_module_report_metadata(),
+        }
+
+    def _partition_iteration_history(self) -> tuple[List[ModuleIterationResult], List[ModuleIterationResult]]:
+        completed = [item for item in self.iteration_history if item.status == "completed"]
+        failed = [item for item in self.iteration_history if item.status == "failed"]
+        return completed, failed
+
+    def _build_module_average_metrics(self, completed_iterations: List[ModuleIterationResult]) -> Dict[str, float]:
+        if not completed_iterations:
+            return {
+                "average_execution_time": 0.0,
+                "average_quality_score": 0.0,
+                "average_confidence_score": 0.0,
+            }
+
+        avg_execution_time = sum(item.duration for item in completed_iterations) / len(completed_iterations)
+        avg_quality_score = sum(
+            item.quality_assessment.get("overall_quality", 0.0)
+            for item in completed_iterations
+        ) / len(completed_iterations)
+        avg_confidence_score = sum(
+            item.confidence_scores.get("overall", 0.0)
+            for item in completed_iterations
+        ) / len(completed_iterations)
+        return {
+            "average_execution_time": avg_execution_time,
+            "average_quality_score": avg_quality_score,
+            "average_confidence_score": avg_confidence_score,
+        }
+
+    def _build_module_report_analysis_summary(
+        self,
+        failed_iteration_count: int,
+        avg_quality_score: float,
+    ) -> Dict[str, Any]:
+        is_stable = (
+            failed_iteration_count == 0
+            and avg_quality_score >= self.governance_config["minimum_stable_quality"]
+        )
+        return {
+            "status": "stable" if is_stable else "needs_followup",
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.module_metadata.get("failed_phase"),
+            "last_completed_phase": self.module_metadata.get("last_completed_phase"),
+            "final_status": self.module_metadata.get("final_status", "initialized"),
         }
 
     def _build_module_report_metadata(self) -> Dict[str, Any]:
