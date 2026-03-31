@@ -25,9 +25,7 @@ from src.storage.db_models import (
 from src.storage.neo4j_driver import (
     Neo4jDriver,
     Neo4jEdge,
-    Neo4jNode,
     entity_to_neo4j_node,
-    relationship_to_neo4j_edge,
 )
 
 logger = logging.getLogger(__name__)

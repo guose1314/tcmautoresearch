@@ -1,0 +1,13 @@
+1. Get the application URL by running these commands:
+{{- if contains "NodePort" .Values.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "tcmautoresearch.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.service.type }}
+  echo "Run 'kubectl get svc --namespace {{ .Release.Namespace }} {{ include "tcmautoresearch.fullname" . }} -w' to get external IP"
+{{- else }}
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "tcmautoresearch.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8000:{{ .Values.service.targetPort }}
+  echo "Open http://127.0.0.1:8000/liveness"
+  echo "Open http://127.0.0.1:8000/readiness"
+{{- end }}

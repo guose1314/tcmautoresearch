@@ -12,11 +12,11 @@ stdout_reconfigure = getattr(sys.stdout, "reconfigure", None)
 if callable(stdout_reconfigure):
     stdout_reconfigure(encoding='utf-8')
 
-from src.extractors.advanced_entity_extractor import AdvancedEntityExtractor
+from src.analysis.entity_extractor import AdvancedEntityExtractor
 
 # 导入依赖模块
-from src.preprocessor.document_preprocessor import DocumentPreprocessor
-from src.semantic_modeling.semantic_graph_builder import SemanticGraphBuilder
+from src.analysis.preprocessor import DocumentPreprocessor
+from src.analysis.semantic_graph import SemanticGraphBuilder
 from src.semantic_modeling.tcm_relationships import (
     RelationshipType,
     TCMRelationshipDefinitions,

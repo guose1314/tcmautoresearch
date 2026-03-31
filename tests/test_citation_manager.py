@@ -1,7 +1,16 @@
+import importlib
+import os
+import tempfile
 import unittest
 
-from src.output.citation_manager import CitationManager
+from src.generation.citation_manager import CitationManager
 from src.research.research_pipeline import ResearchPhase, ResearchPipeline
+
+DOCX_AVAILABLE = True
+try:
+    importlib.import_module("docx")
+except ImportError:
+    DOCX_AVAILABLE = False
 
 
 class TestCitationManager(unittest.TestCase):
@@ -143,10 +152,19 @@ class TestCitationManager(unittest.TestCase):
 
 class TestCitationManagerPipelineIntegration(unittest.TestCase):
     def setUp(self):
-        self.pipeline = ResearchPipeline({})
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.pipeline = ResearchPipeline(
+            {
+                "paper_writing": {
+                    "output_dir": self.tempdir.name,
+                    "output_formats": ["markdown", "docx"],
+                }
+            }
+        )
 
     def tearDown(self):
         self.pipeline.cleanup()
+        self.tempdir.cleanup()
 
     def test_publish_phase_generates_bibtex_from_observe_literature(self):
         cycle = self.pipeline.create_research_cycle(
@@ -231,6 +249,128 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
         )
         self.assertIn("GB/T 7714 参考文献", result["deliverables"])
         self.assertIn("[1]", result["gbt7714"])
+
+    def test_publish_phase_generates_real_paper_outputs(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="publish-paper-cycle",
+            description="publish paper integration test",
+            objective="桂枝汤证据整合",
+            scope="src/output",
+            researchers=["tester"],
+        )
+        self.pipeline.start_research_cycle(cycle.cycle_id)
+        cycle.phase_executions[ResearchPhase.OBSERVE] = {
+            "result": {
+                "literature_pipeline": {
+                    "records": [
+                        {
+                            "title": "桂枝汤证据整合研究",
+                            "authors": ["Ada Lovelace"],
+                            "year": 2025,
+                            "journal": "TCM Evidence Review",
+                        }
+                    ]
+                },
+                "ingestion_pipeline": {
+                    "documents": [
+                        {"title": "桂枝汤", "urn": "doc-1"},
+                        {"title": "太阳中风证", "urn": "doc-2"},
+                    ]
+                },
+            }
+        }
+        cycle.phase_executions[ResearchPhase.HYPOTHESIS] = {
+            "result": {
+                "hypotheses": [
+                    {
+                        "hypothesis_id": "hyp-1",
+                        "title": "桂枝汤调和营卫假设",
+                        "statement": "桂枝汤可能通过调和营卫改善太阳中风证相关症状。",
+                        "domain": "formula_research",
+                        "keywords": ["桂枝汤", "营卫", "太阳中风证"],
+                        "validation_plan": "结合古籍文献与现代临床证据进行验证。",
+                    }
+                ],
+                "metadata": {"selected_hypothesis_id": "hyp-1"},
+            }
+        }
+        cycle.phase_executions[ResearchPhase.ANALYZE] = {
+            "result": {
+                "results": {
+                    "statistical_significance": True,
+                    "confidence_level": 0.95,
+                    "effect_size": 0.76,
+                    "p_value": 0.003,
+                    "interpretation": "桂枝汤核心配伍与营卫调和证据之间存在稳定关联",
+                    "limitations": ["样本量有限"],
+                    "data_mining_result": {
+                        "methods_executed": ["association_rules", "clustering"],
+                        "association_rules": {
+                            "rules": [
+                                {
+                                    "antecedent": ["桂枝"],
+                                    "consequent": ["白芍"],
+                                    "support": 0.62,
+                                    "confidence": 0.81,
+                                    "lift": 1.18,
+                                }
+                            ]
+                        },
+                        "clustering": {
+                            "cluster_summary": [
+                                {
+                                    "cluster": 0,
+                                    "size": 2,
+                                    "top_items": [
+                                        {"item": "桂枝", "count": 2},
+                                        {"item": "白芍", "count": 2},
+                                    ],
+                                }
+                            ]
+                        },
+                    },
+                    "research_perspectives": {
+                        "桂枝汤": {
+                            "integrated": {
+                                "similar_formula_matches": [
+                                    {
+                                        "formula_name": "桂麻各半汤",
+                                        "similarity_score": 0.87,
+                                        "retrieval_sources": ["embedding", "relationship_reasoning"],
+                                        "graph_evidence": {
+                                            "source": "neo4j+relationship_reasoning",
+                                            "evidence_score": 0.91,
+                                            "shared_herbs": [{"herb": "桂枝"}, {"herb": "白芍"}],
+                                            "shared_syndromes": ["营卫不和"],
+                                            "shared_herb_count": 2,
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                },
+                "metadata": {"analysis_type": "integrated_analysis"},
+            }
+        }
+
+        result = self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.PUBLISH, {})
+
+        self.assertIn("paper_draft", result)
+        self.assertTrue(result["paper_draft"].get("sections"))
+        self.assertIn("output_files", result)
+        self.assertIn("markdown", result["output_files"])
+        self.assertTrue(os.path.exists(result["output_files"]["markdown"]))
+        markdown_text = open(result["output_files"]["markdown"], "r", encoding="utf-8").read()
+        self.assertIn("统计分析提示当前结果具有稳定信号", markdown_text)
+        self.assertIn("综合解释认为：桂枝汤核心配伍与营卫调和证据之间存在稳定关联", markdown_text)
+        self.assertIn("类方图谱证据", markdown_text)
+        self.assertIn("桂枝汤 与 桂麻各半汤", markdown_text)
+        self.assertIn("Markdown 论文初稿", result["deliverables"])
+        if DOCX_AVAILABLE:
+            self.assertIn("docx", result["output_files"])
+            self.assertTrue(os.path.exists(result["output_files"]["docx"]))
+            self.assertIn("DOCX 论文初稿", result["deliverables"])
 
 
 if __name__ == "__main__":

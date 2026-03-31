@@ -3,8 +3,8 @@ import os
 import tempfile
 import unittest
 
-from src.research.ctext_corpus_collector import CTextCorpusCollector
-from src.research.ctext_whitelist import build_batch_manifest, load_whitelist
+from src.collector.ctext_corpus_collector import CTextCorpusCollector
+from src.collector.ctext_whitelist import build_batch_manifest, load_whitelist
 
 
 class TestCTextWhitelist(unittest.TestCase):

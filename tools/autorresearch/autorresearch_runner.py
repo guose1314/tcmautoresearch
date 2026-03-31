@@ -23,10 +23,62 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+_CONFIG_LOADER_REPO_ROOT = next(
+    (parent for parent in Path(__file__).resolve().parents if (parent / "src" / "infrastructure" / "config_loader.py").exists()),
+    None,
+)
+if _CONFIG_LOADER_REPO_ROOT is not None and str(_CONFIG_LOADER_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CONFIG_LOADER_REPO_ROOT))
+
 try:
-    import yaml
-except ImportError:  # pragma: no cover
-    yaml = None
+    from src.infrastructure.config_loader import load_settings_section
+except ModuleNotFoundError:
+    try:
+        import yaml as _fallback_yaml
+    except ImportError:  # pragma: no cover
+        _fallback_yaml = None
+
+    def _fallback_deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+        merged = dict(base)
+        for key, value in override.items():
+            existing = merged.get(key)
+            if isinstance(existing, dict) and isinstance(value, dict):
+                merged[key] = _fallback_deep_merge(existing, value)
+                continue
+            merged[key] = value
+        return merged
+
+    def _fallback_get_nested(mapping: Dict[str, Any], dotted_path: str) -> Dict[str, Any]:
+        current: Any = mapping
+        for segment in (part for part in dotted_path.split(".") if part):
+            if not isinstance(current, dict) or segment not in current:
+                return {}
+            current = current[segment]
+        return current if isinstance(current, dict) else {}
+
+    def load_settings_section(
+        *candidates: str,
+        root_path: str | Path | None = None,
+        config_path: str | Path | None = None,
+        environment: str | None = None,
+        default: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        del root_path, environment
+        merged = dict(default or {})
+        if config_path is None or _fallback_yaml is None:
+            return merged
+        candidate_path = Path(config_path)
+        if not candidate_path.exists():
+            return merged
+        try:
+            payload = _fallback_yaml.safe_load(candidate_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return merged
+        for candidate in candidates:
+            section = _fallback_get_nested(payload, candidate)
+            if isinstance(section, dict):
+                merged = _fallback_deep_merge(merged, section)
+        return merged
 
 VAL_RE = re.compile(r"val_bpb\s*=\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE)
 VRAM_RE = re.compile(r"vram_peak_mb\s*=\s*([0-9]+)", re.IGNORECASE)
@@ -67,15 +119,11 @@ def _now_iso() -> str:
 
 
 def _load_autorresearch_section(config_path: Path | None) -> Dict[str, Any]:
-    if config_path is None or not config_path.exists() or yaml is None:
-        return {}
-    try:
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return {}
-    governance = data.get("governance") or {}
-    section = governance.get("autorresearch_runner") or {}
-    return section if isinstance(section, dict) else {}
+    return load_settings_section(
+        "governance.autorresearch_runner",
+        config_path=config_path,
+        default={},
+    )
 
 
 def _load_governance_config(config_path: Path | None) -> Dict[str, Any]:

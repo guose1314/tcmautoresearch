@@ -12,9 +12,10 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from importlib import import_module
 from typing import Any, Dict, List, Optional
 
-import networkx as nx
+nx = import_module("networkx")
 
 from src.core.phase_tracker import PhaseTrackerMixin
 
@@ -655,6 +656,10 @@ class SystemArchitecture(PhaseTrackerMixin):
             "metadata": self._build_runtime_metadata(),
             "report_metadata": self._build_report_metadata(),
         }
+
+    def get_system_export_payload(self) -> Dict[str, Any]:
+        """公开系统导出载荷，供 API 与自动化任务复用。"""
+        return self._build_system_export_payload()
     
     def register_module(self, module_info: ModuleInfo) -> bool:
         """

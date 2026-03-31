@@ -1,6 +1,6 @@
 import unittest
 
-from src.research.multi_source_corpus import (
+from src.collector.multi_source_corpus import (
     build_source_collection_plan,
     build_witnesses_from_records,
     cross_validate_witnesses,

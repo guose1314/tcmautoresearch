@@ -1,5 +1,6 @@
 """tests/test_embedding_service.py — 3.3 向量检索服务单元测试"""
 
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -260,6 +261,102 @@ class TestEmbeddingService(unittest.TestCase):
         self.assertEqual(coerced.item_id, "f9")
         self.assertIn("药物:黄芪", coerced.text)
         self.assertIn("证候:气虚", coerced.text)
+
+    def test_persisted_index_can_be_loaded_without_reencoding(self):
+        formulas = [
+            {
+                "formula_id": "f1",
+                "name": "四君子汤",
+                "herbs": ["人参", "白术", "茯苓", "甘草"],
+                "indications": ["脾虚", "气虚"],
+                "description": "补气健脾",
+            },
+            {
+                "formula_id": "f2",
+                "name": "六君子汤",
+                "herbs": ["人参", "白术", "茯苓", "甘草", "陈皮", "半夏"],
+                "indications": ["脾虚", "痰湿"],
+                "description": "补气化痰",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            service = EmbeddingService(encoder=self.service._encoder, use_faiss=False, persist_directory=tmp)
+            service.build_formula_index(formulas)
+
+            reloaded = EmbeddingService(encoder=self.service._encoder, use_faiss=False, persist_directory=tmp)
+            self.assertEqual(reloaded.size, 2)
+            results = reloaded.search_similar_formulas(self.query_formula, top_k=2)
+
+        self.assertEqual(results[0].item_id, "f1")
+        self.assertEqual(results[1].item_id, "f2")
+
+    def test_build_formula_index_reuses_persisted_signature_without_encoder_call(self):
+        class _CountingEncoder(FakeEncoder):
+            def __init__(self, mapping):
+                super().__init__(mapping)
+                self.calls = 0
+
+            def encode(self, texts, normalize_embeddings=False, convert_to_numpy=True):
+                self.calls += 1
+                return super().encode(texts, normalize_embeddings=normalize_embeddings, convert_to_numpy=convert_to_numpy)
+
+        formulas = [
+            {
+                "formula_id": "f1",
+                "name": "四君子汤",
+                "herbs": ["人参", "白术", "茯苓", "甘草"],
+                "indications": ["脾虚", "气虚"],
+                "description": "补气健脾",
+            }
+        ]
+        counting_encoder = _CountingEncoder(
+            {
+                self.formula_a: [1.0, 0.0, 0.0],
+                self.query_formula: [1.0, 0.0, 0.0],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            service = EmbeddingService(encoder=counting_encoder, use_faiss=False, persist_directory=tmp)
+            service.build_formula_index(formulas)
+            self.assertEqual(counting_encoder.calls, 1)
+
+            reloaded = EmbeddingService(encoder=counting_encoder, use_faiss=False, persist_directory=tmp)
+            reloaded.build_formula_index(formulas)
+
+        self.assertEqual(counting_encoder.calls, 1)
+
+    def test_persisted_index_invalidates_when_corpus_version_changes(self):
+        formulas = [
+            {
+                "formula_id": "f1",
+                "name": "四君子汤",
+                "herbs": ["人参", "白术", "茯苓", "甘草"],
+                "indications": ["脾虚", "气虚"],
+                "description": "补气健脾",
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            service = EmbeddingService(
+                encoder=self.service._encoder,
+                use_faiss=False,
+                persist_directory=tmp,
+                corpus_version="formula-corpus-v1",
+            )
+            service.build_formula_index(formulas)
+
+            reloaded = EmbeddingService(
+                encoder=self.service._encoder,
+                use_faiss=False,
+                persist_directory=tmp,
+                corpus_version="formula-corpus-v2",
+            )
+
+            self.assertEqual(reloaded.size, 0)
+            reloaded.build_formula_index(formulas)
+            self.assertEqual(reloaded.size, 1)
+            self.assertEqual(reloaded.stats()["corpus_version"], "formula-corpus-v2")
 
 
 class TestEmbeddingServiceSentenceTransformersIntegration(unittest.TestCase):

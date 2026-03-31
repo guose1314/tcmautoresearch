@@ -4,7 +4,7 @@
 
 import json
 
-from src.research.ctext_corpus_collector import CTextCorpusCollector
+from src.collector.ctext_corpus_collector import CTextCorpusCollector
 
 
 def main() -> None:

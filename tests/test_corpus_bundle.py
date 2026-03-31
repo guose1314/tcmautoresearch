@@ -4,14 +4,14 @@ import os
 import tempfile
 import unittest
 
-from src.corpus.corpus_bundle import (
+from src.collector.corpus_bundle import (
     BUNDLE_SCHEMA_VERSION,
     CorpusBundle,
     CorpusDocument,
     extract_text_entries,
     is_corpus_bundle,
 )
-from src.corpus.local_collector import LocalCorpusCollector, _infer_title
+from src.collector.local_collector import LocalCorpusCollector, _infer_title
 
 # ─────────────────────────────────────────────────────────────────────────────
 # helpers

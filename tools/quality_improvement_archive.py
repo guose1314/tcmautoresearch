@@ -20,16 +20,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
-try:
-    import yaml
-except ImportError:  # pragma: no cover
-    yaml = None
+_CONFIG_LOADER_REPO_ROOT = next(
+    (parent for parent in Path(__file__).resolve().parents if (parent / "src" / "infrastructure" / "config_loader.py").exists()),
+    None,
+)
+if _CONFIG_LOADER_REPO_ROOT is not None and str(_CONFIG_LOADER_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CONFIG_LOADER_REPO_ROOT))
 
+from src.infrastructure.config_loader import load_settings_section
 
 DEFAULT_GOVERNANCE_CONFIG = {
     "enable_phase_tracking": True,
@@ -44,17 +48,11 @@ def _utc_now_iso() -> str:
 
 
 def _load_archive_section(config_path: Path | None) -> Dict[str, Any]:
-    if config_path is None or not config_path.exists() or yaml is None:
-        return {}
-
-    try:
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return {}
-
-    governance = data.get("governance") or {}
-    section = governance.get("quality_improvement_archive") or {}
-    return section if isinstance(section, dict) else {}
+    return load_settings_section(
+        "governance.quality_improvement_archive",
+        config_path=config_path,
+        default={},
+    )
 
 
 def _load_governance_config(config_path: Path | None) -> Dict[str, Any]:
@@ -81,6 +79,48 @@ def _serialize_value(value: Any) -> Any:
 
 def _normalize_reference_path(path: Path | str) -> str:
     return str(path).replace("\\", "/")
+
+
+def _looks_like_clinical_gap_payload(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return any(key in value for key in ("clinical_question", "gaps", "priority_summary", "coverage_overview"))
+
+
+def _extract_clinical_gap_json_payload(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        clinical_gap = value.get("clinical_gap_analysis")
+        if isinstance(clinical_gap, dict):
+            json_payload = clinical_gap.get("json_payload")
+            if _looks_like_clinical_gap_payload(json_payload):
+                return _serialize_value(json_payload)
+            if _looks_like_clinical_gap_payload(clinical_gap):
+                return _serialize_value(clinical_gap)
+
+        json_payload = value.get("json_payload")
+        if _looks_like_clinical_gap_payload(json_payload):
+            return _serialize_value(json_payload)
+
+        for item in value.values():
+            extracted = _extract_clinical_gap_json_payload(item)
+            if extracted:
+                return extracted
+
+    if isinstance(value, list):
+        for item in value:
+            extracted = _extract_clinical_gap_json_payload(item)
+            if extracted:
+                return extracted
+
+    return {}
+
+
+def _resolve_clinical_gap_archive_payload(*reports: Any) -> Dict[str, Any]:
+    for report in reports:
+        extracted = _extract_clinical_gap_json_payload(report)
+        if extracted:
+            return extracted
+    return {}
 
 
 def _reference_list_entries(
@@ -430,6 +470,12 @@ def build_archive_entry(
 
     action_backlog = improvement_report.get("action_backlog", [])
     inventory_summary = _build_inventory_summary(inventory_report)
+    clinical_gap_analysis = _resolve_clinical_gap_archive_payload(
+        gate_report,
+        assessment_report,
+        improvement_report,
+        inventory_report,
+    )
     entry = {
         "timestamp": _utc_now_iso(),
         "overall_success": bool(gate_report.get("overall_success", False)),
@@ -443,6 +489,8 @@ def build_archive_entry(
         "next_cycle_targets": improvement_report.get("next_cycle_targets", {}),
         "inventory_summary": inventory_summary,
     }
+    if clinical_gap_analysis:
+        entry["clinical_gap_analysis"] = clinical_gap_analysis
     runtime_metadata["final_status"] = "completed"
     _complete_phase(
         runtime_metadata,
@@ -462,6 +510,7 @@ def build_archive_entry(
 def _to_md_lines(entry: Dict[str, object]) -> List[str]:
     inventory_summary = entry.get("inventory_summary") or {}
     inventory_trend = entry.get("inventory_trend") or {}
+    clinical_gap_analysis = entry.get("clinical_gap_analysis") or {}
     report_metadata = entry.get("report_metadata") or {}
     lines = [
         "# Quality Improvement Archive Entry",
@@ -502,13 +551,35 @@ def _to_md_lines(entry: Dict[str, object]) -> List[str]:
         "- Uncategorized Root Script Delta: {0}".format(inventory_trend.get("uncategorized_root_script_delta", 0)),
         "- Recommended Next Target Changed: {0}".format(inventory_trend.get("recommended_next_target_changed", False)),
         "",
+    ]
+
+    if clinical_gap_analysis:
+        priority_summary = clinical_gap_analysis.get("priority_summary") or {}
+        lines.extend(
+            [
+                "## Clinical Gap Analysis",
+                "",
+                "- Clinical Question: {0}".format(clinical_gap_analysis.get("clinical_question", "")),
+                "- Highest Priority: {0}".format(priority_summary.get("highest_priority", "低")),
+                "- Total Gaps: {0}".format(priority_summary.get("total_gaps", len(clinical_gap_analysis.get("gaps", [])))),
+                "",
+                "```json",
+                json.dumps(clinical_gap_analysis, ensure_ascii=False, indent=2),
+                "```",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
         "## Artifact References",
         "",
         "- History Path: {0}".format(report_metadata.get("history_path", "")),
         "- Latest Output Path: {0}".format(report_metadata.get("latest_output_path", "")),
         "- Dossier Path: {0}".format(report_metadata.get("dossier_path", "")),
         "",
-    ]
+        ]
+    )
     return lines
 
 

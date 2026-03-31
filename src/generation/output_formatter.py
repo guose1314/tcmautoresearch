@@ -1,0 +1,358 @@
+# src/generation/output_formatter.py  (migrated from src/output/output_generator.py)
+"""
+输出格式化模块 — 架构 3.0 重命名（原 OutputGenerator）
+"""
+import os
+from datetime import datetime
+from typing import Any, Dict, List
+
+from src.core.module_base import BaseModule
+
+
+class OutputGenerator(BaseModule):
+    """
+    输出生成器
+    """
+    
+    def __init__(self, config: Dict[str, Any] | None = None):
+        super().__init__("output_generator", config)
+        self.max_entities = int((config or {}).get("max_entities", 1000))
+        self.max_recommendations = int((config or {}).get("max_recommendations", 20))
+        self.max_string_length = int((config or {}).get("max_string_length", 5000))
+        
+    def _do_initialize(self) -> bool:
+        """初始化输出生成器"""
+        try:
+            self.logger.info("输出生成器初始化完成")
+            return True
+        except Exception as e:
+            self.logger.error(f"输出生成器初始化失败: {e}")
+            return False
+    
+    def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """执行输出生成"""
+        try:
+            # 构造输出格式
+            output_data = self._generate_output_format(context)
+            safe_output_data = self._make_json_safe(output_data)
+            
+            return {
+                "output_data": safe_output_data,
+                "output_format": "structured_json",
+                "generated_at": self._get_timestamp()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"输出生成执行失败: {e}")
+            raise
+    
+    def _generate_output_format(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """生成输出格式"""
+        source_file = str(context.get("source_file", "unknown"))
+        safe_source = os.path.basename(source_file) or "unknown"
+        entities = context.get("entities", [])
+        research_artifact = self._build_research_artifact(context)
+
+        # 构造标准输出格式
+        output = {
+            "metadata": {
+                "source": safe_source,
+                "processing_timestamp": self._get_timestamp(),
+                "objective": context.get("objective", "unknown"),
+                "protocol_version": "research-output-v2",
+                "architecture_version": "3.0-draft",
+                "standards": [
+                    "T/C IATCM 098-2023",
+                    "GB/T 15657",
+                    "ISO 21000",
+                ],
+            },
+            "analysis_results": {
+                "entities": entities[: self.max_entities],
+                "semantic_graph": context.get("semantic_graph", {}),
+                "reasoning_results": context.get("reasoning_results", {}),
+                "temporal_analysis": context.get("temporal_analysis", {}),
+                "pattern_recognition": context.get("pattern_recognition", {}),
+                "evidence_protocol": self._build_evidence_protocol(context),
+            },
+            "research_artifact": research_artifact,
+            "generation_contract": {
+                "name": "ResearchArtifact",
+                "fields": [
+                    "hypothesis",
+                    "evidence",
+                    "data_mining_result",
+                    "similar_formula_graph_evidence_summary",
+                ],
+            },
+            "quality_metrics": self._calculate_quality_metrics(context),
+            "recommendations": self._build_recommendations(context)
+        }
+        return output
+
+    def _build_research_artifact(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """构建研究域到生成域的标准产物契约。"""
+        return {
+            "hypothesis": self._resolve_hypothesis_payload(context),
+            "evidence": self._resolve_evidence_payload(context),
+            "data_mining_result": self._resolve_data_mining_payload(context),
+            "similar_formula_graph_evidence_summary": self._build_similar_formula_graph_evidence_summary(context),
+        }
+
+    def _build_similar_formula_graph_evidence_summary(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        research_perspectives = self._resolve_research_perspectives(context)
+        matches: List[Dict[str, Any]] = []
+
+        for formula_name, perspective in research_perspectives.items():
+            if not isinstance(perspective, dict):
+                continue
+            integrated = perspective.get("integrated") or {}
+            similar_matches = integrated.get("similar_formula_matches") or []
+            if not isinstance(similar_matches, list):
+                continue
+
+            for match in similar_matches:
+                if not isinstance(match, dict):
+                    continue
+                graph_evidence = match.get("graph_evidence") or {}
+                shared_herbs = self._extract_shared_herb_names(graph_evidence)
+                shared_syndromes = [
+                    str(item) for item in list(graph_evidence.get("shared_syndromes") or []) if item
+                ]
+                matches.append(
+                    {
+                        "formula_name": formula_name,
+                        "similar_formula_name": match.get("formula_name") or match.get("formula_id", ""),
+                        "similarity_score": match.get("similarity_score"),
+                        "evidence_score": graph_evidence.get("evidence_score", 0.0),
+                        "retrieval_sources": list(match.get("retrieval_sources") or []),
+                        "graph_evidence_source": graph_evidence.get("source", "unknown"),
+                        "shared_herbs": shared_herbs,
+                        "shared_herb_count": graph_evidence.get("shared_herb_count", len(shared_herbs)),
+                        "shared_syndromes": shared_syndromes,
+                        "shared_syndrome_count": len(shared_syndromes),
+                    }
+                )
+
+        return {
+            "formula_count": len(research_perspectives),
+            "match_count": len(matches),
+            "matches": matches[: self.max_entities],
+        }
+
+    def _resolve_research_perspectives(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        direct = context.get("research_perspectives")
+        if isinstance(direct, dict):
+            return direct
+
+        for key in ("semantic_analysis", "research_analysis", "analysis_results"):
+            value = context.get(key)
+            if isinstance(value, dict) and isinstance(value.get("research_perspectives"), dict):
+                return value.get("research_perspectives") or {}
+        return {}
+
+    def _extract_shared_herb_names(self, graph_evidence: Dict[str, Any]) -> List[str]:
+        shared_herbs: List[str] = []
+        for item in list(graph_evidence.get("shared_herbs") or []):
+            if isinstance(item, dict):
+                herb_name = str(item.get("herb") or "").strip()
+                if herb_name:
+                    shared_herbs.append(herb_name)
+            elif item:
+                shared_herbs.append(str(item))
+        return shared_herbs
+
+    def _resolve_hypothesis_payload(self, context: Dict[str, Any]) -> Any:
+        hypothesis = context.get("hypothesis")
+        if hypothesis is not None:
+            return hypothesis
+
+        hypothesis_phase = context.get("hypothesis_result", {})
+        if isinstance(hypothesis_phase, dict):
+            return hypothesis_phase.get("hypotheses", hypothesis_phase)
+        return []
+
+    def _resolve_evidence_payload(self, context: Dict[str, Any]) -> Any:
+        reasoning_results = context.get("reasoning_results", {})
+        if isinstance(reasoning_results, dict) and "evidence_records" in reasoning_results:
+            return reasoning_results.get("evidence_records", [])
+        return context.get("evidence", [])
+
+    def _resolve_data_mining_payload(self, context: Dict[str, Any]) -> Any:
+        for key in ("data_mining_result", "data_mining", "mining_result"):
+            if key in context:
+                return context.get(key)
+
+        analysis_results = context.get("analysis_results", {})
+        if isinstance(analysis_results, dict) and "data_mining_result" in analysis_results:
+            return analysis_results.get("data_mining_result")
+        return {}
+
+    def _build_evidence_protocol(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """构建 Evidence/Claim 输出协议，统一证据可追溯字段。"""
+        reasoning_results = context.get("reasoning_results", {})
+        evidence_records = [
+            self._normalize_evidence_record(record)
+            for record in list(reasoning_results.get("evidence_records", []) or [])
+        ]
+        claims = [
+            self._normalize_claim_record(claim)
+            for claim in list(reasoning_results.get("entity_relationships", []) or [])
+        ]
+        evidence_summary = dict(reasoning_results.get("evidence_summary", {}) or {})
+
+        return {
+            "contract_version": "evidence-claim-v1",
+            "evidence_records": evidence_records[: self.max_entities],
+            "claims": claims[: self.max_entities],
+            "evidence_summary": evidence_summary,
+            "research_grade": self._build_research_grade_protocol(reasoning_results),
+            "contract": {
+                "required_fields": [
+                    "source_entity",
+                    "target_entity",
+                    "relation_type",
+                    "confidence",
+                    "provenance",
+                ],
+                "claim_fields": [
+                    "source_entity",
+                    "target_entity",
+                    "relation_type",
+                    "confidence",
+                    "support_count",
+                    "evidence_ids",
+                ],
+            },
+        }
+
+    def _normalize_evidence_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        """将 evidence record 规整为输出契约要求的字段集。"""
+        provenance = record.get("provenance", {})
+        if not isinstance(provenance, dict):
+            provenance = {"source": str(provenance)}
+
+        return {
+            "evidence_id": record.get("evidence_id", ""),
+            "source_entity": record.get("source_entity", ""),
+            "target_entity": record.get("target_entity", ""),
+            "relation_type": record.get("relation_type", "related"),
+            "confidence": record.get("confidence", 0.0),
+            "provenance": provenance,
+        }
+
+    def _normalize_claim_record(self, claim: Dict[str, Any]) -> Dict[str, Any]:
+        """将 claim 规整为输出契约要求的字段集。"""
+        evidence_ids = claim.get("evidence_ids", [])
+        if not isinstance(evidence_ids, list):
+            evidence_ids = [str(evidence_ids)]
+
+        return {
+            "source_entity": claim.get("source_entity", claim.get("source", "")),
+            "target_entity": claim.get("target_entity", claim.get("target", "")),
+            "relation_type": claim.get("relation_type", claim.get("type", "related")),
+            "confidence": claim.get("confidence", 0.0),
+            "support_count": claim.get("support_count", len(evidence_ids)),
+            "evidence_ids": evidence_ids,
+        }
+
+    def _build_research_grade_protocol(self, reasoning_results: Dict[str, Any]) -> Dict[str, Any]:
+        """输出博士级科研诊断协议，支撑可验证结论复核。"""
+        diagnostics = dict(reasoning_results.get("research_grade_diagnostics", {}) or {})
+        fusion = dict(reasoning_results.get("multimodal_fusion", {}) or {})
+        return {
+            "diagnostics": diagnostics,
+            "fusion": {
+                "confidence": fusion.get("confidence", 0.0),
+                "evidence_score": fusion.get("evidence_score", 0.0),
+                "strategy": fusion.get("strategy", "attention"),
+            },
+        }
+    
+    def _calculate_quality_metrics(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """计算质量指标"""
+        entities = context.get("entities", [])
+        statistics = context.get("statistics", {})
+        safe_formulas = self._safe_metric_count(statistics, "formulas_count")
+        safe_herbs = self._safe_metric_count(statistics, "herbs_count")
+        safe_syndromes = self._safe_metric_count(statistics, "syndromes_count")
+        
+        return {
+            "entities_extracted": len(entities),
+            "formulas_found": safe_formulas,
+            "herbs_identified": safe_herbs,
+            "syndromes_recognized": safe_syndromes,
+            "confidence_score": 0.92,
+            "completeness": 0.88
+        }
+
+    def _safe_metric_count(self, statistics: Dict[str, Any], key: str) -> int:
+        """将统计字段安全转换为非负整数。"""
+        try:
+            return max(int(statistics.get(key, 0)), 0)
+        except (TypeError, ValueError):
+            return 0
+    
+    def _build_recommendations(self, context: Dict[str, Any]) -> List[str]:
+        """生成建议"""
+        recommendations = self._recommendations_by_entity_count(context)
+        recommendations.extend(self._recommendations_by_confidence(context))
+        return recommendations[: self.max_recommendations]
+
+    def _recommendations_by_entity_count(self, context: Dict[str, Any]) -> List[str]:
+        """基于实体规模生成建议。"""
+        entities_count = len(context.get("entities", []))
+        if entities_count < 10:
+            return ["建议增加更多样本以提高准确性"]
+        if entities_count > 50:
+            return ["实体数量较多，建议进行分组分析"]
+        return []
+
+    def _recommendations_by_confidence(self, context: Dict[str, Any]) -> List[str]:
+        """基于置信度生成建议。"""
+        try:
+            confidence = float(context.get("confidence_score", 0.5))
+        except (TypeError, ValueError):
+            confidence = 0.5
+        if confidence < 0.8:
+            return ["置信度较低，建议人工复核"]
+        return []
+
+    def _make_json_safe(self, value: Any, depth: int = 0) -> Any:
+        """将任意对象裁剪为 JSON 安全结构，避免序列化异常和超大输出。"""
+        if depth > 8:
+            return "<max-depth-reached>"
+
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+
+        if isinstance(value, str):
+            return value[: self.max_string_length]
+
+        if isinstance(value, dict):
+            return {
+                str(k)[:128]: self._make_json_safe(v, depth + 1)
+                for k, v in value.items()
+            }
+
+        if isinstance(value, (list, tuple, set)):
+            return [self._make_json_safe(v, depth + 1) for v in list(value)[: self.max_entities]]
+
+        return str(value)[: self.max_string_length]
+    
+    def _get_timestamp(self) -> str:
+        """获取时间戳"""
+        return datetime.now().isoformat()
+    
+    def _do_cleanup(self) -> bool:
+        """清理资源"""
+        try:
+            self.logger.info("输出生成器资源清理完成")
+            return True
+        except Exception as e:
+            self.logger.error(f"输出生成器资源清理失败: {e}")
+            return False
+
+
+# 架构 3.0 别名：OutputFormatter = OutputGenerator（保持向后兼容）
+OutputFormatter = OutputGenerator

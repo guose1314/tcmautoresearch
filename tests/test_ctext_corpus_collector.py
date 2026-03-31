@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.research.ctext_corpus_collector import CTextCorpusCollector
+from src.collector.ctext_corpus_collector import CTextCorpusCollector
 
 
 class TestCTextCorpusCollector(unittest.TestCase):
@@ -20,7 +20,7 @@ class TestCTextCorpusCollector(unittest.TestCase):
     def tearDown(self):
         self.collector.cleanup()
 
-    @patch("src.research.ctext_corpus_collector.requests.Session.get")
+    @patch("src.collector.ctext_corpus_collector.requests.Session.get")
     def test_collect_urn_recursive(self, mock_get):
         def side_effect(url, params=None, timeout=None):
             endpoint = url.split("/")[-1]

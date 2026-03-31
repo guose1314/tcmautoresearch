@@ -37,6 +37,16 @@ def _phase_result(phase: str) -> dict:
             ],
             "domain": "tcm",
         }
+    if phase == "publish":
+        return {
+            "phase": "publish",
+            "deliverables": ["Markdown 论文初稿", "DOCX 论文初稿"],
+            "abstract": "这是一个摘要",
+            "output_files": {
+                "markdown": "C:/workspace/output/papers/demo.md",
+                "docx": "C:/workspace/output/papers/demo.docx",
+            },
+        }
     return {"phase": phase}
 
 
@@ -175,6 +185,17 @@ class TestOrchestratorRunHappyPath(unittest.TestCase):
         hyp_outcome = next(p for p in result.phases if p.phase == "hypothesis")
         self.assertEqual(hyp_outcome.summary["hypothesis_count"], 1)
         self.assertEqual(hyp_outcome.summary["validated_count"], 1)
+
+    @patch("src.orchestration.research_orchestrator.ResearchPipeline")
+    def test_publish_summary_preserves_output_files(self, MockPipeline):
+        MockPipeline.return_value = _mock_pipeline()
+        orch = ResearchOrchestrator()
+        result = orch.run("桂枝汤")
+        publish_outcome = next(p for p in result.phases if p.phase == "publish")
+        self.assertEqual(publish_outcome.summary["deliverable_count"], 2)
+        self.assertIn("output_files", publish_outcome.summary)
+        self.assertIn("markdown", publish_outcome.summary["output_files"])
+        self.assertIn("docx", publish_outcome.summary["output_files"])
 
     @patch("src.orchestration.research_orchestrator.ResearchPipeline")
     def test_cleanup_called_even_on_happy_path(self, MockPipeline):
@@ -332,6 +353,171 @@ class TestOrchestratorMisc(unittest.TestCase):
         d = result.to_dict()
         serialized = json.dumps(d, ensure_ascii=False)
         self.assertIn("test", serialized)
+
+
+class TestOrchestratorObserveHypothesisExperimentSummary(unittest.TestCase):
+    @patch("src.research.research_pipeline.LiteratureRetriever.close")
+    @patch("src.research.research_pipeline.LiteratureRetriever.search")
+    def test_real_pipeline_three_phase_summary(self, mock_search, mock_close):
+        mock_close.return_value = None
+        mock_search.return_value = {
+            "query": "四君子汤与脾气虚证关联",
+            "sources": ["pubmed", "arxiv"],
+            "records": [
+                {
+                    "source": "pubmed",
+                    "title": "Traditional chinese medicine formula improves efficacy and safety",
+                    "authors": ["A"],
+                    "year": 2023,
+                    "doi": "10.1000/test1",
+                    "url": "https://pubmed.ncbi.nlm.nih.gov/1/",
+                    "abstract": "Randomized cohort study of traditional chinese medicine formula shows efficacy safety response and machine learning support.",
+                },
+                {
+                    "source": "arxiv",
+                    "title": "Machine learning network for TCM syndrome response",
+                    "authors": ["B"],
+                    "year": 2024,
+                    "doi": "",
+                    "url": "https://arxiv.org/abs/1234",
+                    "abstract": "Network analysis for herb formula response with risk and effectiveness outcomes.",
+                },
+            ],
+            "query_plans": [],
+            "source_stats": {
+                "pubmed": {"count": 1, "mode": "open_api", "source_name": "PubMed"},
+                "arxiv": {"count": 1, "mode": "open_api", "source_name": "arXiv"},
+            },
+            "errors": [],
+        }
+
+        orch = ResearchOrchestrator(
+            {
+                "phases": ["observe", "hypothesis", "experiment"],
+                "pipeline_config": {
+                    "literature_retrieval": {"enabled": True, "max_results_per_source": 2},
+                    "hypothesis_engine_config": {"max_hypotheses": 2, "max_validation_iterations": 1},
+                },
+            }
+        )
+
+        result = orch.run(
+            "四君子汤与脾气虚证关联",
+            phase_contexts={
+                "observe": {
+                    "run_literature_retrieval": True,
+                    "literature_query": "四君子汤与脾气虚证关联",
+                    "run_preprocess_and_extract": False,
+                    "use_ctext_whitelist": False,
+                },
+                "hypothesis": {
+                    "entities": [
+                        {"name": "四君子汤", "type": "formula", "confidence": 0.95},
+                        {"name": "脾气虚证", "type": "syndrome", "confidence": 0.88},
+                    ],
+                    "contradictions": ["存在个别样本偏差"],
+                },
+            },
+        )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual([phase.phase for phase in result.phases], ["observe", "hypothesis", "experiment"])
+
+        observe_summary = next(phase.summary for phase in result.phases if phase.phase == "observe")
+        hypothesis_summary = next(phase.summary for phase in result.phases if phase.phase == "hypothesis")
+        experiment_summary = next(phase.summary for phase in result.phases if phase.phase == "experiment")
+
+        self.assertEqual(observe_summary["literature_records"], 2)
+        self.assertGreaterEqual(hypothesis_summary["hypothesis_count"], 1)
+        self.assertEqual(experiment_summary["experiment_count"], 1)
+        self.assertEqual(experiment_summary["success_rate"], 1.0)
+        self.assertTrue(experiment_summary["selected_hypothesis_id"])
+        self.assertEqual(experiment_summary["evidence_record_count"], 2)
+        self.assertGreater(experiment_summary["weighted_evidence_score"], 0.0)
+
+    @patch("src.research.research_pipeline.ResearchPipeline._run_clinical_gap_analysis")
+    @patch("src.research.research_pipeline.LiteratureRetriever.close")
+    @patch("src.research.research_pipeline.LiteratureRetriever.search")
+    def test_experiment_summary_includes_high_priority_gap_methodology_and_sample_size(self, mock_search, mock_close, mock_gap):
+        mock_close.return_value = None
+        mock_search.return_value = {
+            "query": "四君子汤与脾气虚证关联",
+            "sources": ["pubmed", "arxiv"],
+            "records": [
+                {
+                    "source": "pubmed",
+                    "title": "Traditional chinese medicine formula improves efficacy and safety",
+                    "authors": ["A"],
+                    "year": 2023,
+                    "doi": "10.1000/test1",
+                    "url": "https://pubmed.ncbi.nlm.nih.gov/1/",
+                    "abstract": "Randomized cohort study of traditional chinese medicine formula shows efficacy safety response and machine learning support.",
+                },
+                {
+                    "source": "arxiv",
+                    "title": "Machine learning network for TCM syndrome response",
+                    "authors": ["B"],
+                    "year": 2024,
+                    "doi": "",
+                    "url": "https://arxiv.org/abs/1234",
+                    "abstract": "Network analysis for herb formula response with risk and effectiveness outcomes.",
+                },
+            ],
+            "query_plans": [],
+            "source_stats": {
+                "pubmed": {"count": 1, "mode": "open_api", "source_name": "PubMed"},
+                "arxiv": {"count": 1, "mode": "open_api", "source_name": "arXiv"},
+            },
+            "errors": [],
+        }
+        mock_gap.return_value = {
+            "report": "gap report",
+            "gaps": [
+                {"dimension": "outcome", "title": "关键结局覆盖不足", "limitation": "安全性证据弱", "priority": "高"},
+                {"dimension": "method", "title": "研究设计单一", "limitation": "缺少多中心对照", "priority": "中"},
+            ],
+            "priority_summary": {
+                "counts": {"高": 1, "中": 1, "低": 0},
+                "highest_priority": "高",
+                "total_gaps": 2,
+            },
+        }
+
+        orch = ResearchOrchestrator(
+            {
+                "phases": ["observe", "hypothesis", "experiment"],
+                "pipeline_config": {
+                    "literature_retrieval": {"enabled": True, "max_results_per_source": 2},
+                    "hypothesis_engine_config": {"max_hypotheses": 2, "max_validation_iterations": 1},
+                },
+            }
+        )
+
+        result = orch.run(
+            "四君子汤与脾气虚证关联",
+            phase_contexts={
+                "observe": {
+                    "run_literature_retrieval": True,
+                    "run_clinical_gap_analysis": True,
+                    "literature_query": "四君子汤与脾气虚证关联",
+                    "run_preprocess_and_extract": False,
+                    "use_ctext_whitelist": False,
+                },
+                "hypothesis": {
+                    "entities": [
+                        {"name": "四君子汤", "type": "formula", "confidence": 0.95},
+                        {"name": "脾气虚证", "type": "syndrome", "confidence": 0.88},
+                    ],
+                    "contradictions": ["存在个别样本偏差"],
+                },
+            },
+        )
+
+        experiment_summary = next(phase.summary for phase in result.phases if phase.phase == "experiment")
+
+        self.assertEqual(experiment_summary["methodology"], "high_priority_gap_escalated_validation")
+        self.assertGreaterEqual(experiment_summary["sample_size"], 100)
+        self.assertEqual(experiment_summary["highest_gap_priority"], "高")
 
 
 class TestRunResearchSingleEntry(unittest.TestCase):

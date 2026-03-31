@@ -1,7 +1,10 @@
 import unittest
 from unittest.mock import patch
 
-from src.research.google_scholar_helper import ScholarPaperItem, run_google_scholar_related_works
+from src.research.google_scholar_helper import (
+    ScholarPaperItem,
+    run_google_scholar_related_works,
+)
 
 
 class _FakeResponse:

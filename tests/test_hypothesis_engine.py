@@ -1,6 +1,7 @@
 import unittest
 
 from src.hypothesis.hypothesis_engine import HypothesisEngine
+from src.infra.llm_service import LLMService
 from src.research.research_pipeline import ResearchPhase, ResearchPipeline
 
 SAMPLE_CONTEXT = {
@@ -155,6 +156,45 @@ class TestHypothesisEngine(unittest.TestCase):
 
         self.assertEqual(iterations, [])
         self.assertFalse(prepared["used_llm_closed_loop"])
+
+    def test_use_llm_generation_supports_real_llmservice_generate(self):
+        class PromptOnlyLLM(LLMService):
+            def generate(self, prompt: str, system_prompt: str = "") -> str:
+                return (
+                    '[{"title":"配伍稳定性假设","statement":"四君子汤核心配伍与脾气虚证改善存在稳定对应关系",'
+                    '"rationale":"多条观察与文献标题重复指向补气配伍结构",'
+                    '"validation_plan":"比较方剂-证候-功效三元组并做交叉验证",'
+                    '"keywords":["四君子汤","脾气虚证","补气"]}]'
+                )
+
+        result = self.engine.execute(
+            {
+                **SAMPLE_CONTEXT,
+                "use_llm_generation": True,
+                "llm_service": PromptOnlyLLM(),
+            }
+        )
+
+        self.assertTrue(result["metadata"]["used_llm_generation"])
+        self.assertEqual(result["hypotheses"][0]["title"], "配伍稳定性假设")
+        self.assertIn("交叉验证", result["hypotheses"][0]["validation_plan"])
+
+    def test_use_llm_generation_falls_back_when_response_unparseable(self):
+        class PromptOnlyLLM(LLMService):
+            def generate(self, prompt: str, system_prompt: str = "") -> str:
+                return "好的，我认为这是一个值得研究的话题，但暂时不给结构化结果。"
+
+        result = self.engine.execute(
+            {
+                **SAMPLE_CONTEXT,
+                "use_llm_generation": True,
+                "llm_service": PromptOnlyLLM(),
+            }
+        )
+
+        self.assertFalse(result["metadata"]["used_llm_generation"])
+        self.assertGreaterEqual(len(result["hypotheses"]), 1)
+        self.assertNotEqual(result["hypotheses"][0]["statement"], "好的，我认为这是一个值得研究的话题，但暂时不给结构化结果。")
 
 
 class TestHypothesisEnginePipelineIntegration(unittest.TestCase):

@@ -107,6 +107,31 @@ class TestQualityAssessment(unittest.TestCase):
         self.assertEqual(report["report_metadata"]["contract_version"], "d49.v1")
         self.assertEqual(report["metadata"]["last_completed_phase"], "assess_quality_metrics")
 
+    def test_assess_from_gate_results_supports_governance_namespace(self):
+        with TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.yml"
+            config_path.write_text(
+                "governance:\n"
+                "  quality_assessment:\n"
+                "    min_overall_score: 81\n"
+                "    min_dimension_score: 68\n"
+                "    export_contract_version: \"d49.v1\"\n",
+                encoding="utf-8",
+            )
+            report = assess_from_gate_results(
+                [
+                    {"name": "logic_checks", "success": True, "metrics": {"issue_count": 0, "error_count": 0}},
+                    {"name": "code_quality", "success": True, "metrics": {"issue_count": 10, "error_count": 0, "warning_count": 3}},
+                    {"name": "dependency_graph", "success": True, "metrics": {}},
+                    {"name": "quality_unit_tests", "success": True, "metrics": {"return_code": 0}},
+                ],
+                config_path,
+            )
+
+        self.assertEqual(report["thresholds"]["min_overall_score"], 81.0)
+        self.assertEqual(report["thresholds"]["min_dimension_score"], 68.0)
+        self.assertEqual(report["report_metadata"]["contract_version"], "d49.v1")
+
     def test_export_assessment_report_updates_export_phase(self):
         with TemporaryDirectory() as tmp:
             output_path = Path(tmp) / "quality-assessment.json"

@@ -15,7 +15,7 @@ import argparse
 import json
 from pathlib import Path
 
-from src.research.literature_retriever import LiteratureRetriever
+from src.collector.literature_retriever import LiteratureRetriever
 
 
 def parse_args() -> argparse.Namespace:

@@ -4,7 +4,6 @@
 基于AI的科研闭环流程管理系统
 """
 
-import hashlib
 import json
 import logging
 import os
@@ -15,21 +14,23 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.core.module_base import get_global_executor
-from src.core.phase_tracker import PhaseTrackerMixin
-from src.corpus.corpus_bundle import (
+from src.analysis.entity_extractor import AdvancedEntityExtractor
+from src.analysis.preprocessor import DocumentPreprocessor
+from src.analysis.semantic_graph import SemanticGraphBuilder
+from src.collector.corpus_bundle import (
     CorpusBundle,
-    extract_text_entries,
-    is_corpus_bundle,
 )
-from src.corpus.local_collector import LocalCorpusCollector
-from src.extractors.advanced_entity_extractor import AdvancedEntityExtractor
+from src.collector.ctext_corpus_collector import CTextCorpusCollector
+from src.collector.literature_retriever import LiteratureRetriever
+from src.collector.local_collector import LocalCorpusCollector
+from src.core.event_bus import EventBus
+from src.core.module_base import get_global_executor
+from src.core.module_factory import ModuleFactory
+from src.core.phase_tracker import PhaseTrackerMixin
 from src.hypothesis import HypothesisEngine
-from src.preprocessor.document_preprocessor import DocumentPreprocessor
-from src.research.ctext_corpus_collector import CTextCorpusCollector
 from src.research.gap_analyzer import GapAnalyzer
-from src.research.literature_retriever import LiteratureRetriever
-from src.semantic_modeling.semantic_graph_builder import SemanticGraphBuilder
+from src.research.pipeline_orchestrator import ResearchPipelineOrchestrator
+from src.research.pipeline_phase_handlers import ResearchPhaseHandlers
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -50,19 +51,29 @@ except Exception:
 CachedLLMService = _ImportedCachedLLMService
 
 try:
-    from src.output.citation_manager import CitationManager as _ImportedCitationManager
+    from src.generation.citation_manager import (
+        CitationManager as _ImportedCitationManager,
+    )
 except Exception:
     _ImportedCitationManager = None
 
 CitationManager = _ImportedCitationManager
 
+try:
+    from src.generation.paper_writer import PaperWriter as _ImportedPaperWriter
+except Exception:
+    _ImportedPaperWriter = None
 
-def _safe_researcher_key(researchers: List[str]) -> str:
-    if not researchers:
-        return "research"
-    primary = str(researchers[0]).strip() or "research"
-    compact = "".join(ch for ch in primary if ch.isalnum())
-    return compact[:24] or "research"
+PaperWriter = _ImportedPaperWriter
+
+try:
+    from src.generation.output_formatter import (
+        OutputGenerator as _ImportedOutputGenerator,
+    )
+except Exception:
+    _ImportedOutputGenerator = None
+
+OutputGenerator = _ImportedOutputGenerator
 
 class ResearchPhase(Enum):
     """
@@ -146,6 +157,31 @@ class ResearchPipeline(PhaseTrackerMixin):
     4. 成果产出与知识沉淀
     5. 反思改进与持续优化
     """
+
+    ResearchPhase = ResearchPhase
+    ResearchCycleStatus = ResearchCycleStatus
+    ResearchCycle = ResearchCycle
+    CitationManager = CitationManager
+    LocalCorpusCollector = LocalCorpusCollector
+    CTextCorpusCollector = CTextCorpusCollector
+    LiteratureRetriever = LiteratureRetriever
+    DocumentPreprocessor = DocumentPreprocessor
+    AdvancedEntityExtractor = AdvancedEntityExtractor
+    SemanticGraphBuilder = SemanticGraphBuilder
+    PaperWriter = PaperWriter
+    OutputGenerator = OutputGenerator
+
+    _MODULE_KEYS = {
+        "literature_retriever": "LiteratureRetriever",
+        "local_corpus_collector": "LocalCorpusCollector",
+        "ctext_corpus_collector": "CTextCorpusCollector",
+        "document_preprocessor": "DocumentPreprocessor",
+        "entity_extractor": "AdvancedEntityExtractor",
+        "semantic_graph_builder": "SemanticGraphBuilder",
+        "citation_manager": "CitationManager",
+        "paper_writer": "PaperWriter",
+        "output_generator": "OutputGenerator",
+    }
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
@@ -155,6 +191,10 @@ class ResearchPipeline(PhaseTrackerMixin):
             config (Dict[str, Any]): 配置参数
         """
         self.config = config or {}
+        self.event_bus = EventBus()
+        self.module_factory = ModuleFactory.from_config(self.config.get("module_factory") or {})
+        self._register_default_module_providers()
+        self._register_default_event_handlers()
         self.research_cycles = {}
         self.active_cycles = {}
         self.failed_cycles: List[ResearchCycle] = []
@@ -184,6 +224,8 @@ class ResearchPipeline(PhaseTrackerMixin):
         }
         self.hypothesis_engine = HypothesisEngine(self.config.get("hypothesis_engine_config") or {})
         self.hypothesis_engine.initialize()
+        self.phase_handlers = ResearchPhaseHandlers(self)
+        self.orchestrator = ResearchPipelineOrchestrator(self, self.phase_handlers)
         
         # 初始化质量控制指标
         self.quality_metrics = {
@@ -202,6 +244,105 @@ class ResearchPipeline(PhaseTrackerMixin):
         }
         
         self.logger.info("研究流程管理器初始化完成")
+
+    def _register_default_module_providers(self) -> None:
+        for key, symbol_name in self._MODULE_KEYS.items():
+            if self.module_factory.has(key):
+                continue
+
+            def _provider(cfg: Dict[str, Any], _symbol=symbol_name):
+                cls = globals().get(_symbol)
+                if cls is None:
+                    raise RuntimeError(f"模块工厂默认依赖不可用: {_symbol}")
+                return cls(cfg)
+
+            self.module_factory.register(key, _provider)
+
+    def create_module(self, key: str, config: Optional[Dict[str, Any]] = None) -> Any:
+        """通过模块工厂创建依赖实例。"""
+        return self.module_factory.create(key, config or {})
+
+    def _register_default_event_handlers(self) -> None:
+        self.event_bus.subscribe("phase.execute.requested", self._on_phase_execute_requested)
+        self.event_bus.subscribe("cycle.create.requested", self._on_cycle_create_requested)
+        self.event_bus.subscribe("cycle.start.requested", self._on_cycle_start_requested)
+        self.event_bus.subscribe("cycle.phase.execute.requested", self._on_cycle_phase_execute_requested)
+        self.event_bus.subscribe("cycle.complete.requested", self._on_cycle_complete_requested)
+        self.event_bus.subscribe("cycle.suspend.requested", self._on_cycle_suspend_requested)
+        self.event_bus.subscribe("cycle.resume.requested", self._on_cycle_resume_requested)
+
+    def _on_phase_execute_requested(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        phase = payload.get("phase")
+        cycle = payload.get("cycle")
+        context = payload.get("context") or {}
+        if phase is None or cycle is None:
+            return None
+        return self.phase_handlers.execute_phase_internal(phase, cycle, context)
+
+    def _on_cycle_create_requested(self, payload: Dict[str, Any]) -> Optional[Any]:
+        if not hasattr(self, "orchestrator"):
+            return None
+        cycle_name = payload.get("cycle_name")
+        description = payload.get("description")
+        objective = payload.get("objective")
+        scope = payload.get("scope")
+        researchers = payload.get("researchers")
+        cycle_options = payload.get("cycle_options") or {}
+        if not all(isinstance(value, str) and value for value in [cycle_name, description, objective, scope]):
+            return None
+        return self.orchestrator._create_research_cycle_local(
+            cycle_name=cycle_name,
+            description=description,
+            objective=objective,
+            scope=scope,
+            researchers=researchers,
+            **cycle_options,
+        )
+
+    def _on_cycle_start_requested(self, payload: Dict[str, Any]) -> Optional[bool]:
+        if not hasattr(self, "orchestrator"):
+            return None
+        cycle_id = payload.get("cycle_id")
+        if not isinstance(cycle_id, str) or not cycle_id:
+            return None
+        return self.orchestrator._start_research_cycle_local(cycle_id)
+
+    def _on_cycle_phase_execute_requested(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not hasattr(self, "orchestrator"):
+            return None
+        cycle_id = payload.get("cycle_id")
+        phase = payload.get("phase")
+        if not isinstance(cycle_id, str) or not cycle_id or phase is None:
+            return None
+        return self.orchestrator._execute_research_phase_local(
+            cycle_id,
+            phase,
+            payload.get("phase_context"),
+        )
+
+    def _on_cycle_complete_requested(self, payload: Dict[str, Any]) -> Optional[bool]:
+        if not hasattr(self, "orchestrator"):
+            return None
+        cycle_id = payload.get("cycle_id")
+        if not isinstance(cycle_id, str) or not cycle_id:
+            return None
+        return self.orchestrator._complete_research_cycle_local(cycle_id)
+
+    def _on_cycle_suspend_requested(self, payload: Dict[str, Any]) -> Optional[bool]:
+        if not hasattr(self, "orchestrator"):
+            return None
+        cycle_id = payload.get("cycle_id")
+        if not isinstance(cycle_id, str) or not cycle_id:
+            return None
+        return self.orchestrator._suspend_research_cycle_local(cycle_id)
+
+    def _on_cycle_resume_requested(self, payload: Dict[str, Any]) -> Optional[bool]:
+        if not hasattr(self, "orchestrator"):
+            return None
+        cycle_id = payload.get("cycle_id")
+        if not isinstance(cycle_id, str) or not cycle_id:
+            return None
+        return self.orchestrator._resume_research_cycle_local(cycle_id)
 
     def _initialize_cycle_tracking(self, cycle: ResearchCycle) -> None:
         cycle.metadata["phase_history"] = []
@@ -226,6 +367,14 @@ class ResearchPipeline(PhaseTrackerMixin):
         }
         if self._governance_config.get("enable_phase_tracking", True):
             metadata.setdefault("phase_history", []).append(phase_entry)
+        self.event_bus.publish(
+            "phase.lifecycle.started",
+            {
+                "phase": phase_name,
+                "started_at": phase_entry["started_at"],
+                "context": phase_entry["context"],
+            },
+        )
         return phase_entry
 
     def _complete_phase(
@@ -244,6 +393,14 @@ class ResearchPipeline(PhaseTrackerMixin):
             metadata["completed_phases"].append(phase_name)
         metadata["last_completed_phase"] = phase_name
         metadata["final_status"] = "completed"
+        self.event_bus.publish(
+            "phase.lifecycle.completed",
+            {
+                "phase": phase_name,
+                "ended_at": phase_entry["ended_at"],
+                "duration_seconds": phase_entry["duration_seconds"],
+            },
+        )
 
     def _fail_phase(
         self,
@@ -262,6 +419,15 @@ class ResearchPipeline(PhaseTrackerMixin):
         metadata.setdefault("phase_timings", {})[phase_name] = round(duration, 6)
         metadata["failed_phase"] = phase_name
         metadata["final_status"] = "failed"
+        self.event_bus.publish(
+            "phase.lifecycle.failed",
+            {
+                "phase": phase_name,
+                "ended_at": phase_entry["ended_at"],
+                "duration_seconds": phase_entry["duration_seconds"],
+                "error": error,
+            },
+        )
         self._record_failed_operation(
             failed_operations,
             phase_name,
@@ -432,121 +598,19 @@ class ResearchPipeline(PhaseTrackerMixin):
         researchers: Optional[List[str]] = None,
         **cycle_options: Any,
     ) -> ResearchCycle:
-        """
-        创建研究循环
-        
-        Args:
-            cycle_name (str): 循环名称
-            description (str): 循环描述
-            objective (str): 研究目标
-            scope (str): 研究范围
-            researchers (List[str]): 研究人员
-            advisors (List[str]): 指导专家
-            resources (Dict[str, Any]): 资源配置
-            
-        Returns:
-            ResearchCycle: 创建的研究循环
-        """
-        phase_entry = self._start_phase(
-            self._metadata,
-            "create_research_cycle",
-            {"cycle_name": cycle_name, "scope": scope},
+        """创建研究循环（委托编排器执行）。"""
+        return self.orchestrator.create_research_cycle(
+            cycle_name=cycle_name,
+            description=description,
+            objective=objective,
+            scope=scope,
+            researchers=researchers,
+            **cycle_options,
         )
-        start_time = time.perf_counter()
-        try:
-            advisors = cycle_options.get("advisors") or []
-            resources = cycle_options.get("resources") or {}
-
-            # 生成循环ID
-            cycle_id = f"cycle_{int(time.time())}_{hashlib.md5(cycle_name.encode()).hexdigest()[:8]}"
-            
-            # 创建研究循环
-            research_cycle = ResearchCycle(
-                cycle_id=cycle_id,
-                cycle_name=cycle_name,
-                description=description,
-                research_objective=objective,
-                research_scope=scope,
-                researchers=researchers or [],
-                advisors=advisors,
-                resources=resources,
-                tags=["created", "automated", "tcmautoresearch"]
-            )
-            self._initialize_cycle_tracking(research_cycle)
-            research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
-            
-            # 存储循环
-            self.research_cycles[cycle_id] = research_cycle
-            
-            # 记录历史
-            self.execution_history.append({
-                "timestamp": datetime.now().isoformat(),
-                "action": "cycle_created",
-                "cycle_id": cycle_id,
-                "cycle_name": cycle_name
-            })
-            self._complete_phase(self._metadata, "create_research_cycle", phase_entry, start_time)
-            
-            self.logger.info(f"研究循环创建完成: {cycle_name}")
-            return research_cycle
-            
-        except Exception as e:
-            self._fail_phase(self._metadata, self._failed_operations, "create_research_cycle", phase_entry, start_time, str(e))
-            self.logger.error(f"研究循环创建失败: {e}")
-            raise
     
     def start_research_cycle(self, cycle_id: str) -> bool:
-        """
-        启动研究循环
-        
-        Args:
-            cycle_id (str): 循环ID
-            
-        Returns:
-            bool: 启动是否成功
-        """
-        phase_entry = self._start_phase(self._metadata, "start_research_cycle", {"cycle_id": cycle_id})
-        start_time = time.perf_counter()
-        try:
-            if cycle_id not in self.research_cycles:
-                self.logger.warning(f"研究循环 {cycle_id} 不存在")
-                self._fail_phase(
-                    self._metadata,
-                    self._failed_operations,
-                    "start_research_cycle",
-                    phase_entry,
-                    start_time,
-                    "循环不存在",
-                )
-                return False
-            
-            research_cycle = self.research_cycles[cycle_id]
-            
-            # 更新状态
-            research_cycle.status = ResearchCycleStatus.ACTIVE
-            research_cycle.started_at = datetime.now().isoformat()
-            research_cycle.current_phase = ResearchPhase.OBSERVE
-            research_cycle.metadata["final_status"] = research_cycle.status.value
-            
-            # 记录活动
-            self.active_cycles[cycle_id] = research_cycle
-            
-            # 记录历史
-            self.execution_history.append({
-                "timestamp": datetime.now().isoformat(),
-                "action": "cycle_started",
-                "cycle_id": cycle_id,
-                "phase": research_cycle.current_phase.value
-            })
-            self._complete_phase(self._metadata, "start_research_cycle", phase_entry, start_time)
-            
-            self.logger.info(f"研究循环启动: {research_cycle.cycle_name}")
-            return True
-            
-        except Exception as e:
-            self._fail_phase(self._metadata, self._failed_operations, "start_research_cycle", phase_entry, start_time, str(e))
-            self.logger.error(f"研究循环启动失败: {e}")
-            return False
+        """启动研究循环（委托编排器执行）。"""
+        return self.orchestrator.start_research_cycle(cycle_id)
     
     def execute_research_phase(
         self,
@@ -554,47 +618,8 @@ class ResearchPipeline(PhaseTrackerMixin):
         phase: ResearchPhase,
         phase_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """
-        执行研究阶段
-        
-        Args:
-            cycle_id (str): 循环ID
-            phase (ResearchPhase): 研究阶段
-            phase_context (Dict[str, Any]): 阶段上下文
-            
-        Returns:
-            Dict[str, Any]: 执行结果
-        """
-        phase_context_payload = phase_context or {}
-        start_time = time.perf_counter()
-
-        validation_error = self._validate_research_phase_request(cycle_id)
-        if validation_error:
-            return validation_error
-
-        research_cycle = self.research_cycles[cycle_id]
-        phase_entry = self._start_phase(research_cycle.metadata, phase.value, phase_context_payload)
-
-        try:
-            phase_result = self._execute_phase_internal(phase, research_cycle, phase_context_payload)
-            self._advance_research_cycle_phase(research_cycle, phase)
-            phase_execution = self._build_phase_execution(
-                phase=phase,
-                started_at=phase_entry["started_at"],
-                start_time=start_time,
-                phase_context=phase_context_payload,
-                phase_result=phase_result,
-            )
-            research_cycle.phase_executions[phase] = phase_execution
-            self._complete_phase(research_cycle.metadata, phase.value, phase_entry, start_time)
-            self._sync_phase_history_entry(phase_entry, phase_execution, phase_result)
-            self._apply_phase_result(research_cycle, phase, phase_result)
-            research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
-            self._record_phase_success(cycle_id, phase, start_time)
-            self.logger.info(f"研究阶段执行完成: {phase.value}")
-            return phase_result
-        except Exception as exc:
-            return self._handle_phase_execution_failure(cycle_id, phase, start_time, exc)
+        """执行研究阶段（委托编排器 + 阶段处理器执行）。"""
+        return self.orchestrator.execute_research_phase(cycle_id, phase, phase_context)
 
     def _validate_research_phase_request(self, cycle_id: str) -> Optional[Dict[str, Any]]:
         if cycle_id not in self.research_cycles:
@@ -742,119 +767,27 @@ class ResearchPipeline(PhaseTrackerMixin):
     def _execute_phase_internal(self, phase: ResearchPhase, 
                               cycle: ResearchCycle,
                               context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        内部执行阶段逻辑
-        
-        Args:
-            phase (ResearchPhase): 研究阶段
-            cycle (ResearchCycle): 研究循环
-            context (Dict[str, Any]): 阶段上下文
-            
-        Returns:
-            Dict[str, Any]: 执行结果
-        """
-        # 根据阶段执行不同的逻辑
-        if phase == ResearchPhase.OBSERVE:
-            return self._execute_observe_phase(cycle, context)
-        elif phase == ResearchPhase.HYPOTHESIS:
-            return self._execute_hypothesis_phase(cycle, context)
-        elif phase == ResearchPhase.EXPERIMENT:
-            return self._execute_experiment_phase(cycle, context)
-        elif phase == ResearchPhase.ANALYZE:
-            return self._execute_analyze_phase(cycle, context)
-        elif phase == ResearchPhase.PUBLISH:
-            return self._execute_publish_phase(cycle, context)
-        elif phase == ResearchPhase.REFLECT:
-            return self._execute_reflect_phase(cycle, context)
-        else:
-            return {"error": f"未知阶段: {phase.value}"}
+        """内部执行阶段逻辑（通过事件路径调度，兼容回退）。"""
+        payload = {
+            "phase": phase,
+            "cycle": cycle,
+            "context": context,
+        }
+        result = self.event_bus.request("phase.execute.requested", payload)
+        if isinstance(result, dict):
+            return result
+        return self.phase_handlers.execute_phase_internal(phase, cycle, context)
     
     def _execute_observe_phase(self, cycle: ResearchCycle, 
                               context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行观察阶段
-        
-        Args:
-            cycle (ResearchCycle): 研究循环
-            context (Dict[str, Any]): 阶段上下文
-            
-        Returns:
-            Dict[str, Any]: 执行结果
-        """
-        context = context or {}
-
-        corpus_result = self._collect_observe_corpus_if_enabled(context)
-        literature_result = self._run_observe_literature_if_enabled(context)
-
-        observations, findings = self._build_observe_seed_lists()
-        self._append_corpus_observe_updates(corpus_result, observations, findings)
-
-        ingestion_result = self._run_observe_ingestion_if_enabled(corpus_result, context)
-        self._append_ingestion_observe_updates(ingestion_result, observations, findings)
-
-        self._append_literature_observe_updates(literature_result, observations, findings)
-
-        return {
-            "phase": "observe",
-            "observations": observations,
-            "findings": findings,
-            "corpus_collection": corpus_result,
-            "ingestion_pipeline": ingestion_result,
-            "literature_pipeline": literature_result,
-            "metadata": self._build_observe_metadata(
-                context,
-                observations,
-                findings,
-                corpus_result,
-                ingestion_result,
-                literature_result,
-            )
-        }
+        """执行观察阶段（兼容入口，委托阶段处理器）。"""
+        return self.phase_handlers.execute_observe_phase(cycle, context)
 
     def _build_observe_seed_lists(self) -> Tuple[List[str], List[str]]:
-        observations = [
-            "收集到原始中医古籍文本数据",
-            "识别出多个方剂实例",
-            "发现不同朝代的用药规律",
-            "提取出关键症候信息"
-        ]
-        findings = [
-            "方剂组成存在地域差异",
-            "药材使用呈现时代演变特征",
-            "症候分类具有系统性规律"
-        ]
-        return observations, findings
+        return self.phase_handlers._build_observe_seed_lists()
 
     def _collect_observe_corpus_if_enabled(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        collect_ctext = self._should_collect_ctext_corpus(context)
-        collect_local = self._should_collect_local_corpus(context)
-
-        if not collect_ctext and not collect_local:
-            return None
-
-        bundles: List[CorpusBundle] = []
-        fallback_error: Optional[Dict[str, Any]] = None
-
-        ctext_result = self._collect_ctext_observation_corpus(context) if collect_ctext else None
-        fallback_error = self._register_observe_collection_result(
-            ctext_result,
-            "ctext",
-            bundles,
-            fallback_error,
-        )
-
-        local_result = self._collect_local_observation_corpus(context) if collect_local else None
-        fallback_error = self._register_observe_collection_result(
-            local_result,
-            "local",
-            bundles,
-            fallback_error,
-        )
-
-        if bundles:
-            merged = CorpusBundle.merge(bundles) if len(bundles) > 1 else bundles[0]
-            return merged.to_dict()
-        return fallback_error
+        return self.phase_handlers._collect_observe_corpus_if_enabled(context)
 
     def _register_observe_collection_result(
         self,
@@ -863,42 +796,29 @@ class ResearchPipeline(PhaseTrackerMixin):
         bundles: List[CorpusBundle],
         fallback_error: Optional[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        if not source_result:
-            return fallback_error
-        if source_result.get("error"):
-            return fallback_error or source_result
-
-        bundle = self._to_observe_corpus_bundle(source_result, source_type)
-        if bundle:
-            bundles.append(bundle)
-        return fallback_error
+        return self.phase_handlers._register_observe_collection_result(
+            source_result,
+            source_type,
+            bundles,
+            fallback_error,
+        )
 
     def _to_observe_corpus_bundle(
         self,
         source_result: Dict[str, Any],
         source_type: str,
     ) -> Optional[CorpusBundle]:
-        if source_type == "ctext":
-            return CorpusBundle.from_ctext_result(source_result)
-        if source_type == "local" and is_corpus_bundle(source_result):
-            return CorpusBundle.from_dict(source_result)
-        return None
+        return self.phase_handlers._to_observe_corpus_bundle(source_result, source_type)
 
     def _run_observe_literature_if_enabled(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        if not self._should_run_observe_literature(context):
-            return None
-        return self._run_observe_literature_pipeline(context)
+        return self.phase_handlers._run_observe_literature_if_enabled(context)
 
     def _run_observe_ingestion_if_enabled(
         self,
         corpus_result: Optional[Dict[str, Any]],
         context: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
-        if not corpus_result or corpus_result.get("error"):
-            return None
-        if not self._should_run_observe_ingestion(context):
-            return None
-        return self._run_observe_ingestion_pipeline(corpus_result, context)
+        return self.phase_handlers._run_observe_ingestion_if_enabled(corpus_result, context)
 
     def _append_corpus_observe_updates(
         self,
@@ -906,31 +826,7 @@ class ResearchPipeline(PhaseTrackerMixin):
         observations: List[str],
         findings: List[str],
     ) -> None:
-        if not corpus_result:
-            return
-        if corpus_result.get("error"):
-            findings.append(f"语料采集失败: {corpus_result['error']}")
-            return
-
-        # 新格式（CorpusBundle）
-        if is_corpus_bundle(corpus_result):
-            stats = corpus_result.get("stats", {})
-            sources = corpus_result.get("sources", [])
-            total = stats.get("total_documents", 0)
-            # 单 CText 来源：沿用旧提示语保持向后兼容
-            if sources == ["ctext"]:
-                observations.insert(0, f"已从 ctext 白名单自动采集 {stats.get('document_count', total)} 个根文献")
-                findings.insert(0, "观察阶段已接入标准语料白名单，可直接进入后续假设生成")
-            else:
-                source_label = "+".join(sources) if sources else "多来源"
-                observations.insert(0, f"已从 {source_label} 自动采集 {total} 篇文档（CorpusBundle）")
-                findings.insert(0, "观察阶段已输出统一 CorpusBundle，多来源文档可直接进入后续假设生成")
-            return
-
-        # 旧格式（CText raw dict）
-        stats = corpus_result.get("stats", {})
-        observations.insert(0, f"已从 ctext 白名单自动采集 {stats.get('document_count', 0)} 个根文献")
-        findings.insert(0, "观察阶段已接入标准语料白名单，可直接进入后续假设生成")
+        self.phase_handlers._append_corpus_observe_updates(corpus_result, observations, findings)
 
     def _append_ingestion_observe_updates(
         self,
@@ -938,22 +834,7 @@ class ResearchPipeline(PhaseTrackerMixin):
         observations: List[str],
         findings: List[str],
     ) -> None:
-        if not ingestion_result:
-            return
-        if ingestion_result.get("error"):
-            findings.append(f"预处理、实体抽取与语义建模链路失败: {ingestion_result['error']}")
-            return
-
-        aggregate = ingestion_result.get("aggregate", {})
-        observations.append(
-            f"已完成 {ingestion_result.get('processed_document_count', 0)} 篇文本的预处理、实体抽取与语义建模"
-        )
-        findings.append(
-            f"首段主流程累计识别 {aggregate.get('total_entities', 0)} 个实体"
-        )
-        findings.append(
-            f"累计构建 {aggregate.get('semantic_graph_nodes', 0)} 个语义节点与 {aggregate.get('semantic_graph_edges', 0)} 条关系"
-        )
+        self.phase_handlers._append_ingestion_observe_updates(ingestion_result, observations, findings)
 
     def _append_literature_observe_updates(
         self,
@@ -961,25 +842,7 @@ class ResearchPipeline(PhaseTrackerMixin):
         observations: List[str],
         findings: List[str],
     ) -> None:
-        if not literature_result:
-            return
-        if literature_result.get("error"):
-            findings.append(f"文献检索链路失败: {literature_result['error']}")
-            return
-
-        clinical_gap = (literature_result.get("clinical_gap_analysis") or {})
-        evidence_matrix = literature_result.get("evidence_matrix", {})
-        observations.append(
-            f"已完成 {literature_result.get('record_count', 0)} 条医学文献检索并抽取摘要证据"
-        )
-        findings.append(
-            f"证据矩阵覆盖 {evidence_matrix.get('dimension_count', 0)} 个维度"
-        )
-        findings.append(
-            f"文献来源统计: {', '.join(literature_result.get('source_counts_summary', [])) or '无'}"
-        )
-        if clinical_gap.get("report"):
-            findings.append("已完成 Qwen 临床关联 Gap Analysis，可直接用于选题与方案设计")
+        self.phase_handlers._append_literature_observe_updates(literature_result, observations, findings)
 
     def _build_observe_metadata(
         self,
@@ -990,137 +853,40 @@ class ResearchPipeline(PhaseTrackerMixin):
         ingestion_result: Optional[Dict[str, Any]],
         literature_result: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        clinical_gap = ((literature_result or {}).get("clinical_gap_analysis") or {})
-        ingestion_ok = bool(ingestion_result and not ingestion_result.get("error"))
-        literature_ok = bool(literature_result and not literature_result.get("error"))
-        downstream_processing, semantic_modeling = self._build_observe_ingestion_flags(
+        return self.phase_handlers._build_observe_metadata(
+            context,
+            observations,
+            findings,
+            corpus_result,
             ingestion_result,
-            ingestion_ok,
+            literature_result,
         )
 
-        return {
-            "data_source": self._resolve_observe_data_source(context),
-            "observation_count": len(observations),
-            "finding_count": len(findings),
-            "auto_collected_ctext": self._is_ctext_corpus_collected(corpus_result),
-            "auto_collected_corpus": bool(corpus_result),
-            "corpus_schema": "bundle" if is_corpus_bundle(corpus_result) else ("ctext_raw" if corpus_result else None),
-            "ctext_groups": self._resolve_whitelist_groups(context),
-            "downstream_processing": downstream_processing,
-            "semantic_modeling": semantic_modeling,
-            "literature_retrieval": literature_ok,
-            "evidence_matrix": self._has_observe_evidence_matrix(literature_result, literature_ok),
-            "clinical_gap_analysis": bool(literature_ok and clinical_gap.get("report"))
-        }
-
     def _is_ctext_corpus_collected(self, corpus_result: Optional[Dict[str, Any]]) -> bool:
-        if not corpus_result:
-            return False
-        if not is_corpus_bundle(corpus_result):
-            return True
-        return "ctext" in (corpus_result.get("sources") or [])
+        return self.phase_handlers._is_ctext_corpus_collected(corpus_result)
 
     def _build_observe_ingestion_flags(
         self,
         ingestion_result: Optional[Dict[str, Any]],
         ingestion_ok: bool,
     ) -> Tuple[bool, bool]:
-        if not ingestion_ok or not ingestion_result:
-            return False, False
-
-        downstream_processing = ingestion_result.get("processed_document_count", 0) > 0
-        semantic_modeling = ingestion_result.get("aggregate", {}).get("semantic_graph_nodes", 0) > 0
-        return bool(downstream_processing), bool(semantic_modeling)
+        return self.phase_handlers._build_observe_ingestion_flags(ingestion_result, ingestion_ok)
 
     def _has_observe_evidence_matrix(
         self,
         literature_result: Optional[Dict[str, Any]],
         literature_ok: bool,
     ) -> bool:
-        if not literature_ok or not literature_result:
-            return False
-        return bool(literature_result.get("evidence_matrix", {}).get("record_count", 0) > 0)
+        return self.phase_handlers._has_observe_evidence_matrix(literature_result, literature_ok)
 
     def _should_run_observe_ingestion(self, context: Dict[str, Any]) -> bool:
-        if "run_preprocess_and_extract" in context:
-            return bool(context.get("run_preprocess_and_extract"))
-
-        observe_pipeline_config = self.config.get("observe_pipeline", {})
-        return bool(observe_pipeline_config.get("enabled", True))
+        return self.phase_handlers._should_run_observe_ingestion(context)
 
     def _should_run_observe_literature(self, context: Dict[str, Any]) -> bool:
-        if "run_literature_retrieval" in context:
-            return bool(context.get("run_literature_retrieval"))
-
-        literature_config = self.config.get("literature_retrieval", {})
-        return bool(literature_config.get("enabled", False))
+        return self.phase_handlers._should_run_observe_literature(context)
 
     def _run_observe_literature_pipeline(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        literature_config = self.config.get("literature_retrieval", {})
-        sources = context.get("literature_sources") or literature_config.get(
-            "default_sources",
-            ["pubmed", "semantic_scholar", "plos_one", "arxiv"]
-        )
-        query = context.get("literature_query") or context.get("query") or "traditional chinese medicine"
-        raw_max_results = context.get("literature_max_results", literature_config.get("max_results_per_source", 5))
-        max_results = max(1, min(int(raw_max_results), 50))
-        offline_plan_only = bool(
-            context.get(
-                "literature_offline_plan_only",
-                literature_config.get("offline_plan_only", False)
-            )
-        )
-
-        retriever = LiteratureRetriever(
-            {
-                "timeout_sec": literature_config.get("timeout_sec", 20),
-                "retry_count": literature_config.get("retry_count", 2),
-                "request_interval_sec": literature_config.get("request_interval_sec", 0.2),
-                "user_agent": literature_config.get("user_agent", "TCM-AutoResearch-Observe/1.0")
-            }
-        )
-
-        try:
-            retrieval_result = retriever.search(
-                query=query,
-                sources=sources,
-                max_results_per_source=max_results,
-                pubmed_email=context.get("pubmed_email", literature_config.get("pubmed_email", "")),
-                pubmed_api_key=context.get("pubmed_api_key", literature_config.get("pubmed_api_key", "")),
-                offline_plan_only=offline_plan_only,
-            )
-        except Exception as e:
-            self.logger.error(f"观察阶段文献检索失败: {e}")
-            return {"error": str(e)}
-        finally:
-            retriever.close()
-
-        summaries = self._extract_literature_summaries(retrieval_result.get("records", []))
-        evidence_matrix = self._build_evidence_matrix(summaries, context)
-        clinical_gap_result = None
-        if self._should_run_clinical_gap_analysis(context):
-            clinical_gap_result = self._run_clinical_gap_analysis(evidence_matrix, summaries, context)
-
-        source_counts = retrieval_result.get("source_stats", {})
-        source_counts_summary = [
-            f"{source}:{(stats or {}).get('count', 0)}"
-            for source, stats in source_counts.items()
-        ]
-
-        return {
-            "query": retrieval_result.get("query", query),
-            "sources": retrieval_result.get("sources", sources),
-            "record_count": len(retrieval_result.get("records", [])),
-            "abstract_summary_count": len(summaries),
-            "records": retrieval_result.get("records", []),
-            "query_plans": retrieval_result.get("query_plans", []),
-            "errors": retrieval_result.get("errors", []),
-            "source_stats": source_counts,
-            "source_counts_summary": source_counts_summary,
-            "summaries": summaries,
-            "evidence_matrix": evidence_matrix,
-            "clinical_gap_analysis": clinical_gap_result,
-        }
+        return self.phase_handlers._run_observe_literature_pipeline(context)
 
     def _should_run_clinical_gap_analysis(self, context: Dict[str, Any]) -> bool:
         if "run_clinical_gap_analysis" in context:
@@ -1144,26 +910,27 @@ class ResearchPipeline(PhaseTrackerMixin):
 
         gap_config = self.config.get("clinical_gap_analysis", {})
         llm_config = self.config.get("models", {}).get("llm", {})
-        clinical_question = (
-            context.get("clinical_question")
-            or context.get("literature_query")
-            or "中医干预在目标人群中的临床有效性与安全性证据缺口是什么？"
-        )
-        output_language = context.get("gap_output_language", gap_config.get("output_language", "zh"))
 
         # CachedLLMService 磁盘缓存：相同请求直接从 SQLite 返回，跳过 GPU 推理
         engine = CachedLLMService.from_gap_config(gap_config, llm_config)
         analyzer = GapAnalyzer(gap_config, llm_service=engine)
+        analysis_context = {
+            "evidence_matrix": evidence_matrix,
+            "literature_summaries": summaries,
+            "llm_service": engine,
+            "clinical_question": context.get("clinical_question"),
+            "literature_query": context.get("literature_query"),
+            "research_topic": context.get("research_topic"),
+            "gap_output_language": context.get("gap_output_language"),
+            "gap_output_mode": context.get("gap_output_mode"),
+            "output_language": context.get("output_language"),
+            "use_llm_refinement": context.get("use_llm_refinement"),
+        }
 
         try:
             engine.load()
             analyzer.initialize()
-            report = analyzer.analyze(
-                clinical_question=clinical_question,
-                evidence_matrix=evidence_matrix,
-                literature_summaries=summaries,
-                output_language=output_language,
-            )
+            result = analyzer.execute(analysis_context)
             stats = engine.cache_stats()
             self.logger.debug(
                 "LLM 缓存统计: hits=%d misses=%d total_entries=%s",
@@ -1171,16 +938,23 @@ class ResearchPipeline(PhaseTrackerMixin):
                 stats.get("session_misses", 0),
                 stats.get("total_entries", "n/a"),
             )
-            return {
-                "clinical_question": clinical_question,
-                "output_language": output_language,
-                "report": report,
-            }
+            result.setdefault("metadata", {})["cache_stats"] = stats
+            return result
         except Exception as e:
             self.logger.error(f"Qwen 临床 Gap Analysis 失败: {e}")
             return {
-                "clinical_question": clinical_question,
-                "output_language": output_language,
+                "clinical_question": str(
+                    context.get("clinical_question")
+                    or context.get("literature_query")
+                    or gap_config.get("default_clinical_question")
+                    or "中医干预在目标人群中的临床有效性与安全性证据缺口是什么？"
+                ),
+                "output_language": str(
+                    context.get("gap_output_language")
+                    or context.get("output_language")
+                    or gap_config.get("default_output_language")
+                    or gap_config.get("output_language", "zh")
+                ),
                 "error": str(e),
             }
         finally:
@@ -1256,247 +1030,37 @@ class ResearchPipeline(PhaseTrackerMixin):
         }
 
     def _should_collect_ctext_corpus(self, context: Dict[str, Any]) -> bool:
-        ctext_config = self.config.get("ctext_corpus", {})
-        whitelist_config = ctext_config.get("whitelist", {})
-
-        if "use_ctext_whitelist" in context:
-            return bool(context.get("use_ctext_whitelist"))
-
-        if context.get("data_source") == "ctext_whitelist":
-            return True
-
-        return bool(ctext_config.get("enabled") and whitelist_config.get("enabled"))
+        return self.phase_handlers._should_collect_ctext_corpus(context)
 
     def _should_collect_local_corpus(self, context: Dict[str, Any]) -> bool:
-        if "use_local_corpus" in context:
-            return bool(context.get("use_local_corpus"))
-
-        if context.get("data_source") == "local":
-            return True
-
-        local_config = self.config.get("local_corpus", {})
-        return bool(local_config.get("enabled"))
+        return self.phase_handlers._should_collect_local_corpus(context)
 
     def _collect_local_observation_corpus(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        local_config = self.config.get("local_corpus", {})
-        collector = LocalCorpusCollector(
-            {
-                "data_dir": context.get("local_data_dir", local_config.get("data_dir", "data")),
-                "file_glob": context.get("file_glob", local_config.get("file_glob", "*.txt")),
-                "max_files": context.get("local_max_files", local_config.get("max_files", 50)),
-                "recursive": context.get("local_recursive", local_config.get("recursive", False)),
-                "encoding_fallbacks": local_config.get("encoding_fallbacks"),
-                "min_text_length": local_config.get("min_text_length", 50),
-            }
-        )
-        initialized = collector.initialize()
-        if not initialized:
-            return {"error": "本地语料采集器初始化失败"}
-        try:
-            return collector.execute(context)
-        except Exception as e:
-            self.logger.error("观察阶段本地语料采集失败: %s", e)
-            return {"error": str(e)}
-        finally:
-            collector.cleanup()
+        return self.phase_handlers._collect_local_observation_corpus(context)
 
     def _resolve_observe_data_source(self, context: Dict[str, Any]) -> str:
-        if self._should_collect_ctext_corpus(context) and self._should_collect_local_corpus(context):
-            return "ctext_whitelist+local"
-        if self._should_collect_ctext_corpus(context):
-            return "ctext_whitelist"
-        if self._should_collect_local_corpus(context):
-            return "local"
-        return context.get("data_source", "unknown")
+        return self.phase_handlers._resolve_observe_data_source(context)
 
     def _resolve_whitelist_groups(self, context: Dict[str, Any]) -> List[str]:
-        ctext_config = self.config.get("ctext_corpus", {})
-        whitelist_config = ctext_config.get("whitelist", {})
-        return context.get("whitelist_groups") or whitelist_config.get("default_groups", [])
+        return self.phase_handlers._resolve_whitelist_groups(context)
 
     def _collect_ctext_observation_corpus(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        ctext_config = self.config.get("ctext_corpus", {})
-        whitelist_config = ctext_config.get("whitelist", {})
-
-        collector = CTextCorpusCollector(
-            {
-                "api_base": context.get("api_base", ctext_config.get("api_base", "https://api.ctext.org")),
-                "request_interval_sec": context.get("request_interval_sec", ctext_config.get("request_interval_sec", 0.2)),
-                "retry_count": context.get("retry_count", ctext_config.get("retry_count", 2)),
-                "timeout_sec": context.get("timeout_sec", ctext_config.get("timeout_sec", 20)),
-                "output_dir": context.get("output_dir", os.path.join("data", "ctext"))
-            }
-        )
-
-        initialized = collector.initialize()
-        if not initialized:
-            return {"error": "ctext 采集器初始化失败"}
-
-        try:
-            return collector.execute(
-                {
-                    "use_whitelist": True,
-                    "whitelist_path": context.get("whitelist_path", whitelist_config.get("path")),
-                    "whitelist_groups": self._resolve_whitelist_groups(context),
-                    "recurse": context.get("recurse", True),
-                    "max_depth": context.get("max_depth", 3),
-                    "save_to_disk": context.get("save_to_disk", True),
-                    "output_dir": context.get("output_dir", os.path.join("data", "ctext"))
-                }
-            )
-        except Exception as e:
-            self.logger.error(f"观察阶段 ctext 采集失败: {e}")
-            return {"error": str(e)}
-        finally:
-            collector.cleanup()
+        return self.phase_handlers._collect_ctext_observation_corpus(context)
 
     def _run_observe_ingestion_pipeline(self, corpus_result: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        text_entries = self._extract_corpus_text_entries(corpus_result)
-        max_texts = max(1, min(int(context.get("max_texts", 3)), 20))
-        max_chars_per_text = max(200, min(int(context.get("max_chars_per_text", 1200)), 4000))
-        selected_entries = text_entries[:max_texts]
-
-        if not selected_entries:
-            return {
-                "processed_document_count": 0,
-                "documents": [],
-                "aggregate": {
-                    "total_entities": 0,
-                    "entity_type_counts": {},
-                    "average_confidence": 0.0
-                }
-            }
-
-        preprocessor = DocumentPreprocessor(context.get("preprocessor_config") or {})
-        extractor = AdvancedEntityExtractor(context.get("extractor_config") or {})
-        semantic_builder = SemanticGraphBuilder(context.get("semantic_builder_config") or {})
-
-        if not preprocessor.initialize():
-            return {"error": "文档预处理器初始化失败"}
-        if not extractor.initialize():
-            preprocessor.cleanup()
-            return {"error": "实体抽取器初始化失败"}
-        if not semantic_builder.initialize():
-            extractor.cleanup()
-            preprocessor.cleanup()
-            return {"error": "语义图构建器初始化失败"}
-
-        document_results: List[Dict[str, Any]] = []
-        entity_type_counts: Dict[str, int] = {}
-        total_entities = 0
-        confidence_values: List[float] = []
-        total_semantic_nodes = 0
-        total_semantic_edges = 0
-
-        try:
-            for entry in selected_entries:
-                raw_text = entry.get("text", "")[:max_chars_per_text]
-                preprocess_result = preprocessor.execute(
-                    {
-                        "raw_text": raw_text,
-                        "source_file": entry.get("urn", "unknown"),
-                        "metadata": {
-                            "title": entry.get("title", ""),
-                            "source": "ctext",
-                            "collection_stage": "observe"
-                        }
-                    }
-                )
-                extraction_result = extractor.execute(preprocess_result)
-                semantic_result = semantic_builder.execute(extraction_result)
-
-                entities = extraction_result.get("entities", [])
-                total_entities += len(entities)
-                confidence_values.extend(entity.get("confidence", 0.0) for entity in entities)
-                graph_stats = semantic_result.get("graph_statistics", {})
-                total_semantic_nodes += graph_stats.get("nodes_count", 0)
-                total_semantic_edges += graph_stats.get("edges_count", 0)
-
-                for entity_type, count in extraction_result.get("statistics", {}).get("by_type", {}).items():
-                    entity_type_counts[entity_type] = entity_type_counts.get(entity_type, 0) + count
-
-                document_results.append(
-                    {
-                        "urn": entry.get("urn", ""),
-                        "title": entry.get("title", ""),
-                        "raw_text_preview": raw_text[:120],
-                        "processed_text_preview": preprocess_result.get("processed_text", "")[:120],
-                        "entity_count": len(entities),
-                        "entity_types": extraction_result.get("statistics", {}).get("by_type", {}),
-                        "average_confidence": extraction_result.get("confidence_scores", {}).get("average_confidence", 0.0),
-                        "semantic_graph_nodes": graph_stats.get("nodes_count", 0),
-                        "semantic_graph_edges": graph_stats.get("edges_count", 0),
-                        "relationship_types": graph_stats.get("relationships_by_type", {})
-                    }
-                )
-
-            average_confidence = sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
-            return {
-                "processed_document_count": len(document_results),
-                "documents": document_results,
-                "aggregate": {
-                    "total_entities": total_entities,
-                    "entity_type_counts": entity_type_counts,
-                    "average_confidence": average_confidence,
-                    "semantic_graph_nodes": total_semantic_nodes,
-                    "semantic_graph_edges": total_semantic_edges
-                }
-            }
-        except Exception as e:
-            self.logger.error(f"观察阶段预处理/抽取/建模链路失败: {e}")
-            return {"error": str(e)}
-        finally:
-            semantic_builder.cleanup()
-            extractor.cleanup()
-            preprocessor.cleanup()
+        return self.phase_handlers._run_observe_ingestion_pipeline(corpus_result, context)
 
     def _extract_corpus_text_entries(self, corpus_result: Dict[str, Any]) -> List[Dict[str, str]]:
         """统一文本条目提取 — 兼容新 CorpusBundle 格式与旧 CText dict 格式。"""
-        return extract_text_entries(corpus_result)
+        return self.phase_handlers._extract_corpus_text_entries(corpus_result)
     
     def _execute_hypothesis_phase(self, cycle: ResearchCycle, 
                                 context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行假设阶段
-        
-        Args:
-            cycle (ResearchCycle): 研究循环
-            context (Dict[str, Any]): 阶段上下文
-            
-        Returns:
-            Dict[str, Any]: 执行结果
-        """
-        hypothesis_context = self._build_hypothesis_context(cycle, context or {})
-        result = self.hypothesis_engine.execute(hypothesis_context)
-        result.setdefault("phase", "hypothesis")
-        return result
+        """执行假设阶段（兼容入口，委托阶段处理器）。"""
+        return self.phase_handlers.execute_hypothesis_phase(cycle, context)
 
     def _build_hypothesis_context(self, cycle: ResearchCycle, context: Dict[str, Any]) -> Dict[str, Any]:
-        observe_result = cycle.phase_executions.get(ResearchPhase.OBSERVE, {}).get("result", {})
-        existing_hypotheses = cycle.phase_executions.get(ResearchPhase.HYPOTHESIS, {}).get("result", {}).get("hypotheses", [])
-
-        observations = observe_result.get("observations", [])
-        findings = observe_result.get("findings", [])
-        literature_pipeline = observe_result.get("literature_pipeline") or {}
-        corpus_collection = observe_result.get("corpus_collection") or {}
-        ingestion_pipeline = observe_result.get("ingestion_pipeline") or {}
-
-        entities = context.get("entities") or ingestion_pipeline.get("entities") or corpus_collection.get("entities") or []
-        contradictions = context.get("contradictions") or observe_result.get("contradictions") or []
-
-        return {
-            "research_objective": cycle.research_objective or context.get("research_objective") or cycle.description,
-            "research_scope": cycle.research_scope or context.get("research_scope") or "",
-            "research_domain": context.get("research_domain") or self._infer_hypothesis_domain(cycle, observations, findings),
-            "observations": observations,
-            "findings": findings,
-            "entities": entities,
-            "literature_pipeline": literature_pipeline,
-            "contradictions": contradictions,
-            "existing_hypotheses": existing_hypotheses,
-            "use_llm_generation": context.get("use_llm_generation", False),
-            "llm_service": context.get("llm_service"),
-        }
+        return self.phase_handlers._build_hypothesis_context(cycle, context)
 
     def _infer_hypothesis_domain(
         self,
@@ -1504,153 +1068,22 @@ class ResearchPipeline(PhaseTrackerMixin):
         observations: List[str],
         findings: List[str],
     ) -> str:
-        text_blob = " ".join(
-            [
-                cycle.research_scope or "",
-                cycle.research_objective or "",
-                cycle.description or "",
-                *observations,
-                *findings,
-            ]
-        )
-        if any(token in text_blob for token in ["历史", "古籍", "朝代", "演变"]):
-            return "historical_research"
-        if any(token in text_blob for token in ["方剂", "配伍", "处方"]):
-            return "formula_research"
-        if any(token in text_blob for token in ["药物", "药材", "本草"]):
-            return "herb_research"
-        return "integrative_research"
+        return self.phase_handlers._infer_hypothesis_domain(cycle, observations, findings)
     
     def _execute_experiment_phase(self, cycle: ResearchCycle, 
                                 context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行实验阶段
-        
-        Args:
-            cycle (ResearchCycle): 研究循环
-            context (Dict[str, Any]): 阶段上下文
-            
-        Returns:
-            Dict[str, Any]: 执行结果
-        """
-        # 模拟实验阶段的执行
-        experiment_results = {
-            "study_design": "对照实验设计",
-            "sample_size": 100,
-            "duration_days": 30,
-            "methodology": "数据挖掘与统计分析",
-            "validation_metrics": {
-                "accuracy": 0.92,
-                "precision": 0.89,
-                "recall": 0.87,
-                "f1_score": 0.88
-            },
-            "data_sources": ["古籍文本", "现代数据库", "专家知识"]
-        }
-        
-        return {
-            "phase": "experiment",
-            "results": experiment_results,
-            "metadata": {
-                "study_type": "quantitative_analysis",
-                "validation_status": "approved"
-            }
-        }
+        """执行实验阶段（兼容入口，委托阶段处理器）。"""
+        return self.phase_handlers.execute_experiment_phase(cycle, context)
     
     def _execute_analyze_phase(self, cycle: ResearchCycle, 
                               context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行分析阶段
-        
-        Args:
-            cycle (ResearchCycle): 研究循环
-            context (Dict[str, Any]): 阶段上下文
-            
-        Returns:
-            Dict[str, Any]: 执行结果
-        """
-        # 模拟分析阶段的执行
-        analysis_results = {
-            "statistical_significance": True,
-            "confidence_level": 0.95,
-            "effect_size": 0.75,
-            "p_value": 0.003,
-            "interpretation": "发现方剂剂量与疗效存在显著相关性，符合中医理论预期",
-            "limitations": ["样本规模有限", "数据来源单一", "时间跨度较短"]
-        }
-        
-        return {
-            "phase": "analyze",
-            "results": analysis_results,
-            "metadata": {
-                "analysis_type": "statistical_analysis",
-                "significance_level": 0.05
-            }
-        }
+        """执行分析阶段（兼容入口，委托阶段处理器）。"""
+        return self.phase_handlers.execute_analyze_phase(cycle, context)
     
     def _execute_publish_phase(self, cycle: ResearchCycle, 
                               context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行发布阶段
-        
-        Args:
-            cycle (ResearchCycle): 研究循环
-            context (Dict[str, Any]): 阶段上下文
-            
-        Returns:
-            Dict[str, Any]: 执行结果
-        """
-        observe_result = cycle.phase_executions.get(ResearchPhase.OBSERVE, {}).get("result", {})
-        literature_pipeline = observe_result.get("literature_pipeline") or {}
-        citation_records = self._collect_citation_records(cycle, context, literature_pipeline)
-        citation_manager = CitationManager(self.config.get("citation_management") or {})
-        citation_manager.initialize()
-        citation_result = citation_manager.execute({"records": citation_records})
-        citation_manager.cleanup()
-
-        publications = [
-            {
-                "title": "基于AI的中医古籍方剂分析研究",
-                "journal": "中医研究学报",
-                "authors": cycle.researchers,
-                "keywords": ["AI", "中医", "古籍", "方剂", "数据分析"],
-                "status": "submitted",
-                "citation_key": f"{_safe_researcher_key(cycle.researchers)}2026AI",
-            },
-            {
-                "title": "古代方剂剂量演变规律研究",
-                "journal": "中医药学报",
-                "authors": cycle.researchers,
-                "keywords": ["剂量", "历史", "演变", "中医"],
-                "status": "accepted",
-                "citation_key": f"{_safe_researcher_key(cycle.researchers)}2026Dose",
-            }
-        ]
-        
-        deliverables = [
-            "研究报告",
-            "数据集",
-            "分析工具包",
-            "可视化图表",
-        ]
-        if citation_result.get("bibtex"):
-            deliverables.append("BibTeX 参考文献")
-        if citation_result.get("gbt7714"):
-            deliverables.append("GB/T 7714 参考文献")
-        
-        return {
-            "phase": "publish",
-            "publications": publications,
-            "deliverables": deliverables,
-            "citations": citation_result.get("entries", []),
-            "bibtex": citation_result.get("bibtex", ""),
-            "gbt7714": citation_result.get("gbt7714", ""),
-            "metadata": {
-                "publication_count": len(publications),
-                "deliverable_count": len(deliverables),
-                "citation_count": citation_result.get("citation_count", 0),
-            }
-        }
+        """执行发布阶段（兼容入口，委托阶段处理器）。"""
+        return self.phase_handlers.execute_publish_phase(cycle, context)
 
     def _collect_citation_records(
         self,
@@ -1658,237 +1091,24 @@ class ResearchPipeline(PhaseTrackerMixin):
         context: Dict[str, Any],
         literature_pipeline: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
-        context_records = context.get("citation_records")
-        if isinstance(context_records, list):
-            return [dict(item) for item in context_records if isinstance(item, dict)]
-
-        literature_records = literature_pipeline.get("records")
-        if isinstance(literature_records, list) and literature_records:
-            return [dict(item) for item in literature_records if isinstance(item, dict)]
-
-        publications = [
-            {
-                "title": outcome.get("result", {}).get("title", "") or outcome.get("result", {}).get("phase", ""),
-                "authors": cycle.researchers,
-                "year": datetime.now().year,
-                "journal": "中医古籍全自动研究系统",
-                "source": "pipeline",
-                "note": outcome.get("phase", ""),
-            }
-            for outcome in cycle.outcomes
-            if isinstance(outcome, dict) and isinstance(outcome.get("result"), dict)
-        ]
-        return [item for item in publications if item.get("title")]
+        return self.phase_handlers.collect_citation_records(cycle, context, literature_pipeline)
     
     def _execute_reflect_phase(self, cycle: ResearchCycle, 
                               context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行反思阶段
-        
-        Args:
-            cycle (ResearchCycle): 研究循环
-            context (Dict[str, Any]): 阶段上下文
-            
-        Returns:
-            Dict[str, Any]: 执行结果
-        """
-        # 模拟反思阶段的执行
-        reflections = [
-            {
-                "topic": "方法论改进",
-                "reflection": "实验设计可以更加多样化，增加跨学科方法的应用",
-                "action": "在下一轮研究中引入更多样化的实验方法"
-            },
-            {
-                "topic": "数据质量",
-                "reflection": "古籍文本的标准化处理仍有改进空间",
-                "action": "开发更完善的文本预处理工具"
-            },
-            {
-                "topic": "技术应用",
-                "reflection": "AI模型在中医领域应用效果显著，但需要持续优化",
-                "action": "加强模型训练和调优"
-            }
-        ]
-        
-        improvement_plan = [
-            "优化数据预处理流程",
-            "增强模型泛化能力",
-            "完善质量控制体系",
-            "建立长期跟踪机制"
-        ]
-        
-        return {
-            "phase": "reflect",
-            "reflections": reflections,
-            "improvement_plan": improvement_plan,
-            "metadata": {
-                "reflection_count": len(reflections),
-                "plan_items": len(improvement_plan)
-            }
-        }
+        """执行反思阶段（兼容入口，委托阶段处理器）。"""
+        return self.phase_handlers.execute_reflect_phase(cycle, context)
     
     def complete_research_cycle(self, cycle_id: str) -> bool:
-        """
-        完成研究循环
-        
-        Args:
-            cycle_id (str): 循环ID
-            
-        Returns:
-            bool: 完成是否成功
-        """
-        phase_entry = self._start_phase(self._metadata, "complete_research_cycle", {"cycle_id": cycle_id})
-        start_time = time.perf_counter()
-        try:
-            if cycle_id not in self.research_cycles:
-                self.logger.warning(f"研究循环 {cycle_id} 不存在")
-                self._fail_phase(
-                    self._metadata,
-                    self._failed_operations,
-                    "complete_research_cycle",
-                    phase_entry,
-                    start_time,
-                    "循环不存在",
-                )
-                return False
-            
-            research_cycle = self.research_cycles[cycle_id]
-            
-            # 更新状态
-            research_cycle.status = ResearchCycleStatus.COMPLETED
-            research_cycle.completed_at = datetime.now().isoformat()
-            research_cycle.duration = (
-                datetime.fromisoformat(research_cycle.completed_at) - 
-                datetime.fromisoformat(research_cycle.started_at)
-            ).total_seconds()
-            
-            # 从活跃循环中移除
-            if cycle_id in self.active_cycles:
-                del self.active_cycles[cycle_id]
-            research_cycle.metadata["final_status"] = research_cycle.status.value
-            research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
-            
-            # 记录历史
-            self.execution_history.append({
-                "timestamp": datetime.now().isoformat(),
-                "action": "cycle_completed",
-                "cycle_id": cycle_id,
-                "duration": research_cycle.duration
-            })
-            self._complete_phase(self._metadata, "complete_research_cycle", phase_entry, start_time)
-            self._persist_result(research_cycle)
-
-            self.logger.info(f"研究循环完成: {research_cycle.cycle_name}")
-            return True
-            
-        except Exception as e:
-            self._fail_phase(self._metadata, self._failed_operations, "complete_research_cycle", phase_entry, start_time, str(e))
-            self.logger.error(f"研究循环完成失败: {e}")
-            return False
+        """完成研究循环（委托编排器执行）。"""
+        return self.orchestrator.complete_research_cycle(cycle_id)
     
     def suspend_research_cycle(self, cycle_id: str) -> bool:
-        """
-        暂停研究循环
-        
-        Args:
-            cycle_id (str): 循环ID
-            
-        Returns:
-            bool: 暂停是否成功
-        """
-        phase_entry = self._start_phase(self._metadata, "suspend_research_cycle", {"cycle_id": cycle_id})
-        start_time = time.perf_counter()
-        try:
-            if cycle_id not in self.research_cycles:
-                self.logger.warning(f"研究循环 {cycle_id} 不存在")
-                self._fail_phase(
-                    self._metadata,
-                    self._failed_operations,
-                    "suspend_research_cycle",
-                    phase_entry,
-                    start_time,
-                    "循环不存在",
-                )
-                return False
-            
-            research_cycle = self.research_cycles[cycle_id]
-            
-            # 更新状态
-            research_cycle.status = ResearchCycleStatus.SUSPENDED
-            
-            # 从活跃循环中移除
-            if cycle_id in self.active_cycles:
-                del self.active_cycles[cycle_id]
-            research_cycle.metadata["final_status"] = research_cycle.status.value
-            research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
-            
-            # 记录历史
-            self.execution_history.append({
-                "timestamp": datetime.now().isoformat(),
-                "action": "cycle_suspended",
-                "cycle_id": cycle_id
-            })
-            self._complete_phase(self._metadata, "suspend_research_cycle", phase_entry, start_time)
-            
-            self.logger.info(f"研究循环暂停: {research_cycle.cycle_name}")
-            return True
-            
-        except Exception as e:
-            self._fail_phase(self._metadata, self._failed_operations, "suspend_research_cycle", phase_entry, start_time, str(e))
-            self.logger.error(f"研究循环暂停失败: {e}")
-            return False
+        """暂停研究循环（委托编排器执行）。"""
+        return self.orchestrator.suspend_research_cycle(cycle_id)
     
     def resume_research_cycle(self, cycle_id: str) -> bool:
-        """
-        恢复研究循环
-        
-        Args:
-            cycle_id (str): 循环ID
-            
-        Returns:
-            bool: 恢复是否成功
-        """
-        phase_entry = self._start_phase(self._metadata, "resume_research_cycle", {"cycle_id": cycle_id})
-        start_time = time.perf_counter()
-        try:
-            if cycle_id not in self.research_cycles:
-                self.logger.warning(f"研究循环 {cycle_id} 不存在")
-                self._fail_phase(
-                    self._metadata,
-                    self._failed_operations,
-                    "resume_research_cycle",
-                    phase_entry,
-                    start_time,
-                    "循环不存在",
-                )
-                return False
-            
-            research_cycle = self.research_cycles[cycle_id]
-            
-            # 更新状态
-            research_cycle.status = ResearchCycleStatus.ACTIVE
-            
-            # 添加到活跃循环
-            self.active_cycles[cycle_id] = research_cycle
-            research_cycle.metadata["final_status"] = research_cycle.status.value
-            research_cycle.metadata["analysis_summary"] = self._build_cycle_analysis_summary(research_cycle)
-            
-            # 记录历史
-            self.execution_history.append({
-                "timestamp": datetime.now().isoformat(),
-                "action": "cycle_resumed",
-                "cycle_id": cycle_id
-            })
-            self._complete_phase(self._metadata, "resume_research_cycle", phase_entry, start_time)
-            
-            self.logger.info(f"研究循环恢复: {research_cycle.cycle_name}")
-            return True
-            
-        except Exception as e:
-            self._fail_phase(self._metadata, self._failed_operations, "resume_research_cycle", phase_entry, start_time, str(e))
-            self.logger.error(f"研究循环恢复失败: {e}")
-            return False
+        """恢复研究循环（委托编排器执行）。"""
+        return self.orchestrator.resume_research_cycle(cycle_id)
     
     def get_cycle_status(self, cycle_id: str) -> Dict[str, Any]:
         """

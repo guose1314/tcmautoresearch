@@ -1,0 +1,2014 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TCM Auto Research Console</title>
+    <style>
+        :root {
+            --bg-top: #f3ead8;
+            --bg-bottom: #d8e6df;
+            --panel: rgba(255, 251, 245, 0.9);
+            --panel-strong: rgba(248, 242, 231, 0.96);
+            --ink: #25312d;
+            --muted: #66746f;
+            --accent: #b35c2e;
+            --accent-soft: rgba(179, 92, 46, 0.14);
+            --success: #2f6a49;
+            --border: rgba(37, 49, 45, 0.12);
+            --shadow: 0 20px 45px rgba(65, 55, 43, 0.14);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Source Han Serif SC", "Songti SC", "STSong", Georgia, serif;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at top left, rgba(255, 255, 255, 0.55), transparent 32%),
+                radial-gradient(circle at bottom right, rgba(179, 92, 46, 0.12), transparent 28%),
+                linear-gradient(160deg, var(--bg-top), var(--bg-bottom));
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0.18;
+            background-image:
+                linear-gradient(rgba(37, 49, 45, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(37, 49, 45, 0.05) 1px, transparent 1px);
+            background-size: 24px 24px;
+            mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), transparent 90%);
+        }
+
+        main {
+            width: min(1080px, calc(100% - 32px));
+            margin: 0 auto;
+            padding: 40px 0 56px;
+        }
+
+        .hero {
+            display: grid;
+            gap: 16px;
+            margin-bottom: 24px;
+            padding: 28px;
+            border: 1px solid var(--border);
+            border-radius: 28px;
+            background: linear-gradient(135deg, rgba(255, 252, 247, 0.94), rgba(242, 236, 225, 0.9));
+            box-shadow: var(--shadow);
+            animation: fade-slide 0.55s ease-out;
+        }
+
+        .hero h1 {
+            margin: 0;
+            font-size: clamp(2rem, 3vw, 3.2rem);
+            letter-spacing: 0.02em;
+            line-height: 1.1;
+        }
+
+        .hero p {
+            margin: 0;
+            max-width: 760px;
+            color: var(--muted);
+            font-size: 1rem;
+        }
+
+        .layout {
+            display: grid;
+            gap: 18px;
+            grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.9fr);
+        }
+
+        .panel {
+            padding: 24px;
+            border-radius: 24px;
+            border: 1px solid var(--border);
+            background: var(--panel);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(10px);
+            animation: fade-slide 0.65s ease-out;
+        }
+
+        .panel h2,
+        .panel h3 {
+            margin: 0 0 14px;
+            font-size: 1.2rem;
+        }
+
+        form {
+            display: grid;
+            gap: 14px;
+        }
+
+        label {
+            display: grid;
+            gap: 8px;
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+
+        input,
+        textarea,
+        select,
+        button {
+            font: inherit;
+        }
+
+        input,
+        textarea,
+        select {
+            width: 100%;
+            padding: 14px 16px;
+            border-radius: 16px;
+            border: 1px solid rgba(37, 49, 45, 0.16);
+            background: rgba(255, 255, 255, 0.7);
+            color: var(--ink);
+            transition: border-color 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+        }
+
+        input:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: rgba(179, 92, 46, 0.6);
+            transform: translateY(-1px);
+            background: rgba(255, 255, 255, 0.9);
+        }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        button {
+            border: none;
+            border-radius: 999px;
+            padding: 12px 20px;
+            cursor: pointer;
+            background: linear-gradient(135deg, #b35c2e, #8f4824);
+            color: #fffaf4;
+            box-shadow: 0 10px 24px rgba(143, 72, 36, 0.28);
+            transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 14px 28px rgba(143, 72, 36, 0.32);
+        }
+
+        button:disabled {
+            cursor: wait;
+            opacity: 0.72;
+        }
+
+        .hint {
+            color: var(--muted);
+            font-size: 0.92rem;
+        }
+
+        .stats {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            margin-bottom: 18px;
+        }
+
+        .stat-card {
+            padding: 16px;
+            border-radius: 18px;
+            background: var(--panel-strong);
+            border: 1px solid var(--border);
+        }
+
+        .stat-card span {
+            display: block;
+            color: var(--muted);
+            font-size: 0.84rem;
+            margin-bottom: 6px;
+        }
+
+        .stat-card strong {
+            display: block;
+            font-size: 1.05rem;
+            word-break: break-word;
+        }
+
+        .progress-shell {
+            padding: 16px 18px;
+            border-radius: 20px;
+            background: var(--panel-strong);
+            border: 1px solid var(--border);
+            margin-bottom: 18px;
+        }
+
+        .progress-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 10px;
+            color: var(--muted);
+            font-size: 0.92rem;
+        }
+
+        .progress-track {
+            position: relative;
+            overflow: hidden;
+            height: 14px;
+            border-radius: 999px;
+            background: rgba(37, 49, 45, 0.08);
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #d07a37, #2f6a49);
+            transition: width 0.35s ease;
+        }
+
+        .phase-list,
+        .event-log {
+            display: grid;
+            gap: 10px;
+        }
+
+        .phase-item,
+        .event-item {
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.58);
+        }
+
+        .phase-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: center;
+            transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
+        }
+
+        .phase-item.active {
+            border-color: rgba(179, 92, 46, 0.38);
+            background: rgba(179, 92, 46, 0.08);
+            transform: translateY(-1px);
+        }
+
+        .phase-item.completed {
+            border-color: rgba(47, 106, 73, 0.2);
+            background: rgba(47, 106, 73, 0.06);
+        }
+
+        .phase-item.failed,
+        .phase-item.partial {
+            border-color: rgba(137, 44, 44, 0.2);
+            background: rgba(137, 44, 44, 0.06);
+        }
+
+        .phase-label {
+            font-weight: 600;
+        }
+
+        .phase-note {
+            display: block;
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 0.82rem;
+        }
+
+        .phase-status {
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-size: 0.84rem;
+            white-space: nowrap;
+        }
+
+        .phase-status.running,
+        .phase-status.queued,
+        .phase-status.pending {
+            background: rgba(179, 92, 46, 0.14);
+            color: var(--accent);
+        }
+
+        .phase-status.completed {
+            background: rgba(47, 106, 73, 0.12);
+            color: var(--success);
+        }
+
+        .phase-status.skipped,
+        .phase-status.idle {
+            background: rgba(37, 49, 45, 0.08);
+            color: var(--muted);
+        }
+
+        .phase-status.failed,
+        .phase-status.partial {
+            background: rgba(137, 44, 44, 0.12);
+            color: #892c2c;
+        }
+
+        .event-item {
+            font-size: 0.92rem;
+        }
+
+        .event-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 6px;
+            color: var(--muted);
+        }
+
+        .event-payload {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--ink);
+            font-size: 0.84rem;
+        }
+
+        .status-banner {
+            margin-bottom: 16px;
+            padding: 13px 16px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.62);
+            border: 1px solid var(--border);
+            color: var(--muted);
+        }
+
+        .status-banner.error {
+            background: rgba(137, 44, 44, 0.08);
+            color: #892c2c;
+            border-color: rgba(137, 44, 44, 0.2);
+        }
+
+        .status-banner.success {
+            background: rgba(47, 106, 73, 0.08);
+            color: var(--success);
+            border-color: rgba(47, 106, 73, 0.2);
+        }
+
+        .summary-grid {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            margin-bottom: 16px;
+        }
+
+        .summary-card {
+            padding: 14px 16px;
+            border-radius: 18px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.62);
+        }
+
+        .summary-card span {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--muted);
+            font-size: 0.84rem;
+        }
+
+        .summary-card strong {
+            display: block;
+            font-size: 1rem;
+            word-break: break-word;
+        }
+
+        .summary-section {
+            margin-top: 14px;
+        }
+
+        .panel-tools {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+
+        .ghost-button {
+            padding: 8px 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(37, 49, 45, 0.14);
+            background: rgba(255, 255, 255, 0.7);
+            color: var(--ink);
+            box-shadow: none;
+        }
+
+        .ghost-button:hover:not(:disabled) {
+            box-shadow: none;
+            background: rgba(255, 255, 255, 0.88);
+        }
+
+        .recent-job-list {
+            display: grid;
+            gap: 10px;
+        }
+
+        .recent-job-card {
+            padding: 14px 16px;
+            border-radius: 18px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.62);
+            color: var(--ink);
+        }
+
+        .recent-job-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .recent-job-action {
+            padding: 7px 12px;
+            font-size: 0.84rem;
+        }
+
+        .danger-button {
+            background: rgba(137, 44, 44, 0.08);
+            color: #892c2c;
+            border-color: rgba(137, 44, 44, 0.18);
+        }
+
+        .danger-button:hover:not(:disabled) {
+            background: rgba(137, 44, 44, 0.14);
+        }
+
+        .recent-job-card.active {
+            border-color: rgba(179, 92, 46, 0.35);
+            background: rgba(179, 92, 46, 0.08);
+        }
+
+        .recent-job-card strong {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 0.98rem;
+            word-break: break-word;
+        }
+
+        .recent-job-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .recent-job-note {
+            color: var(--muted);
+            font-size: 0.84rem;
+            white-space: pre-wrap;
+        }
+
+        .report-actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .report-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 180px;
+            padding: 11px 16px;
+            border-radius: 999px;
+            border: 1px solid rgba(179, 92, 46, 0.24);
+            background: rgba(179, 92, 46, 0.09);
+            color: var(--accent);
+            text-decoration: none;
+            transition: transform 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+        }
+
+        .report-link:hover {
+            transform: translateY(-1px);
+            background: rgba(179, 92, 46, 0.14);
+            border-color: rgba(179, 92, 46, 0.32);
+        }
+
+        .summary-section h4 {
+            margin: 0 0 10px;
+            font-size: 0.98rem;
+        }
+
+        .summary-list {
+            display: grid;
+            gap: 10px;
+        }
+
+        .summary-item {
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.56);
+        }
+
+        .summary-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .summary-meta {
+            color: var(--muted);
+            font-size: 0.86rem;
+        }
+
+        .summary-text {
+            margin: 0;
+            color: var(--ink);
+            font-size: 0.9rem;
+            white-space: pre-wrap;
+        }
+
+        .empty {
+            color: var(--muted);
+            font-size: 0.92rem;
+        }
+
+        @keyframes fade-slide {
+            from {
+                opacity: 0;
+                transform: translateY(12px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 860px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+
+            .stats {
+                grid-template-columns: 1fr;
+            }
+
+            .summary-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 560px) {
+            .summary-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <section class="hero">
+            <h1>中医自动科研控制台</h1>
+            <p>输入研究主题后，页面会创建后台任务，并通过可选的 WebSocket 或 SSE 实时通道展示当前阶段、总进度和关键事件。</p>
+        </section>
+
+        <div class="layout">
+            <section class="panel">
+                <h2>启动任务</h2>
+                <form id="research-form">
+                    <label>
+                        研究主题
+                        <input id="topic-input" name="topic" type="text" placeholder="例如：桂枝汤治疗太阳中风证的证据整合研究" required>
+                    </label>
+                    <label>
+                        备注说明
+                        <textarea id="description-input" name="description" rows="4" placeholder="可选：补充研究范围、关注证型或预期输出"></textarea>
+                    </label>
+                    <label>
+                        实时通道
+                        <select id="transport-select" name="transport">
+                            <option value="auto" selected>自动优先 WebSocket</option>
+                            <option value="websocket">仅 WebSocket</option>
+                            <option value="sse">仅 SSE</option>
+                        </select>
+                    </label>
+                    <div class="actions">
+                        <button id="submit-button" type="submit">创建并订阅任务</button>
+                        <span class="hint">自动模式会优先使用 WebSocket，短暂抖动时指数退避重连，仍不可用时回退到 SSE。</span>
+                    </div>
+                </form>
+            </section>
+
+            <aside class="panel">
+                <h3>任务概览</h3>
+                <div id="status-banner" class="status-banner">等待创建任务。</div>
+                <div class="stats">
+                    <div class="stat-card">
+                        <span>Job ID</span>
+                        <strong id="job-id">-</strong>
+                    </div>
+                    <div class="stat-card">
+                        <span>状态</span>
+                        <strong id="job-status">idle</strong>
+                    </div>
+                    <div class="stat-card">
+                        <span>当前阶段</span>
+                        <strong id="current-phase">-</strong>
+                    </div>
+                    <div class="stat-card">
+                        <span>研究主题</span>
+                        <strong id="current-topic">-</strong>
+                    </div>
+                    <div class="stat-card">
+                        <span>实时通道</span>
+                        <strong id="active-transport">自动 / 未连接</strong>
+                    </div>
+                </div>
+
+                <div class="progress-shell">
+                    <div class="progress-meta">
+                        <span id="progress-label">总进度</span>
+                        <strong id="progress-value">0%</strong>
+                    </div>
+                    <div class="progress-track">
+                        <div id="progress-bar" class="progress-bar"></div>
+                    </div>
+                </div>
+
+                <h3>阶段状态</h3>
+                <div id="phase-list" class="phase-list">
+                    <div class="empty">暂无阶段事件。</div>
+                </div>
+
+                <div class="summary-section">
+                    <h3>最近任务</h3>
+                    <div class="panel-tools">
+                        <button id="refresh-recent-jobs" type="button" class="ghost-button">刷新列表</button>
+                        <button id="prune-local-records" type="button" class="ghost-button">清除失效记录</button>
+                        <button id="clear-local-records" type="button" class="ghost-button">清理本地记录</button>
+                    </div>
+                    <div id="recent-job-list" class="recent-job-list">
+                        <div class="empty">暂无最近任务。</div>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <section class="panel" style="margin-top: 18px;">
+            <h3>结果摘要</h3>
+            <div id="result-summary" class="result-summary">
+                <div class="empty">任务完成后会在这里展开关键结果。</div>
+            </div>
+        </section>
+
+        <section class="panel" style="margin-top: 18px;">
+            <h3>事件流</h3>
+            <div id="event-log" class="event-log">
+                <div class="empty">实时通道尚未连接。</div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const form = document.getElementById("research-form");
+        const topicInput = document.getElementById("topic-input");
+        const descriptionInput = document.getElementById("description-input");
+        const transportSelect = document.getElementById("transport-select");
+        const submitButton = document.getElementById("submit-button");
+        const statusBanner = document.getElementById("status-banner");
+        const jobIdNode = document.getElementById("job-id");
+        const jobStatusNode = document.getElementById("job-status");
+        const currentPhaseNode = document.getElementById("current-phase");
+        const currentTopicNode = document.getElementById("current-topic");
+        const activeTransportNode = document.getElementById("active-transport");
+        const progressValueNode = document.getElementById("progress-value");
+        const progressBarNode = document.getElementById("progress-bar");
+        const phaseListNode = document.getElementById("phase-list");
+        const eventLogNode = document.getElementById("event-log");
+        const resultSummaryNode = document.getElementById("result-summary");
+        const recentJobListNode = document.getElementById("recent-job-list");
+        const refreshRecentJobsButton = document.getElementById("refresh-recent-jobs");
+        const pruneLocalRecordsButton = document.getElementById("prune-local-records");
+        const clearLocalRecordsButton = document.getElementById("clear-local-records");
+        const LAST_JOB_STORAGE_KEY = "tcm-auto-research.lastJobId";
+        const RECENT_JOBS_STORAGE_KEY = "tcm-auto-research.recentJobIds";
+        const RECENT_JOB_LIMIT = 8;
+
+        const phaseLabels = {
+            observe: "观察阶段",
+            analyze: "分析阶段",
+            hypothesize: "假设阶段",
+            experiment: "实验阶段",
+            publish: "发布阶段",
+            reflect: "复盘阶段",
+            summarize: "总结阶段",
+        };
+
+        const summaryFieldLabels = {
+            observation_count: "观察记录数",
+            key_findings: "关键发现",
+            reason: "原因说明",
+            evidence_count: "证据条目数",
+            literature_count: "文献数量",
+            entity_count: "实体数量",
+            relationship_count: "关系数量",
+            hypothesis: "核心假设",
+            hypotheses: "假设列表",
+            experiment_count: "实验数量",
+            recommendations: "研究建议",
+            analysis_results: "分析结果",
+            research_artifact: "研究产物",
+            statistical_analysis: "统计分析",
+            interpretation: "结果解释",
+            confidence_level: "置信水平",
+            effect_size: "效应量",
+            p_value: "P 值",
+            evidence_protocol: "证据协议",
+            quality_metrics: "质量指标",
+            confidence_score: "置信分数",
+            completeness: "完整度",
+            data_mining_result: "数据挖掘结果",
+            formula_count: "候选方剂数",
+            match_count: "图谱匹配数",
+        };
+
+        const statusLabels = {
+            idle: "空闲",
+            queued: "排队中",
+            pending: "待开始",
+            running: "进行中",
+            completed: "已完成",
+            partial: "部分完成",
+            failed: "失败",
+            skipped: "已跳过",
+        };
+
+        const transportPreferenceLabels = {
+            auto: "自动",
+            websocket: "WebSocket",
+            sse: "SSE",
+        };
+
+        const transportChannelLabels = {
+            idle: "未连接",
+            websocket: "WebSocket",
+            sse: "SSE",
+        };
+
+        const WEBSOCKET_RECONNECT_BASE_DELAY_MS = 500;
+        const WEBSOCKET_RECONNECT_MAX_DELAY_MS = 4000;
+        const WEBSOCKET_RECONNECT_MAX_ATTEMPTS = 4;
+
+        let activeConnection = null;
+        let activeConnectionKind = "idle";
+        let realtimeConnectionToken = 0;
+        let reconnectTimerId = 0;
+        let phaseState = new Map();
+        let activePhaseKey = "";
+
+        function setBanner(message, kind = "default") {
+            statusBanner.textContent = message;
+            statusBanner.classList.toggle("error", kind === "error");
+            statusBanner.classList.toggle("success", kind === "success");
+        }
+
+        function formatPhaseName(phase) {
+            return phaseLabels[phase] || phase || "-";
+        }
+
+        function formatStatus(status) {
+            return statusLabels[status] || status || "-";
+        }
+
+        function normalizeTransportPreference(preference) {
+            return transportPreferenceLabels[preference] ? preference : "auto";
+        }
+
+        function formatTransportPreference(preference) {
+            return transportPreferenceLabels[normalizeTransportPreference(preference)] || transportPreferenceLabels.auto;
+        }
+
+        function formatTransportChannel(kind) {
+            return transportChannelLabels[kind] || kind || transportChannelLabels.idle;
+        }
+
+        function setTransportState(kind, preference = transportSelect?.value || "auto") {
+            activeConnectionKind = kind;
+            activeTransportNode.textContent = `${formatTransportPreference(preference)} / ${formatTransportChannel(kind)}`;
+        }
+
+        function formatDuration(duration) {
+            const numeric = Number(duration);
+            if (!Number.isFinite(numeric)) {
+                return "-";
+            }
+            return `${numeric.toFixed(2)} 秒`;
+        }
+
+        function formatSummaryKey(key) {
+            return summaryFieldLabels[key] || key || "-";
+        }
+
+        function formatSummaryValue(value) {
+            if (Array.isArray(value)) {
+                return value.length > 0 ? value.map((item) => String(item)).join("、") : "-";
+            }
+            if (value && typeof value === "object") {
+                return JSON.stringify(value, null, 0);
+            }
+            if (typeof value === "boolean") {
+                return value ? "是" : "否";
+            }
+            return String(value);
+        }
+
+        function summarizeObject(summary) {
+            if (!summary || typeof summary !== "object") {
+                return "无摘要";
+            }
+
+            const entries = Object.entries(summary)
+                .filter(([, value]) => value !== null && value !== undefined && value !== "")
+                .slice(0, 4)
+                .map(([key, value]) => {
+                    return `${formatSummaryKey(key)}：${formatSummaryValue(Array.isArray(value) ? value.slice(0, 3) : value)}`;
+                });
+
+            return entries.length > 0 ? entries.join("\n") : "无摘要";
+        }
+
+        function formatMetricValue(value, digits = 2) {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric)) {
+                return "-";
+            }
+            return numeric.toFixed(digits);
+        }
+
+        function buildSummarySection(titleText, blocks) {
+            if (!Array.isArray(blocks) || blocks.length === 0) {
+                return null;
+            }
+
+            const section = document.createElement("div");
+            section.className = "summary-section";
+
+            const heading = document.createElement("h4");
+            heading.textContent = titleText;
+            section.appendChild(heading);
+
+            const list = document.createElement("div");
+            list.className = "summary-list";
+
+            blocks.forEach((block) => {
+                const item = document.createElement("div");
+                item.className = "summary-item";
+
+                const head = document.createElement("div");
+                head.className = "summary-head";
+
+                const title = document.createElement("strong");
+                title.textContent = block.title;
+                head.appendChild(title);
+
+                item.appendChild(head);
+
+                const text = document.createElement("p");
+                text.className = "summary-text";
+                text.textContent = block.lines.join("\n");
+                item.appendChild(text);
+
+                list.appendChild(item);
+            });
+
+            section.appendChild(list);
+            return section;
+        }
+
+        function buildAnalysisBlocks(result) {
+            const analysis = result?.analysis_results;
+            if (!analysis || typeof analysis !== "object") {
+                return [];
+            }
+
+            const blocks = [];
+            const statistical = analysis.statistical_analysis && typeof analysis.statistical_analysis === "object"
+                ? analysis.statistical_analysis
+                : analysis;
+            const statisticalLines = [];
+            if (statistical.interpretation) {
+                statisticalLines.push(`结果解释：${statistical.interpretation}`);
+            }
+            if (statistical.p_value !== undefined && statistical.p_value !== null) {
+                statisticalLines.push(`P 值：${formatMetricValue(statistical.p_value, 3)}`);
+            }
+            if (statistical.confidence_level !== undefined && statistical.confidence_level !== null) {
+                statisticalLines.push(`置信水平：${formatMetricValue(statistical.confidence_level, 2)}`);
+            }
+            if (statistical.effect_size !== undefined && statistical.effect_size !== null) {
+                statisticalLines.push(`效应量：${formatMetricValue(statistical.effect_size, 2)}`);
+            }
+            if (statisticalLines.length > 0) {
+                blocks.push({ title: "统计分析", lines: statisticalLines });
+            }
+
+            const protocol = analysis.evidence_protocol;
+            if (protocol && typeof protocol === "object") {
+                const evidenceCount = Array.isArray(protocol.evidence_records) ? protocol.evidence_records.length : 0;
+                const claimCount = Array.isArray(protocol.claims) ? protocol.claims.length : 0;
+                const summary = protocol.evidence_summary && typeof protocol.evidence_summary === "object"
+                    ? protocol.evidence_summary
+                    : {};
+                const protocolLines = [];
+                if (evidenceCount > 0) {
+                    protocolLines.push(`证据记录：${evidenceCount}`);
+                }
+                if (claimCount > 0) {
+                    protocolLines.push(`候选论断：${claimCount}`);
+                }
+                if (summary.record_count !== undefined) {
+                    protocolLines.push(`证据覆盖记录：${summary.record_count}`);
+                }
+                if (protocolLines.length > 0) {
+                    blocks.push({ title: "证据协议", lines: protocolLines });
+                }
+            }
+
+            const mining = analysis.data_mining_result;
+            if (mining && typeof mining === "object") {
+                const ruleCount = Array.isArray(mining.association_rules?.rules) ? mining.association_rules.rules.length : 0;
+                const clusterCount = Array.isArray(mining.clustering?.cluster_summary) ? mining.clustering.cluster_summary.length : 0;
+                const miningLines = [];
+                if (ruleCount > 0) {
+                    miningLines.push(`关联规则：${ruleCount}`);
+                }
+                if (clusterCount > 0) {
+                    miningLines.push(`聚类摘要：${clusterCount}`);
+                }
+                if (Array.isArray(mining.methods_executed) && mining.methods_executed.length > 0) {
+                    miningLines.push(`执行方法：${mining.methods_executed.slice(0, 3).join("、")}`);
+                }
+                if (miningLines.length > 0) {
+                    blocks.push({ title: "数据挖掘", lines: miningLines });
+                }
+            }
+
+            const quality = analysis.quality_metrics && typeof analysis.quality_metrics === "object"
+                ? analysis.quality_metrics
+                : {};
+            const recommendations = Array.isArray(analysis.recommendations) ? analysis.recommendations : [];
+            const qualityLines = [];
+            if (quality.confidence_score !== undefined && quality.confidence_score !== null) {
+                qualityLines.push(`置信分数：${formatMetricValue(quality.confidence_score, 2)}`);
+            }
+            if (quality.completeness !== undefined && quality.completeness !== null) {
+                qualityLines.push(`完整度：${formatMetricValue(quality.completeness, 2)}`);
+            }
+            if (recommendations.length > 0) {
+                qualityLines.push(`建议：${recommendations.slice(0, 2).join("；")}`);
+            }
+            if (qualityLines.length > 0) {
+                blocks.push({ title: "质量评估", lines: qualityLines });
+            }
+
+            return blocks;
+        }
+
+        function buildResearchArtifactBlocks(result) {
+            const artifact = result?.research_artifact;
+            if (!artifact || typeof artifact !== "object") {
+                return [];
+            }
+
+            const blocks = [];
+            const hypotheses = Array.isArray(artifact.hypothesis) ? artifact.hypothesis : [];
+            const hypothesisLines = [];
+            if (hypotheses.length > 0) {
+                const firstHypothesis = hypotheses[0];
+                const title = firstHypothesis && typeof firstHypothesis === "object"
+                    ? firstHypothesis.title || firstHypothesis.statement
+                    : String(firstHypothesis || "");
+                hypothesisLines.push(`假设数量：${hypotheses.length}`);
+                if (title) {
+                    hypothesisLines.push(`核心假设：${title}`);
+                }
+            }
+            if (hypothesisLines.length > 0) {
+                blocks.push({ title: "假设产物", lines: hypothesisLines });
+            }
+
+            const evidence = Array.isArray(artifact.evidence) ? artifact.evidence : [];
+            const mining = artifact.data_mining_result && typeof artifact.data_mining_result === "object"
+                ? artifact.data_mining_result
+                : {};
+            const evidenceLines = [];
+            if (evidence.length > 0) {
+                evidenceLines.push(`证据条目：${evidence.length}`);
+            }
+            const artifactRuleCount = Array.isArray(mining.association_rules?.rules) ? mining.association_rules.rules.length : 0;
+            const artifactClusterCount = Array.isArray(mining.clustering?.cluster_summary) ? mining.clustering.cluster_summary.length : 0;
+            if (artifactRuleCount > 0) {
+                evidenceLines.push(`关联规则：${artifactRuleCount}`);
+            }
+            if (artifactClusterCount > 0) {
+                evidenceLines.push(`聚类摘要：${artifactClusterCount}`);
+            }
+            if (evidenceLines.length > 0) {
+                blocks.push({ title: "证据与挖掘产物", lines: evidenceLines });
+            }
+
+            const graphSummary = artifact.similar_formula_graph_evidence_summary;
+            if (graphSummary && typeof graphSummary === "object") {
+                const graphLines = [];
+                if (graphSummary.formula_count !== undefined) {
+                    graphLines.push(`候选方剂数：${graphSummary.formula_count}`);
+                }
+                if (graphSummary.match_count !== undefined) {
+                    graphLines.push(`图谱匹配数：${graphSummary.match_count}`);
+                }
+                const matches = Array.isArray(graphSummary.matches) ? graphSummary.matches : [];
+                if (matches.length > 0) {
+                    const firstMatch = matches[0] || {};
+                    if (firstMatch.formula_name && firstMatch.similar_formula_name) {
+                        graphLines.push(`代表类方：${firstMatch.formula_name} - ${firstMatch.similar_formula_name}`);
+                    }
+                }
+                if (graphLines.length > 0) {
+                    blocks.push({ title: "类方图谱证据", lines: graphLines });
+                }
+            }
+
+            return blocks;
+        }
+
+        function buildReportUrl(jobId, format) {
+            if (!jobId || jobId === "-") {
+                return "#";
+            }
+            return `/api/research/jobs/${encodeURIComponent(jobId)}/report?format=${encodeURIComponent(format)}`;
+        }
+
+        function renderReportActions(jobId) {
+            const section = document.createElement("div");
+            section.className = "summary-section";
+
+            const heading = document.createElement("h4");
+            heading.textContent = "导出报告";
+            section.appendChild(heading);
+
+            const actions = document.createElement("div");
+            actions.className = "report-actions";
+
+            [
+                ["auto", "打开最终产物"],
+                ["json", "导出 JSON 报告"],
+            ].forEach(([format, label]) => {
+                const link = document.createElement("a");
+                link.className = "report-link";
+                link.href = buildReportUrl(jobId, format);
+                link.target = "_blank";
+                link.rel = "noopener noreferrer";
+                link.textContent = label;
+                actions.appendChild(link);
+            });
+
+            section.appendChild(actions);
+            return section;
+        }
+
+        function renderResultSummary(result) {
+            if (!result || typeof result !== "object") {
+                resultSummaryNode.innerHTML = '<div class="empty">任务完成后会在这里展开关键结果。</div>';
+                return;
+            }
+
+            const phases = Array.isArray(result.phases) ? result.phases : [];
+            const completedCount = phases.filter((phase) => phase.status === "completed").length;
+            const cycleName = result.pipeline_metadata?.cycle_name || "-";
+
+            const summaryGrid = document.createElement("div");
+            summaryGrid.className = "summary-grid";
+            [
+                ["研究周期", result.cycle_id || "-"],
+                ["任务结果", formatStatus(result.status)],
+                ["总耗时", formatDuration(result.total_duration_sec)],
+                ["完成阶段", `${completedCount}/${phases.length || 0}`],
+            ].forEach(([label, value]) => {
+                const card = document.createElement("div");
+                card.className = "summary-card";
+
+                const labelNode = document.createElement("span");
+                labelNode.textContent = label;
+
+                const valueNode = document.createElement("strong");
+                valueNode.textContent = value;
+
+                card.appendChild(labelNode);
+                card.appendChild(valueNode);
+                summaryGrid.appendChild(card);
+            });
+
+            const metaSection = document.createElement("div");
+            metaSection.className = "summary-section";
+
+            const metaHeading = document.createElement("h4");
+            metaHeading.textContent = "任务元信息";
+
+            const metaList = document.createElement("div");
+            metaList.className = "summary-list";
+
+            const metaItem = document.createElement("div");
+            metaItem.className = "summary-item";
+
+            const metaHead = document.createElement("div");
+            metaHead.className = "summary-head";
+
+            const metaTitle = document.createElement("strong");
+            metaTitle.textContent = result.topic || "未命名主题";
+
+            const metaStatus = document.createElement("span");
+            metaStatus.className = `phase-status ${result.status || ""}`.trim();
+            metaStatus.textContent = formatStatus(result.status);
+
+            metaHead.appendChild(metaTitle);
+            metaHead.appendChild(metaStatus);
+
+            const metaText = document.createElement("p");
+            metaText.className = "summary-text";
+            metaText.textContent = `周期名：${cycleName}\n开始时间：${result.started_at || "-"}\n完成时间：${result.completed_at || "-"}`;
+
+            metaItem.appendChild(metaHead);
+            metaItem.appendChild(metaText);
+            metaList.appendChild(metaItem);
+            metaSection.appendChild(metaHeading);
+            metaSection.appendChild(metaList);
+
+            const phaseSection = document.createElement("div");
+            phaseSection.className = "summary-section";
+            const phaseHeading = document.createElement("h4");
+            phaseHeading.textContent = "阶段摘要";
+            phaseSection.appendChild(phaseHeading);
+
+            const phaseList = document.createElement("div");
+            phaseList.className = "summary-list";
+            if (phases.length === 0) {
+                phaseList.innerHTML = '<div class="empty">当前结果未返回阶段详情。</div>';
+            } else {
+                phases.forEach((phase) => {
+                    const item = document.createElement("div");
+                    item.className = "summary-item";
+
+                    const head = document.createElement("div");
+                    head.className = "summary-head";
+
+                    const title = document.createElement("strong");
+                    title.textContent = formatPhaseName(phase.phase);
+
+                    const status = document.createElement("span");
+                    status.className = `phase-status ${phase.status || ""}`.trim();
+                    status.textContent = formatStatus(phase.status);
+
+                    head.appendChild(title);
+                    head.appendChild(status);
+
+                    const meta = document.createElement("div");
+                    meta.className = "summary-meta";
+                    meta.textContent = `耗时：${formatDuration(phase.duration_sec)}`;
+
+                    const text = document.createElement("p");
+                    text.className = "summary-text";
+                    text.textContent = `${summarizeObject(phase.summary)}${phase.error ? `\n错误：${phase.error}` : ""}`;
+
+                    item.appendChild(head);
+                    item.appendChild(meta);
+                    item.appendChild(text);
+                    phaseList.appendChild(item);
+                });
+            }
+            phaseSection.appendChild(phaseList);
+
+            resultSummaryNode.innerHTML = "";
+            resultSummaryNode.appendChild(summaryGrid);
+            resultSummaryNode.appendChild(renderReportActions(jobIdNode.textContent.trim()));
+            resultSummaryNode.appendChild(metaSection);
+            const analysisSection = buildSummarySection("分析摘要", buildAnalysisBlocks(result));
+            if (analysisSection) {
+                resultSummaryNode.appendChild(analysisSection);
+            }
+            const artifactSection = buildSummarySection("研究产物摘要", buildResearchArtifactBlocks(result));
+            if (artifactSection) {
+                resultSummaryNode.appendChild(artifactSection);
+            }
+            resultSummaryNode.appendChild(phaseSection);
+        }
+
+        function setProgress(progress) {
+            const safeProgress = Math.max(0, Math.min(100, Number(progress) || 0));
+            progressValueNode.textContent = `${safeProgress.toFixed(1)}%`;
+            progressBarNode.style.width = `${safeProgress}%`;
+        }
+
+        function renderPhaseList() {
+            if (phaseState.size === 0) {
+                phaseListNode.innerHTML = '<div class="empty">暂无阶段事件。</div>';
+                return;
+            }
+
+            const fragment = document.createDocumentFragment();
+            Array.from(phaseState.entries())
+                .sort((left, right) => left[1].index - right[1].index)
+                .forEach(([phase, info]) => {
+                    const item = document.createElement("div");
+                    item.className = `phase-item ${info.status || ""} ${phase === activePhaseKey ? "active" : ""}`.trim();
+
+                    const label = document.createElement("div");
+                    label.className = "phase-label";
+                    label.textContent = `${info.index || "-"}. ${formatPhaseName(phase)}`;
+
+                    const note = document.createElement("span");
+                    note.className = "phase-note";
+                    note.textContent = phase;
+                    label.appendChild(note);
+
+                    const status = document.createElement("div");
+                    status.className = `phase-status ${info.status || ""}`.trim();
+                    status.textContent = formatStatus(info.status || "pending");
+
+                    item.appendChild(label);
+                    item.appendChild(status);
+                    fragment.appendChild(item);
+                });
+
+            phaseListNode.innerHTML = "";
+            phaseListNode.appendChild(fragment);
+        }
+
+        function prependEvent(eventType, payload, transportKind = activeConnectionKind) {
+            const empty = eventLogNode.querySelector(".empty");
+            if (empty) {
+                empty.remove();
+            }
+
+            const item = document.createElement("div");
+            item.className = "event-item";
+
+            const head = document.createElement("div");
+            head.className = "event-head";
+
+            const name = document.createElement("strong");
+            name.textContent = `${eventType} · ${formatTransportChannel(transportKind)}`;
+
+            const timeNode = document.createElement("span");
+            timeNode.textContent = new Date().toLocaleTimeString();
+
+            head.appendChild(name);
+            head.appendChild(timeNode);
+
+            const payloadNode = document.createElement("pre");
+            payloadNode.className = "event-payload";
+            payloadNode.textContent = JSON.stringify(payload, null, 2);
+
+            item.appendChild(head);
+            item.appendChild(payloadNode);
+            eventLogNode.prepend(item);
+
+            while (eventLogNode.children.length > 12) {
+                eventLogNode.removeChild(eventLogNode.lastChild);
+            }
+        }
+
+        function clearPendingReconnect() {
+            if (reconnectTimerId) {
+                window.clearTimeout(reconnectTimerId);
+                reconnectTimerId = 0;
+            }
+        }
+
+        function buildReconnectDelayMs(attempt) {
+            const safeAttempt = Math.max(1, Number(attempt) || 1);
+            return Math.min(
+                WEBSOCKET_RECONNECT_MAX_DELAY_MS,
+                WEBSOCKET_RECONNECT_BASE_DELAY_MS * (2 ** (safeAttempt - 1))
+            );
+        }
+
+        function closeRealtimeChannel(options = {}) {
+            const preference = normalizeTransportPreference(options.preference || transportSelect?.value || "auto");
+            const currentConnection = activeConnection;
+            activeConnection = null;
+            realtimeConnectionToken += 1;
+            clearPendingReconnect();
+            if (currentConnection && typeof currentConnection.close === "function") {
+                currentConnection.close();
+            }
+            setTransportState("idle", preference);
+        }
+
+        function buildStatusUrl(jobId) {
+            return `/api/research/jobs/${encodeURIComponent(jobId)}`;
+        }
+
+        function buildStreamUrl(jobId) {
+            return `/api/research/jobs/${encodeURIComponent(jobId)}/events`;
+        }
+
+        function buildWebSocketUrl(jobId) {
+            return `/api/research/jobs/${encodeURIComponent(jobId)}/ws`;
+        }
+
+        function normalizeWebSocketUrl(websocketUrl, jobId) {
+            const fallbackPath = buildWebSocketUrl(jobId);
+            const rawValue = String(websocketUrl || fallbackPath || "").trim();
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+
+            if (rawValue.startsWith("ws://") || rawValue.startsWith("wss://")) {
+                return rawValue;
+            }
+            if (rawValue.startsWith("/")) {
+                return `${protocol}//${window.location.host}${rawValue}`;
+            }
+            return `${protocol}//${window.location.host}/${rawValue.replace(/^\/+/, "")}`;
+        }
+
+        function buildRecentJobsUrl(limit = RECENT_JOB_LIMIT) {
+            return `/api/research/jobs?limit=${encodeURIComponent(limit)}`;
+        }
+
+        function loadRecentJobIds() {
+            try {
+                const raw = window.localStorage.getItem(RECENT_JOBS_STORAGE_KEY);
+                if (!raw) {
+                    return [];
+                }
+                const parsed = JSON.parse(raw);
+                return Array.isArray(parsed) ? parsed.map((item) => String(item || "").trim()).filter(Boolean) : [];
+            } catch (error) {
+                console.warn("读取最近任务列表失败", error);
+                return [];
+            }
+        }
+
+        function saveRecentJobIds(jobIds) {
+            try {
+                window.localStorage.setItem(RECENT_JOBS_STORAGE_KEY, JSON.stringify(jobIds.slice(0, RECENT_JOB_LIMIT)));
+            } catch (error) {
+                console.warn("保存最近任务列表失败", error);
+            }
+        }
+
+        function persistRecentJobId(jobId) {
+            if (!jobId) {
+                return;
+            }
+            const next = [jobId, ...loadRecentJobIds().filter((item) => item !== jobId)].slice(0, RECENT_JOB_LIMIT);
+            saveRecentJobIds(next);
+        }
+
+        function persistLastJobId(jobId) {
+            if (!jobId) {
+                return;
+            }
+            try {
+                window.localStorage.setItem(LAST_JOB_STORAGE_KEY, jobId);
+                persistRecentJobId(jobId);
+            } catch (error) {
+                console.warn("保存最近任务失败", error);
+            }
+        }
+
+        function loadLastJobId() {
+            try {
+                return window.localStorage.getItem(LAST_JOB_STORAGE_KEY) || "";
+            } catch (error) {
+                console.warn("读取最近任务失败", error);
+                return "";
+            }
+        }
+
+        function clearLastJobId() {
+            try {
+                window.localStorage.removeItem(LAST_JOB_STORAGE_KEY);
+            } catch (error) {
+                console.warn("清理最近任务失败", error);
+            }
+        }
+
+        function clearLocalJobRecords() {
+            clearLastJobId();
+            try {
+                window.localStorage.removeItem(RECENT_JOBS_STORAGE_KEY);
+            } catch (error) {
+                console.warn("清理本地任务列表失败", error);
+            }
+        }
+
+        function removeLocalJobRecord(jobId) {
+            const normalizedJobId = String(jobId || "").trim();
+            if (!normalizedJobId) {
+                return;
+            }
+            saveRecentJobIds(loadRecentJobIds().filter((item) => item !== normalizedJobId));
+            if (loadLastJobId() === normalizedJobId) {
+                clearLastJobId();
+            }
+        }
+
+        function pruneInvalidLocalRecords(validJobIds) {
+            const valid = new Set((validJobIds || []).map((item) => String(item || "").trim()).filter(Boolean));
+            const nextRecent = loadRecentJobIds().filter((jobId) => valid.has(jobId));
+            saveRecentJobIds(nextRecent);
+            const lastJobId = loadLastJobId();
+            if (lastJobId && !valid.has(lastJobId)) {
+                clearLastJobId();
+            }
+        }
+
+        function renderRecentJobs(jobs) {
+            if (!Array.isArray(jobs) || jobs.length === 0) {
+                recentJobListNode.innerHTML = '<div class="empty">暂无最近任务。</div>';
+                return;
+            }
+
+            const fragment = document.createDocumentFragment();
+            jobs.forEach((job) => {
+                const card = document.createElement("div");
+                card.className = `recent-job-card ${job.job_id === jobIdNode.textContent.trim() ? "active" : ""}`.trim();
+                card.dataset.jobId = job.job_id || "";
+
+                const title = document.createElement("strong");
+                title.textContent = job.topic || job.job_id || "未命名任务";
+
+                const meta = document.createElement("div");
+                meta.className = "recent-job-meta";
+
+                const status = document.createElement("span");
+                status.className = `phase-status ${job.status || ""}`.trim();
+                status.textContent = formatStatus(job.status || "idle");
+
+                const progress = document.createElement("span");
+                progress.className = "recent-job-note";
+                progress.textContent = `${Number(job.progress || 0).toFixed(1)}%`;
+
+                meta.appendChild(status);
+                meta.appendChild(progress);
+
+                const note = document.createElement("div");
+                note.className = "recent-job-note";
+                note.textContent = `任务 ID：${job.job_id || "-"}\n创建时间：${job.created_at || "-"}${job.current_phase ? `\n当前阶段：${formatPhaseName(job.current_phase)}` : ""}`;
+
+                const actions = document.createElement("div");
+                actions.className = "recent-job-actions";
+
+                const loadButton = document.createElement("button");
+                loadButton.type = "button";
+                loadButton.className = "ghost-button recent-job-action";
+                loadButton.textContent = "查看任务";
+                loadButton.addEventListener("click", async function() {
+                    await loadJobById(job.job_id, { showBanner: true });
+                });
+
+                const deleteButton = document.createElement("button");
+                deleteButton.type = "button";
+                deleteButton.className = "ghost-button recent-job-action danger-button";
+                deleteButton.textContent = "删除任务";
+                deleteButton.disabled = job.status === "queued" || job.status === "running";
+                deleteButton.title = deleteButton.disabled ? "运行中的任务不能删除" : "删除该持久化任务档案";
+                deleteButton.addEventListener("click", async function() {
+                    await deleteJobById(job.job_id, { status: job.status, topic: job.topic });
+                });
+
+                actions.appendChild(loadButton);
+                actions.appendChild(deleteButton);
+
+                card.appendChild(title);
+                card.appendChild(meta);
+                card.appendChild(note);
+                card.appendChild(actions);
+                fragment.appendChild(card);
+            });
+
+            recentJobListNode.innerHTML = "";
+            recentJobListNode.appendChild(fragment);
+        }
+
+        async function refreshRecentJobs() {
+            try {
+                const response = await fetch(buildRecentJobsUrl());
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const payload = await response.json();
+                const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+                renderRecentJobs(jobs);
+                pruneInvalidLocalRecords(jobs.map((job) => job.job_id));
+                return jobs;
+            } catch (error) {
+                recentJobListNode.innerHTML = `<div class="empty">最近任务加载失败：${error.message}</div>`;
+                return [];
+            }
+        }
+
+        function resetView(topic) {
+            closeRealtimeChannel();
+            phaseState = new Map();
+            renderPhaseList();
+            eventLogNode.innerHTML = '<div class="empty">实时通道连接后会在这里显示事件。</div>';
+            currentTopicNode.textContent = topic || "-";
+            currentPhaseNode.textContent = "-";
+            jobStatusNode.textContent = formatStatus("queued");
+            jobIdNode.textContent = "-";
+            activePhaseKey = "";
+            renderResultSummary(null);
+            setProgress(0);
+            setTransportState("idle");
+        }
+
+        function updateFromSnapshot(snapshot) {
+            if (!snapshot || typeof snapshot !== "object") {
+                return;
+            }
+            jobIdNode.textContent = snapshot.job_id || jobIdNode.textContent;
+            if (snapshot.job_id) {
+                persistLastJobId(snapshot.job_id);
+            }
+            jobStatusNode.textContent = formatStatus(snapshot.status) || jobStatusNode.textContent;
+            activePhaseKey = snapshot.current_phase || activePhaseKey;
+            currentPhaseNode.textContent = formatPhaseName(snapshot.current_phase);
+            currentTopicNode.textContent = snapshot.topic || currentTopicNode.textContent;
+            setProgress(snapshot.progress);
+            if (snapshot.result) {
+                const phases = Array.isArray(snapshot.result.phases) ? snapshot.result.phases : [];
+                if (phases.length > 0) {
+                    phaseState = new Map(
+                        phases.map((phase, index) => [
+                            phase.phase,
+                            {
+                                index: index + 1,
+                                status: phase.status || "pending",
+                            },
+                        ])
+                    );
+                    renderPhaseList();
+                }
+                renderResultSummary(snapshot.result);
+            }
+            refreshRecentJobs();
+        }
+
+        async function loadJobById(jobId, options = {}) {
+            if (!jobId) {
+                return;
+            }
+
+            const { showBanner = false } = options;
+            const response = await fetch(buildStatusUrl(jobId));
+            if (response.status === 404) {
+                clearLastJobId();
+                pruneInvalidLocalRecords([]);
+                throw new Error("任务不存在，可能已被清理");
+            }
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const snapshot = await response.json();
+            resetView(snapshot.topic || "-");
+            updateFromSnapshot(snapshot);
+            if (snapshot.status === "queued" || snapshot.status === "running") {
+                if (showBanner) {
+                    setBanner(`已切换到任务 ${jobId}，继续订阅实时进度。`);
+                }
+                openRealtimeChannel({
+                    jobId,
+                    statusUrl: buildStatusUrl(jobId),
+                    streamUrl: buildStreamUrl(jobId),
+                    websocketUrl: buildWebSocketUrl(jobId),
+                    preference: transportSelect.value,
+                });
+                return snapshot;
+            }
+            if (showBanner) {
+                setBanner(`已切换到任务 ${jobId}：${formatStatus(snapshot.status || "completed")}`, snapshot.status === "completed" ? "success" : snapshot.status === "failed" ? "error" : "default");
+            }
+            return snapshot;
+        }
+
+        async function deleteJobById(jobId, context = {}) {
+            const normalizedJobId = String(jobId || "").trim();
+            if (!normalizedJobId) {
+                return;
+            }
+
+            const topic = context.topic || normalizedJobId;
+            const status = context.status || "";
+            if (status === "queued" || status === "running") {
+                setBanner("运行中的任务不能删除，请等待任务结束。", "error");
+                return;
+            }
+
+            const confirmed = window.confirm(`确认删除任务“${topic}”的持久化档案吗？此操作不会删除真实产物文件。`);
+            if (!confirmed) {
+                return;
+            }
+
+            const response = await fetch(buildStatusUrl(normalizedJobId), { method: "DELETE" });
+            if (response.status === 404) {
+                removeLocalJobRecord(normalizedJobId);
+                await refreshRecentJobs();
+                setBanner(`任务 ${normalizedJobId} 已不存在，本地记录已同步清理。`);
+                return;
+            }
+            if (!response.ok) {
+                const errorPayload = await response.json().catch(() => ({}));
+                throw new Error(errorPayload.detail || `HTTP ${response.status}`);
+            }
+
+            removeLocalJobRecord(normalizedJobId);
+            if (jobIdNode.textContent.trim() === normalizedJobId) {
+                resetView("-");
+                setBanner(`任务 ${normalizedJobId} 已删除，当前视图已清空。`);
+            } else {
+                setBanner(`任务 ${normalizedJobId} 已删除。`);
+            }
+            await refreshRecentJobs();
+        }
+
+        function applyPhaseEvent(eventType, payload) {
+            if (!payload || !payload.phase) {
+                return;
+            }
+
+            const previous = phaseState.get(payload.phase) || { index: payload.index || phaseState.size + 1, status: "pending" };
+            if (eventType === "phase_started") {
+                activePhaseKey = payload.phase;
+            }
+            if (eventType === "phase_completed" || eventType === "phase_skipped") {
+                activePhaseKey = payload.phase;
+            }
+            phaseState.set(payload.phase, {
+                index: payload.index || previous.index,
+                status: payload.status || (eventType === "phase_started" ? "running" : previous.status),
+            });
+            renderPhaseList();
+        }
+
+        function handleRealtimeEvent(eventType, payload, transportKind) {
+            prependEvent(eventType, payload, transportKind);
+
+            if (payload && payload.progress !== undefined) {
+                setProgress(payload.progress);
+            }
+
+            if (eventType === "phase_started") {
+                currentPhaseNode.textContent = formatPhaseName(payload.phase);
+                jobStatusNode.textContent = formatStatus("running");
+                applyPhaseEvent(eventType, payload);
+            }
+
+            if (eventType === "phase_completed") {
+                currentPhaseNode.textContent = formatPhaseName(payload.phase);
+                applyPhaseEvent(eventType, payload);
+            }
+
+            if (eventType === "phase_skipped") {
+                currentPhaseNode.textContent = formatPhaseName(payload.phase);
+                applyPhaseEvent(eventType, payload);
+            }
+
+            if (eventType === "job_queued") {
+                jobStatusNode.textContent = formatStatus("queued");
+            }
+
+            if (eventType === "job_completed") {
+                jobStatusNode.textContent = formatStatus(payload.status || "completed");
+                const lastPhase = payload.result?.phases?.slice(-1)?.[0]?.phase || "";
+                currentPhaseNode.textContent = formatPhaseName(lastPhase || activePhaseKey);
+                renderResultSummary(payload.result);
+                if (payload.result?.status) {
+                    setBanner(`任务已结束：${formatStatus(payload.result.status)}`, payload.result.status === "completed" ? "success" : "default");
+                } else {
+                    setBanner(`任务已结束：${formatStatus(payload.status || "completed")}`, payload.status === "completed" ? "success" : "default");
+                }
+                setProgress(100);
+                closeRealtimeChannel();
+            }
+        }
+
+        function scheduleWebSocketReconnect(options = {}) {
+            const preference = normalizeTransportPreference(options.preference || transportSelect.value);
+            const reconnectAttempt = Math.max(1, Number(options.reconnectAttempt) || 1);
+            const delayMs = buildReconnectDelayMs(reconnectAttempt);
+
+            clearPendingReconnect();
+            setTransportState("idle", preference);
+            setBanner(`WebSocket 连接中断，${delayMs} ms 后进行第 ${reconnectAttempt} 次重连。`, "error");
+
+            reconnectTimerId = window.setTimeout(function() {
+                reconnectTimerId = 0;
+                attachWebSocket(options.websocketUrl, options.statusUrl, {
+                    preference,
+                    streamUrl: options.streamUrl,
+                    fallbackToSse: options.fallbackToSse,
+                    reconnectAttempt,
+                    maxReconnectAttempts: options.maxReconnectAttempts,
+                });
+            }, delayMs);
+        }
+
+        async function syncSnapshotAfterDisconnect(statusUrl, options = {}) {
+            const {
+                message = "实时通道连接中断，正在查询任务最终状态。",
+                streamUrl = "",
+                preference = transportSelect.value,
+                websocketUrl = "",
+                fallbackToSse = false,
+                reconnectAttempt = 0,
+                maxReconnectAttempts = WEBSOCKET_RECONNECT_MAX_ATTEMPTS,
+            } = options;
+
+            closeRealtimeChannel({ preference });
+            setBanner(message, "error");
+            if (!statusUrl) {
+                return;
+            }
+            try {
+                const response = await fetch(statusUrl);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const snapshot = await response.json();
+                updateFromSnapshot(snapshot);
+                const isActiveJob = snapshot.status === "queued" || snapshot.status === "running";
+                if (isActiveJob && websocketUrl && reconnectAttempt < maxReconnectAttempts) {
+                    scheduleWebSocketReconnect({
+                        preference,
+                        statusUrl,
+                        streamUrl,
+                        websocketUrl,
+                        fallbackToSse,
+                        reconnectAttempt: reconnectAttempt + 1,
+                        maxReconnectAttempts,
+                    });
+                    return;
+                }
+                if (isActiveJob && fallbackToSse && streamUrl) {
+                    setBanner("WebSocket 多次重连未恢复，已自动回退到 SSE。", "error");
+                    attachEventSource(streamUrl, statusUrl, { preference });
+                    return;
+                }
+                if (isActiveJob) {
+                    setBanner("WebSocket 重连次数已用尽，请稍后重试或手动切换到 SSE。", "error");
+                    return;
+                }
+                setBanner(`已切换到快照状态：${formatStatus(snapshot.status || "unknown")}`, snapshot.status === "failed" ? "error" : snapshot.status === "completed" ? "success" : "default");
+            } catch (error) {
+                setBanner(`状态查询失败：${error.message}`, "error");
+            }
+        }
+
+        function attachEventSource(streamUrl, statusUrl, options = {}) {
+            const preference = normalizeTransportPreference(options.preference || transportSelect.value);
+            const connectionToken = ++realtimeConnectionToken;
+            clearPendingReconnect();
+            const source = new EventSource(streamUrl);
+            activeConnection = source;
+            setTransportState("sse", preference);
+            setBanner("SSE 已连接，等待阶段事件。");
+
+            source.onmessage = function(event) {
+                if (connectionToken !== realtimeConnectionToken) {
+                    return;
+                }
+                try {
+                    const payload = JSON.parse(event.data);
+                    prependEvent("message", payload, "sse");
+                } catch (error) {
+                    prependEvent("message", { raw: event.data }, "sse");
+                }
+            };
+
+            ["job_queued", "cycle_created", "phase_started", "phase_completed", "phase_skipped", "job_completed"].forEach((eventType) => {
+                source.addEventListener(eventType, function(event) {
+                    if (connectionToken !== realtimeConnectionToken) {
+                        return;
+                    }
+                    const payload = JSON.parse(event.data);
+                    handleRealtimeEvent(eventType, payload, "sse");
+                });
+            });
+
+            source.addEventListener("heartbeat", function(event) {
+                if (connectionToken !== realtimeConnectionToken) {
+                    return;
+                }
+                try {
+                    prependEvent("heartbeat", JSON.parse(event.data), "sse");
+                } catch (error) {
+                    prependEvent("heartbeat", { raw: event.data }, "sse");
+                }
+            });
+
+            source.onerror = async function() {
+                if (connectionToken !== realtimeConnectionToken) {
+                    return;
+                }
+                await syncSnapshotAfterDisconnect(statusUrl, {
+                    preference,
+                    message: "SSE 连接中断，正在查询任务最终状态。",
+                });
+            };
+        }
+
+        function attachWebSocket(websocketUrl, statusUrl, options = {}) {
+            const preference = normalizeTransportPreference(options.preference || transportSelect.value);
+            const streamUrl = options.streamUrl || "";
+            const fallbackToSse = options.fallbackToSse === true;
+            const reconnectAttempt = Math.max(0, Number(options.reconnectAttempt) || 0);
+            const maxReconnectAttempts = Math.max(1, Number(options.maxReconnectAttempts) || WEBSOCKET_RECONNECT_MAX_ATTEMPTS);
+
+            let socket;
+            try {
+                socket = new WebSocket(websocketUrl);
+            } catch (error) {
+                if (fallbackToSse && streamUrl) {
+                    setBanner(`WebSocket 初始化失败，已回退到 SSE：${error.message}`, "error");
+                    attachEventSource(streamUrl, statusUrl, { preference });
+                    return;
+                }
+                throw error;
+            }
+
+            const connectionToken = ++realtimeConnectionToken;
+            clearPendingReconnect();
+            activeConnection = socket;
+            setTransportState("websocket", preference);
+
+            socket.onopen = function() {
+                if (connectionToken !== realtimeConnectionToken) {
+                    return;
+                }
+                setBanner("WebSocket 已连接，等待阶段事件。");
+            };
+
+            socket.onmessage = function(event) {
+                if (connectionToken !== realtimeConnectionToken) {
+                    return;
+                }
+                try {
+                    const envelope = JSON.parse(event.data);
+                    const eventType = envelope.event || "message";
+                    const payload = envelope.data && typeof envelope.data === "object" ? envelope.data : {};
+                    handleRealtimeEvent(eventType, payload, "websocket");
+                } catch (error) {
+                    prependEvent("message", { raw: event.data }, "websocket");
+                }
+            };
+
+            socket.onerror = function() {
+                if (connectionToken !== realtimeConnectionToken) {
+                    return;
+                }
+                setBanner("WebSocket 连接异常，正在检查任务状态。", "error");
+            };
+
+            socket.onclose = async function() {
+                if (connectionToken !== realtimeConnectionToken) {
+                    return;
+                }
+                await syncSnapshotAfterDisconnect(statusUrl, {
+                    preference,
+                    streamUrl,
+                    websocketUrl,
+                    fallbackToSse,
+                    reconnectAttempt,
+                    maxReconnectAttempts,
+                    message: "WebSocket 连接中断，正在检查任务状态。",
+                });
+            };
+        }
+
+        function openRealtimeChannel(options) {
+            const preference = normalizeTransportPreference(options.preference || transportSelect.value);
+            const jobId = options.jobId || jobIdNode.textContent.trim();
+            const statusUrl = options.statusUrl || buildStatusUrl(jobId);
+            const streamUrl = options.streamUrl || buildStreamUrl(jobId);
+            const websocketUrl = normalizeWebSocketUrl(options.websocketUrl || buildWebSocketUrl(jobId), jobId);
+
+            if (preference === "sse") {
+                attachEventSource(streamUrl, statusUrl, { preference });
+                return;
+            }
+
+            if (typeof window.WebSocket === "undefined") {
+                setBanner("当前浏览器不支持 WebSocket，已回退到 SSE。", "error");
+                attachEventSource(streamUrl, statusUrl, { preference });
+                return;
+            }
+
+            attachWebSocket(websocketUrl, statusUrl, {
+                preference,
+                streamUrl,
+                fallbackToSse: preference === "auto",
+                reconnectAttempt: 0,
+                maxReconnectAttempts: WEBSOCKET_RECONNECT_MAX_ATTEMPTS,
+            });
+        }
+
+        form.addEventListener("submit", async function(event) {
+            event.preventDefault();
+            const topic = topicInput.value.trim();
+            if (!topic) {
+                setBanner("请输入研究主题。", "error");
+                topicInput.focus();
+                return;
+            }
+
+            submitButton.disabled = true;
+            resetView(topic);
+            setBanner("正在创建研究任务...");
+
+            try {
+                const response = await fetch("/api/research/jobs", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        topic,
+                        description: descriptionInput.value.trim(),
+                    }),
+                });
+
+                if (!response.ok) {
+                    const errorPayload = await response.json().catch(() => ({}));
+                    throw new Error(errorPayload.detail || `HTTP ${response.status}`);
+                }
+
+                const job = await response.json();
+                jobIdNode.textContent = job.job_id;
+                persistLastJobId(job.job_id);
+                jobStatusNode.textContent = formatStatus(job.status || "queued");
+                setBanner(`任务 ${job.job_id} 已创建，准备连接实时通道。`);
+                refreshRecentJobs();
+                openRealtimeChannel({
+                    jobId: job.job_id,
+                    statusUrl: job.status_url,
+                    streamUrl: job.stream_url,
+                    websocketUrl: job.websocket_url,
+                    preference: transportSelect.value,
+                });
+            } catch (error) {
+                setBanner(`创建任务失败：${error.message}`, "error");
+            } finally {
+                submitButton.disabled = false;
+            }
+        });
+
+        transportSelect.addEventListener("change", function() {
+            if (!activeConnection) {
+                setTransportState("idle", transportSelect.value);
+            }
+        });
+
+        refreshRecentJobsButton.addEventListener("click", async function() {
+            const jobs = await refreshRecentJobs();
+            setBanner(`最近任务列表已刷新，共 ${jobs.length} 条。`);
+        });
+
+        pruneLocalRecordsButton.addEventListener("click", async function() {
+            const jobs = await refreshRecentJobs();
+            pruneInvalidLocalRecords(jobs.map((job) => job.job_id));
+            setBanner("已清除失效的本地最近任务记录。");
+        });
+
+        clearLocalRecordsButton.addEventListener("click", function() {
+            clearLocalJobRecords();
+            refreshRecentJobs();
+            setBanner("已清理本地记录；服务端持久化任务不受影响。");
+        });
+
+        async function restoreLastJob() {
+            const jobId = loadLastJobId();
+            if (!jobId) {
+                return;
+            }
+
+            try {
+                const snapshot = await loadJobById(jobId, { showBanner: false });
+                setBanner(`已恢复最近任务：${formatStatus(snapshot.status || "completed")}`, snapshot.status === "completed" ? "success" : snapshot.status === "failed" ? "error" : "default");
+            } catch (error) {
+                setBanner(`恢复最近任务失败：${error.message}`, "error");
+            }
+        }
+
+        refreshRecentJobs();
+        setTransportState("idle", transportSelect.value);
+        restoreLastJob();
+    </script>
+</body>
+</html>

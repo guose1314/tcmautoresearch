@@ -2,8 +2,8 @@
 
 import unittest
 
+from src.analysis.semantic_graph import SemanticGraphBuilder
 from src.extraction.relation_extractor import RelationExtractor
-from src.semantic_modeling.semantic_graph_builder import SemanticGraphBuilder
 
 
 class TestRelationExtractor(unittest.TestCase):

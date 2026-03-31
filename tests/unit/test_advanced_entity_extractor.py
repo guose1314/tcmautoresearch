@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from src.extractors.advanced_entity_extractor import AdvancedEntityExtractor
+from src.analysis.entity_extractor import AdvancedEntityExtractor
 
 
 class _FakeLexicon:
@@ -30,7 +30,7 @@ class _FakeLexicon:
 
 class TestAdvancedEntityExtractor(unittest.TestCase):
     def _build_module(self):
-        with patch("src.extractors.advanced_entity_extractor.get_lexicon", return_value=_FakeLexicon()):
+        with patch("src.analysis.entity_extractor.get_lexicon", return_value=_FakeLexicon()):
             module = AdvancedEntityExtractor()
         self.assertTrue(module.initialize())
         return module

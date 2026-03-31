@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Neo4j 图数据库驱动
 中医古籍全自动研究系统 - 知识图谱存储
@@ -7,9 +9,21 @@ import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from importlib import import_module
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from src.infrastructure.persistence import Entity, EntityRelationship
 
 logger = logging.getLogger(__name__)
+
+
+def _get_neo4j_graph_database() -> Any:
+    """按需加载 Neo4j GraphDatabase，避免模块导入阶段硬依赖。"""
+    try:
+        return import_module("neo4j").GraphDatabase
+    except Exception as exc:  # pragma: no cover - 缺依赖时在运行期反馈
+        raise RuntimeError("neo4j 未安装或不可用，无法执行图数据库操作") from exc
 
 
 @dataclass
@@ -49,7 +63,7 @@ class Neo4jDriver:
     def connect(self):
         """建立连接"""
         try:
-            from neo4j import GraphDatabase
+            GraphDatabase = _get_neo4j_graph_database()
             self.driver = GraphDatabase.driver(self.uri, auth=self.auth)
             # 验证连接
             with self.driver.session(database=self.database) as session:
@@ -69,7 +83,6 @@ class Neo4jDriver:
     def clear_database(self):
         """清空数据库（谨慎使用）"""
         try:
-            from neo4j import GraphDatabase
             with self.driver.session(database=self.database) as session:
                 session.execute_write(lambda tx: tx.run("MATCH (n) DETACH DELETE n"))
             logger.info("Neo4j 数据库已清空")
@@ -90,7 +103,6 @@ class Neo4jDriver:
             是否成功
         """
         try:
-            from neo4j import GraphDatabase
             query = f"""
             MERGE (n:{node.label} {{id: $id}})
             SET n += $properties
@@ -152,7 +164,6 @@ class Neo4jDriver:
             节点数据或None
         """
         try:
-            from neo4j import GraphDatabase
             query = f"MATCH (n:{label} {{id: $id}}) RETURN n"
             
             with self.driver.session(database=self.database) as session:
@@ -170,7 +181,6 @@ class Neo4jDriver:
     def delete_node(self, node_id: str, label: str) -> bool:
         """删除节点及其关系"""
         try:
-            from neo4j import GraphDatabase
             query = f"MATCH (n:{label} {{id: $id}}) DETACH DELETE n"
             
             with self.driver.session(database=self.database) as session:
@@ -195,7 +205,6 @@ class Neo4jDriver:
             是否成功
         """
         try:
-            from neo4j import GraphDatabase
             query = f"""
             MATCH (source:{source_label} {{id: $source_id}})
             MATCH (target:{target_label} {{id: $target_id}})
@@ -273,7 +282,6 @@ class Neo4jDriver:
             关系列表
         """
         try:
-            from neo4j import GraphDatabase
             if rel_type:
                 query = f"""
                 MATCH (source:{source_label} {{id: $source_id}})-[r:{rel_type}]->(target)
@@ -305,7 +313,6 @@ class Neo4jDriver:
                           rel_type: str, source_label: str, target_label: str) -> bool:
         """删除关系"""
         try:
-            from neo4j import GraphDatabase
             query = f"""
             MATCH (source:{source_label} {{id: $source_id}})-[r:{rel_type}]->(target:{target_label} {{id: $target_id}})
             DELETE r
@@ -342,7 +349,6 @@ class Neo4jDriver:
             }
         """
         try:
-            from neo4j import GraphDatabase
             query = """
             MATCH (f:Formula {name: $formula_name})
             OPTIONAL MATCH (f)-[:SOVEREIGN]->(sovereign:Herb)
@@ -384,7 +390,6 @@ class Neo4jDriver:
             方剂列表
         """
         try:
-            from neo4j import GraphDatabase
             query = """
             MATCH (f:Formula)-[:TREATS]->(s:Syndrome {name: $syndrome_name})
             RETURN f.name as name, f as properties
@@ -411,7 +416,6 @@ class Neo4jDriver:
             功效列表
         """
         try:
-            from neo4j import GraphDatabase
             query = """
             MATCH (h:Herb {name: $herb_name})-[:HAS_EFFICACY]->(e:Efficacy)
             RETURN e.name as efficacy
@@ -439,7 +443,6 @@ class Neo4jDriver:
             类似方剂列表
         """
         try:
-            from neo4j import GraphDatabase
             query = """
             MATCH (f1:Formula {name: $formula_name})-[:SIMILAR_TO]-(f2:Formula)
             RETURN f2.name as name, f2 as properties
@@ -455,6 +458,85 @@ class Neo4jDriver:
         except Exception as e:
             logger.error(f"查询类似方剂失败: {e}")
             return []
+
+    def collect_formula_similarity_evidence(self, formula_name: str, similar_formula_name: str) -> Dict[str, Any]:
+        """汇总两个方剂在图数据库中的相似性证据。"""
+        try:
+            shared_herb_query = """
+            MATCH (f1:Formula {name: $formula_name})-[r1]->(h:Herb)<-[r2]-(f2:Formula {name: $similar_formula_name})
+            WHERE type(r1) IN ['SOVEREIGN', 'MINISTER', 'ASSISTANT', 'ENVOY']
+              AND type(r2) IN ['SOVEREIGN', 'MINISTER', 'ASSISTANT', 'ENVOY']
+            RETURN h.name AS herb_name, type(r1) AS formula_role, type(r2) AS similar_formula_role
+            ORDER BY herb_name
+            """
+            shared_syndrome_query = """
+            MATCH (f1:Formula {name: $formula_name})-[:TREATS]->(s:Syndrome)<-[:TREATS]-(f2:Formula {name: $similar_formula_name})
+            RETURN collect(DISTINCT s.name) AS syndromes
+            """
+            direct_relationship_query = """
+            MATCH (f1:Formula {name: $formula_name})-[r]-(f2:Formula {name: $similar_formula_name})
+            RETURN type(r) AS relationship_type, properties(r) AS properties
+            """
+
+            with self.driver.session(database=self.database) as session:
+                shared_herbs = session.execute_read(
+                    lambda tx: [
+                        {
+                            "herb": record["herb_name"],
+                            "formula_role": str(record["formula_role"]).lower(),
+                            "similar_formula_role": str(record["similar_formula_role"]).lower(),
+                        }
+                        for record in tx.run(
+                            shared_herb_query,
+                            formula_name=formula_name,
+                            similar_formula_name=similar_formula_name,
+                        )
+                    ]
+                )
+                syndrome_record = session.execute_read(
+                    lambda tx: tx.run(
+                        shared_syndrome_query,
+                        formula_name=formula_name,
+                        similar_formula_name=similar_formula_name,
+                    ).single()
+                )
+                direct_relationships = session.execute_read(
+                    lambda tx: [
+                        {
+                            "relationship_type": record["relationship_type"],
+                            "properties": dict(record["properties"] or {}),
+                        }
+                        for record in tx.run(
+                            direct_relationship_query,
+                            formula_name=formula_name,
+                            similar_formula_name=similar_formula_name,
+                        )
+                    ]
+                )
+
+            shared_syndromes = []
+            if syndrome_record:
+                shared_syndromes = [item for item in (syndrome_record.get("syndromes") or []) if item]
+
+            evidence_score = min(
+                1.0,
+                round(
+                    len(shared_herbs) * 0.18
+                    + len(shared_syndromes) * 0.22
+                    + len(direct_relationships) * 0.12,
+                    3,
+                ),
+            )
+            return {
+                "source": "neo4j",
+                "shared_herbs": shared_herbs,
+                "shared_syndromes": shared_syndromes,
+                "direct_relationships": direct_relationships,
+                "evidence_score": evidence_score,
+            }
+        except Exception as e:
+            logger.error(f"查询方剂图谱证据失败: {e}")
+            return {}
     
     def get_graph_statistics(self) -> Dict[str, Any]:
         """
@@ -464,7 +546,6 @@ class Neo4jDriver:
             统计数据
         """
         try:
-            from neo4j import GraphDatabase
             node_query = "MATCH (n) RETURN labels(n)[0] as label, count(*) as count"
             rel_query = "MATCH ()-[r]->() RETURN type(r) as type, count(*) as count"
             
@@ -494,7 +575,7 @@ def _to_json_text(value: Any) -> str:
     except Exception:
         return "{}"
 
-def entity_to_neo4j_node(entity: 'Entity', node_id: str = None) -> Neo4jNode:
+def entity_to_neo4j_node(entity: Entity, node_id: str | None = None) -> Neo4jNode:
     """
     将PostgreSQL实体转换为Neo4j节点
     
@@ -532,7 +613,7 @@ def entity_to_neo4j_node(entity: 'Entity', node_id: str = None) -> Neo4jNode:
     )
 
 
-def relationship_to_neo4j_edge(rel: 'EntityRelationship', rel_type_name: str) -> Neo4jEdge:
+def relationship_to_neo4j_edge(rel: EntityRelationship, rel_type_name: str) -> Neo4jEdge:
     """
     将PostgreSQL关系转换为Neo4j边
     

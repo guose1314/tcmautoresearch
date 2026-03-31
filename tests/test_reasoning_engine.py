@@ -4,7 +4,7 @@ ReasoningEngine 单元测试 — 覆盖真实 KG 路径推理的各个模块
 """
 import unittest
 
-from src.reasoning.reasoning_engine import _ROLE_WEIGHTS, ReasoningEngine
+from src.analysis.reasoning_engine import _ROLE_WEIGHTS, ReasoningEngine
 
 # ---------------------------------------------------------------------------
 # 测试用 KG 数据（模拟 SemanticGraphBuilder 输出）

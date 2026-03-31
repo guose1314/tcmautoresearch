@@ -9,9 +9,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.extractors.advanced_entity_extractor import AdvancedEntityExtractor
-from src.preprocessor.document_preprocessor import DocumentPreprocessor
-from src.semantic_modeling.semantic_graph_builder import SemanticGraphBuilder
+from src.analysis.entity_extractor import AdvancedEntityExtractor
+from src.analysis.preprocessor import DocumentPreprocessor
+from src.analysis.semantic_graph import SemanticGraphBuilder
 from src.semantic_modeling.tcm_relationships import (
     RelationshipType,
     TCMRelationshipDefinitions,

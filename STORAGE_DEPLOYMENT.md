@@ -138,6 +138,93 @@ $env:NEO4J_PASSWORD = "your_neo4j_password"
 # 然后使用 python-dotenv 加载
 ```
 
+### 4. Kubernetes 探针示例
+
+如果 PostgreSQL、Neo4j 之外还会把 FastAPI API 或 Web Console 进程一并部署到 Kubernetes，建议直接使用应用根路径探针：
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: tcmautoresearch-app
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: tcmautoresearch-app
+    template:
+        metadata:
+            labels:
+                app: tcmautoresearch-app
+        spec:
+            containers:
+                - name: app
+                    image: ghcr.io/guose1314/tcmautoresearch:latest
+                    ports:
+                        - containerPort: 8000
+                    readinessProbe:
+                        httpGet:
+                            path: /readiness
+                            port: 8000
+                        initialDelaySeconds: 10
+                        periodSeconds: 10
+                        timeoutSeconds: 3
+                        failureThreshold: 3
+                    livenessProbe:
+                        httpGet:
+                            path: /liveness
+                            port: 8000
+                        initialDelaySeconds: 20
+                        periodSeconds: 15
+                        timeoutSeconds: 3
+                        failureThreshold: 3
+```
+
+说明：
+- 推荐优先使用根路径 `/liveness` 和 `/readiness`，不要把集群探针绑死到 `/api/v1/system/...`。
+- `readiness` 失败表示应用暂时不应接流量。
+- `liveness` 失败表示进程已不可恢复，适合交给 Kubernetes 重启。
+- 当系统处于 `degraded` 时，探针仍返回 200；仅 `error` 时返回 503。
+
+### 5. 应用 Secrets 注入
+
+应用层敏感项建议统一走 secrets 管理，而不是写在 `config.yml`。推荐方式：
+- 本地开发：使用 `secrets.yml` 或 `secrets/development.yml`
+- 测试/生产：通过 CI 或 Kubernetes Secret 注入 `TCM_SECRET__...` 环境变量
+
+Kubernetes 示例：
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+    name: tcmautoresearch-secrets
+type: Opaque
+stringData:
+    TCM_SECRET__MODELS__LLM__API_KEY: "sk-prod-xxx"
+    TCM_SECRET__LITERATURE_RETRIEVAL__PUBMED_API_KEY: "pubmed-prod-key"
+    TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__SCOPUS__API_KEY: "scopus-prod-key"
+    TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__WEB_OF_SCIENCE__API_KEY: "wos-prod-key"
+    TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__EMBASE__API_KEY: "embase-prod-key"
+    TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__COCHRANE__API_KEY: "cochrane-prod-key"
+    TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__LEXICOMP__API_KEY: "lexicomp-prod-key"
+    TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__CLINICALKEY__API_KEY: "clinicalkey-prod-key"
+    TCM_SECRET__MONITORING__ALERTING__WEBHOOK_URL: "https://hooks.example.com/prod"
+```
+
+```yaml
+spec:
+    template:
+        spec:
+            containers:
+                - name: app
+                    envFrom:
+                        - secretRef:
+                                name: tcmautoresearch-secrets
+```
+
+                完整可部署示例：`deploy/k8s/tcmautoresearch-deployment.example.yaml`
+
 ---
 
 ## 系统初始化脚本

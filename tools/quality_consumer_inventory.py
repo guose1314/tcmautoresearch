@@ -14,15 +14,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
-try:
-    import yaml
-except ImportError:  # pragma: no cover
-    yaml = None
+_CONFIG_LOADER_REPO_ROOT = next(
+    (parent for parent in Path(__file__).resolve().parents if (parent / "src" / "infrastructure" / "config_loader.py").exists()),
+    None,
+)
+if _CONFIG_LOADER_REPO_ROOT is not None and str(_CONFIG_LOADER_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CONFIG_LOADER_REPO_ROOT))
 
+from src.infrastructure.config_loader import load_settings_section
 
 ARTIFACT_PATTERNS = {
     "quality_gate": ["output/quality-gate.json", "quality-gate.json"],
@@ -116,15 +120,11 @@ def _now_iso() -> str:
 
 
 def _load_inventory_section(config_path: Path | None) -> Dict[str, Any]:
-    if not config_path or not config_path.exists() or yaml is None:
-        return {}
-    try:
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return {}
-    governance = data.get("governance") or {}
-    section = governance.get("quality_consumer_inventory") or {}
-    return section if isinstance(section, dict) else {}
+    return load_settings_section(
+        "governance.quality_consumer_inventory",
+        config_path=config_path,
+        default={},
+    )
 
 
 def _load_governance_config(config_path: Path | None) -> Dict[str, Any]:

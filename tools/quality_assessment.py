@@ -13,16 +13,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-try:
-    import yaml
-except ImportError:  # pragma: no cover
-    yaml = None
+_CONFIG_LOADER_REPO_ROOT = next(
+    (parent for parent in Path(__file__).resolve().parents if (parent / "src" / "infrastructure" / "config_loader.py").exists()),
+    None,
+)
+if _CONFIG_LOADER_REPO_ROOT is not None and str(_CONFIG_LOADER_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CONFIG_LOADER_REPO_ROOT))
+
+from src.infrastructure.config_loader import load_settings_section
 
 DEFAULT_WEIGHTS = {
     "gate_stability": 0.25,
@@ -61,19 +66,15 @@ def _normalize_weights(weights: Dict[str, float]) -> Dict[str, float]:
     return {k: v / total for k, v in merged.items()}
 
 
-def _load_quality_assessment_section(config_path: Path) -> Dict[str, Any]:
-    if not config_path.exists():
-        return {}
-
-    try:
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        # Some repositories keep partially-edited YAML during development.
-        # Do not block quality assessment due to config parse issues.
-        return {}
-
-    section = data.get("quality_assessment") or {}
-    return section if isinstance(section, dict) else {}
+def _load_quality_assessment_section(config_path: Path | None) -> Dict[str, Any]:
+    # Backward compatible with historical top-level quality_assessment,
+    # while preferring the centralized governance namespace.
+    return load_settings_section(
+        "quality_assessment",
+        "governance.quality_assessment",
+        config_path=config_path,
+        default={},
+    )
 
 
 def _load_thresholds_from_config(config_path: Path) -> AssessmentThresholds:

@@ -20,6 +20,25 @@ system:
     - "实用性原则"
     - "创新性原则"
 
+config_center:
+  default_environment: "development"
+  environments_dir: "./config"
+  env_prefix: "TCM"
+  isolate_paths: true
+
+api:
+  title: "TCM Auto Research API"
+  version: "3.0.0"
+  cors_origins:
+    - "*"
+
+web_console:
+  title: "TCM Auto Research Web Console"
+  version: "0.2.0"
+  job_storage_dir: "./output/web_console_jobs"
+  cors_origins:
+    - "*"
+
 # 核心模块配置
 modules:
   # 文档预处理模块
@@ -258,6 +277,7 @@ monitoring:
     academic_compliance: true
   alerting:
     enabled: true
+    resend_interval_seconds: 300
     thresholds:
       cpu_usage: 80
       memory_usage: 85
@@ -270,6 +290,14 @@ monitoring:
     email_recipients:
       - "admin@example.com"
       - "research-team@example.com"
+    email:
+      sender: "noreply@example.com"
+      smtp_host: "smtp.example.com"
+      smtp_port: 587
+      username: "${SMTP_USERNAME}"
+      password: "${SMTP_PASSWORD}"
+      use_tls: true
+      timeout_seconds: 10
     webhook_url: "https://example.invalid/slack-webhook-placeholder"
 
 # ctext 标准语料采集配置
@@ -609,6 +637,12 @@ maintenance:
     enabled: true
     interval_seconds: 300
     timeout_seconds: 30
+    readiness_checks:
+      - "config_loaded"
+      - "job_manager"
+      - "job_storage"
+      - "database_connection"
+      - "model_loading"
     health_metrics:
       - "cpu_usage"
       - "memory_usage"

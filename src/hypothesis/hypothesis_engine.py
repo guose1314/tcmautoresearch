@@ -441,40 +441,207 @@ class HypothesisEngine(BaseModule):
         if not prepared["context"].get("use_llm_generation"):
             return []
 
-        llm_service = prepared["context"].get("llm_service") or self.llm_service
-        if llm_service is None or not hasattr(llm_service, "generate_research_hypothesis"):
+        llm_service = self._resolve_llm_service(prepared)
+        if llm_service is None:
             return []
 
         try:
-            response = llm_service.generate_research_hypothesis(
-                prepared["research_domain"],
-                self._summarize_evidence_pool(prepared["evidence_pool"]),
-                "\n".join(prepared["existing_hypotheses"]),
-            )
+            response = self._request_llm_hypotheses(llm_service, prepared)
         except Exception as exc:
             self.logger.warning("LLM 假设生成失败，回退启发式生成: %s", exc)
             return []
 
-        items = [line.strip("- 0123456789.、") for line in response.splitlines() if line.strip()]
+        items = self._parse_llm_hypothesis_response(response, prepared)
+        if not items:
+            self.logger.warning("LLM 假设生成结果无法稳定解析，回退启发式生成")
+            return []
+
         candidates: List[HypothesisCandidate] = []
-        for idx, item in enumerate(items[: self.max_hypotheses]):
-            title = item[:36] if len(item) > 36 else item
+        for item in items[: self.max_hypotheses]:
             candidates.append(
-                self._build_candidate(
-                    HypothesisCandidateInput(
-                        title=title or f"研究假设 {idx + 1}",
-                        statement=item,
-                        domain=prepared["research_domain"],
-                        rationale="基于 LLM 对观察结果、研究目标和既有研究的综合生成。",
-                        validation_plan="通过古籍证据比对、结构化抽取结果复核与文献回溯验证。",
-                        keywords=self._extract_keywords([item]),
-                        supporting_signals=prepared["evidence_pool"][:3],
-                        contradiction_signals=prepared["contradictions"][:2],
-                        generated_at=prepared["generated_at"],
-                    )
-                )
+                self._build_candidate(item)
             )
         return candidates
+
+    def _request_llm_hypotheses(self, llm_service: Any, prepared: Dict[str, Any]) -> Any:
+        evidence_summary = self._summarize_evidence_pool(prepared["evidence_pool"])
+        existing = "\n".join(prepared["existing_hypotheses"])
+        if hasattr(llm_service, "generate_research_hypothesis"):
+            return llm_service.generate_research_hypothesis(
+                prepared["research_domain"],
+                evidence_summary,
+                existing,
+            )
+        if hasattr(llm_service, "generate"):
+            return llm_service.generate(
+                self._build_llm_hypothesis_prompt(prepared),
+                system_prompt=(
+                    "你是中医科研方法学专家。"
+                    "请输出 1-3 条可验证研究假设。优先输出 JSON；若不能输出 JSON，"
+                    "则按 key: value 结构输出 title/statement/rationale/validation_plan/keywords。"
+                ),
+            )
+        raise TypeError("提供的 llm_service 不支持假设生成接口")
+
+    def _build_llm_hypothesis_prompt(self, prepared: Dict[str, Any]) -> str:
+        return (
+            f"研究目标: {prepared['research_objective']}\n"
+            f"研究范围: {prepared['research_scope']}\n"
+            f"研究领域: {prepared['research_domain']}\n"
+            f"观察与证据:\n{self._summarize_evidence_pool(prepared['evidence_pool'])}\n"
+            f"冲突线索:\n{self._summarize_evidence_pool(prepared['contradictions'])}\n"
+            f"已有假设:\n{self._summarize_evidence_pool(prepared['existing_hypotheses'])}\n\n"
+            "请生成 1-3 条假设。推荐 JSON 格式："
+            "[{\"title\":...,\"statement\":...,\"rationale\":...,\"validation_plan\":...,\"keywords\":[...]}]。"
+            "如果无法输出 JSON，请使用空行分隔的 key: value 结构。"
+        )
+
+    def _parse_llm_hypothesis_response(
+        self,
+        response: Any,
+        prepared: Dict[str, Any],
+    ) -> List[HypothesisCandidateInput]:
+        if isinstance(response, list):
+            return self._parse_llm_hypothesis_items(response, prepared)
+        if isinstance(response, dict):
+            raw_items = response.get("hypotheses") or response.get("items") or [response]
+            return self._parse_llm_hypothesis_items(raw_items, prepared)
+
+        text = str(response or "").strip()
+        if not text:
+            return []
+
+        parsed_json = self._parse_llm_hypothesis_json(text, prepared)
+        if parsed_json:
+            return parsed_json
+
+        parsed_blocks = self._parse_llm_hypothesis_blocks(text, prepared)
+        if parsed_blocks:
+            return parsed_blocks
+
+        return self._parse_llm_hypothesis_lines(text, prepared)
+
+    def _parse_llm_hypothesis_json(
+        self,
+        text: str,
+        prepared: Dict[str, Any],
+    ) -> List[HypothesisCandidateInput]:
+        candidate_text = text.strip()
+        if candidate_text.startswith("```"):
+            candidate_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", candidate_text, flags=re.IGNORECASE | re.DOTALL).strip()
+        if not candidate_text.startswith("{") and not candidate_text.startswith("["):
+            return []
+        try:
+            payload = __import__("json").loads(candidate_text)
+        except Exception:
+            return []
+        return self._parse_llm_hypothesis_response(payload, prepared)
+
+    def _parse_llm_hypothesis_items(
+        self,
+        items: List[Any],
+        prepared: Dict[str, Any],
+    ) -> List[HypothesisCandidateInput]:
+        parsed: List[HypothesisCandidateInput] = []
+        for idx, item in enumerate(items):
+            if not isinstance(item, dict):
+                if item:
+                    parsed.append(self._build_llm_candidate_input({"statement": str(item)}, prepared, idx))
+                continue
+            statement = str(item.get("statement") or item.get("hypothesis") or item.get("description") or "").strip()
+            if not statement:
+                continue
+            parsed.append(self._build_llm_candidate_input(item, prepared, idx))
+        return parsed
+
+    def _parse_llm_hypothesis_blocks(
+        self,
+        text: str,
+        prepared: Dict[str, Any],
+    ) -> List[HypothesisCandidateInput]:
+        blocks = re.split(r"\n\s*\n", text)
+        parsed: List[HypothesisCandidateInput] = []
+        for idx, block in enumerate(blocks):
+            payload: Dict[str, Any] = {}
+            for raw_line in block.splitlines():
+                line = raw_line.strip().lstrip("- ").strip()
+                if not line or ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                normalized_key = key.strip().lower().replace(" ", "_")
+                payload[normalized_key] = value.strip()
+            if not payload:
+                continue
+            statement = str(
+                payload.get("statement")
+                or payload.get("hypothesis")
+                or payload.get("description")
+                or ""
+            ).strip()
+            if not statement:
+                continue
+            parsed.append(self._build_llm_candidate_input(payload, prepared, idx))
+        return parsed
+
+    def _parse_llm_hypothesis_lines(
+        self,
+        text: str,
+        prepared: Dict[str, Any],
+    ) -> List[HypothesisCandidateInput]:
+        parsed: List[HypothesisCandidateInput] = []
+        hypothesis_markers = ["假设", "相关", "关联", "影响", "改善", "促进", "抑制", "导致", "机制", "预测"]
+        for idx, raw_line in enumerate(text.splitlines()):
+            line = raw_line.strip()
+            if not line:
+                continue
+            cleaned = re.sub(r"^[-*\d\s.、)]+", "", line).strip()
+            if not cleaned or len(cleaned) < 8:
+                continue
+            if any(token in cleaned.lower() for token in ["title:", "statement:", "rationale:", "validation_plan:"]):
+                continue
+            if not any(marker in cleaned for marker in hypothesis_markers):
+                continue
+            parsed.append(self._build_llm_candidate_input({"statement": cleaned}, prepared, idx))
+        return parsed
+
+    def _build_llm_candidate_input(
+        self,
+        item: Dict[str, Any],
+        prepared: Dict[str, Any],
+        index: int,
+    ) -> HypothesisCandidateInput:
+        statement = str(
+            item.get("statement")
+            or item.get("hypothesis")
+            or item.get("description")
+            or ""
+        ).strip()
+        title = str(item.get("title") or statement[:36] or f"研究假设 {index + 1}").strip()
+        rationale = str(item.get("rationale") or "基于 LLM 对观察结果、研究目标和既有研究的综合生成。").strip()
+        validation_plan = str(
+            item.get("validation_plan")
+            or item.get("plan")
+            or item.get("validation")
+            or "通过古籍证据比对、结构化抽取结果复核与文献回溯验证。"
+        ).strip()
+        keywords = item.get("keywords")
+        if isinstance(keywords, str):
+            keyword_list = [segment.strip() for segment in re.split(r"[,，;；、\s]+", keywords) if segment.strip()]
+        elif isinstance(keywords, list):
+            keyword_list = [str(segment).strip() for segment in keywords if str(segment).strip()]
+        else:
+            keyword_list = self._extract_keywords([statement, title])
+        return HypothesisCandidateInput(
+            title=title or f"研究假设 {index + 1}",
+            statement=statement,
+            domain=prepared["research_domain"],
+            rationale=rationale,
+            validation_plan=validation_plan,
+            keywords=keyword_list,
+            supporting_signals=prepared["evidence_pool"][:3],
+            contradiction_signals=prepared["contradictions"][:2],
+            generated_at=prepared["generated_at"],
+        )
 
     def _generate_heuristic_hypotheses(self, prepared: Dict[str, Any]) -> List[HypothesisCandidate]:
         formulas = self._entity_names_by_type(prepared["entities"], "formula")

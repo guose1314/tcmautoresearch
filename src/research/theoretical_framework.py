@@ -12,9 +12,10 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from importlib import import_module
 from typing import Any, Dict, List, Optional
 
-import networkx as nx
+nx = import_module("networkx")
 import numpy as np
 
 from src.core.phase_tracker import PhaseTrackerMixin
@@ -682,6 +683,9 @@ class TheoreticalFramework(PhaseTrackerMixin):
             
             # 基于假设生成实验设计
             experiment_title, experiment_description = self._generate_experiment_content(hypothesis)
+            resolved_context = context or {}
+            evidence_profile = resolved_context.get("evidence_profile") or {}
+            source_weights = resolved_context.get("source_weights") or []
             
             # 创建实验
             experiment = ResearchExperiment(
@@ -689,16 +693,20 @@ class TheoreticalFramework(PhaseTrackerMixin):
                 hypothesis_id=hypothesis.hypothesis_id,
                 title=experiment_title,
                 description=experiment_description,
-                experimental_design="controlled_study",
-                methodology="data_analysis",
-                sample_size=100,
-                duration=30,
+                experimental_design=self._resolve_experimental_design(resolved_context, evidence_profile, source_weights),
+                methodology=self._resolve_experiment_methodology(resolved_context, evidence_profile),
+                sample_size=self._resolve_experiment_sample_size(resolved_context, evidence_profile),
+                duration=self._resolve_experiment_duration(resolved_context, evidence_profile),
                 phase="planning",
-                expected_results="验证假设的有效性",
-                validation_criteria="统计显著性(p<0.05)",
-                quality_score=0.85,
-                reproducibility_score=0.9,
-                scientific_validity=0.95,
+                conditions=self._resolve_experiment_conditions(resolved_context, evidence_profile),
+                controls=self._resolve_experiment_controls(resolved_context, evidence_profile),
+                data_collection_methods=self._resolve_data_collection_methods(resolved_context, evidence_profile),
+                data_sources=self._resolve_data_sources(resolved_context, source_weights),
+                expected_results=self._resolve_expected_results(hypothesis, resolved_context, evidence_profile),
+                validation_criteria=self._resolve_validation_criteria(resolved_context, evidence_profile),
+                quality_score=self._resolve_quality_score(evidence_profile),
+                reproducibility_score=self._resolve_reproducibility_score(evidence_profile),
+                scientific_validity=self._resolve_scientific_validity(evidence_profile),
                 tags=["designed", "automated", "tcmautoresearch"],
                 categories=["formal", "scientific"]
             )
@@ -726,6 +734,173 @@ class TheoreticalFramework(PhaseTrackerMixin):
             self.logger.error(f"实验设计失败: {e}")
             self._fail_operation("design_experiment", phase_entry, start_time, str(e))
             raise
+
+    def _resolve_experimental_design(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+        source_weights: List[Dict[str, Any]],
+    ) -> str:
+        if context.get("experimental_design"):
+            return str(context["experimental_design"])
+        if evidence_profile.get("clinical_gap_available"):
+            return "gap_informed_controlled_study"
+        if len(source_weights) >= 2:
+            return "multisource_controlled_study"
+        if int(evidence_profile.get("record_count") or 0) > 0:
+            return "evidence_weighted_controlled_study"
+        return "controlled_study"
+
+    def _resolve_experiment_methodology(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> str:
+        if context.get("methodology"):
+            return str(context["methodology"])
+        if str(evidence_profile.get("highest_gap_priority") or "低") == "高":
+            return "high_priority_gap_escalated_validation"
+        if evidence_profile.get("clinical_gap_available"):
+            return "gap_informed_evidence_weighted_analysis"
+        if float(evidence_profile.get("weighted_evidence_score") or 0.0) >= 0.5:
+            return "multisource_weighted_comparative_analysis"
+        if int(evidence_profile.get("record_count") or 0) > 0:
+            return "evidence_weighted_analysis"
+        return "data_analysis"
+
+    def _resolve_experiment_sample_size(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> int:
+        if context.get("sample_size"):
+            return int(context["sample_size"])
+        record_count = int(evidence_profile.get("record_count") or 0)
+        dimension_count = int(evidence_profile.get("dimension_count") or 0)
+        weighted_score = float(evidence_profile.get("weighted_evidence_score") or 0.0)
+        high_gap_count = int(evidence_profile.get("gap_high_count") or 0)
+        medium_gap_count = int(evidence_profile.get("gap_medium_count") or 0)
+        sample_size = 48 + record_count * 10 + dimension_count * 5 + int(weighted_score * 30)
+        sample_size += high_gap_count * 18 + medium_gap_count * 8
+        if str(evidence_profile.get("highest_gap_priority") or "低") == "高":
+            sample_size += 16
+        return max(48, min(sample_size, 240))
+
+    def _resolve_experiment_duration(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> int:
+        if context.get("duration_days"):
+            return int(context["duration_days"])
+        duration = 14 + int(evidence_profile.get("dimension_count") or 0) * 3 + int(evidence_profile.get("record_count") or 0)
+        if evidence_profile.get("clinical_gap_available"):
+            duration += 5
+        return max(14, min(duration, 90))
+
+    def _resolve_experiment_conditions(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return {
+            "research_scope": context.get("research_scope", ""),
+            "validation_plan": context.get("validation_plan", ""),
+            "weighted_evidence_score": float(evidence_profile.get("weighted_evidence_score") or 0.0),
+            "evidence_priority_titles": context.get("evidence_priority_titles") or [],
+            "clinical_gap_available": bool(evidence_profile.get("clinical_gap_available")),
+            "highest_gap_priority": str(evidence_profile.get("highest_gap_priority") or "低"),
+        }
+
+    def _resolve_experiment_controls(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> List[str]:
+        controls = [
+            "证据矩阵覆盖度分层对照",
+            "跨来源文献一致性对照",
+        ]
+        if context.get("contradiction_signals"):
+            controls.append("冲突证据复核对照")
+        if evidence_profile.get("clinical_gap_available"):
+            controls.append("临床证据缺口优先级对照")
+        return controls
+
+    def _resolve_data_collection_methods(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> List[str]:
+        methods = ["evidence_matrix_review"]
+        if int(evidence_profile.get("record_count") or 0) > 0:
+            methods.append("weighted_literature_comparison")
+        if evidence_profile.get("clinical_gap_available"):
+            methods.append("clinical_gap_validation")
+        if context.get("supporting_signals"):
+            methods.append("supporting_signal_traceback")
+        return methods
+
+    def _resolve_data_sources(
+        self,
+        context: Dict[str, Any],
+        source_weights: List[Dict[str, Any]],
+    ) -> List[str]:
+        explicit_sources = context.get("data_sources") or []
+        if explicit_sources:
+            return [str(item) for item in explicit_sources if str(item).strip()]
+        sources = [str(item.get("label") or item.get("source") or "").strip() for item in source_weights]
+        return [item for item in sources if item]
+
+    def _resolve_expected_results(
+        self,
+        hypothesis: ResearchHypothesis,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> str:
+        validation_plan = str(context.get("validation_plan") or "验证假设的有效性")
+        if int(evidence_profile.get("record_count") or 0) > 0:
+            return (
+                f"围绕{hypothesis.title}完成加权证据验证，"
+                f"重点覆盖 {evidence_profile.get('record_count', 0)} 条文献证据与"
+                f" {evidence_profile.get('dimension_count', 0)} 个证据维度；{validation_plan}"
+            )
+        return validation_plan
+
+    def _resolve_validation_criteria(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> str:
+        if context.get("validation_criteria"):
+            return str(context["validation_criteria"])
+        weighted_score = float(evidence_profile.get("weighted_evidence_score") or 0.0)
+        return (
+            "统计显著性(p<0.05) + 跨来源一致性 + "
+            f"证据加权得分>= {max(0.3, round(weighted_score, 2))}"
+        )
+
+    def _resolve_quality_score(self, evidence_profile: Dict[str, Any]) -> float:
+        base = 0.72
+        score = base + min(0.18, float(evidence_profile.get("weighted_evidence_score") or 0.0) * 0.2)
+        score += min(0.05, float(evidence_profile.get("source_balance") or 0.0) * 0.05)
+        if evidence_profile.get("clinical_gap_available"):
+            score += 0.03
+        return round(min(score, 0.98), 4)
+
+    def _resolve_reproducibility_score(self, evidence_profile: Dict[str, Any]) -> float:
+        score = 0.78 + min(0.12, float(evidence_profile.get("source_balance") or 0.0) * 0.12)
+        if int(evidence_profile.get("record_count") or 0) >= 3:
+            score += 0.03
+        return round(min(score, 0.96), 4)
+
+    def _resolve_scientific_validity(self, evidence_profile: Dict[str, Any]) -> float:
+        score = 0.8 + min(0.12, float(evidence_profile.get("weighted_evidence_score") or 0.0) * 0.15)
+        if int(evidence_profile.get("dimension_count") or 0) >= 3:
+            score += 0.02
+        if evidence_profile.get("clinical_gap_available"):
+            score += 0.02
+        return round(min(score, 0.97), 4)
     
     def _generate_experiment_content(self, hypothesis: ResearchHypothesis) -> tuple:
         """

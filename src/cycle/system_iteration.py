@@ -11,9 +11,10 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
+from importlib import import_module
 from typing import Any, Callable, Dict, List, Optional
 
-import networkx as nx
+nx = import_module("networkx")
 import numpy as np
 
 from src.core.phase_tracker import PhaseTrackerMixin

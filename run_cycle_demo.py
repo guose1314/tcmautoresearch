@@ -17,10 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-try:
-    import yaml
-except ImportError:  # pragma: no cover
-    yaml = None
+from src.infrastructure.config_loader import load_settings_section
 
 # 配置日志
 logging.basicConfig(
@@ -78,15 +75,11 @@ os.makedirs('./data', exist_ok=True)
 
 
 def _load_cycle_demo_section(config_path: Optional[Path]) -> Dict[str, Any]:
-    if config_path is None or not config_path.exists() or yaml is None:
-        return {}
-    try:
-        data = yaml.safe_load(config_path.read_text(encoding='utf-8')) or {}
-    except Exception:
-        return {}
-    governance = data.get('governance') or {}
-    section = governance.get('cycle_demo') or {}
-    return section if isinstance(section, dict) else {}
+    return load_settings_section(
+        'governance.cycle_demo',
+        config_path=config_path,
+        default={},
+    )
 
 
 def _load_cycle_demo_governance_config(config_path: Optional[Path]) -> Dict[str, Any]:
@@ -321,11 +314,11 @@ def create_sample_data():
 
 def build_real_modules() -> List[tuple[str, Any]]:
     """构建真实处理链路模块。"""
-    from src.extractors.advanced_entity_extractor import AdvancedEntityExtractor
-    from src.output.output_generator import OutputGenerator
-    from src.preprocessor.document_preprocessor import DocumentPreprocessor
-    from src.reasoning.reasoning_engine import ReasoningEngine
-    from src.semantic_modeling.semantic_graph_builder import SemanticGraphBuilder
+    from src.analysis.entity_extractor import AdvancedEntityExtractor
+    from src.analysis.preprocessor import DocumentPreprocessor
+    from src.analysis.reasoning_engine import ReasoningEngine
+    from src.analysis.semantic_graph import SemanticGraphBuilder
+    from src.generation.output_formatter import OutputGenerator
 
     return [
         ("DocumentPreprocessor", DocumentPreprocessor()),

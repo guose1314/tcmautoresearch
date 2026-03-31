@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
@@ -61,6 +64,11 @@ class EmbeddingService:
         normalize_embeddings: bool = True,
         use_faiss: bool = True,
         encoder: Optional[Any] = None,
+        persist_directory: Optional[str] = None,
+        index_name: str = "embedding_index",
+        auto_persist: bool = True,
+        auto_load: bool = True,
+        corpus_version: str = "default",
     ):
         self.model_name = model_name
         self.normalize_embeddings = normalize_embeddings
@@ -72,6 +80,14 @@ class EmbeddingService:
         self._index: Any = None
         self._faiss_enabled = bool(use_faiss and faiss is not None)
         self._ontology = OntologyManager()
+        self._persist_directory = Path(persist_directory).resolve() if persist_directory else None
+        self._index_name = str(index_name or "embedding_index").strip() or "embedding_index"
+        self._auto_persist = bool(auto_persist)
+        self._index_signature: str = ""
+        self._corpus_version = str(corpus_version or "default").strip() or "default"
+
+        if auto_load and self._persist_directory is not None:
+            self.load_index()
 
     @property
     def faiss_enabled(self) -> bool:
@@ -97,13 +113,15 @@ class EmbeddingService:
 
     def build_formula_index(self, formulas: Iterable[Dict[str, Any]]) -> int:
         items = [self._coerce_formula_item(item) for item in formulas]
-        self._replace_items_by_type("formula", items)
+        if self._reuse_or_replace_items("formula", items):
+            return len(items)
         self.build_index()
         return len(items)
 
     def build_syndrome_index(self, syndromes: Iterable[Dict[str, Any]]) -> int:
         items = [self._coerce_syndrome_item(item) for item in syndromes]
-        self._replace_items_by_type("syndrome", items)
+        if self._reuse_or_replace_items("syndrome", items):
+            return len(items)
         self.build_index()
         return len(items)
 
@@ -134,6 +152,10 @@ class EmbeddingService:
             self._index = index
         else:
             self._index = vectors
+
+        self._index_signature = self._compute_signature(self._items)
+        if self._auto_persist and self._persist_directory is not None:
+            self.save_index()
 
     def search(
         self,
@@ -266,6 +288,7 @@ class EmbeddingService:
         self._embeddings = None
         self._dimension = None
         self._index = None
+        self._index_signature = ""
 
     def stats(self) -> Dict[str, Any]:
         type_counts: Dict[str, int] = {}
@@ -277,7 +300,93 @@ class EmbeddingService:
             "faiss_enabled": self.faiss_enabled,
             "types": type_counts,
             "model_name": self.model_name,
+            "persist_directory": str(self._persist_directory) if self._persist_directory is not None else "",
+            "index_name": self._index_name,
+            "index_signature": self._index_signature,
+            "corpus_version": self._corpus_version,
         }
+
+    def save_index(self, directory: Optional[str] = None) -> bool:
+        target_dir = Path(directory).resolve() if directory else self._persist_directory
+        if target_dir is None or self._embeddings is None:
+            return False
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        metadata_path = self._metadata_path(target_dir)
+        embeddings_path = self._embeddings_path(target_dir)
+        metadata = {
+            "model_name": self.model_name,
+            "normalize_embeddings": self.normalize_embeddings,
+            "faiss_enabled": bool(self._faiss_enabled and faiss is not None),
+            "dimension": self._dimension,
+            "corpus_version": self._corpus_version,
+            "index_signature": self._index_signature or self._compute_signature(self._items),
+            "items": [
+                {
+                    "item_id": item.item_id,
+                    "text": item.text,
+                    "item_type": item.item_type,
+                    "metadata": item.metadata,
+                }
+                for item in self._items
+            ],
+        }
+        metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        np.save(embeddings_path, self._embeddings)
+
+        if metadata["faiss_enabled"] and self._index is not None and faiss is not None:
+            faiss.write_index(self._index, str(self._faiss_path(target_dir)))
+        return True
+
+    def load_index(self, directory: Optional[str] = None) -> bool:
+        target_dir = Path(directory).resolve() if directory else self._persist_directory
+        if target_dir is None:
+            return False
+
+        metadata_path = self._metadata_path(target_dir)
+        embeddings_path = self._embeddings_path(target_dir)
+        if not metadata_path.exists() or not embeddings_path.exists():
+            return False
+
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+
+        if not self._is_compatible_persisted_metadata(metadata):
+            return False
+
+        try:
+            embeddings = np.load(embeddings_path, allow_pickle=False)
+        except Exception:
+            return False
+
+        items_payload = metadata.get("items") or []
+        items = [
+            EmbeddingItem(
+                item_id=str(item.get("item_id") or ""),
+                text=str(item.get("text") or ""),
+                item_type=str(item.get("item_type") or ""),
+                metadata=dict(item.get("metadata") or {}),
+            )
+            for item in items_payload
+            if isinstance(item, dict)
+        ]
+        if not items or embeddings.ndim != 2 or embeddings.shape[0] != len(items):
+            return False
+
+        self._items = items
+        self._embeddings = np.asarray(embeddings, dtype=np.float32)
+        self._dimension = int(self._embeddings.shape[1])
+        self._index_signature = str(metadata.get("index_signature") or self._compute_signature(items))
+        self._faiss_enabled = bool(self._requested_use_faiss and metadata.get("faiss_enabled") and faiss is not None)
+
+        if self._faiss_enabled and self._faiss_path(target_dir).exists() and faiss is not None:
+            self._index = faiss.read_index(str(self._faiss_path(target_dir)))
+        else:
+            self._index = self._embeddings
+            self._faiss_enabled = False
+        return True
 
     def _candidate_indexes(
         self,
@@ -315,6 +424,18 @@ class EmbeddingService:
         normalized_item_type = self._ontology.normalize_node_type(item_type, strict=True)
         remaining = [item for item in self._items if item.item_type != normalized_item_type]
         self._items = remaining + list(new_items)
+
+    def _reuse_or_replace_items(self, item_type: str, new_items: Sequence[EmbeddingItem]) -> bool:
+        normalized_item_type = self._ontology.normalize_node_type(item_type, strict=True)
+        remaining = [item for item in self._items if item.item_type != normalized_item_type]
+        candidate_items = remaining + list(new_items)
+        candidate_signature = self._compute_signature(candidate_items)
+        self._items = candidate_items
+        if self._embeddings is not None and self._index_signature == candidate_signature:
+            self._dimension = int(self._embeddings.shape[1])
+            return True
+        self._index_signature = candidate_signature
+        return False
 
     def _coerce_formula_item(self, item: Dict[str, Any]) -> EmbeddingItem:
         formula_id, name = self._extract_formula_identity(item)
@@ -385,3 +506,32 @@ class EmbeddingService:
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         norms = np.where(norms == 0, 1.0, norms)
         return vectors / norms
+
+    def _compute_signature(self, items: Sequence[EmbeddingItem]) -> str:
+        payload = [
+            {
+                "item_id": item.item_id,
+                "text": item.text,
+                "item_type": item.item_type,
+                "metadata": item.metadata,
+            }
+            for item in items
+        ]
+        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    def _is_compatible_persisted_metadata(self, metadata: Dict[str, Any]) -> bool:
+        return (
+            str(metadata.get("model_name") or "") == self.model_name
+            and bool(metadata.get("normalize_embeddings")) == self.normalize_embeddings
+            and str(metadata.get("corpus_version") or "default") == self._corpus_version
+        )
+
+    def _metadata_path(self, directory: Path) -> Path:
+        return directory / f"{self._index_name}.metadata.json"
+
+    def _embeddings_path(self, directory: Path) -> Path:
+        return directory / f"{self._index_name}.embeddings.npy"
+
+    def _faiss_path(self, directory: Path) -> Path:
+        return directory / f"{self._index_name}.faiss.index"

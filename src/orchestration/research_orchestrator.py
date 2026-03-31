@@ -76,9 +76,11 @@ class OrchestrationResult:
     total_duration_sec: float
     phases: List[PhaseOutcome]
     pipeline_metadata: Dict[str, Any]
+    analysis_results: Dict[str, Any] = field(default_factory=dict)
+    research_artifact: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "topic": self.topic,
             "cycle_id": self.cycle_id,
             "status": self.status,
@@ -88,6 +90,11 @@ class OrchestrationResult:
             "phases": [p.to_dict() for p in self.phases],
             "pipeline_metadata": self.pipeline_metadata,
         }
+        if self.analysis_results:
+            payload["analysis_results"] = self.analysis_results
+        if self.research_artifact:
+            payload["research_artifact"] = self.research_artifact
+        return payload
 
     @property
     def succeeded_phases(self) -> List[str]:
@@ -184,6 +191,7 @@ class ResearchOrchestrator:
                 topic=topic,
                 phase_contexts=phase_contexts,
             )
+            publish_highlights = self._extract_publish_result_highlights(pipeline, cycle_id)
         finally:
             pipeline.cleanup()
 
@@ -207,6 +215,8 @@ class ResearchOrchestrator:
                 "scope": scope,
                 "phases_requested": [p.value for p in self._phases],
             },
+            analysis_results=publish_highlights.get("analysis_results") or {},
+            research_artifact=publish_highlights.get("research_artifact") or {},
         )
 
     def _prepare_pipeline_and_cycle(
@@ -358,9 +368,18 @@ class ResearchOrchestrator:
                 "domain": result.get("domain", ""),
             }
         if phase == ResearchPhase.EXPERIMENT:
+            experiment_results = result.get("results") or {}
+            experiments = result.get("experiments") or []
+            first_experiment = experiments[0] if experiments else {}
             return {
-                "experiment_count": len(result.get("experiments", [])),
+                "experiment_count": len(experiments),
                 "success_rate": result.get("success_rate", 0.0),
+                "selected_hypothesis_id": (result.get("metadata") or {}).get("selected_hypothesis_id", ""),
+                "evidence_record_count": (result.get("metadata") or {}).get("evidence_record_count", 0),
+                "weighted_evidence_score": (result.get("metadata") or {}).get("weighted_evidence_score", 0.0),
+                "methodology": experiment_results.get("methodology") or first_experiment.get("methodology", ""),
+                "sample_size": experiment_results.get("sample_size") or first_experiment.get("sample_size", 0),
+                "highest_gap_priority": (result.get("metadata") or {}).get("highest_gap_priority", "低"),
             }
         if phase == ResearchPhase.ANALYZE:
             return {
@@ -368,16 +387,42 @@ class ResearchOrchestrator:
                 "key_findings": result.get("key_findings", [])[:3],
             }
         if phase == ResearchPhase.PUBLISH:
-            return {
+            summary = {
                 "deliverable_count": len(result.get("deliverables", [])),
                 "abstract_word_count": len(str(result.get("abstract", "")).split()),
             }
+            output_files = result.get("output_files")
+            if isinstance(output_files, dict) and output_files:
+                summary["output_files"] = output_files
+            return summary
         if phase == ResearchPhase.REFLECT:
             return {
                 "improvement_suggestions": result.get("improvements", [])[:3],
                 "next_cycle_focus": result.get("next_cycle_focus", ""),
             }
         return {}
+
+    @staticmethod
+    def _extract_publish_result_highlights(
+        pipeline: ResearchPipeline,
+        cycle_id: str,
+    ) -> Dict[str, Dict[str, Any]]:
+        cycle = pipeline.research_cycles.get(cycle_id)
+        if cycle is None:
+            return {}
+        publish_execution = cycle.phase_executions.get(ResearchPhase.PUBLISH) or {}
+        publish_result = publish_execution.get("result") or {}
+        if not isinstance(publish_result, dict):
+            return {}
+
+        highlights: Dict[str, Dict[str, Any]] = {}
+        analysis_results = publish_result.get("analysis_results")
+        research_artifact = publish_result.get("research_artifact")
+        if isinstance(analysis_results, dict) and analysis_results:
+            highlights["analysis_results"] = analysis_results
+        if isinstance(research_artifact, dict) and research_artifact:
+            highlights["research_artifact"] = research_artifact
+        return highlights
 
     @staticmethod
     def _infer_scope(topic: str) -> str:

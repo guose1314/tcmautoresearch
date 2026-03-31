@@ -61,6 +61,31 @@ class TestQualityImprovementArchive(unittest.TestCase):
         self.assertEqual(entry["metadata"]["last_completed_phase"], "build_archive_entry")
         self.assertIn("inventory_missing_contract_count", entry["analysis_summary"])
 
+    def test_build_archive_entry_extracts_clinical_gap_json_payload(self):
+        entry = build_archive_entry(
+            {"overall_success": True, "results": [{"name": "logic_checks", "success": True}]},
+            {"overall_score": 91.0, "grade": "A", "failed_dimensions": []},
+            {
+                "trend": {"status": "stable", "score_delta": 0.0},
+                "action_backlog": [],
+                "clinical_gap_analysis": {
+                    "report": "gap report",
+                    "json_payload": {
+                        "clinical_question": "四君子汤是否改善脾气虚相关结局",
+                        "coverage_overview": {"evidence_density": "medium"},
+                        "gaps": [{"dimension": "outcome", "title": "关键结局覆盖不足", "priority": "高"}],
+                        "priority_summary": {"counts": {"高": 1, "中": 0, "低": 0}, "highest_priority": "高", "total_gaps": 1},
+                        "recommendations": ["补充前瞻性对照研究"],
+                    },
+                },
+            },
+            inventory_report={"analysis_summary": {"missing_contract_count": 0, "root_script_observation_category_counts": {}}, "recommendation": {"recommended_path": None}},
+        )
+
+        self.assertIn("clinical_gap_analysis", entry)
+        self.assertEqual(entry["clinical_gap_analysis"]["priority_summary"]["highest_priority"], "高")
+        self.assertEqual(entry["clinical_gap_analysis"]["gaps"][0]["dimension"], "outcome")
+
     def test_write_archive_outputs_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -227,6 +252,65 @@ class TestQualityImprovementArchive(unittest.TestCase):
                 "- Dossier Path: {0}".format(latest_payload["report_metadata"]["dossier_path"]),
                 dossier_text,
             )
+
+    def test_write_archive_persists_clinical_gap_payload_to_history_latest_and_dossier(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            entry = {
+                "timestamp": "2026-03-31T00:00:00+00:00",
+                "quality_score": 93.0,
+                "quality_grade": "A",
+                "trend_status": "stable",
+                "trend_delta": 0.0,
+                "overall_success": True,
+                "failed_gates": [],
+                "failed_dimensions": [],
+                "action_backlog_count": 1,
+                "next_cycle_targets": {"target_overall_score": 95.0},
+                "inventory_summary": {
+                    "status": "healthy",
+                    "scanned_consumer_count": 9,
+                    "missing_contract_count": 0,
+                    "eligible_missing_contract_count": 0,
+                    "root_script_observation_count": 1,
+                    "root_script_observation_category_counts": {},
+                    "recommended_next_target": None,
+                },
+                "clinical_gap_analysis": {
+                    "clinical_question": "四君子汤是否改善脾气虚相关结局",
+                    "coverage_overview": {"evidence_density": "medium"},
+                    "gaps": [{"dimension": "outcome", "title": "关键结局覆盖不足", "priority": "高"}],
+                    "priority_summary": {"counts": {"高": 1, "中": 0, "低": 0}, "highest_priority": "高", "total_gaps": 1},
+                    "recommendations": ["补充前瞻性对照研究"],
+                },
+                "metadata": {
+                    "phase_history": [],
+                    "phase_timings": {},
+                    "completed_phases": ["build_archive_entry"],
+                    "failed_phase": None,
+                    "final_status": "completed",
+                    "last_completed_phase": "build_archive_entry",
+                },
+                "failed_operations": [],
+                "report_metadata": {"contract_version": "d65.v1"},
+            }
+
+            outputs = write_archive(
+                entry,
+                root / "output" / "archive.jsonl",
+                root / "docs" / "quality-archive",
+                root / "output" / "latest.json",
+            )
+
+            history_lines = outputs["history"].read_text(encoding="utf-8").splitlines()
+            history_payload = json.loads(history_lines[-1])
+            latest_payload = json.loads(outputs["latest"].read_text(encoding="utf-8"))
+            dossier_text = outputs["dossier"].read_text(encoding="utf-8")
+
+            self.assertEqual(history_payload["clinical_gap_analysis"]["priority_summary"]["highest_priority"], "高")
+            self.assertEqual(latest_payload["clinical_gap_analysis"]["gaps"][0]["title"], "关键结局覆盖不足")
+            self.assertIn("## Clinical Gap Analysis", dossier_text)
+            self.assertIn("四君子汤是否改善脾气虚相关结局", dossier_text)
 
 
 if __name__ == "__main__":

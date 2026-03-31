@@ -13,7 +13,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from src.core.phase_tracker import PhaseTrackerMixin
+from src.core.module_base import BaseModule
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -73,8 +73,7 @@ class ModuleOutput:
     performance_metrics: Dict[str, Any] = field(default_factory=dict)
     tags: List[str] = field(default_factory=list)
 
-@dataclass
-class ModuleInterface(PhaseTrackerMixin):
+class ModuleInterface(BaseModule):
     """
     模块接口定义
     
@@ -91,31 +90,13 @@ class ModuleInterface(PhaseTrackerMixin):
     """
     
     def __init__(self, module_name: str, config: Dict[str, Any] = None):
-        self.module_name = module_name
-        self.config = config or {}
-        self.governance_config = {
-            "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
-            "persist_failed_operations": self.config.get("persist_failed_operations", True),
-            "minimum_stable_success_rate": float(self.config.get("minimum_stable_success_rate", 0.8)),
-            "export_contract_version": self.config.get("export_contract_version", "d47.v1"),
-        }
-        self.logger = logging.getLogger(f"{__name__}.{module_name}")
+        super().__init__(module_name, config)
+        self.governance_config["export_contract_version"] = self.config.get("export_contract_version", "d47.v1")
         self.status = ModuleStatus.CREATED
-        self.initialized = False
-        self.metrics = {
-            "execution_count": 0,
-            "total_execution_time": 0.0,
-            "last_execution_time": 0.0,
-            "last_success": False,
-            "quality_score": 0.0
-        }
-        self.phase_history: List[Dict[str, Any]] = []
-        self.phase_timings: Dict[str, float] = {}
-        self.completed_phases: List[str] = []
-        self.failed_phase: Optional[str] = None
-        self.failed_operations: List[Dict[str, Any]] = []
         self.final_status = self.status.value
-        self.last_completed_phase: Optional[str] = None
+
+    def _status_value(self) -> str:
+        return self.status.value if isinstance(self.status, ModuleStatus) else str(self.status)
 
     def _build_analysis_summary(self) -> Dict[str, Any]:
         total_executions = int(self.metrics.get("execution_count", 0) or 0)
@@ -163,55 +144,9 @@ class ModuleInterface(PhaseTrackerMixin):
         return merged
         
     def initialize(self, config: Dict[str, Any] = None) -> bool:
-        """
-        初始化模块
-        
-        Args:
-            config (Dict[str, Any]): 模块配置
-            
-        Returns:
-            bool: 初始化是否成功
-        """
-        start_time = time.time()
-        phase_started_at = self._start_phase("initialize", {"config_keys": sorted((config or {}).keys())})
-        try:
-            # 更新配置
-            if config:
-                self.config.update(config)
-            
-            # 执行具体初始化逻辑
-            if self._do_initialize():
-                self.status = ModuleStatus.INITIALIZED
-                self.initialized = True
-                self.metrics["last_execution_time"] = time.time() - start_time
-                self.final_status = "initialized"
-                self._complete_phase(
-                    "initialize",
-                    phase_started_at,
-                    {"initialized": True},
-                    final_status="initialized",
-                )
-                self.logger.info(f"模块 {self.module_name} 初始化成功")
-                return True
-            self._fail_phase(
-                "initialize",
-                phase_started_at,
-                RuntimeError("module initialization returned False"),
-                {"config_keys": sorted((config or {}).keys())},
-            )
-                
-        except Exception as e:
-            self.status = ModuleStatus.ERROR
-            self._fail_phase(
-                "initialize",
-                phase_started_at,
-                e,
-                {"config_keys": sorted((config or {}).keys())},
-            )
-            self.logger.error(f"模块 {self.module_name} 初始化失败: {e}")
-            self.logger.error(traceback.format_exc())
-            
-        return False
+        initialized = super().initialize(config)
+        self.status = ModuleStatus.INITIALIZED if initialized else ModuleStatus.ERROR
+        return initialized
     
     def _do_initialize(self) -> bool:
         """
@@ -368,42 +303,9 @@ class ModuleInterface(PhaseTrackerMixin):
         raise NotImplementedError("子类必须实现 _do_execute 方法")
     
     def cleanup(self) -> bool:
-        """
-        清理模块资源
-        
-        Returns:
-            bool: 清理是否成功
-        """
-        start_time = time.time()
-        phase_started_at = self._start_phase("cleanup", {"module_name": self.module_name})
-        self.logger.info(f"开始清理模块资源: {self.module_name}")
-        
-        try:
-            if self._do_cleanup():
-                self.status = ModuleStatus.TERMINATED
-                self.initialized = False
-                self.metrics["last_execution_time"] = time.time() - start_time
-                self.metrics["execution_count"] = 0
-                self.metrics["total_execution_time"] = 0.0
-                self.metrics["last_success"] = False
-                self.metrics["quality_score"] = 0.0
-                self.phase_history.clear()
-                self.phase_timings.clear()
-                self.completed_phases.clear()
-                self.failed_operations.clear()
-                self.failed_phase = None
-                self.last_completed_phase = None
-                self.final_status = "cleaned"
-                self.logger.info(f"模块 {self.module_name} 资源清理完成")
-                return True
-                
-        except Exception as e:
-            self.status = ModuleStatus.ERROR
-            self._fail_phase("cleanup", phase_started_at, e, {"module_name": self.module_name})
-            self.logger.error(f"模块 {self.module_name} 资源清理失败: {e}")
-            self.logger.error(traceback.format_exc())
-            
-        return False
+        cleaned = super().cleanup()
+        self.status = ModuleStatus.TERMINATED if cleaned else ModuleStatus.ERROR
+        return cleaned
     
     def _do_cleanup(self) -> bool:
         """
@@ -457,7 +359,7 @@ class ModuleInterface(PhaseTrackerMixin):
             "version": self.config.get("version", "1.0.0"),
             "description": self.config.get("description", "模块描述"),
             "type": self.config.get("type", "generic"),
-            "status": self.status.value,
+            "status": self._status_value(),
             "initialized": self.initialized,
             "config": self._serialize_value(self.config),
             "metrics": self._serialize_value(self.metrics),

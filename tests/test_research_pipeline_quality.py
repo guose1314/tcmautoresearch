@@ -262,6 +262,9 @@ class TestResearchPipelineQuality(unittest.TestCase):
         with patch.object(CachedLLMService, "from_gap_config", return_value=_GoodService()):
             ok = self.pipeline._run_clinical_gap_analysis({}, [], {})
             self.assertEqual(ok.get("report"), "ok")
+            self.assertIn("gaps", ok)
+            self.assertIn("priority_summary", ok)
+            self.assertEqual(ok.get("output_language"), "zh")
 
         with patch.object(CachedLLMService, "from_gap_config", return_value=_BadService()):
             bad = self.pipeline._run_clinical_gap_analysis({}, [], {})

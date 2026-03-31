@@ -4,11 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from src.analysis.multimodal_fusion import FusionStrategy, MultimodalFusionEngine
 from src.core.algorithm_optimizer import AlgorithmOptimizer
 from src.learning.adaptive_tuner import AdaptiveTuner
 from src.learning.pattern_recognizer import PatternRecognizer
 from src.learning.self_learning_engine import SelfLearningEngine
-from src.research.multimodal_fusion import FusionStrategy, MultimodalFusionEngine
 
 
 class TestOptimizationAndLearningFeatures(unittest.TestCase):

@@ -8,8 +8,8 @@ import sys
 
 sys.path.insert(0, '.')
 
+from src.analysis.entity_extractor import AdvancedEntityExtractor
 from src.data.tcm_lexicon import get_lexicon
-from src.extractors.advanced_entity_extractor import AdvancedEntityExtractor
 
 print('=' * 80)
 print('实体抽取升级演示（6000+ 中医词汇 → 支持扩展至 3 万+）')

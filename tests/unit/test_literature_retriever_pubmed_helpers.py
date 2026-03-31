@@ -1,6 +1,6 @@
 import unittest
 
-from src.research.literature_retriever import LiteratureRetriever
+from src.collector.literature_retriever import LiteratureRetriever
 
 
 class TestLiteratureRetrieverPubmedHelpers(unittest.TestCase):

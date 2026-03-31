@@ -1,0 +1,19 @@
+environment:
+  name: "development"
+
+database:
+  path: "./data/development/tcmautoresearch.db"
+
+output:
+  directory: "./output/development"
+  backup_directory: "./backup/development"
+
+logging:
+  file: "./logs/development/tcmautoresearch.log"
+
+models:
+  llm:
+    cache_dir: "./cache/llm/development"
+
+web_console:
+  job_storage_dir: "./output/development/web_console_jobs"

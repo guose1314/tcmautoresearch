@@ -13,9 +13,10 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from importlib import import_module
 from typing import Any, Dict, List, Optional
 
-import networkx as nx
+nx = import_module("networkx")
 
 from src.core.module_base import get_global_executor
 from src.core.phase_tracker import PhaseTrackerMixin
