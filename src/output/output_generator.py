@@ -135,7 +135,7 @@ class OutputGenerator(BaseModule):
         """
         recs: List[str] = []
         entities = context.get("entities", [])
-        confidence = float(context.get("confidence_score", 0.0))
+        confidence = _to_float(context.get("confidence_score", 0.0))
 
         if confidence < 0.7:
             recs.append("建议提高实体识别置信度阈值，当前置信度偏低")
@@ -155,6 +155,14 @@ class OutputGenerator(BaseModule):
 # ---------------------------------------------------------------------------
 # 内部辅助函数
 # ---------------------------------------------------------------------------
+
+def _to_float(value: Any) -> float:
+    """安全地将任意值转换为浮点数，转换失败时返回 0.0"""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
 
 def _to_int(value: Any) -> int:
     """安全地将任意值转换为整数，转换失败时返回 0"""

@@ -261,7 +261,10 @@ class TCMLexicon:
                     line = raw_line.strip()
                     if not line or line.startswith("#"):
                         continue
-                    word = line.split()[0]
+                    parts = line.split()
+                    if not parts:
+                        continue
+                    word = parts[0]
                     if word and word not in self._index:
                         self.add_word(word, word_type)
                         count += 1
