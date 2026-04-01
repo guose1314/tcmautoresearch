@@ -125,6 +125,9 @@ data/
 models/
 output/
 logs/
+# Source packages must be tracked even if their name matches a data/output dir
+!src/data/
+!src/output/
 
 # Temporary files
 *.tmp
