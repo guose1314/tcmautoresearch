@@ -258,6 +258,17 @@ monitoring:
     enabled: true
     thresholds:
       cpu_usage: 80
+      memory_usage: 85
+      error_rate: 0.05
+      processing_time: 300
+    notification_channels:
+      - "email"
+      - "slack"
+      - "webhook"
+    email_recipients:
+      - "admin@example.com"
+      - "research-team@example.com"
+    webhook_url: "https://example.invalid/slack-webhook-placeholder"
 
 # ctext 标准语料采集配置
 ctext_corpus:
@@ -274,17 +285,6 @@ ctext_corpus:
       - "five_classics"
       - "tcm_classics"
   batch_manifest_output: "./output/ctext_batch_manifest.json"
-      memory_usage: 85
-      error_rate: 0.05
-      processing_time: 300
-    notification_channels:
-      - "email"
-      - "slack"
-      - "webhook"
-    email_recipients:
-      - "admin@example.com"
-      - "research-team@example.com"
-    webhook_url: "https://example.invalid/slack-webhook-placeholder"
 
 # 安全配置
 security:
