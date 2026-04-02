@@ -34,6 +34,10 @@
                 linear-gradient(160deg, var(--bg-top), var(--bg-bottom));
         }
 
+            body.auth-overlay-open {
+                overflow: hidden;
+            }
+
         body::before {
             content: "";
             position: fixed;
@@ -65,6 +69,33 @@
             animation: fade-slide 0.55s ease-out;
         }
 
+        .hero-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 22px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .hero-copy {
+            display: grid;
+            gap: 14px;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            width: fit-content;
+            border-radius: 999px;
+            background: rgba(37, 49, 45, 0.08);
+            color: var(--muted);
+            font-size: 0.78rem;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+        }
+
         .hero h1 {
             margin: 0;
             font-size: clamp(2rem, 3vw, 3.2rem);
@@ -77,6 +108,147 @@
             max-width: 760px;
             color: var(--muted);
             font-size: 1rem;
+        }
+
+        .console-session {
+            width: min(320px, 100%);
+            padding: 18px;
+            border-radius: 22px;
+            border: 1px solid rgba(37, 49, 45, 0.14);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(249, 243, 233, 0.88));
+        }
+
+        .session-kicker {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--muted);
+            font-size: 0.78rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+
+        .console-session strong {
+            display: block;
+            font-size: 1.12rem;
+            margin-bottom: 8px;
+        }
+
+        .session-meta {
+            color: var(--muted);
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .session-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 14px;
+        }
+
+        .auth-shell {
+            position: fixed;
+            inset: 0;
+            z-index: 40;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background:
+                linear-gradient(135deg, rgba(22, 26, 24, 0.56), rgba(56, 46, 36, 0.34)),
+                radial-gradient(circle at top left, rgba(255, 255, 255, 0.16), transparent 34%);
+            backdrop-filter: blur(18px);
+        }
+
+        .auth-shell[hidden] {
+            display: none;
+        }
+
+        .auth-card {
+            width: min(980px, 100%);
+            display: grid;
+            grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+            border-radius: 30px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 251, 245, 0.24);
+            box-shadow: 0 32px 72px rgba(18, 20, 18, 0.28);
+            background: rgba(251, 247, 239, 0.94);
+        }
+
+        .auth-copy {
+            padding: 34px 32px;
+            color: #fffaf2;
+            background:
+                radial-gradient(circle at top right, rgba(255, 255, 255, 0.14), transparent 28%),
+                linear-gradient(155deg, #1d352e, #355444 48%, #8b4d2a 100%);
+        }
+
+        .auth-copy h2 {
+            margin: 14px 0 12px;
+            font-size: clamp(2rem, 3vw, 3rem);
+            line-height: 1.06;
+        }
+
+        .auth-copy p {
+            margin: 0 0 14px;
+            color: rgba(255, 250, 242, 0.8);
+            line-height: 1.7;
+        }
+
+        .auth-list {
+            display: grid;
+            gap: 10px;
+            margin-top: 24px;
+        }
+
+        .auth-list div {
+            padding: 12px 14px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .auth-form-shell {
+            position: relative;
+            padding: 28px 28px 30px;
+            background: linear-gradient(180deg, rgba(255, 252, 247, 0.96), rgba(244, 238, 228, 0.92));
+        }
+
+        .auth-form-shell h3 {
+            margin: 0 0 10px;
+            font-size: 1.3rem;
+        }
+
+        .auth-form {
+            display: grid;
+            gap: 14px;
+            margin-top: 16px;
+        }
+
+        .login-note {
+            margin: 0;
+            color: var(--muted);
+            font-size: 0.92rem;
+            line-height: 1.7;
+        }
+
+        .remember-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--muted);
+            font-size: 0.92rem;
+        }
+
+        .remember-row input {
+            width: 18px;
+            height: 18px;
+            margin: 0;
+        }
+
+        .auth-close {
+            position: absolute;
+            top: 18px;
+            right: 18px;
         }
 
         .layout {
@@ -563,6 +735,10 @@
             .summary-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
+
+            .auth-card {
+                grid-template-columns: 1fr;
+            }
         }
 
         @media (max-width: 560px) {
@@ -573,10 +749,66 @@
     </style>
 </head>
 <body>
-    <main>
+    <div id="auth-shell" class="auth-shell" hidden>
+        <div class="auth-card">
+            <section class="auth-copy">
+                <span class="eyebrow">Secure Research Access</span>
+                <h2>登录科研控制台</h2>
+                <p>进入控制台后，你可以创建研究任务、订阅实时阶段进度、查看结果摘要，并直接导出最终报告与研究产物。</p>
+                <p>当环境启用了控制台账号时，系统会签发独立会话令牌，并自动附带到任务创建、状态查询、SSE 与 WebSocket 连接中。</p>
+                <div class="auth-list">
+                    <div>研究任务创建、状态查询与导出链路统一受保护。</div>
+                    <div>支持临时会话与本机记住登录状态两种进入方式。</div>
+                    <div>登录后仍保留现有研究控制台与实时事件流体验。</div>
+                </div>
+            </section>
+
+            <section class="auth-form-shell">
+                <button id="close-login-button" type="button" class="ghost-button auth-close">稍后配置</button>
+                <h3>控制台会话</h3>
+                <p id="login-mode-note" class="login-note">正在检查当前环境是否启用控制台账号密码认证。</p>
+                <form id="login-form" class="auth-form">
+                    <label>
+                        用户名称
+                        <input id="login-user-input" type="text" placeholder="例如：TCM Researcher">
+                    </label>
+                    <label>
+                        <span id="login-secret-label">登录凭证</span>
+                        <input id="login-token-input" type="password" placeholder="输入 Bearer Token 或管理密钥">
+                    </label>
+                    <label class="remember-row">
+                        <input id="remember-login-input" type="checkbox">
+                        记住本机登录状态
+                    </label>
+                    <div class="actions">
+                        <button id="login-submit-button" type="submit">进入控制台</button>
+                        <button id="guest-enter-button" type="button" class="ghost-button">访客模式进入</button>
+                    </div>
+                </form>
+                <div id="login-status" class="status-banner">请输入身份信息后进入控制台。</div>
+            </section>
+        </div>
+    </div>
+
+    <main id="console-main">
         <section class="hero">
-            <h1>中医自动科研控制台</h1>
-            <p>输入研究主题后，页面会创建后台任务，并通过可选的 WebSocket 或 SSE 实时通道展示当前阶段、总进度和关键事件。</p>
+            <div class="hero-head">
+                <div class="hero-copy">
+                    <span class="eyebrow">TCM Research Command</span>
+                    <h1>中医自动科研控制台</h1>
+                    <p>输入研究主题后，页面会创建后台任务，并通过可选的 WebSocket 或 SSE 实时通道展示当前阶段、总进度和关键事件。</p>
+                </div>
+
+                <div class="console-session">
+                    <span class="session-kicker">Console Session</span>
+                    <strong id="auth-user">访客模式</strong>
+                    <div id="auth-mode" class="session-meta">正在检查鉴权模式…</div>
+                    <div class="session-actions">
+                        <button id="open-login-button" type="button" class="ghost-button">登录 / 切换会话</button>
+                        <button id="logout-button" type="button" class="ghost-button danger-button" hidden>退出登录</button>
+                    </div>
+                </div>
+            </div>
         </section>
 
         <div class="layout">
@@ -677,6 +909,22 @@
     </main>
 
     <script>
+        const authShell = document.getElementById("auth-shell");
+        const consoleMain = document.getElementById("console-main");
+        const loginForm = document.getElementById("login-form");
+        const loginUserInput = document.getElementById("login-user-input");
+        const loginTokenInput = document.getElementById("login-token-input");
+        const rememberLoginInput = document.getElementById("remember-login-input");
+        const loginSubmitButton = document.getElementById("login-submit-button");
+        const guestEnterButton = document.getElementById("guest-enter-button");
+        const closeLoginButton = document.getElementById("close-login-button");
+        const loginStatusNode = document.getElementById("login-status");
+        const loginModeNote = document.getElementById("login-mode-note");
+        const loginSecretLabel = document.getElementById("login-secret-label");
+        const authUserNode = document.getElementById("auth-user");
+        const authModeNode = document.getElementById("auth-mode");
+        const openLoginButton = document.getElementById("open-login-button");
+        const logoutButton = document.getElementById("logout-button");
         const form = document.getElementById("research-form");
         const topicInput = document.getElementById("topic-input");
         const descriptionInput = document.getElementById("description-input");
@@ -699,6 +947,8 @@
         const clearLocalRecordsButton = document.getElementById("clear-local-records");
         const LAST_JOB_STORAGE_KEY = "tcm-auto-research.lastJobId";
         const RECENT_JOBS_STORAGE_KEY = "tcm-auto-research.recentJobIds";
+        const AUTH_SESSION_STORAGE_KEY = "tcm-auto-research.console-auth.session";
+        const AUTH_PERSIST_STORAGE_KEY = "tcm-auto-research.console-auth.persist";
         const RECENT_JOB_LIMIT = 8;
 
         const phaseLabels = {
@@ -772,6 +1022,330 @@
         let reconnectTimerId = 0;
         let phaseState = new Map();
         let activePhaseKey = "";
+        let consoleBootstrapped = false;
+        let currentAuthConfig = {
+            authRequired: false,
+            authMode: "open",
+            tokenLabel: "控制台会话令牌",
+            credentialLabel: "登录凭证",
+            credentialPlaceholder: "输入登录凭证",
+            supportsPasswordLogin: false,
+            supportsApiKeyLogin: false,
+            guestAllowed: true,
+        };
+        let currentAuthSession = {
+            token: "",
+            principal: "访客模式",
+            remember: false,
+            authSource: "guest",
+        };
+
+        function parseAuthSession(raw) {
+            if (!raw) {
+                return null;
+            }
+            try {
+                const parsed = JSON.parse(raw);
+                if (!parsed || typeof parsed !== "object") {
+                    return null;
+                }
+                return {
+                    token: String(parsed.token || "").trim(),
+                    principal: String(parsed.principal || "").trim(),
+                    remember: Boolean(parsed.remember),
+                    authSource: String(parsed.authSource || "guest"),
+                };
+            } catch (error) {
+                console.warn("解析登录会话失败", error);
+                return null;
+            }
+        }
+
+        function loadPersistedAuthSession() {
+            const sessionValue = parseAuthSession(window.sessionStorage.getItem(AUTH_SESSION_STORAGE_KEY));
+            if (sessionValue) {
+                return sessionValue;
+            }
+            return parseAuthSession(window.localStorage.getItem(AUTH_PERSIST_STORAGE_KEY));
+        }
+
+        function clearPersistedAuthSession() {
+            window.sessionStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+            window.localStorage.removeItem(AUTH_PERSIST_STORAGE_KEY);
+        }
+
+        function savePersistedAuthSession(session) {
+            clearPersistedAuthSession();
+            const payload = JSON.stringify({
+                token: session.token || "",
+                principal: session.principal || "",
+                remember: Boolean(session.remember),
+                authSource: session.authSource || "guest",
+            });
+            if (session.remember) {
+                window.localStorage.setItem(AUTH_PERSIST_STORAGE_KEY, payload);
+                return;
+            }
+            window.sessionStorage.setItem(AUTH_SESSION_STORAGE_KEY, payload);
+        }
+
+        function setLoginStatus(message, kind = "default") {
+            loginStatusNode.textContent = message;
+            loginStatusNode.classList.toggle("error", kind === "error");
+            loginStatusNode.classList.toggle("success", kind === "success");
+        }
+
+        function syncAuthPresentation() {
+            loginSecretLabel.textContent = currentAuthConfig.credentialLabel || "登录凭证";
+            loginTokenInput.placeholder = currentAuthConfig.credentialPlaceholder || "输入登录凭证";
+            authUserNode.textContent = currentAuthSession.principal || (currentAuthConfig.authRequired ? "待登录" : "访客模式");
+            if (currentAuthConfig.authMode === "password") {
+                authModeNode.textContent = currentAuthSession.token
+                    ? "账号密码模式 / 会话有效"
+                    : "账号密码模式 / 需要登录";
+            } else if (currentAuthConfig.authMode === "management_api_key") {
+                authModeNode.textContent = currentAuthSession.token
+                    ? "API Key 模式 / 会话有效"
+                    : "API Key 模式 / 需要验证";
+            } else {
+                authModeNode.textContent = currentAuthSession.token
+                    ? "开放模式 / 已保存会话"
+                    : "开放模式 / 可直接使用";
+            }
+            openLoginButton.textContent = currentAuthSession.token ? "切换账号" : "登录 / 切换会话";
+            logoutButton.hidden = !currentAuthSession.token;
+            guestEnterButton.hidden = !currentAuthConfig.guestAllowed;
+            closeLoginButton.hidden = currentAuthConfig.authRequired;
+            if (currentAuthConfig.authMode === "password") {
+                loginModeNote.textContent = "当前环境已启用控制台账号密码认证。登录成功后会签发独立会话令牌，用于研究任务、SSE 与 WebSocket 鉴权。";
+            } else if (currentAuthConfig.authMode === "management_api_key") {
+                loginModeNote.textContent = "当前环境仍支持管理 API Key 登录，但页面会在验证后改存短期会话令牌，而不是直接缓存管理密钥。";
+            } else {
+                loginModeNote.textContent = "当前环境未启用强制鉴权。你可以直接进入控制台，也可以预先创建会话以便切换到受保护环境。";
+            }
+        }
+
+        function openAuthShell() {
+            authShell.hidden = false;
+            document.body.classList.add("auth-overlay-open");
+            syncAuthPresentation();
+            window.setTimeout(function() {
+                if (currentAuthConfig.authRequired) {
+                    loginTokenInput.focus();
+                } else {
+                    loginUserInput.focus();
+                }
+            }, 0);
+        }
+
+        function closeAuthShell() {
+            if (currentAuthConfig.authRequired && !currentAuthSession.token) {
+                return;
+            }
+            authShell.hidden = true;
+            document.body.classList.remove("auth-overlay-open");
+        }
+
+        function withApiKeyQuery(urlValue) {
+            if (!currentAuthSession.token) {
+                return urlValue;
+            }
+            const raw = String(urlValue || "").trim();
+            if (!raw) {
+                return raw;
+            }
+            const resolved = new URL(raw, window.location.origin);
+            resolved.searchParams.set("api_key", currentAuthSession.token);
+            if (/^https?:/i.test(raw) || /^wss?:/i.test(raw)) {
+                return resolved.toString();
+            }
+            return `${resolved.pathname}${resolved.search}`;
+        }
+
+        function authenticatedFetch(resource, options = {}) {
+            const headers = new Headers(options.headers || {});
+            if (currentAuthSession.token) {
+                headers.set("Authorization", `Bearer ${currentAuthSession.token}`);
+            }
+            return fetch(resource, { ...options, headers });
+        }
+
+        async function fetchConsoleAuthStatus() {
+            const response = await fetch("/api/console/auth/status");
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return response.json();
+        }
+
+        async function verifyConsoleLogin(payload) {
+            const response = await fetch("/api/console/auth/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+                const errorPayload = await response.json().catch(() => ({}));
+                throw new Error(errorPayload.detail || `HTTP ${response.status}`);
+            }
+            return response.json();
+        }
+
+        async function revokeConsoleSession() {
+            if (!currentAuthSession.token) {
+                return;
+            }
+            try {
+                await authenticatedFetch("/api/console/auth/logout", { method: "POST" });
+            } catch (error) {
+                console.warn("注销控制台会话失败", error);
+            }
+        }
+
+        function bootConsole() {
+            if (!consoleBootstrapped) {
+                consoleBootstrapped = true;
+                setTransportState("idle", transportSelect.value);
+                restoreLastJob();
+            }
+            refreshRecentJobs();
+        }
+
+        async function completeConsoleLogin(options = {}) {
+            const username = String(options.username || loginUserInput.value || "").trim();
+            const secretValue = options.secret ?? options.token ?? loginTokenInput.value ?? "";
+            const secret = String(secretValue).trim();
+            const restoreToken = String(options.restoreToken || "").trim();
+            const remember = Boolean(options.remember ?? rememberLoginInput.checked);
+            const statusMessage = options.statusMessage || "正在验证控制台访问权限...";
+            const loginPayload = { username };
+
+            if (restoreToken) {
+                loginPayload.session_token = restoreToken;
+            } else if (currentAuthConfig.authMode === "password") {
+                loginPayload.password = secret;
+            } else if (currentAuthConfig.authMode === "management_api_key") {
+                loginPayload.api_key = secret;
+            } else if (secret) {
+                loginPayload.api_key = secret;
+            }
+
+            setLoginStatus(statusMessage);
+            loginSubmitButton.disabled = true;
+            guestEnterButton.disabled = true;
+            try {
+                const payload = await verifyConsoleLogin(loginPayload);
+                currentAuthSession = {
+                    token: String(payload.session_token || "").trim(),
+                    principal: payload.principal || username || (currentAuthConfig.authRequired ? "研究员" : "访客模式"),
+                    remember,
+                    authSource: String(payload.auth_source || "guest"),
+                };
+                savePersistedAuthSession(currentAuthSession);
+                syncAuthPresentation();
+                closeAuthShell();
+                bootConsole();
+                setLoginStatus(`已登录为 ${currentAuthSession.principal}。`, "success");
+                setBanner(`欢迎进入控制台，当前会话：${currentAuthSession.principal}`, "success");
+            } catch (error) {
+                clearPersistedAuthSession();
+                currentAuthSession = {
+                    token: "",
+                    principal: currentAuthConfig.authRequired ? "待登录" : "访客模式",
+                    remember: false,
+                    authSource: "guest",
+                };
+                syncAuthPresentation();
+                setLoginStatus(`登录失败：${error.message}`, "error");
+                if (currentAuthConfig.authRequired) {
+                    openAuthShell();
+                }
+            } finally {
+                loginSubmitButton.disabled = false;
+                guestEnterButton.disabled = false;
+            }
+        }
+
+        async function logoutConsoleSession() {
+            closeRealtimeChannel({ preference: transportSelect.value });
+            await revokeConsoleSession();
+            clearPersistedAuthSession();
+            currentAuthSession = {
+                token: "",
+                principal: currentAuthConfig.authRequired ? "待登录" : "访客模式",
+                remember: false,
+                authSource: "guest",
+            };
+            syncAuthPresentation();
+            if (currentAuthConfig.authRequired) {
+                openAuthShell();
+                setBanner("已退出登录，请重新完成控制台鉴权。", "error");
+                setLoginStatus("请输入登录凭证后重新进入控制台。", "default");
+                return;
+            }
+            setBanner("已清除本地登录状态。", "default");
+        }
+
+        async function initializeConsoleAuth() {
+            try {
+                const authStatus = await fetchConsoleAuthStatus();
+                currentAuthConfig = {
+                    authRequired: Boolean(authStatus.auth_required),
+                    authMode: String(authStatus.auth_mode || "open"),
+                    tokenLabel: String(authStatus.token_label || "控制台会话令牌"),
+                    credentialLabel: String(authStatus.credential_label || "登录凭证"),
+                    credentialPlaceholder: String(authStatus.credential_placeholder || "输入登录凭证"),
+                    supportsPasswordLogin: Boolean(authStatus.supports_password_login),
+                    supportsApiKeyLogin: Boolean(authStatus.supports_api_key_login),
+                    guestAllowed: Boolean(authStatus.guest_allowed),
+                };
+                syncAuthPresentation();
+
+                const savedSession = loadPersistedAuthSession();
+                if (savedSession) {
+                    loginUserInput.value = savedSession.principal || "";
+                    loginTokenInput.value = savedSession.token || "";
+                    rememberLoginInput.checked = Boolean(savedSession.remember);
+                    await completeConsoleLogin({
+                        username: savedSession.principal,
+                        restoreToken: savedSession.token,
+                        remember: savedSession.remember,
+                        statusMessage: "正在恢复最近一次控制台会话...",
+                    });
+                    return;
+                }
+
+                if (currentAuthConfig.authRequired) {
+                    currentAuthSession = { token: "", principal: "待登录", remember: false };
+                    syncAuthPresentation();
+                    setLoginStatus("当前环境需要先完成控制台鉴权。", "default");
+                    openAuthShell();
+                    return;
+                }
+
+                currentAuthSession = { token: "", principal: "访客模式", remember: false, authSource: "guest" };
+                syncAuthPresentation();
+                setLoginStatus("当前环境未启用强制鉴权，可直接进入控制台。", "success");
+                bootConsole();
+            } catch (error) {
+                currentAuthConfig = {
+                    authRequired: false,
+                    authMode: "unknown",
+                    tokenLabel: "控制台会话令牌",
+                    credentialLabel: "登录凭证",
+                    credentialPlaceholder: "输入登录凭证",
+                    supportsPasswordLogin: false,
+                    supportsApiKeyLogin: false,
+                    guestAllowed: true,
+                };
+                currentAuthSession = { token: "", principal: "访客模式", remember: false, authSource: "guest" };
+                syncAuthPresentation();
+                closeAuthShell();
+                setBanner(`鉴权状态获取失败，已回退为开放模式：${error.message}`, "error");
+                setLoginStatus(`无法确认当前环境鉴权状态：${error.message}。如需访问受保护环境，请手动登录。`, "error");
+                bootConsole();
+            }
+        }
 
         function setBanner(message, kind = "default") {
             statusBanner.textContent = message;
@@ -1052,7 +1626,7 @@
             if (!jobId || jobId === "-") {
                 return "#";
             }
-            return `/api/research/jobs/${encodeURIComponent(jobId)}/report?format=${encodeURIComponent(format)}`;
+            return withApiKeyQuery(`/api/research/jobs/${encodeURIComponent(jobId)}/report?format=${encodeURIComponent(format)}`);
         }
 
         function renderReportActions(jobId) {
@@ -1329,12 +1903,12 @@
             const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 
             if (rawValue.startsWith("ws://") || rawValue.startsWith("wss://")) {
-                return rawValue;
+                return withApiKeyQuery(rawValue);
             }
             if (rawValue.startsWith("/")) {
-                return `${protocol}//${window.location.host}${rawValue}`;
+                return withApiKeyQuery(`${protocol}//${window.location.host}${rawValue}`);
             }
-            return `${protocol}//${window.location.host}/${rawValue.replace(/^\/+/, "")}`;
+            return withApiKeyQuery(`${protocol}//${window.location.host}/${rawValue.replace(/^\/+/, "")}`);
         }
 
         function buildRecentJobsUrl(limit = RECENT_JOB_LIMIT) {
@@ -1500,7 +2074,7 @@
 
         async function refreshRecentJobs() {
             try {
-                const response = await fetch(buildRecentJobsUrl());
+                const response = await authenticatedFetch(buildRecentJobsUrl());
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
                 }
@@ -1568,7 +2142,7 @@
             }
 
             const { showBanner = false } = options;
-            const response = await fetch(buildStatusUrl(jobId));
+            const response = await authenticatedFetch(buildStatusUrl(jobId));
             if (response.status === 404) {
                 clearLastJobId();
                 pruneInvalidLocalRecords([]);
@@ -1618,7 +2192,7 @@
                 return;
             }
 
-            const response = await fetch(buildStatusUrl(normalizedJobId), { method: "DELETE" });
+            const response = await authenticatedFetch(buildStatusUrl(normalizedJobId), { method: "DELETE" });
             if (response.status === 404) {
                 removeLocalJobRecord(normalizedJobId);
                 await refreshRecentJobs();
@@ -1739,7 +2313,7 @@
                 return;
             }
             try {
-                const response = await fetch(statusUrl);
+                const response = await authenticatedFetch(statusUrl);
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
                 }
@@ -1777,7 +2351,7 @@
             const preference = normalizeTransportPreference(options.preference || transportSelect.value);
             const connectionToken = ++realtimeConnectionToken;
             clearPendingReconnect();
-            const source = new EventSource(streamUrl);
+            const source = new EventSource(withApiKeyQuery(streamUrl));
             activeConnection = source;
             setTransportState("sse", preference);
             setBanner("SSE 已连接，等待阶段事件。");
@@ -1935,7 +2509,7 @@
             setBanner("正在创建研究任务...");
 
             try {
-                const response = await fetch("/api/research/jobs", {
+                const response = await authenticatedFetch("/api/research/jobs", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -1967,6 +2541,32 @@
             } finally {
                 submitButton.disabled = false;
             }
+        });
+
+        loginForm.addEventListener("submit", async function(event) {
+            event.preventDefault();
+            if (currentAuthConfig.authRequired && !loginTokenInput.value.trim()) {
+                setLoginStatus(`当前环境要求输入${currentAuthConfig.credentialLabel || "登录凭证"}。`, "error");
+                loginTokenInput.focus();
+                return;
+            }
+            await completeConsoleLogin();
+        });
+
+        guestEnterButton.addEventListener("click", async function() {
+            await completeConsoleLogin({ secret: "", statusMessage: "正在进入访客模式..." });
+        });
+
+        openLoginButton.addEventListener("click", function() {
+            openAuthShell();
+        });
+
+        closeLoginButton.addEventListener("click", function() {
+            closeAuthShell();
+        });
+
+        logoutButton.addEventListener("click", async function() {
+            await logoutConsoleSession();
         });
 
         transportSelect.addEventListener("change", function() {
@@ -2006,9 +2606,7 @@
             }
         }
 
-        refreshRecentJobs();
-        setTransportState("idle", transportSelect.value);
-        restoreLastJob();
+        initializeConsoleAuth();
     </script>
 </body>
 </html>

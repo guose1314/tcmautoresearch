@@ -11,6 +11,7 @@ import unittest
 import urllib.error
 import urllib.request
 from importlib import import_module
+from typing import Any, cast
 
 from web_console.app import create_app
 from web_console.job_manager import ResearchJobManager
@@ -144,7 +145,7 @@ def _create_webdriver():
         if not browser_path:
             continue
 
-        options = options_factory()
+        options = cast(Any, options_factory)()
         options.binary_location = browser_path
         options.add_argument("--headless=new")
         options.add_argument("--window-size=1440,1200")
@@ -153,7 +154,7 @@ def _create_webdriver():
         options.add_argument("--disable-dev-shm-usage")
 
         try:
-            driver = driver_factory(options=options)
+            driver = cast(Any, driver_factory)(options=options)
             driver.set_page_load_timeout(20)
             return driver
         except WebDriverException as error:
@@ -171,14 +172,16 @@ class TestWebConsoleBrowserE2E(unittest.TestCase):
         cls.started = threading.Event()
         cls.proceed = threading.Event()
         cls.manager = ResearchJobManager(
-            runner_factory=lambda config: BrowserE2ERunner({**config, "started": cls.started, "continue": cls.proceed}),
+            runner_factory=lambda config: cast(Any, BrowserE2ERunner({**config, "started": cls.started, "continue": cls.proceed})),
             storage_dir=os.path.join(cls.tempdir.name, "jobs"),
         )
         cls.port = _find_free_port()
         cls.base_url = f"http://127.0.0.1:{cls.port}"
+        app = create_app(job_manager=cls.manager)
+        app.state.settings.secrets.pop("security", None)
         cls.server = uvicorn.Server(
             uvicorn.Config(
-                create_app(job_manager=cls.manager),
+                app,
                 host="127.0.0.1",
                 port=cls.port,
                 log_level="warning",
@@ -227,31 +230,35 @@ class TestWebConsoleBrowserE2E(unittest.TestCase):
         self.proceed.clear()
 
     def test_auto_transport_prefers_websocket_on_real_page(self):
+        if WebDriverWait is None or Select is None or By is None:
+            raise unittest.SkipTest("selenium 未安装，跳过浏览器级 E2E。")
+
+        by = By
         wait = WebDriverWait(self.driver, 20)
         self.driver.get(self.base_url)
 
-        transport_select = Select(wait.until(lambda driver: driver.find_element(By.ID, "transport-select")))
+        transport_select = Select(wait.until(lambda driver: driver.find_element(by.ID, "transport-select")))
         self.assertEqual(transport_select.first_selected_option.get_attribute("value"), "auto")
 
-        topic_input = self.driver.find_element(By.ID, "topic-input")
+        topic_input = self.driver.find_element(by.ID, "topic-input")
         topic_input.clear()
         topic_input.send_keys("浏览器 E2E WebSocket 优先链路")
 
-        self.driver.find_element(By.ID, "submit-button").click()
+        self.driver.find_element(by.ID, "submit-button").click()
         self.assertTrue(self.started.wait(timeout=10.0))
 
         try:
-            wait.until(lambda driver: "自动 / WebSocket" in driver.find_element(By.ID, "active-transport").text)
+            wait.until(lambda driver: "自动 / WebSocket" in driver.find_element(by.ID, "active-transport").text)
             wait.until(
-                lambda driver: "phase_started" in driver.find_element(By.ID, "event-log").text
-                and "WebSocket" in driver.find_element(By.ID, "event-log").text
+                lambda driver: "phase_started" in driver.find_element(by.ID, "event-log").text
+                and "WebSocket" in driver.find_element(by.ID, "event-log").text
             )
-            banner_text = self.driver.find_element(By.ID, "status-banner").text
+            banner_text = self.driver.find_element(by.ID, "status-banner").text
             self.assertIn("WebSocket", banner_text)
         finally:
             self.proceed.set()
 
-        wait.until(lambda driver: "已完成" in driver.find_element(By.ID, "job-status").text)
+        wait.until(lambda driver: "已完成" in driver.find_element(by.ID, "job-status").text)
 
 
 if __name__ == "__main__":

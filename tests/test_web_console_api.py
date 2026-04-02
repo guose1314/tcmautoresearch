@@ -191,7 +191,9 @@ class TestWebConsoleApi(unittest.TestCase):
             storage_dir=self.job_storage_dir,
         )
         self.manager = manager
-        self.client = TestClient(create_app(job_manager=manager))
+        app = create_app(job_manager=manager)
+        app.state.settings.secrets.pop("security", None)
+        self.client = TestClient(app)
 
     def tearDown(self):
         self.manager.close()
@@ -216,12 +218,21 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.headers["content-type"])
         self.assertIn("中医自动科研控制台", response.text)
+        self.assertIn('id="auth-shell"', response.text)
+        self.assertIn('id="login-form"', response.text)
+        self.assertIn('id="login-token-input"', response.text)
+        self.assertIn('id="open-login-button"', response.text)
+        self.assertIn("登录凭证", response.text)
+        self.assertIn("控制台会话令牌", response.text)
+        self.assertIn("Console Session", response.text)
         self.assertIn('id="progress-bar"', response.text)
         self.assertIn("EventSource", response.text)
         self.assertIn("WebSocket", response.text)
         self.assertIn('id="transport-select"', response.text)
         self.assertIn('id="active-transport"', response.text)
         self.assertIn("openRealtimeChannel", response.text)
+        self.assertIn("initializeConsoleAuth", response.text)
+        self.assertIn("authenticatedFetch", response.text)
         self.assertIn("结果摘要", response.text)
         self.assertIn('id="result-summary"', response.text)
         self.assertIn('observe: "观察阶段"', response.text)
@@ -241,6 +252,138 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertIn("refreshRecentJobs", response.text)
         self.assertIn("打开最终产物", response.text)
         self.assertIn("导出 JSON 报告", response.text)
+
+    def test_console_auth_endpoints_report_open_mode(self):
+        status_response = self.client.get("/api/console/auth/status")
+        self.assertEqual(status_response.status_code, 200)
+        status_payload = status_response.json()
+        self.assertFalse(status_payload["auth_required"])
+        self.assertEqual(status_payload["auth_mode"], "open")
+        self.assertEqual(status_payload["token_label"], "控制台会话令牌")
+        self.assertEqual(status_payload["credential_label"], "可选访问令牌")
+        self.assertTrue(status_payload["guest_allowed"])
+
+        login_response = self.client.post(
+            "/api/console/auth/login",
+            json={"username": "开放控制台访客", "api_key": ""},
+        )
+        self.assertEqual(login_response.status_code, 200)
+        login_payload = login_response.json()
+        self.assertTrue(login_payload["authenticated"])
+        self.assertFalse(login_payload["auth_required"])
+        self.assertEqual(login_payload["principal"], "开放控制台访客")
+        self.assertFalse(login_payload["token_supplied"])
+        self.assertEqual(login_payload["session_token"], "")
+
+    def test_console_auth_endpoints_require_management_key_when_enabled(self):
+        app = create_app(job_manager=self.manager)
+        app.state.settings.secrets.setdefault("security", {})["management_api_key"] = "console-secret"
+        client = TestClient(app)
+
+        status_response = client.get("/api/v1/console/auth/status")
+        self.assertEqual(status_response.status_code, 200)
+        status_payload = status_response.json()
+        self.assertTrue(status_payload["auth_required"])
+        self.assertEqual(status_payload["auth_mode"], "management_api_key")
+        self.assertEqual(status_payload["credential_label"], "管理 API Key")
+
+        denied_response = client.post(
+            "/api/console/auth/login",
+            json={"username": "管理员", "api_key": "wrong-key"},
+        )
+        self.assertEqual(denied_response.status_code, 401)
+
+        allowed_response = client.post(
+            "/api/console/auth/login",
+            json={"username": "管理员", "api_key": "console-secret"},
+        )
+        self.assertEqual(allowed_response.status_code, 200)
+        allowed_payload = allowed_response.json()
+        self.assertTrue(allowed_payload["authenticated"])
+        self.assertTrue(allowed_payload["auth_required"])
+        self.assertEqual(allowed_payload["principal"], "管理员")
+        self.assertTrue(allowed_payload["token_supplied"])
+        self.assertTrue(allowed_payload["session_token"])
+        self.assertEqual(allowed_payload["auth_source"], "management_api_key")
+
+    def test_console_username_password_login_issues_session_token_and_can_access_protected_routes(self):
+        app = create_app(job_manager=self.manager)
+        app.state.settings.secrets.setdefault("security", {})["console_auth"] = {
+            "users": [
+                {
+                    "username": "researcher",
+                    "password": "s3cret-pass",
+                    "display_name": "科研管理员",
+                }
+            ]
+        }
+        client = TestClient(app)
+
+        status_response = client.get("/api/console/auth/status")
+        self.assertEqual(status_response.status_code, 200)
+        self.assertEqual(status_response.json()["auth_mode"], "password")
+
+        denied_response = client.post(
+            "/api/console/auth/login",
+            json={"username": "researcher", "password": "wrong-pass"},
+        )
+        self.assertEqual(denied_response.status_code, 401)
+
+        login_response = client.post(
+            "/api/console/auth/login",
+            json={"username": "researcher", "password": "s3cret-pass"},
+        )
+        self.assertEqual(login_response.status_code, 200)
+        login_payload = login_response.json()
+        session_token = login_payload["session_token"]
+        self.assertTrue(session_token)
+        self.assertEqual(login_payload["principal"], "科研管理员")
+        self.assertEqual(login_payload["auth_source"], "password")
+
+        create_response = client.post(
+            "/api/research/jobs",
+            json={"topic": "密码登录任务"},
+            headers={"Authorization": f"Bearer {session_token}"},
+        )
+        self.assertEqual(create_response.status_code, 202)
+        job_id = create_response.json()["job_id"]
+
+        for _ in range(20):
+            status_response = client.get(
+                f"/api/research/jobs/{job_id}",
+                headers={"Authorization": f"Bearer {session_token}"},
+            )
+            payload = status_response.json()
+            if payload["status"] in {"completed", "partial", "failed"}:
+                break
+            time.sleep(0.01)
+
+        events_response = client.get(f"/api/research/jobs/{job_id}/events?api_key={session_token}")
+        self.assertEqual(events_response.status_code, 200)
+        self.assertIn("text/event-stream", events_response.headers["content-type"])
+
+        with client.websocket_connect(f"/api/research/jobs/{job_id}/ws?api_key={session_token}") as websocket:
+            received_events = []
+            for _ in range(20):
+                event = websocket.receive_json()
+                received_events.append(event["event"])
+                if event["event"] == "job_completed":
+                    break
+        self.assertIn("job_completed", received_events)
+
+        logout_response = client.post(
+            "/api/console/auth/logout",
+            headers={"Authorization": f"Bearer {session_token}"},
+        )
+        self.assertEqual(logout_response.status_code, 200)
+        self.assertTrue(logout_response.json()["revoked"])
+
+        revoked_response = client.post(
+            "/api/research/jobs",
+            json={"topic": "失效会话任务"},
+            headers={"Authorization": f"Bearer {session_token}"},
+        )
+        self.assertEqual(revoked_response.status_code, 401)
 
     def test_sync_run_endpoint(self):
         response = self.client.post("/api/research/run", json={"topic": "四君子汤研究"})
@@ -318,7 +461,9 @@ class TestWebConsoleApi(unittest.TestCase):
             runner_factory=lambda config: BlockingRunner({**config, "started": started, "continue": proceed}),
             storage_dir=os.path.join(self.tempdir.name, "blocking-jobs"),
         )
-        client = TestClient(create_app(job_manager=manager))
+        _app = create_app(job_manager=manager)
+        _app.state.settings.secrets.pop("security", None)
+        client = TestClient(_app)
 
         job_id = client.post("/api/research/jobs", json={"topic": "运行中任务"}).json()["job_id"]
         self.assertTrue(started.wait(timeout=2.0))
@@ -361,7 +506,9 @@ class TestWebConsoleApi(unittest.TestCase):
             runner_factory=lambda config: FakeRunner(config),
             storage_dir=os.path.join(self.tempdir.name, "fallback-jobs"),
         )
-        client = TestClient(create_app(job_manager=manager))
+        _app = create_app(job_manager=manager)
+        _app.state.settings.secrets.pop("security", None)
+        client = TestClient(_app)
 
         create_response = client.post("/api/research/jobs", json={"topic": "白虎汤研究"})
         job_id = create_response.json()["job_id"]

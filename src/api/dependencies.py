@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets
 from datetime import datetime
-from typing import Callable, Mapping, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Mapping, TypeVar
 
 from fastapi import HTTPException, Request, WebSocket
 
@@ -17,6 +17,9 @@ from src.extraction.relation_extractor import RelationExtractor
 from src.infrastructure.config_loader import AppSettings, load_settings
 from src.infrastructure.monitoring import MonitoringService
 from web_console.job_manager import ResearchJobManager
+
+if TYPE_CHECKING:
+    from web_console.console_auth import ConsoleAuthService
 
 ServiceT = TypeVar("ServiceT")
 MANAGEMENT_API_KEY_HEADER = "X-API-Key"
@@ -60,6 +63,10 @@ def _extract_presented_api_key(carrier: Mapping[str, str], query_params: Mapping
     return ""
 
 
+def extract_presented_auth_credential(carrier: Mapping[str, str], query_params: Mapping[str, str] | None = None) -> str:
+    return _extract_presented_api_key(carrier, query_params)
+
+
 def is_management_auth_enabled(settings: AppSettings) -> bool:
     return bool(_get_management_api_key(settings))
 
@@ -79,10 +86,60 @@ def verify_management_api_key(
         )
 
 
+def get_console_auth_service_from_state(state: Any, settings: AppSettings) -> "ConsoleAuthService":
+    from web_console.console_auth import ConsoleAuthService
+
+    service = getattr(state, "console_auth_service", None)
+    if service is None:
+        service = ConsoleAuthService(settings)
+        state.console_auth_service = service
+    return service
+
+
+def get_console_auth_service(request: Request) -> "ConsoleAuthService":
+    settings = get_settings(request)
+    return get_console_auth_service_from_state(request.app.state, settings)
+
+
+def resolve_authenticated_console_principal(
+    presented_key: str,
+    settings: AppSettings,
+    console_auth_service: "ConsoleAuthService",
+) -> dict[str, Any]:
+    normalized_key = str(presented_key or "").strip()
+    expected_key = _get_management_api_key(settings)
+    if expected_key and normalized_key and secrets.compare_digest(normalized_key, expected_key):
+        return {
+            "principal": "管理 API Key",
+            "auth_source": "management_api_key",
+        }
+
+    session = console_auth_service.resolve_session(normalized_key)
+    if session is not None:
+        return session.to_public_dict()
+
+    if not expected_key and not console_auth_service.auth_required:
+        return {
+            "principal": "访客",
+            "auth_source": "open",
+        }
+
+    raise HTTPException(
+        status_code=401,
+        detail="缺少或无效的认证凭据",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 def require_management_api_key(request: Request) -> None:
     settings = get_settings(request)
+    console_auth_service = get_console_auth_service_from_state(request.app.state, settings)
     presented_key = _extract_presented_api_key(request.headers, request.query_params)
-    verify_management_api_key(presented_key, settings)
+    request.state.auth_context = resolve_authenticated_console_principal(
+        presented_key,
+        settings,
+        console_auth_service,
+    )
 
 
 def verify_management_api_key_for_websocket(websocket: WebSocket) -> None:
@@ -90,8 +147,13 @@ def verify_management_api_key_for_websocket(websocket: WebSocket) -> None:
     if settings is None:
         settings = load_settings()
         websocket.app.state.settings = settings
+    console_auth_service = get_console_auth_service_from_state(websocket.app.state, settings)
     presented_key = _extract_presented_api_key(websocket.headers, websocket.query_params)
-    verify_management_api_key(presented_key, settings)
+    resolve_authenticated_console_principal(
+        presented_key,
+        settings,
+        console_auth_service,
+    )
 
 
 def create_default_architecture(settings: AppSettings | None = None) -> SystemArchitecture:
