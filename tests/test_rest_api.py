@@ -78,7 +78,9 @@ class TestRestApi(unittest.TestCase):
             runner_factory=lambda config: FakeRunner(config),
             storage_dir=os.path.join(self.tempdir.name, "jobs"),
         )
-        self.client = TestClient(create_app(job_manager=self.manager))
+        app = create_app(job_manager=self.manager)
+        app.state.settings.secrets.pop("security", None)
+        self.client = TestClient(app)
 
     def tearDown(self):
         self.manager.close()

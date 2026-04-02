@@ -76,7 +76,45 @@ class ModuleRegistry:
     提供模块的注册、查询、激活和卸载功能，
     确保系统模块的统一管理和控制。
     """
-    
+
+    _instance: "ModuleRegistry | None" = None
+
+    @classmethod
+    def get_instance(cls) -> "ModuleRegistry":
+        """返回全局单例，不存在则创建。"""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def register(self, module) -> bool:
+        """
+        从 BaseModule 实例直接注册（便捷接口）。
+
+        Args:
+            module: BaseModule 实例
+
+        Returns:
+            bool: 注册是否成功
+        """
+        try:
+            module_id = module.get_module_id()
+            info = ModuleInfo(
+                module_id=module_id,
+                module_name=module.module_name,
+                module_type=ModuleType.UTILITY,
+                version=module.config.get("version", "1.0.0"),
+                status=ModuleStatus.CREATED,
+                created_at=datetime.now().isoformat(),
+            )
+            return self.register_module(info)
+        except Exception as e:
+            self.logger.warning(f"Auto-register BaseModule failed (non-fatal): {e}")
+            return False
+
+    def list_modules(self) -> List[str]:
+        """返回已注册的所有模块 ID 列表。"""
+        return list(self.modules.keys())
+
     def __init__(self):
         self.modules = {}
         self.module_graph = nx.DiGraph()

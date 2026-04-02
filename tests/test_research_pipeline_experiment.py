@@ -65,6 +65,62 @@ class TestResearchPipelineExperimentPhase(unittest.TestCase):
         self.assertIn("validation_plan", experiment_result["results"])
         self.assertEqual(experiment_result["success_rate"], 1.0)
 
+    def test_hypothesis_context_prefers_observe_semantic_relationships(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="semantic-gap-cycle",
+            description="semantic gap integration",
+            objective="从语义图路径中发现潜在机制缺口",
+            scope="中医语义图研究",
+            researchers=["tester"],
+        )
+
+        cycle.phase_executions[self.pipeline.ResearchPhase.OBSERVE] = {
+            "result": {
+                "phase": "observe",
+                "observations": ["语义图已发现公式到通路的两跳路径"],
+                "findings": ["可基于真实语义边推导缺失直接关系"],
+                "ingestion_pipeline": {
+                    "aggregate": {
+                        "semantic_relationships": [
+                            {
+                                "source": "补中益气汤",
+                                "target": "IL6",
+                                "type": "associated_target",
+                                "source_type": "formula",
+                                "target_type": "target",
+                                "metadata": {"confidence": 0.82},
+                            },
+                            {
+                                "source": "IL6",
+                                "target": "JAK-STAT",
+                                "type": "participates_in",
+                                "source_type": "target",
+                                "target_type": "pathway",
+                                "metadata": {"confidence": 0.79},
+                            },
+                        ]
+                    }
+                },
+                "literature_pipeline": {},
+                "corpus_collection": {},
+            }
+        }
+
+        hypothesis_context = self.pipeline.phase_handlers._build_hypothesis_context(
+            cycle,
+            {
+                "entities": [
+                    {"name": "补中益气汤", "type": "formula", "confidence": 0.95},
+                    {"name": "IL6", "type": "target", "confidence": 0.9},
+                    {"name": "JAK-STAT", "type": "pathway", "confidence": 0.88},
+                ]
+            },
+        )
+
+        self.assertEqual(hypothesis_context["knowledge_gap"]["gap_type"], "missing_direct_relation")
+        self.assertEqual(hypothesis_context["knowledge_gap"]["entities"], ["补中益气汤", "JAK-STAT"])
+        self.assertGreaterEqual(len(hypothesis_context["relationships"]), 2)
+
     @patch("src.research.research_pipeline.LiteratureRetriever.close")
     @patch("src.research.research_pipeline.LiteratureRetriever.search")
     def test_experiment_phase_uses_observe_evidence_weights(self, mock_search, mock_close):

@@ -8,6 +8,7 @@ import json
 import logging
 import time
 import traceback
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -94,6 +95,12 @@ class ModuleInterface(BaseModule):
         self.governance_config["export_contract_version"] = self.config.get("export_contract_version", "d47.v1")
         self.status = ModuleStatus.CREATED
         self.final_status = self.status.value
+        warnings.warn(
+            "ModuleInterface 已弃用，请继承 BaseModule。"
+            "ModuleContext/ModuleOutput 可从 src.core.module_base 导入。",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     def _status_value(self) -> str:
         return self.status.value if isinstance(self.status, ModuleStatus) else str(self.status)

@@ -211,7 +211,23 @@ class TestOutputGeneratorQuality(unittest.TestCase):
         result = module.execute(
             {
                 "entities": [{"name": "桂枝"}],
-                "hypothesis": [{"title": "桂枝汤调和营卫"}],
+                "analysis_results": {
+                    "evidence_grade_summary": {
+                        "overall_grade": "moderate",
+                        "overall_score": 0.67,
+                        "study_count": 3,
+                        "bias_risk_distribution": {"low": 1, "moderate": 2},
+                        "summary": ["纳入 3 项研究进行 GRADE 评估"],
+                    }
+                },
+                "hypothesis": [{
+                    "title": "桂枝汤调和营卫",
+                    "mechanism_completeness": 0.84,
+                    "audit": {
+                        "relationship_count": 2,
+                        "merged_sources": ["observe_reasoning_engine", "observe_semantic_graph"],
+                    },
+                }],
                 "reasoning_results": {
                     "evidence_records": [{"evidence_id": "ev-1", "source_entity": "桂枝", "target_entity": "营卫"}]
                 },
@@ -223,10 +239,15 @@ class TestOutputGeneratorQuality(unittest.TestCase):
         self.assertEqual(payload["metadata"]["architecture_version"], "3.0-draft")
         self.assertIn("ResearchArtifact", payload["generation_contract"]["name"])
         self.assertIn("hypothesis", payload["research_artifact"])
+        self.assertIn("hypothesis_audit_summary", payload["research_artifact"])
+        self.assertIn("evidence_grade_summary", payload["research_artifact"])
         self.assertIn("evidence", payload["research_artifact"])
         self.assertIn("data_mining_result", payload["research_artifact"])
         self.assertIn("similar_formula_graph_evidence_summary", payload["research_artifact"])
         self.assertEqual(payload["research_artifact"]["hypothesis"][0]["title"], "桂枝汤调和营卫")
+        self.assertEqual(payload["research_artifact"]["hypothesis_audit_summary"]["selected_mechanism_completeness"], 0.84)
+        self.assertIn("observe_reasoning_engine", payload["research_artifact"]["hypothesis_audit_summary"]["merged_sources"])
+        self.assertEqual(payload["research_artifact"]["evidence_grade_summary"]["overall_grade"], "moderate")
         self.assertEqual(payload["research_artifact"]["evidence"][0]["evidence_id"], "ev-1")
 
     def test_output_generator_summarizes_similar_formula_graph_evidence(self):

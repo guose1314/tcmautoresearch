@@ -27,7 +27,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +208,21 @@ class LexiconService:
             if word in getattr(self, attr):
                 return category
         return None
+
+    def lookup(self, word: str) -> Optional[Dict[str, str]]:
+        """查询词汇，返回类型与属性字典；未找到时返回 ``None``。
+
+        Returns
+        -------
+        dict
+            ``{"word": word, "type": category, "category": category}``
+        None
+            词典中不存在该词时返回 ``None``。
+        """
+        category = self.get_word_type(word)
+        if category is None:
+            return None
+        return {"word": word, "type": category, "category": category}
 
     # ── 词典写操作 ───────────────────────────────────────────────────────
 

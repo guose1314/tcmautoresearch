@@ -1,0 +1,120 @@
+"""
+tests/test_output_generator.py
+测试 OutputGenerator 的 JSON / Markdown / 空输入三个场景及初始化
+"""
+import json
+
+import pytest
+
+from src.output.output_generator import OutputGenerator
+
+
+@pytest.fixture
+def generator():
+    og = OutputGenerator()
+    og.initialize()
+    return og
+
+
+class TestOutputGeneratorInit:
+    def test_initialize_success(self):
+        og = OutputGenerator()
+        result = og.initialize()
+        assert result is True
+        assert og.initialized is True
+        og.cleanup()
+
+    def test_module_name(self):
+        og = OutputGenerator()
+        assert og.module_name == "output_generator"
+
+
+class TestToJson:
+    def test_dict_to_json(self, generator):
+        result = generator.to_json({"key": "value", "num": 42})
+        parsed = json.loads(result)
+        assert parsed["key"] == "value"
+        assert parsed["num"] == 42
+
+    def test_list_to_json(self, generator):
+        result = generator.to_json(["甘草", "人参", "黄芪"])
+        parsed = json.loads(result)
+        assert "甘草" in parsed
+
+    def test_nested_dict_to_json(self, generator):
+        data = {"entities": [{"name": "人参", "type": "herb"}], "count": 1}
+        result = generator.to_json(data)
+        parsed = json.loads(result)
+        assert parsed["count"] == 1
+        assert parsed["entities"][0]["name"] == "人参"
+
+    def test_json_is_valid_string(self, generator):
+        result = generator.to_json({"a": 1})
+        assert isinstance(result, str)
+        # Must be valid JSON
+        json.loads(result)
+
+
+class TestToMarkdown:
+    def test_dict_produces_markdown(self, generator):
+        result = generator.to_markdown({"标题": "人参研究", "摘要": "补气要药"})
+        assert "# 中医研究报告" in result
+        assert "标题" in result
+        assert "人参研究" in result
+
+    def test_nested_dict_markdown(self, generator):
+        result = generator.to_markdown({
+            "metadata": {"source": "本草纲目", "year": "1596"},
+            "entities": ["人参", "黄芪"],
+        })
+        assert "## metadata" in result
+        assert "本草纲目" in result
+        assert "人参" in result
+
+    def test_returns_string(self, generator):
+        result = generator.to_markdown({"x": 1})
+        assert isinstance(result, str)
+
+    def test_contains_timestamp(self, generator):
+        result = generator.to_markdown({"a": "b"})
+        assert "生成时间" in result
+
+
+class TestToDict:
+    def test_dict_passthrough(self, generator):
+        data = {"key": "val"}
+        result = generator.to_dict(data)
+        assert result == data
+
+    def test_none_returns_empty_dict(self, generator):
+        result = generator.to_dict(None)
+        assert result == {}
+
+    def test_non_dict_wrapped(self, generator):
+        result = generator.to_dict("plain string")
+        assert isinstance(result, dict)
+        assert "data" in result
+
+    def test_list_wrapped(self, generator):
+        result = generator.to_dict([1, 2, 3])
+        assert isinstance(result, dict)
+
+
+class TestEmptyInput:
+    def test_to_json_empty_dict(self, generator):
+        result = generator.to_json({})
+        assert json.loads(result) == {}
+
+    def test_to_json_none(self, generator):
+        result = generator.to_json(None)
+        parsed = json.loads(result)
+        assert parsed is None
+
+    def test_to_markdown_empty_dict(self, generator):
+        result = generator.to_markdown({})
+        assert isinstance(result, str)
+        assert "# 中医研究报告" in result
+
+    def test_to_dict_empty_dict(self, generator):
+        result = generator.to_dict({})
+        assert result == {}

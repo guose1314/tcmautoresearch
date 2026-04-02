@@ -74,12 +74,15 @@ class OutputGenerator(BaseModule):
                 "temporal_analysis": context.get("temporal_analysis", {}),
                 "pattern_recognition": context.get("pattern_recognition", {}),
                 "evidence_protocol": self._build_evidence_protocol(context),
+                "evidence_grade": self._resolve_evidence_grade_payload(context),
             },
             "research_artifact": research_artifact,
             "generation_contract": {
                 "name": "ResearchArtifact",
                 "fields": [
                     "hypothesis",
+                    "hypothesis_audit_summary",
+                    "evidence_grade_summary",
                     "evidence",
                     "data_mining_result",
                     "similar_formula_graph_evidence_summary",
@@ -92,8 +95,11 @@ class OutputGenerator(BaseModule):
 
     def _build_research_artifact(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """构建研究域到生成域的标准产物契约。"""
+        hypothesis_payload = self._resolve_hypothesis_payload(context)
         return {
-            "hypothesis": self._resolve_hypothesis_payload(context),
+            "hypothesis": hypothesis_payload,
+            "hypothesis_audit_summary": self._resolve_hypothesis_audit_summary(context, hypothesis_payload),
+            "evidence_grade_summary": self._resolve_evidence_grade_summary(context),
             "evidence": self._resolve_evidence_payload(context),
             "data_mining_result": self._resolve_data_mining_payload(context),
             "similar_formula_graph_evidence_summary": self._build_similar_formula_graph_evidence_summary(context),
@@ -171,6 +177,114 @@ class OutputGenerator(BaseModule):
         if isinstance(hypothesis_phase, dict):
             return hypothesis_phase.get("hypotheses", hypothesis_phase)
         return []
+
+    def _resolve_hypothesis_audit_summary(
+        self,
+        context: Dict[str, Any],
+        hypothesis_payload: Any,
+    ) -> Dict[str, Any]:
+        direct = context.get("hypothesis_audit_summary")
+        if isinstance(direct, dict):
+            return direct
+
+        if not isinstance(hypothesis_payload, list):
+            return {}
+
+        mechanism_scores: List[float] = []
+        merged_sources: List[str] = []
+        relationship_count = 0
+        selected_hypothesis_id = ""
+        for index, hypothesis in enumerate(hypothesis_payload):
+            if not isinstance(hypothesis, dict):
+                continue
+            if index == 0:
+                selected_hypothesis_id = str(hypothesis.get("hypothesis_id") or "")
+            mechanism_value = hypothesis.get("mechanism_completeness")
+            if mechanism_value is None:
+                mechanism_value = (hypothesis.get("scores") or {}).get("mechanism_completeness")
+            try:
+                mechanism_scores.append(float(mechanism_value or 0.0))
+            except (TypeError, ValueError):
+                mechanism_scores.append(0.0)
+
+            audit = hypothesis.get("audit") or {}
+            relationship_count += int(audit.get("relationship_count") or 0)
+            for source_name in audit.get("merged_sources") or []:
+                source_text = str(source_name).strip()
+                if source_text and source_text not in merged_sources:
+                    merged_sources.append(source_text)
+
+        if not mechanism_scores and not merged_sources and not relationship_count:
+            return {}
+
+        return {
+            "selected_hypothesis_id": selected_hypothesis_id,
+            "hypothesis_count": len([item for item in hypothesis_payload if isinstance(item, dict)]),
+            "selected_mechanism_completeness": mechanism_scores[0] if mechanism_scores else 0.0,
+            "average_mechanism_completeness": round(sum(mechanism_scores) / len(mechanism_scores), 4) if mechanism_scores else 0.0,
+            "relationship_count": relationship_count,
+            "merged_sources": merged_sources,
+        }
+
+    def _resolve_evidence_grade_payload(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        direct = context.get("evidence_grade")
+        if isinstance(direct, dict):
+            return dict(direct)
+
+        analysis_results = context.get("analysis_results", {})
+        if isinstance(analysis_results, dict):
+            nested = analysis_results.get("evidence_grade")
+            if isinstance(nested, dict):
+                return dict(nested)
+        return {}
+
+    def _resolve_evidence_grade_summary(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        direct = context.get("evidence_grade_summary")
+        if isinstance(direct, dict):
+            return dict(direct)
+
+        analysis_results = context.get("analysis_results", {})
+        if isinstance(analysis_results, dict):
+            nested = analysis_results.get("evidence_grade_summary")
+            if isinstance(nested, dict):
+                return dict(nested)
+
+        evidence_grade = self._resolve_evidence_grade_payload(context)
+        if not evidence_grade:
+            return {}
+
+        bias_distribution: Dict[str, int] = {}
+        for key, value in (evidence_grade.get("bias_risk_distribution") or {}).items():
+            try:
+                bias_distribution[str(key)] = int(value)
+            except (TypeError, ValueError):
+                continue
+
+        summary_lines = [
+            str(item).strip()
+            for item in (evidence_grade.get("summary") or [])
+            if str(item).strip()
+        ]
+
+        try:
+            overall_score = round(float(evidence_grade.get("overall_score") or 0.0), 4)
+        except (TypeError, ValueError):
+            overall_score = 0.0
+
+        study_results = evidence_grade.get("study_results") or []
+        study_count = evidence_grade.get("study_count") or len(study_results)
+        try:
+            normalized_study_count = int(study_count)
+        except (TypeError, ValueError):
+            normalized_study_count = 0
+
+        return {
+            "overall_grade": str(evidence_grade.get("overall_grade") or ""),
+            "overall_score": overall_score,
+            "study_count": normalized_study_count,
+            "bias_risk_distribution": bias_distribution,
+            "summary": summary_lines,
+        }
 
     def _resolve_evidence_payload(self, context: Dict[str, Any]) -> Any:
         reasoning_results = context.get("reasoning_results", {})
@@ -344,6 +458,44 @@ class OutputGenerator(BaseModule):
         """获取时间戳"""
         return datetime.now().isoformat()
     
+    def to_json(self, result: Any) -> str:
+        """将结果序列化为 JSON 字符串"""
+        import json
+        safe = self._make_json_safe(result)
+        return json.dumps(safe, ensure_ascii=False, indent=2)
+
+    def to_markdown(self, result: Any) -> str:
+        """将结果整理为 Markdown 学术报告风格字符串"""
+        lines = [
+            "# 中医研究报告",
+            "",
+            f"**生成时间**: {self._get_timestamp()}",
+            "",
+        ]
+        if isinstance(result, dict):
+            for key, value in result.items():
+                lines.append(f"## {key}")
+                if isinstance(value, dict):
+                    for k, v in value.items():
+                        lines.append(f"- **{k}**: {v}")
+                elif isinstance(value, list):
+                    for item in value:
+                        lines.append(f"- {item}")
+                else:
+                    lines.append(str(value))
+                lines.append("")
+        else:
+            lines.append(str(result) if result is not None else "")
+        return "\n".join(lines)
+
+    def to_dict(self, result: Any) -> Dict[str, Any]:
+        """将结果转换为字典"""
+        if isinstance(result, dict):
+            return result
+        if result is None:
+            return {}
+        return {"data": result}
+
     def _do_cleanup(self) -> bool:
         """清理资源"""
         try:

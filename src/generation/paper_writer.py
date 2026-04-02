@@ -30,6 +30,17 @@ _EN_SECTION_TITLES = {
     "discussion": "4. Discussion",
     "conclusion": "5. Conclusion",
 }
+_GRADE_LABELS_ZH = {
+    "high": "高",
+    "moderate": "中等",
+    "low": "低",
+    "very_low": "极低",
+}
+_BIAS_LABELS_ZH = {
+    "low": "低",
+    "moderate": "中等",
+    "high": "高",
+}
 
 
 @dataclass
@@ -458,12 +469,14 @@ class PaperWriter(BaseModule):
         mining = self._resolve_data_mining_result(context)
         analysis_results = self._resolve_analysis_results(context)
         statistical_analysis = self._resolve_statistical_analysis(context)
+        evidence_grade_summary = self._resolve_evidence_grade_summary(context)
         rule_count = len(mining.get("association_rules", {}).get("rules", []) or [])
         cluster_summary = list(mining.get("clustering", {}).get("cluster_summary", []) or [])
         figure_paths = self._resolve_figure_paths(context)
         figure_note = "；相关结果已与图表输出对齐" if figure_paths else ""
         graph_evidence_section = self._build_similar_formula_graph_evidence_section(context, language)
         analysis_note = self._build_analysis_result_note(language, statistical_analysis, analysis_results)
+        evidence_grade_note = self._build_evidence_grade_result_note(language, evidence_grade_summary)
         top_cluster_text = ""
         if cluster_summary:
             first_cluster = cluster_summary[0]
@@ -474,13 +487,13 @@ class PaperWriter(BaseModule):
             base = (
                 f"The integrated workflow identified {len(entities)} entities and consolidated {len(evidence)} evidence records. "
                 f"Data mining yielded {rule_count} association rules and {len(cluster_summary)} cluster summaries. "
-                f"{top_cluster_text or ''} {analysis_note} {('Figures were generated to support the narrative interpretation.' if figure_paths else '')}".strip()
+                f"{top_cluster_text or ''} {analysis_note} {evidence_grade_note} {('Figures were generated to support the narrative interpretation.' if figure_paths else '')}".strip()
             )
             return f"{base}\n\n{graph_evidence_section}".strip() if graph_evidence_section else base
         base = (
             f"研究结果显示，当前流程共汇总 {len(entities)} 个核心实体、{len(evidence)} 条证据记录。"
             f"数据挖掘模块进一步识别出 {rule_count} 条关联规则和 {len(cluster_summary)} 个聚类摘要。"
-            f"{top_cluster_text}{analysis_note}{figure_note} 这些结果为后续结果展示、图表引用和讨论部分的证据解释提供了结构化支撑。"
+            f"{top_cluster_text}{analysis_note}{evidence_grade_note}{figure_note} 这些结果为后续结果展示、图表引用和讨论部分的证据解释提供了结构化支撑。"
         )
         return f"{base}\n\n{graph_evidence_section}".strip() if graph_evidence_section else base
 
@@ -527,6 +540,7 @@ class PaperWriter(BaseModule):
         mining = self._resolve_data_mining_result(context)
         quality_metrics = self._resolve_quality_metrics(context)
         recommendations = self._resolve_recommendations(context)
+        evidence_grade_summary = self._resolve_evidence_grade_summary(context)
         association_rules = list(mining.get("association_rules", {}).get("rules", []) or [])
         high_rule = association_rules[0] if association_rules else None
         rule_text = ""
@@ -538,15 +552,17 @@ class PaperWriter(BaseModule):
         hypothesis_text = ""
         if hypothesis:
             hypothesis_text = f"已有假设结果进一步提示：{hypothesis}。"
+        hypothesis_audit_text = self._build_hypothesis_audit_text(context, language)
+        evidence_grade_text = self._build_evidence_grade_discussion_text(language, evidence_grade_summary)
         quality_text = self._build_quality_discussion_text(language, quality_metrics, recommendations)
         if language == "en":
             return (
                 f"The manuscript draft suggests that integrated evidence processing can improve coherence between classical knowledge and modern analysis. "
-                f"{rule_text} {hypothesis_text}{quality_text} A key limitation is that {limitation}"
+                f"{rule_text} {hypothesis_text}{hypothesis_audit_text}{evidence_grade_text}{quality_text} A key limitation is that {limitation}"
             )
         return (
             f"讨论部分表明，将古籍知识、现代文献与结构化分析结果整合到统一写作框架中，有助于提升科研叙事的一致性与可追溯性。"
-            f"{rule_text}{hypothesis_text}{quality_text}{limitation} 因此，本初稿更适合作为投稿前的研究骨架和专家协作底稿，而非最终定稿。"
+            f"{rule_text}{hypothesis_text}{hypothesis_audit_text}{evidence_grade_text}{quality_text}{limitation} 因此，本初稿更适合作为投稿前的研究骨架和专家协作底稿，而非最终定稿。"
         )
 
     def _build_conclusion(
@@ -601,6 +617,133 @@ class PaperWriter(BaseModule):
         if isinstance(research_artifact, dict):
             return self._resolve_hypothesis(research_artifact)
         return ""
+
+    def _build_hypothesis_audit_text(self, context: Dict[str, Any], language: str) -> str:
+        summary = self._resolve_hypothesis_audit_summary(context)
+        if not summary:
+            return ""
+
+        mechanism_score = float(summary.get("selected_mechanism_completeness") or 0.0)
+        merged_sources = [
+            str(item).strip()
+            for item in (summary.get("merged_sources") or [])
+            if str(item).strip()
+        ]
+        relationship_count = int(summary.get("relationship_count") or 0)
+
+        if language == "en":
+            source_text = ", ".join(merged_sources) if merged_sources else "multiple evidence channels"
+            relation_text = f" across {relationship_count} audited relations" if relationship_count else ""
+            return (
+                f"Audit evidence indicates a mechanism-chain completeness score of {mechanism_score:.2f}"
+                f" with merged relation sources from {source_text}{relation_text}. "
+            )
+
+        source_text = "、".join(merged_sources) if merged_sources else "多源关系证据"
+        relation_text = f"，共覆盖 {relationship_count} 条审计关系" if relationship_count else ""
+        return (
+            f"假设审计显示，当前优先假设的机制链完整性评分为 {mechanism_score:.2f}，"
+            f"关系证据融合自 {source_text}{relation_text}。"
+        )
+
+    def _resolve_hypothesis_audit_summary(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        direct = context.get("hypothesis_audit_summary")
+        if isinstance(direct, dict) and direct:
+            return direct
+
+        research_artifact = context.get("research_artifact")
+        if isinstance(research_artifact, dict):
+            nested = research_artifact.get("hypothesis_audit_summary")
+            if isinstance(nested, dict) and nested:
+                return nested
+
+        output_data = context.get("output_data")
+        if isinstance(output_data, dict):
+            artifact = output_data.get("research_artifact")
+            if isinstance(artifact, dict):
+                nested = artifact.get("hypothesis_audit_summary")
+                if isinstance(nested, dict) and nested:
+                    return nested
+        return {}
+
+    def _resolve_evidence_grade_summary(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        direct = context.get("evidence_grade_summary")
+        if isinstance(direct, dict) and direct:
+            return direct
+
+        analysis_results = self._resolve_analysis_results(context)
+        resolved = self._extract_evidence_grade_summary(analysis_results)
+        if resolved:
+            return resolved
+
+        research_artifact = context.get("research_artifact")
+        if isinstance(research_artifact, dict):
+            resolved = self._extract_evidence_grade_summary(research_artifact)
+            if resolved:
+                return resolved
+
+        output_data = context.get("output_data")
+        if isinstance(output_data, dict):
+            resolved = self._extract_evidence_grade_summary(output_data.get("analysis_results"))
+            if resolved:
+                return resolved
+            resolved = self._extract_evidence_grade_summary(output_data.get("research_artifact"))
+            if resolved:
+                return resolved
+        return {}
+
+    def _extract_evidence_grade_summary(self, container: Any) -> Dict[str, Any]:
+        if not isinstance(container, dict) or not container:
+            return {}
+
+        summary = container.get("evidence_grade_summary")
+        if isinstance(summary, dict) and summary:
+            return dict(summary)
+
+        evidence_grade = container.get("evidence_grade")
+        if isinstance(evidence_grade, dict) and evidence_grade:
+            return self._normalize_evidence_grade_summary(evidence_grade)
+
+        statistical_analysis = container.get("statistical_analysis")
+        if isinstance(statistical_analysis, dict):
+            nested = self._extract_evidence_grade_summary(statistical_analysis)
+            if nested:
+                return nested
+        return {}
+
+    def _normalize_evidence_grade_summary(self, evidence_grade: Dict[str, Any]) -> Dict[str, Any]:
+        bias_distribution: Dict[str, int] = {}
+        for key, value in (evidence_grade.get("bias_risk_distribution") or {}).items():
+            try:
+                bias_distribution[str(key)] = int(value)
+            except (TypeError, ValueError):
+                continue
+
+        summary_lines = [
+            str(item).strip()
+            for item in (evidence_grade.get("summary") or [])
+            if str(item).strip()
+        ]
+
+        try:
+            overall_score = round(float(evidence_grade.get("overall_score") or 0.0), 4)
+        except (TypeError, ValueError):
+            overall_score = 0.0
+
+        study_results = evidence_grade.get("study_results") or []
+        study_count = evidence_grade.get("study_count") or len(study_results)
+        try:
+            normalized_study_count = int(study_count)
+        except (TypeError, ValueError):
+            normalized_study_count = 0
+
+        return {
+            "overall_grade": str(evidence_grade.get("overall_grade") or ""),
+            "overall_score": overall_score,
+            "study_count": normalized_study_count,
+            "bias_risk_distribution": bias_distribution,
+            "summary": summary_lines,
+        }
 
     def _resolve_evidence(self, context: Dict[str, Any]) -> List[Any]:
         reasoning = context.get("reasoning_results") or {}
@@ -762,6 +905,77 @@ class PaperWriter(BaseModule):
             fragments.append(f"综合解释认为：{interpretation}。")
         return "".join(fragments).strip()
 
+    def _build_evidence_grade_result_note(
+        self,
+        language: str,
+        evidence_grade_summary: Dict[str, Any],
+    ) -> str:
+        if not isinstance(evidence_grade_summary, dict) or not evidence_grade_summary:
+            return ""
+
+        study_count = int(evidence_grade_summary.get("study_count") or 0)
+        if study_count <= 0:
+            return ""
+
+        overall_grade_raw = str(evidence_grade_summary.get("overall_grade") or "").strip().lower()
+        overall_grade = self._format_grade_label(overall_grade_raw, language)
+        try:
+            overall_score = float(evidence_grade_summary.get("overall_score") or 0.0)
+        except (TypeError, ValueError):
+            overall_score = 0.0
+
+        bias_bits: List[str] = []
+        for key, value in sorted((evidence_grade_summary.get("bias_risk_distribution") or {}).items()):
+            try:
+                count = int(value)
+            except (TypeError, ValueError):
+                continue
+            if count <= 0:
+                continue
+            if language == "en":
+                bias_bits.append(f"{count} {key}")
+            else:
+                bias_bits.append(f"{self._format_bias_label(str(key), language)}风险 {count} 项")
+
+        if language == "en":
+            sentence = f"GRADE assessment across {study_count} studies indicated overall evidence certainty of {overall_grade}"
+            if overall_score > 0:
+                sentence += f" (score {overall_score:.2f})"
+            sentence += "."
+            if bias_bits:
+                sentence += f" Bias distribution: {', '.join(bias_bits)}."
+            return sentence
+
+        sentence = f"GRADE 证据分级显示，纳入 {study_count} 项研究后整体证据等级为{overall_grade}"
+        if overall_score > 0:
+            sentence += f"，平均评分 {overall_score:.2f}"
+        sentence += "。"
+        if bias_bits:
+            sentence += f"偏倚风险分布为{'、'.join(bias_bits)}。"
+        return sentence
+
+    def _build_evidence_grade_discussion_text(
+        self,
+        language: str,
+        evidence_grade_summary: Dict[str, Any],
+    ) -> str:
+        if not isinstance(evidence_grade_summary, dict) or not evidence_grade_summary:
+            return ""
+
+        study_count = int(evidence_grade_summary.get("study_count") or 0)
+        if study_count <= 0:
+            return ""
+
+        overall_grade = str(evidence_grade_summary.get("overall_grade") or "").strip().lower()
+        if language == "en":
+            if overall_grade in {"high", "moderate"}:
+                return " The GRADE profile suggests that the current narrative is supported by at least moderate evidence certainty."
+            return " The GRADE profile suggests that the current narrative remains constrained by low-certainty evidence and should be interpreted cautiously."
+
+        if overall_grade in {"high", "moderate"}:
+            return "GRADE 证据谱提示当前结论已获得至少中等强度的文献支持，但仍需持续跟踪高偏倚来源。"
+        return "GRADE 证据谱提示当前结论仍受低确定性证据限制，后续应优先补充更高质量研究。"
+
     def _build_quality_discussion_text(
         self,
         language: str,
@@ -795,6 +1009,16 @@ class PaperWriter(BaseModule):
         if recommendation_text:
             parts.append(f"后续建议优先关注：{recommendation_text}。")
         return "".join(parts)
+
+    def _format_grade_label(self, grade: str, language: str) -> str:
+        if language == "en":
+            return grade.replace("_", " ") if grade else "unknown"
+        return _GRADE_LABELS_ZH.get(grade, grade or "未知")
+
+    def _format_bias_label(self, risk_level: str, language: str) -> str:
+        if language == "en":
+            return risk_level
+        return _BIAS_LABELS_ZH.get(risk_level, risk_level)
 
     def _resolve_similar_formula_graph_evidence_summary(self, context: Dict[str, Any]) -> Dict[str, Any]:
         for key in ("similar_formula_graph_evidence_summary",):

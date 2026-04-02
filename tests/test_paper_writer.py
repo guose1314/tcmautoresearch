@@ -203,6 +203,59 @@ class TestPaperWriter(unittest.TestCase):
         self.assertIn("后续建议优先关注：建议增加更多样本以提高准确性", markdown_text)
         self.assertIn("桂枝汤 与 桂麻各半汤", markdown_text)
 
+    def test_discussion_includes_hypothesis_audit_summary(self):
+        result = self.writer.execute(
+            {
+                "title": "假设审计导出测试",
+                "output_format": "markdown",
+                "research_artifact": {
+                    "hypothesis": [
+                        {
+                            "title": "桂枝汤调和营卫假设",
+                            "mechanism_completeness": 0.84,
+                            "audit": {
+                                "relationship_count": 2,
+                                "merged_sources": ["observe_reasoning_engine", "observe_semantic_graph"],
+                            },
+                        }
+                    ],
+                    "hypothesis_audit_summary": {
+                        "selected_mechanism_completeness": 0.84,
+                        "relationship_count": 2,
+                        "merged_sources": ["observe_reasoning_engine", "observe_semantic_graph"],
+                    },
+                },
+            }
+        )
+
+        self.assertTrue(result["success"])
+        markdown_text = open(result["output_files"]["markdown"], "r", encoding="utf-8").read()
+        self.assertIn("机制链完整性评分为 0.84", markdown_text)
+        self.assertIn("observe_reasoning_engine、observe_semantic_graph", markdown_text)
+
+    def test_results_and_discussion_include_evidence_grade_summary(self):
+        result = self.writer.execute(
+            {
+                "title": "GRADE 证据导出测试",
+                "output_format": "markdown",
+                "analysis_results": {
+                    "evidence_grade_summary": {
+                        "overall_grade": "moderate",
+                        "overall_score": 0.67,
+                        "study_count": 5,
+                        "bias_risk_distribution": {"low": 2, "moderate": 2, "high": 1},
+                        "summary": ["纳入 5 项研究进行 GRADE 评估"],
+                    }
+                },
+            }
+        )
+
+        self.assertTrue(result["success"])
+        markdown_text = open(result["output_files"]["markdown"], "r", encoding="utf-8").read()
+        self.assertIn("GRADE 证据分级显示", markdown_text)
+        self.assertIn("整体证据等级为中等", markdown_text)
+        self.assertIn("当前结论已获得至少中等强度的文献支持", markdown_text)
+
     @unittest.skipUnless(DOCX_AVAILABLE, "python-docx 未安装")
     def test_docx_export_renders_similar_formula_graph_evidence_as_heading(self):
         result = self.writer.execute(

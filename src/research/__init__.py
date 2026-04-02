@@ -16,6 +16,7 @@ from .arxiv_quick_helper import (
     ArxivQuickHelperResult,
     run_arxiv_quick_helper,
 )
+from .audit_history import AuditEntry, AuditHistory
 from .ctext_corpus_collector import CTextCorpusCollector
 from .ctext_whitelist import build_batch_manifest, load_whitelist
 from .data_miner import DataMiner
@@ -29,6 +30,7 @@ from .google_scholar_helper import (
     GoogleScholarHelperResult,
     run_google_scholar_related_works,
 )
+from .hypothesis_engine import Hypothesis, HypothesisEngine
 from .literature_retriever import LiteratureRecord, LiteratureRetriever
 from .markdown_translate import MarkdownTranslateResult, run_markdown_translate
 from .multi_source_corpus import (
@@ -44,7 +46,18 @@ from .pdf_translation import (
     PdfTranslationResult,
     run_pdf_full_text_translation,
 )
+from .pipeline_events import (
+    AUDIT_EVENT_LEGACY_NAMES,
+    AUDIT_EVENT_NAMES,
+    PHASE_LIFECYCLE_EVENT_NAMES,
+    publish_audit_event,
+    publish_phase_lifecycle_event,
+)
 from .research_pipeline import ResearchCycle, ResearchPhase, ResearchPipeline
+from .study_session_manager import (
+    ResearchCycleStatus,
+    StudySessionManager,
+)
 from .theoretical_framework import (
     ResearchExperiment,
     ResearchHypothesis,
@@ -61,6 +74,8 @@ __all__ = [
     'ResearchPipeline',
     'ResearchCycle',
     'ResearchPhase',
+    'ResearchCycleStatus',
+    'StudySessionManager',
     'ArxivFineTranslationResult',
     'run_arxiv_fine_translation_docker',
     'MarkdownTranslateResult',
@@ -69,6 +84,13 @@ __all__ = [
     'run_pdf_full_text_translation',
     'ArxivQuickHelperResult',
     'run_arxiv_quick_helper',
+    'AuditHistory',
+    'AuditEntry',
+    'AUDIT_EVENT_NAMES',
+    'AUDIT_EVENT_LEGACY_NAMES',
+    'PHASE_LIFECYCLE_EVENT_NAMES',
+    'publish_audit_event',
+    'publish_phase_lifecycle_event',
     'GoogleScholarHelperResult',
     'run_google_scholar_related_works',
     'DataMiner',
@@ -76,6 +98,8 @@ __all__ = [
     'GapAnalyzerConfig',
     'GapAnalysisRequest',
     'GapAnalysisResult',
+    'Hypothesis',
+    'HypothesisEngine',
     'CTextCorpusCollector',
     'LiteratureRetriever',
     'LiteratureRecord',

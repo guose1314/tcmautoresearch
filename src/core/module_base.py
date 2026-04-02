@@ -16,6 +16,16 @@ from typing import Any, Dict, List, Optional
 
 from src.core.phase_tracker import PhaseTrackerMixin
 
+
+# Re-export deprecated helper types from module_interface (lazy to avoid circular import)
+def __getattr__(name):
+    _interface_types = ("ModuleContext", "ModuleOutput", "ModuleStatus", "ModulePriority")
+    if name in _interface_types:
+        import importlib
+        mod = importlib.import_module("src.core.module_interface")
+        return getattr(mod, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 # 全局线程池管理
 _global_executor = None
 _global_executor_max_workers = None
@@ -86,6 +96,16 @@ class BaseModule(PhaseTrackerMixin, ABC):
         self.last_completed_phase: Optional[str] = None
         
         self.logger.info(f"模块 {module_name} 基类初始化完成")
+
+        # Auto-register with global ModuleRegistry (best-effort, never raises)
+        try:
+            from src.core.architecture import (
+                ModuleRegistry,  # local import avoids circular dep
+            )
+            ModuleRegistry.get_instance().register(self)
+        except Exception as _reg_err:
+            import warnings as _w
+            _w.warn(f"ModuleRegistry auto-register failed for {module_name}: {_reg_err}", stacklevel=2)
 
     def _build_analysis_summary(self) -> Dict[str, Any]:
         total_executions = len(self.performance_history)
@@ -342,7 +362,26 @@ class BaseModule(PhaseTrackerMixin, ABC):
             bool: 清理是否成功
         """
         pass
-    
+
+    def get_module_id(self) -> str:
+        """返回模块的唯一标识符"""
+        return f"{self.module_name}_{id(self)}"
+
+    def health_check(self) -> Dict[str, Any]:
+        """
+        返回模块健康检查快照，供 ModuleRegistry 等注册中心使用。
+
+        Returns:
+            Dict[str, Any]: 包含 module_id、status、initialized、metrics、timestamp 的字典
+        """
+        return {
+            "module_id": self.get_module_id(),
+            "status": self.status,
+            "initialized": self.initialized,
+            "metrics": self._serialize_value(self.metrics),
+            "timestamp": datetime.now().isoformat(),
+        }
+
     def get_metrics(self) -> Dict[str, Any]:
         """
         获取模块指标

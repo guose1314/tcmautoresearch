@@ -1726,6 +1726,215 @@ def persist_paper_result_to_dual_storage(
             storage.close()
 
 
+def export_research_session_reports(
+    session_result: Dict[str, Any],
+    report_formats: Optional[List[str]] = None,
+    output_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """基于 session_result 直接导出 IMRD 报告。"""
+    from src.output.report_generator import ReportGenerator
+
+    normalized_formats = [
+        str(item).strip().lower()
+        for item in (report_formats or ["markdown"])
+        if str(item).strip()
+    ]
+    generator = ReportGenerator({"output_dir": output_dir or "./output/research_reports"})
+    reports: Dict[str, Any] = {}
+    output_files: Dict[str, str] = {}
+    errors: List[Dict[str, str]] = []
+    initialized = False
+
+    try:
+        initialized = bool(generator.initialize())
+        if not initialized:
+            return {
+                "reports": {},
+                "output_files": {},
+                "errors": [{"initialize": "ReportGenerator 初始化失败"}],
+            }
+
+        for report_format in normalized_formats:
+            try:
+                report = generator.generate_report(session_result, report_format)
+                reports[report.format] = report.to_dict()
+                if report.output_path:
+                    output_files[report.format] = report.output_path
+            except Exception as exc:
+                errors.append({report_format: str(exc)})
+    finally:
+        if initialized:
+            generator.cleanup()
+
+    return {
+        "reports": reports,
+        "output_files": output_files,
+        "errors": errors,
+    }
+
+
+def _extract_research_phase_results(cycle_snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    phase_results: Dict[str, Any] = {}
+    phase_executions = cycle_snapshot.get("phase_executions")
+    if not isinstance(phase_executions, dict):
+        return phase_results
+
+    for phase_name, execution in phase_executions.items():
+        if not isinstance(execution, dict):
+            continue
+        result = execution.get("result")
+        if isinstance(result, dict):
+            phase_results[str(phase_name)] = result
+    return phase_results
+
+
+def run_research_session(
+    question: str,
+    config: Dict[str, Any],
+    phase_names: Optional[List[str]] = None,
+    export_report_formats: Optional[List[str]] = None,
+    report_output_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """通过 ResearchPipeline 执行完整科研闭环。
+
+    Parameters
+    ----------
+    question : str
+        研究问题 / 假设陈述。
+    config : dict
+        传递给 ResearchPipeline 的额外配置。
+    phase_names : list[str] | None
+        要顺序执行的阶段名称列表，默认仅 ``["observe"]``。
+
+    Returns
+    -------
+    dict
+        包含 ``status``、``cycle_id`` 和各阶段执行结果的字典。
+    """
+    from src.research.research_pipeline import ResearchPipeline
+    from src.research.study_session_manager import ResearchPhase
+
+    PHASE_MAP = {p.value: p for p in ResearchPhase}
+
+    if phase_names is None:
+        phase_names = ["observe"]
+
+    pipeline_config = dict(config)
+    if export_report_formats or report_output_dir:
+        report_config = dict(pipeline_config.get("report_generation") or {})
+        if export_report_formats:
+            report_config["output_formats"] = list(export_report_formats)
+        if report_output_dir:
+            report_config["output_dir"] = report_output_dir
+        pipeline_config["report_generation"] = report_config
+
+    logger.info("=== 科研闭环模式启动 ===")
+    logger.info("研究问题: %s", question)
+    logger.info("执行阶段: %s", phase_names)
+
+    pipeline = ResearchPipeline(config=pipeline_config)
+    cycle = pipeline.create_research_cycle(
+        cycle_name=f"research_{int(time.time())}",
+        description=question,
+        objective=question,
+        scope="中医药",
+    )
+    logger.info("研究循环已创建: %s", cycle.cycle_id)
+
+    started = pipeline.start_research_cycle(cycle.cycle_id)
+    if not started:
+        logger.error("研究循环启动失败: %s", cycle.cycle_id)
+        return {"status": "failed", "cycle_id": cycle.cycle_id, "phase_results": {}}
+
+    phase_results: Dict[str, Any] = {}
+    overall_status = "completed"
+
+    for pname in phase_names:
+        phase_enum = PHASE_MAP.get(pname.lower())
+        if phase_enum is None:
+            logger.warning("跳过未知阶段: %s (可选: %s)", pname, list(PHASE_MAP.keys()))
+            continue
+        logger.info(">>> 开始阶段: %s", phase_enum.value)
+        try:
+            phase_context = {"question": question, "collect_local_corpus": True}
+            if phase_enum.value == "publish":
+                if export_report_formats:
+                    phase_context["report_output_formats"] = list(export_report_formats)
+                if report_output_dir:
+                    phase_context["report_output_dir"] = report_output_dir
+            result = pipeline.execute_research_phase(
+                cycle.cycle_id,
+                phase_enum,
+                phase_context=phase_context,
+            )
+            phase_results[phase_enum.value] = result
+            logger.info("<<< 阶段 %s 完成", phase_enum.value)
+        except Exception as exc:
+            logger.error("阶段 %s 执行失败: %s", phase_enum.value, exc)
+            phase_results[phase_enum.value] = {"error": str(exc)}
+            overall_status = "failed"
+            break
+
+    cycle_snapshot: Dict[str, Any] = {}
+    try:
+        cycle_snapshot = pipeline._serialize_cycle(cycle)
+    except Exception:
+        cycle_snapshot = {}
+
+    try:
+        pipeline.complete_research_cycle(cycle.cycle_id)
+    except Exception:
+        pass
+    try:
+        cycle_snapshot = pipeline._serialize_cycle(cycle)
+    except Exception:
+        pass
+    try:
+        pipeline.cleanup()
+    except Exception:
+        pass
+
+    snapshot_phase_results = _extract_research_phase_results(cycle_snapshot)
+    if snapshot_phase_results:
+        phase_results.update(snapshot_phase_results)
+
+    summary = {
+        "status": overall_status,
+        "session_id": cycle.cycle_id,
+        "cycle_id": cycle.cycle_id,
+        "title": f"中医科研 IMRD 报告：{question}",
+        "question": question,
+        "research_question": question,
+        "executed_phases": list(phase_results.keys()),
+        "phase_results": phase_results,
+        "metadata": {
+            "research_question": question,
+            "cycle_name": cycle.cycle_name,
+            "generated_by": "run_cycle_demo.research_mode",
+        },
+        "cycle_snapshot": cycle_snapshot,
+    }
+
+    if export_report_formats:
+        report_export_result = export_research_session_reports(
+            summary,
+            report_formats=export_report_formats,
+            output_dir=report_output_dir,
+        )
+        summary["reports"] = report_export_result.get("reports", {})
+        summary["report_outputs"] = report_export_result.get("output_files", {})
+        summary["report_export_errors"] = report_export_result.get("errors", [])
+
+    # 持久化到 output 目录
+    output_file = Path(f"./output/research_session_{int(time.time())}.json")
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text(json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    logger.info("科研闭环结果已保存: %s", output_file)
+    logger.info("=== 科研闭环模式结束 (status=%s) ===", overall_status)
+
+    return summary
+
+
 def main():
     """主函数"""
     help_summary = (
@@ -1740,6 +1949,18 @@ def main():
         description=help_summary,
         formatter_class=argparse.RawTextHelpFormatter,
     )
+    parser.add_argument('--mode', choices=['demo', 'research'], default='demo',
+                       help='运行模式: demo（现有行为）或 research（科研闭环）')
+    parser.add_argument('--question', type=str, default='',
+                       help='科研闭环模式下的研究问题')
+    parser.add_argument('--research-phases', type=str, default='observe',
+                       help='科研闭环要执行的阶段，逗号分隔（默认 observe）')
+    parser.add_argument('--export-report', action='store_true',
+                       help='在 research 模式结束后，基于 session_result 额外导出 IMRD 报告')
+    parser.add_argument('--report-format', action='append', choices=['markdown', 'docx'],
+                       help='IMRD 报告输出格式，可重复传入；默认 markdown')
+    parser.add_argument('--report-output-dir', type=str, default='./output/research_reports',
+                       help='IMRD 报告输出目录')
     parser.add_argument('--demo-type', choices=['basic', 'academic', 'performance', 'full'],
                        default='full', help='演示类型')
     parser.add_argument('--iterations', type=int, default=3, help='迭代次数')
@@ -1901,7 +2122,27 @@ def main():
     
     try:
         setup_signal_handlers()
-        
+
+        # ── 科研闭环模式 ─────────────────────────────────────────────
+        if args.mode == 'research':
+            if not args.question:
+                logger.error("科研闭环模式需要 --question 参数")
+                return 1
+            phases_str = args.research_phases.strip()
+            phase_names = [p.strip() for p in phases_str.split(',') if p.strip()]
+            report_formats = args.report_format or ["markdown"]
+            result = run_research_session(
+                question=args.question,
+                config={},
+                phase_names=phase_names,
+                export_report_formats=report_formats if args.export_report else None,
+                report_output_dir=args.report_output_dir,
+            )
+            if result.get('status') == 'failed':
+                return 1
+            return 0
+
+        # ── demo 模式（保持现有行为） ────────────────────────────────
         if args.demo_type == 'basic':
             logger.info("运行基础演示...")
             run_full_cycle_demo(max_iterations=args.iterations)

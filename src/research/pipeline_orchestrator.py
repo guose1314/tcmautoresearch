@@ -5,6 +5,9 @@ import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from src.research.audit_history import publish_audit_event
+from src.research.study_session_manager import ResearchCycle
+
 if TYPE_CHECKING:
     from src.research.pipeline_phase_handlers import ResearchPhaseHandlers
     from src.research.research_pipeline import ResearchPipeline
@@ -66,7 +69,7 @@ class ResearchPipelineOrchestrator:
             resources = cycle_options.get("resources") or {}
             cycle_id = f"cycle_{int(time.time())}_{hashlib.md5(cycle_name.encode()).hexdigest()[:8]}"
 
-            research_cycle = self.pipeline.ResearchCycle(
+            research_cycle = ResearchCycle(
                 cycle_id=cycle_id,
                 cycle_name=cycle_name,
                 description=description,
@@ -80,13 +83,13 @@ class ResearchPipelineOrchestrator:
             self.pipeline._initialize_cycle_tracking(research_cycle)
             research_cycle.metadata["analysis_summary"] = self.pipeline._build_cycle_analysis_summary(research_cycle)
             self.pipeline.research_cycles[cycle_id] = research_cycle
-            self.pipeline.execution_history.append(
+            publish_audit_event(
+                self.pipeline.event_bus,
+                "cycle_created",
                 {
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "cycle_created",
                     "cycle_id": cycle_id,
                     "cycle_name": cycle_name,
-                }
+                },
             )
             self.pipeline._complete_phase(self.pipeline._metadata, "create_research_cycle", phase_entry, start_time)
             self.pipeline.logger.info(f"研究循环创建完成: {cycle_name}")
@@ -131,13 +134,13 @@ class ResearchPipelineOrchestrator:
             research_cycle.current_phase = self.pipeline.ResearchPhase.OBSERVE
             research_cycle.metadata["final_status"] = research_cycle.status.value
             self.pipeline.active_cycles[cycle_id] = research_cycle
-            self.pipeline.execution_history.append(
+            publish_audit_event(
+                self.pipeline.event_bus,
+                "cycle_started",
                 {
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "cycle_started",
                     "cycle_id": cycle_id,
                     "phase": research_cycle.current_phase.value,
-                }
+                },
             )
             self.pipeline._complete_phase(self.pipeline._metadata, "start_research_cycle", phase_entry, start_time)
             self.pipeline.logger.info(f"研究循环启动: {research_cycle.cycle_name}")
@@ -232,22 +235,38 @@ class ResearchPipelineOrchestrator:
                 return False
 
             research_cycle = self.pipeline.research_cycles[cycle_id]
+            if research_cycle.status != self.pipeline.ResearchCycleStatus.ACTIVE or not research_cycle.started_at:
+                self.pipeline.logger.warning(f"研究循环 {cycle_id} 尚未启动，无法完成")
+                self.pipeline._fail_phase(
+                    self.pipeline._metadata,
+                    self.pipeline._failed_operations,
+                    "complete_research_cycle",
+                    phase_entry,
+                    start_time,
+                    "循环未启动",
+                )
+                return False
+
             research_cycle.status = self.pipeline.ResearchCycleStatus.COMPLETED
             research_cycle.completed_at = datetime.now().isoformat()
-            research_cycle.duration = (
-                datetime.fromisoformat(research_cycle.completed_at) - datetime.fromisoformat(research_cycle.started_at)
-            ).total_seconds()
+            if research_cycle.started_at:
+                research_cycle.duration = (
+                    datetime.fromisoformat(research_cycle.completed_at)
+                    - datetime.fromisoformat(research_cycle.started_at)
+                ).total_seconds()
+            else:
+                research_cycle.duration = 0.0
             if cycle_id in self.pipeline.active_cycles:
                 del self.pipeline.active_cycles[cycle_id]
             research_cycle.metadata["final_status"] = research_cycle.status.value
             research_cycle.metadata["analysis_summary"] = self.pipeline._build_cycle_analysis_summary(research_cycle)
-            self.pipeline.execution_history.append(
+            publish_audit_event(
+                self.pipeline.event_bus,
+                "cycle_completed",
                 {
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "cycle_completed",
                     "cycle_id": cycle_id,
                     "duration": research_cycle.duration,
-                }
+                },
             )
             self.pipeline._complete_phase(self.pipeline._metadata, "complete_research_cycle", phase_entry, start_time)
             self.pipeline._persist_result(research_cycle)
@@ -293,12 +312,10 @@ class ResearchPipelineOrchestrator:
                 del self.pipeline.active_cycles[cycle_id]
             research_cycle.metadata["final_status"] = research_cycle.status.value
             research_cycle.metadata["analysis_summary"] = self.pipeline._build_cycle_analysis_summary(research_cycle)
-            self.pipeline.execution_history.append(
-                {
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "cycle_suspended",
-                    "cycle_id": cycle_id,
-                }
+            publish_audit_event(
+                self.pipeline.event_bus,
+                "cycle_suspended",
+                {"cycle_id": cycle_id},
             )
             self.pipeline._complete_phase(self.pipeline._metadata, "suspend_research_cycle", phase_entry, start_time)
             self.pipeline.logger.info(f"研究循环暂停: {research_cycle.cycle_name}")
@@ -342,12 +359,10 @@ class ResearchPipelineOrchestrator:
             self.pipeline.active_cycles[cycle_id] = research_cycle
             research_cycle.metadata["final_status"] = research_cycle.status.value
             research_cycle.metadata["analysis_summary"] = self.pipeline._build_cycle_analysis_summary(research_cycle)
-            self.pipeline.execution_history.append(
-                {
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "cycle_resumed",
-                    "cycle_id": cycle_id,
-                }
+            publish_audit_event(
+                self.pipeline.event_bus,
+                "cycle_resumed",
+                {"cycle_id": cycle_id},
             )
             self.pipeline._complete_phase(self.pipeline._metadata, "resume_research_cycle", phase_entry, start_time)
             self.pipeline.logger.info(f"研究循环恢复: {research_cycle.cycle_name}")

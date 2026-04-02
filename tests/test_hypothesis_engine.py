@@ -1,250 +1,230 @@
 import unittest
 
-from src.hypothesis.hypothesis_engine import HypothesisEngine
-from src.infra.llm_service import LLMService
-from src.research.research_pipeline import ResearchPhase, ResearchPipeline
+from src.knowledge.tcm_knowledge_graph import TCMKnowledgeGraph
+from src.research.hypothesis_engine import Hypothesis, HypothesisEngine
 
-SAMPLE_CONTEXT = {
-    "research_objective": "验证方剂配伍与脾气虚证之间的稳定关联",
-    "research_scope": "中医古籍方剂研究",
-    "research_domain": "formula_research",
-    "observations": [
-        "收集到多个涉及脾气虚证的方剂案例",
-        "观察到补气相关功效反复出现",
-    ],
-    "findings": [
-        "四君子汤与脾气虚证的关联在线索中重复出现",
-        "人参与补气功效的关系较为稳定",
-    ],
-    "entities": [
-        {"name": "四君子汤", "type": "formula", "confidence": 0.95},
-        {"name": "人参", "type": "herb", "confidence": 0.93},
-        {"name": "脾气虚证", "type": "syndrome", "confidence": 0.88},
-        {"name": "补气", "type": "efficacy", "confidence": 0.84},
-    ],
-    "literature_titles": [
-        "补气方剂治疗脾气虚证的文献分析",
-        "人参功效机制与临床证据回顾",
-    ],
-    "contradictions": ["部分案例中剂量记录不完整"],
-}
+
+class FakeLLMEngine:
+    def generate(self, prompt: str, system_prompt: str = "") -> str:
+        return """[
+  {
+    "title": "黄芪与脾气虚证存在直接作用",
+    "statement": "假设黄芪与脾气虚证之间存在可验证的直接关联，可补全当前图谱缺边。",
+    "rationale": "图谱中存在间接证据且文献多次共现。",
+    "novelty": 0.88,
+    "feasibility": 0.78,
+    "evidence_support": 0.74,
+    "validation_plan": "通过文献回顾和知识图谱补边验证。",
+    "keywords": ["黄芪", "脾气虚证", "直接关联"]
+  },
+  {
+    "title": "黄芪通过补气机制影响脾气虚证",
+    "statement": "假设黄芪通过补气相关中介机制影响脾气虚证。",
+    "rationale": "已有功效和证候线索支持中介机制存在。",
+    "novelty": 0.82,
+    "feasibility": 0.76,
+    "evidence_support": 0.72,
+    "validation_plan": "补充功效和证候关联证据。",
+    "keywords": ["黄芪", "补气", "脾气虚证"]
+  }
+]"""
 
 
 class TestHypothesisEngine(unittest.TestCase):
     def setUp(self):
-        self.engine = HypothesisEngine({"max_hypotheses": 3, "max_validation_iterations": 2})
-        self.engine.initialize()
+        self.graph = TCMKnowledgeGraph(preload_formulas=False)
+        self.graph.add_entity({"name": "补中益气汤", "type": "formula"})
+        self.graph.add_entity({"name": "脾气虚证", "type": "syndrome"})
+        self.graph.add_entity({"name": "黄芪", "type": "herb"})
+        self.graph.add_entity({"name": "补气", "type": "efficacy"})
+        self.graph.add_entity({"name": "PI3K-Akt", "type": "pathway"})
+        self.graph.add_relation("补中益气汤", "contains", "黄芪")
+        self.graph.add_relation("黄芪", "efficacy", "补气")
+        self.graph.add_relation("补中益气汤", "treats", "脾气虚证")
+        self.graph.add_relation("黄芪", "participates_in", "PI3K-Akt")
 
-    def tearDown(self):
-        self.engine.cleanup()
+        self.context = {
+            "research_objective": "围绕补中益气汤和脾气虚证建立新的机制假设",
+            "research_scope": "中医方剂与证候关系研究",
+            "observations": [
+                "补中益气汤与脾气虚证在古籍和综述中多次共同出现",
+                "黄芪的补气作用在多个研究摘要中重复出现",
+            ],
+            "findings": [
+                "黄芪与补气功效之间存在稳定关系",
+                "方剂层面已观察到治疗脾气虚证的间接证据链",
+            ],
+            "literature_titles": [
+                "补中益气汤治疗脾气虚证的文献证据分析",
+                "黄芪补气作用机制研究进展",
+            ],
+            "entities": [
+                {"name": "补中益气汤", "type": "formula"},
+                {"name": "黄芪", "type": "herb"},
+                {"name": "脾气虚证", "type": "syndrome"},
+            ],
+        }
 
-    def test_execute_generates_scored_hypotheses(self):
-        result = self.engine.execute(SAMPLE_CONTEXT)
+    def test_rule_mode_generates_at_least_three_hypotheses_from_gap(self):
+        engine = HypothesisEngine({"max_hypotheses": 5}, knowledge_graph=self.graph)
+        engine.initialize()
+        self.addCleanup(engine.cleanup)
 
-        self.assertEqual(result["phase"], "hypothesis")
-        self.assertGreaterEqual(len(result["hypotheses"]), 1)
-        first = result["hypotheses"][0]
-        self.assertIn("scores", first)
-        self.assertIn("final_score", first)
-        self.assertIn("validation_plan", first)
-        self.assertGreater(first["final_score"], 0.0)
+        gap = {
+            "gap_type": "missing_direct_relation",
+            "entity": "黄芪",
+            "entity_type": "herb",
+            "description": "存在 黄芪 -> 补中益气汤 -> 脾气虚证 的路径，但缺少 黄芪 -> 脾气虚证 的直接关系。",
+            "entities": ["黄芪", "脾气虚证"],
+            "severity": "high",
+        }
 
-    def test_validation_iterations_cover_generated_hypotheses(self):
-        result = self.engine.execute(SAMPLE_CONTEXT)
+        hypotheses = engine.generate_hypotheses(gap, self.context)
 
-        hypothesis_ids = {item["hypothesis_id"] for item in result["hypotheses"]}
-        iteration_ids = {item["hypothesis_id"] for item in result["validation_iterations"]}
-        self.assertEqual(hypothesis_ids, iteration_ids)
-        self.assertEqual(
-            len(result["validation_iterations"]),
-            len(result["hypotheses"]) * 2,
+        self.assertGreaterEqual(len(hypotheses), 3)
+        self.assertTrue(all(item.generation_mode == "rule" for item in hypotheses))
+        self.assertTrue(any("直接关系" in item.statement for item in hypotheses))
+
+    def test_rank_hypotheses_orders_by_weighted_score(self):
+        engine = HypothesisEngine({"max_hypotheses": 5}, knowledge_graph=self.graph)
+        engine.initialize()
+        self.addCleanup(engine.cleanup)
+
+        low = Hypothesis(
+            hypothesis_id="low",
+            title="低分假设",
+            statement="低分假设",
+            rationale="",
+            novelty=0.5,
+            feasibility=0.5,
+            evidence_support=0.5,
+            confidence=0.0,
+            source_gap_type="custom",
+            source_entities=["A"],
+        )
+        high = Hypothesis(
+            hypothesis_id="high",
+            title="高分假设",
+            statement="高分假设",
+            rationale="",
+            novelty=0.9,
+            feasibility=0.8,
+            evidence_support=0.7,
+            confidence=0.0,
+            source_gap_type="custom",
+            source_entities=["B"],
         )
 
-    def test_existing_hypotheses_reduce_novelty_score(self):
-        prepared = self.engine._prepare_context(SAMPLE_CONTEXT)
-        baseline = self.engine._score_hypothesis(
-            self.engine._generate_heuristic_hypotheses(prepared)[0],
-            prepared,
+        ranked = engine.rank_hypotheses([low, high])
+
+        self.assertEqual(ranked[0].hypothesis_id, "high")
+        self.assertGreater(ranked[0].confidence, ranked[1].confidence)
+
+    def test_reasoning_summary_increases_mechanism_completeness_score(self):
+        engine = HypothesisEngine({"max_hypotheses": 5}, knowledge_graph=self.graph)
+        engine.initialize()
+        self.addCleanup(engine.cleanup)
+
+        hypothesis = Hypothesis(
+            hypothesis_id="mech",
+            title="机制链假设",
+            statement="补中益气汤可能通过 IL6 相关机制影响 JAK-STAT 通路。",
+            rationale="",
+            novelty=0.7,
+            feasibility=0.7,
+            evidence_support=0.7,
+            confidence=0.0,
+            source_gap_type="missing_direct_relation",
+            source_entities=["补中益气汤", "JAK-STAT"],
+            keywords=["补中益气汤", "IL6", "JAK-STAT"],
         )
 
-        prepared_with_existing = self.engine._prepare_context(
-            {
-                **SAMPLE_CONTEXT,
-                "existing_hypotheses": [
-                    {"title": baseline.title, "statement": baseline.statement},
-                ],
-            }
-        )
-        with_existing = self.engine._score_hypothesis(
-            self.engine._generate_heuristic_hypotheses(prepared_with_existing)[0],
-            prepared_with_existing,
-        )
-
-        self.assertLess(with_existing.scores["novelty"], baseline.scores["novelty"])
-
-    def test_llm_closed_loop_generates_scores_and_revisions(self):
-        class FakeLLM:
-            def __init__(self):
-                self.review_calls = 0
-
-            def generate_research_hypothesis(self, domain, corpus_summary, existing_research=""):
-                return "1. 四君子汤可稳定改善脾气虚证\n2. 人参在补气方中的角色与剂量相关"
-
-            def generate(self, prompt, system_prompt=""):
-                self.review_calls += 1
-                if self.review_calls == 1:
-                    return (
-                        "verification_score: 0.59\n"
-                        "action: revise\n"
-                        "note: 证据链还需收敛\n"
-                        "revised_statement: 修订后假设：四君子汤核心配伍与脾气虚证存在稳定对应\n"
-                        "revised_plan: 先做方剂-证候-功效三元组交叉验证\n"
-                    )
-                return (
-                    "verification_score: 0.83\n"
-                    "action: retain\n"
-                    "note: 假设达到进入实验阶段标准\n"
-                    "revised_statement:\n"
-                    "revised_plan:\n"
-                )
-
-        result = self.engine.execute(
-            {
-                **SAMPLE_CONTEXT,
-                "use_llm_generation": True,
-                "llm_service": FakeLLM(),
-            }
-        )
-
-        self.assertTrue(result["metadata"]["used_llm_generation"])
-        self.assertTrue(result["metadata"]["used_llm_closed_loop"])
-        self.assertGreater(result["metadata"]["llm_iteration_count"], 0)
-        self.assertTrue(
-            any(item["action"] == "revise" for item in result["validation_iterations"])
-        )
-        self.assertTrue(
-            any("修订后假设" in item["statement"] for item in result["hypotheses"])
-        )
-
-    def test_parse_llm_feedback_response_normalizes_cn_action_and_score(self):
-        payload = self.engine._parse_llm_feedback_response(
-            "verification_score: 评分约 0.76\n"
-            "action: 降低优先级\n"
-            "revised_statement:  修订语句  \n"
-            "revised_plan:  修订计划  \n"
-        )
-
-        self.assertEqual(payload["action"], "deprioritize")
-        self.assertAlmostEqual(payload["verification_score"], 0.76)
-        self.assertEqual(payload["revised_statement"], "修订语句")
-        self.assertEqual(payload["revised_plan"], "修订计划")
-
-    def test_parse_llm_feedback_response_keeps_invalid_score_text(self):
-        payload = self.engine._parse_llm_feedback_response(
-            "verification_score: not-a-number\n"
-            "action: retain\n"
-        )
-
-        self.assertEqual(payload["verification_score"], "not-a-number")
-        self.assertEqual(payload["action"], "retain")
-
-    def test_run_llm_closed_loop_skips_when_llm_generation_disabled(self):
-        prepared = self.engine._prepare_context(SAMPLE_CONTEXT)
-        hypotheses = self.engine._generate_heuristic_hypotheses(prepared)
-
-        iterations = self.engine._run_llm_closed_loop(hypotheses, prepared)
-
-        self.assertEqual(iterations, [])
-        self.assertFalse(prepared["used_llm_closed_loop"])
-
-    def test_use_llm_generation_supports_real_llmservice_generate(self):
-        class PromptOnlyLLM(LLMService):
-            def generate(self, prompt: str, system_prompt: str = "") -> str:
-                return (
-                    '[{"title":"配伍稳定性假设","statement":"四君子汤核心配伍与脾气虚证改善存在稳定对应关系",'
-                    '"rationale":"多条观察与文献标题重复指向补气配伍结构",'
-                    '"validation_plan":"比较方剂-证候-功效三元组并做交叉验证",'
-                    '"keywords":["四君子汤","脾气虚证","补气"]}]'
-                )
-
-        result = self.engine.execute(
-            {
-                **SAMPLE_CONTEXT,
-                "use_llm_generation": True,
-                "llm_service": PromptOnlyLLM(),
-            }
-        )
-
-        self.assertTrue(result["metadata"]["used_llm_generation"])
-        self.assertEqual(result["hypotheses"][0]["title"], "配伍稳定性假设")
-        self.assertIn("交叉验证", result["hypotheses"][0]["validation_plan"])
-
-    def test_use_llm_generation_falls_back_when_response_unparseable(self):
-        class PromptOnlyLLM(LLMService):
-            def generate(self, prompt: str, system_prompt: str = "") -> str:
-                return "好的，我认为这是一个值得研究的话题，但暂时不给结构化结果。"
-
-        result = self.engine.execute(
-            {
-                **SAMPLE_CONTEXT,
-                "use_llm_generation": True,
-                "llm_service": PromptOnlyLLM(),
-            }
-        )
-
-        self.assertFalse(result["metadata"]["used_llm_generation"])
-        self.assertGreaterEqual(len(result["hypotheses"]), 1)
-        self.assertNotEqual(result["hypotheses"][0]["statement"], "好的，我认为这是一个值得研究的话题，但暂时不给结构化结果。")
-
-
-class TestHypothesisEnginePipelineIntegration(unittest.TestCase):
-    def setUp(self):
-        self.pipeline = ResearchPipeline(
-            {
-                "hypothesis_engine_config": {
-                    "max_hypotheses": 2,
-                    "max_validation_iterations": 2,
-                }
-            }
-        )
-
-    def tearDown(self):
-        self.pipeline.cleanup()
-
-    def test_pipeline_hypothesis_phase_uses_hypothesis_engine(self):
-        cycle = self.pipeline.create_research_cycle(
-            cycle_name="hypothesis-cycle",
-            description="hypothesis integration",
-            objective=SAMPLE_CONTEXT["research_objective"],
-            scope=SAMPLE_CONTEXT["research_scope"],
-            researchers=["tester"],
-        )
-        self.assertTrue(self.pipeline.start_research_cycle(cycle.cycle_id))
-
-        self.pipeline.execute_research_phase(
-            cycle.cycle_id,
-            ResearchPhase.OBSERVE,
-            {
-                "run_literature_retrieval": False,
-                "run_preprocess_and_extract": False,
-                "use_ctext_whitelist": False,
-                "data_source": "manual",
+        low_context = {**self.context, "reasoning_summary": {}, "knowledge_patterns": {}, "inference_confidence": 0.0}
+        high_context = {
+            **self.context,
+            "reasoning_summary": {
+                "inference_confidence": 0.92,
+                "knowledge_patterns": {
+                    "common_entities": ["IL6", "JAK-STAT"],
+                    "most_shared_efficacies": ["补气"],
+                    "entity_groups": {"formula": ["补中益气汤"], "target": ["IL6"]},
+                },
             },
-        )
-        result = self.pipeline.execute_research_phase(
-            cycle.cycle_id,
-            ResearchPhase.HYPOTHESIS,
-            {
-                "entities": SAMPLE_CONTEXT["entities"],
-                "literature_titles": SAMPLE_CONTEXT["literature_titles"],
-                "contradictions": SAMPLE_CONTEXT["contradictions"],
+            "knowledge_patterns": {
+                "common_entities": ["IL6", "JAK-STAT"],
+                "most_shared_efficacies": ["补气"],
+                "entity_groups": {"formula": ["补中益气汤"], "target": ["IL6"]},
             },
+            "inference_confidence": 0.92,
+        }
+
+        low_score = engine._enrich_hypotheses([hypothesis], low_context)[0].scores["mechanism_completeness"]
+        hypothesis_high = Hypothesis(
+            hypothesis_id="mech2",
+            title="机制链假设",
+            statement="补中益气汤可能通过 IL6 相关机制影响 JAK-STAT 通路。",
+            rationale="",
+            novelty=0.7,
+            feasibility=0.7,
+            evidence_support=0.7,
+            confidence=0.0,
+            source_gap_type="missing_direct_relation",
+            source_entities=["补中益气汤", "JAK-STAT"],
+            keywords=["补中益气汤", "IL6", "JAK-STAT"],
+        )
+        high_score = engine._enrich_hypotheses([hypothesis_high], high_context)[0].scores["mechanism_completeness"]
+
+        self.assertGreater(high_score, low_score)
+        self.assertGreaterEqual(high_score, 0.7)
+
+    def test_llm_mode_prefers_llm_generation(self):
+        engine = HypothesisEngine(
+            {"max_hypotheses": 5},
+            llm_engine=FakeLLMEngine(),
+            knowledge_graph=self.graph,
+        )
+        engine.initialize()
+        self.addCleanup(engine.cleanup)
+
+        gap = {
+            "gap_type": "missing_direct_relation",
+            "entity": "黄芪",
+            "entity_type": "herb",
+            "description": "存在间接路径但缺少直接关系。",
+            "entities": ["黄芪", "脾气虚证"],
+            "severity": "high",
+        }
+
+        hypotheses = engine.generate_hypotheses(gap, self.context)
+
+        self.assertGreaterEqual(len(hypotheses), 2)
+        self.assertTrue(all(item.generation_mode == "llm" for item in hypotheses))
+        self.assertEqual(hypotheses[0].source_entities, ["黄芪", "脾气虚证"])
+
+    def test_execute_uses_context_gap_and_returns_metadata(self):
+        engine = HypothesisEngine({"max_hypotheses": 5}, knowledge_graph=self.graph)
+        engine.initialize()
+        self.addCleanup(engine.cleanup)
+
+        result = engine.execute(
+            {
+                **self.context,
+                "knowledge_gap": {
+                    "gap_type": "missing_direct_relation",
+                    "entity": "黄芪",
+                    "entity_type": "herb",
+                    "description": "存在间接路径但缺少直接关系。",
+                    "entities": ["黄芪", "脾气虚证"],
+                    "severity": "high",
+                },
+            }
         )
 
         self.assertEqual(result["phase"], "hypothesis")
-        self.assertIn("validation_iterations", result)
-        self.assertEqual(result["metadata"]["hypothesis_count"], len(result["hypotheses"]))
-        self.assertGreaterEqual(len(result["hypotheses"]), 1)
+        self.assertGreaterEqual(len(result["hypotheses"]), 3)
+        self.assertIn("metadata", result)
+        self.assertEqual(result["metadata"]["has_llm"], False)
+        self.assertEqual(result["metadata"]["selected_hypothesis_id"], result["hypotheses"][0]["hypothesis_id"])
 
 
 if __name__ == "__main__":

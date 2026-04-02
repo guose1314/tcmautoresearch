@@ -3,7 +3,8 @@ import os
 import tempfile
 import unittest
 
-from src.generation.citation_manager import CitationManager
+from src.collector.literature_retriever import LiteratureRecord
+from src.output.citation_manager import CitationManager
 from src.research.research_pipeline import ResearchPhase, ResearchPipeline
 
 DOCX_AVAILABLE = True
@@ -149,6 +150,120 @@ class TestCitationManager(unittest.TestCase):
         finally:
             manager.cleanup()
 
+    def test_format_citation_accepts_literature_record(self):
+        record = LiteratureRecord(
+            source="pubmed",
+            title="Large Language Models for TCM Research",
+            authors=["Alice Smith", "Bob Chen"],
+            year=2024,
+            doi="10.1000/tcm.2024.1",
+            url="https://pubmed.ncbi.nlm.nih.gov/example",
+            abstract="unused",
+            citation_count=12,
+            external_id="pmid-1",
+        )
+
+        citation = self.manager.format_citation(record)
+
+        self.assertIn("Smith Alice, Chen Bob", citation)
+        self.assertIn("Large Language Models for TCM Research[J]", citation)
+        self.assertIn("pubmed, 2024", citation)
+        self.assertIn("DOI: 10.1000/tcm.2024.1", citation)
+
+    def test_generate_bibliography_deduplicates_sorts_and_numbers(self):
+        records = [
+            LiteratureRecord(
+                source="pubmed",
+                title="Beta Study",
+                authors=["Bob Chen"],
+                year=2023,
+                doi="",
+                url="https://example.org/beta",
+                abstract="",
+                citation_count=3,
+                external_id="beta-1",
+            ),
+            LiteratureRecord(
+                source="pubmed",
+                title="Alpha Study",
+                authors=["Alice Smith"],
+                year=2024,
+                doi="",
+                url="https://example.org/alpha",
+                abstract="",
+                citation_count=8,
+                external_id="alpha-1",
+            ),
+            LiteratureRecord(
+                source="pubmed",
+                title="Alpha Study",
+                authors=["Alice Smith"],
+                year=2024,
+                doi="",
+                url="https://example.org/alpha-copy",
+                abstract="",
+                citation_count=8,
+                external_id="alpha-2",
+            ),
+        ]
+
+        bibliography = self.manager.generate_bibliography(records)
+
+        self.assertIn("[1]", bibliography)
+        self.assertIn("[2]", bibliography)
+        self.assertEqual(bibliography.count("Alpha Study[J]"), 1)
+        self.assertLess(bibliography.index("Alpha Study[J]"), bibliography.index("Beta Study[J]"))
+
+    def test_insert_inline_citation_appends_numeric_marker(self):
+        record = LiteratureRecord(
+            source="pubmed",
+            title="Inline Citation Study",
+            authors=["Alice Smith"],
+            year=2024,
+            doi="",
+            url="https://example.org/inline",
+            abstract="",
+            citation_count=1,
+            external_id="inline-1",
+        )
+
+        cited = self.manager.insert_inline_citation("该研究提示疗效显著。", record)
+        cited_again = self.manager.insert_inline_citation("另一句继续引用", record)
+
+        self.assertEqual(cited, "该研究提示疗效显著[1]。")
+        self.assertTrue(cited_again.endswith("[1]"))
+
+    def test_supports_book_thesis_and_electronic_types(self):
+        records = [
+            {
+                "title": "中医方剂学",
+                "authors": ["张三"],
+                "year": 2020,
+                "publisher": "人民卫生出版社",
+                "entry_type": "book",
+            },
+            {
+                "title": "基于知识图谱的中医方剂研究",
+                "authors": ["李四"],
+                "year": 2022,
+                "publisher": "北京中医药大学",
+                "entry_type": "thesis",
+            },
+            {
+                "title": "中医药数字化资源平台",
+                "authors": ["王五"],
+                "year": 2025,
+                "url": "https://example.org/tcm-resource",
+                "entry_type": "electronic",
+            },
+        ]
+
+        bibliography = self.manager.generate_bibliography(records)
+
+        self.assertIn("[M]", bibliography)
+        self.assertIn("[D]", bibliography)
+        self.assertIn("[EB/OL]", bibliography)
+
 
 class TestCitationManagerPipelineIntegration(unittest.TestCase):
     def setUp(self):
@@ -156,6 +271,10 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
         self.pipeline = ResearchPipeline(
             {
                 "paper_writing": {
+                    "output_dir": self.tempdir.name,
+                    "output_formats": ["markdown", "docx"],
+                },
+                "report_generation": {
                     "output_dir": self.tempdir.name,
                     "output_formats": ["markdown", "docx"],
                 }
@@ -303,6 +422,23 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
                     "p_value": 0.003,
                     "interpretation": "桂枝汤核心配伍与营卫调和证据之间存在稳定关联",
                     "limitations": ["样本量有限"],
+                    "evidence_grade": {
+                        "overall_grade": "moderate",
+                        "overall_score": 0.67,
+                        "study_count": 1,
+                        "bias_risk_distribution": {"low": 1},
+                        "summary": [
+                            "纳入 1 项研究进行 GRADE 评估",
+                            "整体证据等级为 moderate，平均评分 0.67",
+                        ],
+                    },
+                    "evidence_grade_summary": {
+                        "overall_grade": "moderate",
+                        "overall_score": 0.67,
+                        "study_count": 1,
+                        "bias_risk_distribution": {"low": 1},
+                        "summary": ["纳入 1 项研究进行 GRADE 评估"],
+                    },
                     "data_mining_result": {
                         "methods_executed": ["association_rules", "clustering"],
                         "association_rules": {
@@ -364,13 +500,30 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
         markdown_text = open(result["output_files"]["markdown"], "r", encoding="utf-8").read()
         self.assertIn("统计分析提示当前结果具有稳定信号", markdown_text)
         self.assertIn("综合解释认为：桂枝汤核心配伍与营卫调和证据之间存在稳定关联", markdown_text)
+        self.assertIn("GRADE 证据分级显示", markdown_text)
+        self.assertIn("整体证据等级为中等", markdown_text)
         self.assertIn("类方图谱证据", markdown_text)
         self.assertIn("桂枝汤 与 桂麻各半汤", markdown_text)
+        self.assertEqual(result["analysis_results"]["evidence_grade_summary"]["overall_grade"], "moderate")
+        self.assertEqual(result["research_artifact"]["evidence_grade_summary"]["overall_grade"], "moderate")
         self.assertIn("Markdown 论文初稿", result["deliverables"])
+        self.assertIn("imrd_reports", result)
+        self.assertIn("report_output_files", result)
+        self.assertIn("imrd_markdown", result["report_output_files"])
+        self.assertTrue(os.path.exists(result["report_output_files"]["imrd_markdown"]))
+        imrd_markdown_text = open(result["report_output_files"]["imrd_markdown"], "r", encoding="utf-8").read()
+        self.assertIn("## Introduction", imrd_markdown_text)
+        self.assertIn("## Methods", imrd_markdown_text)
+        self.assertIn("## Results", imrd_markdown_text)
+        self.assertIn("## Discussion", imrd_markdown_text)
+        self.assertIn("Markdown IMRD 报告", result["deliverables"])
         if DOCX_AVAILABLE:
             self.assertIn("docx", result["output_files"])
             self.assertTrue(os.path.exists(result["output_files"]["docx"]))
             self.assertIn("DOCX 论文初稿", result["deliverables"])
+            self.assertIn("imrd_docx", result["report_output_files"])
+            self.assertTrue(os.path.exists(result["report_output_files"]["imrd_docx"]))
+            self.assertIn("DOCX IMRD 报告", result["deliverables"])
 
 
 if __name__ == "__main__":

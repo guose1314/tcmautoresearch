@@ -6,7 +6,7 @@ import json
 import os
 import re
 import unicodedata
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -65,6 +65,8 @@ class CitationManager(BaseModule):
         self.merge_duplicates = bool((config or {}).get("merge_duplicates", True))
         self.export_outputs = bool((config or {}).get("export_outputs", False))
         self.default_output_dir = str((config or {}).get("output_dir", "")).strip()
+        self._inline_citation_registry: Dict[str, int] = {}
+        self._inline_citation_next_index = 1
 
     def _do_initialize(self) -> bool:
         self.logger.info("CitationManager 初始化完成")
@@ -77,7 +79,7 @@ class CitationManager(BaseModule):
         if self.merge_duplicates and entries:
             entries, duplicates_merged = self._merge_duplicate_entries(entries)
         bibtex = self.render_bibtex(entries)
-        gbt7714 = self.render_gbt7714(entries)
+        gbt7714 = self.render_gbt7714(self._sort_entries_for_bibliography(entries))
         selected_format = self._normalize_output_format(context.get("format") or self.output_format)
         formatted_references = gbt7714 if selected_format.lower().startswith("gb") else bibtex
         library = self.build_library(entries, selected_format, duplicates_merged)
@@ -94,11 +96,11 @@ class CitationManager(BaseModule):
             "output_files": output_files,
         }
 
-    def build_entries(self, records: Iterable[Dict[str, Any]]) -> List[CitationEntry]:
+    def build_entries(self, records: Iterable[Any]) -> List[CitationEntry]:
         entries: List[CitationEntry] = []
         used_keys: Dict[str, int] = {}
         for index, record in enumerate(records, start=1):
-            entry = self._normalize_record(record, index=index)
+            entry = self._normalize_record(self._coerce_record_dict(record), index=index)
             entry.citation_key = self._ensure_unique_key(entry.citation_key, used_keys)
             entries.append(entry)
         return entries
@@ -114,6 +116,40 @@ class CitationManager(BaseModule):
             if line:
                 lines.append(f"[{index}] {line}")
         return "\n".join(lines)
+
+    def format_citation(self, record: Any) -> str:
+        """将单条记录格式化为 GB/T 7714 引用字符串。"""
+        entry = self._normalize_record(self._coerce_record_dict(record), index=1)
+        return self.format_gbt_entry(entry)
+
+    def generate_bibliography(self, records: Iterable[Any]) -> str:
+        """生成自动去重、排序、编号后的参考文献列表。"""
+        entries = self.build_entries(records)
+        if self.merge_duplicates and entries:
+            entries, _ = self._merge_duplicate_entries(entries)
+        return self.render_gbt7714(self._sort_entries_for_bibliography(entries))
+
+    def insert_inline_citation(self, text: str, record: Any) -> str:
+        """在文本中插入数字型行内引用标记。"""
+        base_text = str(text or "")
+        entry = self._normalize_record(self._coerce_record_dict(record), index=1)
+        dedupe_key = self._dedupe_key(entry)
+        citation_index = self._inline_citation_registry.get(dedupe_key)
+        if citation_index is None:
+            citation_index = self._inline_citation_next_index
+            self._inline_citation_registry[dedupe_key] = citation_index
+            self._inline_citation_next_index += 1
+
+        marker = f"[{citation_index}]"
+        if marker in base_text:
+            return base_text
+
+        stripped = base_text.rstrip()
+        if not stripped:
+            return marker
+        if stripped[-1] in "。；;，,！!？?）)】]":
+            return stripped[:-1] + marker + stripped[-1]
+        return stripped + marker
 
     def format_gbt_entry(self, entry: CitationEntry) -> str:
         authors = self._format_authors_gbt(entry.authors)
@@ -140,6 +176,15 @@ class CitationManager(BaseModule):
             publisher = entry.publisher or "未知出版社"
             parts = [
                 f"{authors}. {title}[M]",
+                f"{publisher}, {entry.year}" if entry.year else publisher,
+            ]
+            extra = self._build_extra_note(entry)
+            return self._append_extra(self._join_sentence(parts), extra)
+
+        if entry.entry_type in {"thesis", "phdthesis", "mastersthesis", "dissertation"}:
+            publisher = entry.publisher or "未知授予单位"
+            parts = [
+                f"{authors}. {title}[D]",
                 f"{publisher}, {entry.year}" if entry.year else publisher,
             ]
             extra = self._build_extra_note(entry)
@@ -204,7 +249,7 @@ class CitationManager(BaseModule):
 
         return fields
 
-    def generate_bibtex(self, records: Iterable[Dict[str, Any]]) -> str:
+    def generate_bibtex(self, records: Iterable[Any]) -> str:
         return self.render_bibtex(self.build_entries(records))
 
     def build_library(
@@ -384,9 +429,24 @@ class CitationManager(BaseModule):
         publisher: str,
         url: str,
     ) -> str:
+        explicit_type = str(
+            record.get("entry_type")
+            or record.get("document_type")
+            or record.get("publication_type")
+            or record.get("type")
+            or ""
+        ).lower()
         source = str(record.get("source") or "").lower()
+        if explicit_type in {"thesis", "dissertation", "phdthesis", "mastersthesis", "degree"}:
+            return "thesis"
+        if explicit_type in {"book", "monograph"}:
+            return "book"
+        if explicit_type in {"electronic", "online", "web", "webpage", "misc"}:
+            return "misc"
         if publisher and not journal and not booktitle:
             return "book"
+        if any(token in source for token in ("dissertation", "thesis", "degree")):
+            return "thesis"
         if booktitle:
             return "inproceedings"
         if "arxiv" in source or "arxiv" in url.lower():
@@ -467,7 +527,34 @@ class CitationManager(BaseModule):
     def _ensure_record_list(self, value: Any) -> List[Dict[str, Any]]:
         if not isinstance(value, list):
             return []
-        return [dict(item) for item in value if isinstance(item, dict)]
+        normalized: List[Dict[str, Any]] = []
+        for item in value:
+            record = self._coerce_record_dict(item)
+            if record:
+                normalized.append(record)
+        return normalized
+
+    def _coerce_record_dict(self, record: Any) -> Dict[str, Any]:
+        if isinstance(record, CitationEntry):
+            return record.to_dict()
+        if isinstance(record, dict):
+            return dict(record)
+        if is_dataclass(record):
+            payload = asdict(record)
+            return payload if isinstance(payload, dict) else {}
+        if hasattr(record, "__dict__"):
+            return {key: value for key, value in vars(record).items() if not key.startswith("_")}
+        return {}
+
+    def _sort_entries_for_bibliography(self, entries: List[CitationEntry]) -> List[CitationEntry]:
+        return sorted(
+            entries,
+            key=lambda entry: (
+                re.sub(r"\s+", " ", entry.title.strip().lower()),
+                entry.year or "9999",
+                self._extract_primary_author(entry.authors[0]) if entry.authors else "zzz",
+            ),
+        )
 
     def _maybe_export_outputs(
         self,
@@ -584,5 +671,7 @@ class CitationManager(BaseModule):
         return escaped
 
     def _do_cleanup(self) -> bool:
+        self._inline_citation_registry.clear()
+        self._inline_citation_next_index = 1
         self.logger.info("CitationManager 资源清理完成")
         return True

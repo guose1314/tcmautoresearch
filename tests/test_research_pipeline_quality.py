@@ -118,6 +118,55 @@ class TestResearchPipelineQuality(unittest.TestCase):
         result = self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.OBSERVE)
         self.assertIn("error", result)
 
+    def test_analyze_phase_generates_evidence_grade_from_observe_literature(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="analyze-grade-cycle",
+            description="analyze evidence grade",
+            objective="GRADE evidence synthesis",
+            scope="src/research",
+            researchers=["tester"],
+        )
+        self.assertTrue(self.pipeline.start_research_cycle(cycle.cycle_id))
+        cycle.phase_executions[ResearchPhase.OBSERVE] = {
+            "result": {
+                "literature_pipeline": {
+                    "records": [
+                        {
+                            "source": "pubmed",
+                            "title": "Systematic review and meta-analysis of 桂枝汤 randomized controlled trials",
+                            "authors": ["Alice"],
+                            "year": 2025,
+                            "doi": "10.1000/meta-grade",
+                            "url": "https://example.org/meta",
+                            "abstract": "This systematic review and meta-analysis included 16 randomized controlled trials and 1260 patients with low heterogeneity and stable results.",
+                            "citation_count": 36,
+                            "external_id": "meta-grade",
+                        },
+                        {
+                            "source": "semantic_scholar",
+                            "title": "Prospective cohort study of 桂枝汤 in chronic fatigue",
+                            "authors": ["Bob"],
+                            "year": 2024,
+                            "doi": "10.1000/cohort-grade",
+                            "url": "https://example.org/cohort",
+                            "abstract": "This prospective cohort study included 210 patients and produced generally consistent outcome estimates over 12 months.",
+                            "citation_count": 12,
+                            "external_id": "cohort-grade",
+                        },
+                    ]
+                }
+            }
+        }
+
+        result = self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.ANALYZE, {})
+
+        self.assertEqual(result["phase"], "analyze")
+        self.assertIn("evidence_grade", result["results"])
+        self.assertIn("evidence_grade_summary", result["results"])
+        self.assertEqual(result["results"]["evidence_grade"]["study_count"], 2)
+        self.assertTrue(result["metadata"]["evidence_grade_generated"])
+        self.assertEqual(result["metadata"]["evidence_study_count"], 2)
+
     def test_collect_and_resolve_ctext_config(self):
         pipeline = ResearchPipeline(
             {

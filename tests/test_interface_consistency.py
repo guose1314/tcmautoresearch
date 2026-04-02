@@ -1167,10 +1167,77 @@ class ModuleInterfaceTest(unittest.TestCase):
         """测试后清理"""
         self.tester.cleanup()
 
+
+class TestHealthCheckAndModuleId(unittest.TestCase):
+    """BaseModule.health_check() 和 get_module_id() 的验收测试"""
+
+    def _make_module(self, name="demo"):
+        from src.core.module_base import BaseModule
+
+        class _Mod(BaseModule):
+            def _do_initialize(self): return True
+            def _do_execute(self, ctx): return {"ok": True}
+            def _do_cleanup(self): return True
+
+        return _Mod(name)
+
+    def test_get_module_id_format(self):
+        mod = self._make_module("health_mod")
+        mid = mod.get_module_id()
+        self.assertIsInstance(mid, str)
+        self.assertTrue(mid.startswith("health_mod_"), f"Unexpected id: {mid}")
+
+    def test_get_module_id_unique_per_instance(self):
+        a = self._make_module("m")
+        b = self._make_module("m")
+        self.assertNotEqual(a.get_module_id(), b.get_module_id())
+
+    def test_health_check_keys(self):
+        mod = self._make_module("hc")
+        result = mod.health_check()
+        for key in ("module_id", "status", "initialized", "metrics", "timestamp"):
+            self.assertIn(key, result, f"Missing key: {key}")
+
+    def test_health_check_module_id_matches(self):
+        mod = self._make_module("hc2")
+        self.assertEqual(mod.health_check()["module_id"], mod.get_module_id())
+
+    def test_health_check_initialized_false_before_init(self):
+        mod = self._make_module("hc3")
+        self.assertFalse(mod.health_check()["initialized"])
+
+    def test_health_check_initialized_true_after_init(self):
+        mod = self._make_module("hc4")
+        mod.initialize()
+        self.assertTrue(mod.health_check()["initialized"])
+        mod.cleanup()
+
+    def test_health_check_timestamp_is_iso(self):
+        from datetime import datetime
+        mod = self._make_module("hc5")
+        ts = mod.health_check()["timestamp"]
+        # Should parse without error
+        datetime.fromisoformat(ts)
+
+    def test_health_check_callable_on_any_subclass(self):
+        """Any BaseModule subclass should support health_check without override."""
+        from src.core.module_base import BaseModule
+
+        class MinimalMod(BaseModule):
+            def _do_initialize(self): return True
+            def _do_execute(self, ctx): return {}
+            def _do_cleanup(self): return True
+
+        mod = MinimalMod("minimal")
+        result = mod.health_check()
+        self.assertIn("module_id", result)
+
+
 # 导出主要类和函数
 __all__ = [
     'InterfaceConsistencyTest',
     'ModuleInterfaceTest',
     'InterfaceConsistencyResult',
-    'ModuleInterfaceCase'
+    'ModuleInterfaceCase',
+    'TestHealthCheckAndModuleId',
 ]
