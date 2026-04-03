@@ -17,6 +17,46 @@ from typing import Any, Callable, Dict, List
 from src.core.module_base import get_global_executor
 from src.core.phase_tracker import PhaseTrackerMixin
 
+# 实际模块（延迟导入，在方法内按需加载）
+_preprocessor_instance = None
+_extractor_instance = None
+_tester_instance = None
+_fixing_stage_instance = None
+
+
+def _get_preprocessor():
+    global _preprocessor_instance
+    if _preprocessor_instance is None:
+        from src.analysis.preprocessor import DocumentPreprocessor
+        _preprocessor_instance = DocumentPreprocessor()
+        _preprocessor_instance.initialize()
+    return _preprocessor_instance
+
+
+def _get_extractor():
+    global _extractor_instance
+    if _extractor_instance is None:
+        from src.analysis.entity_extractor import AdvancedEntityExtractor
+        _extractor_instance = AdvancedEntityExtractor()
+        _extractor_instance.initialize()
+    return _extractor_instance
+
+
+def _get_tester():
+    global _tester_instance
+    if _tester_instance is None:
+        from src.test.automated_tester import AutomatedTester
+        _tester_instance = AutomatedTester()
+    return _tester_instance
+
+
+def _get_fixing_stage():
+    global _fixing_stage_instance
+    if _fixing_stage_instance is None:
+        from src.cycle.fixing_stage import FixingStage
+        _fixing_stage_instance = FixingStage()
+    return _fixing_stage_instance
+
 # 配置日志
 logger = logging.getLogger(__name__)
 
@@ -222,27 +262,50 @@ class IterationCycle(PhaseTrackerMixin):
             return False
     
     def generate_artifacts(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """生成艺术作品（模块输出）"""
+        """生成研究产物（文档预处理 + 实体抽取）"""
         start_time = time.time()
         self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代 - 生成阶段")
         
         try:
-            # 这里应该是具体的生成逻辑
-            # 为演示，返回模拟的生成结果
-            artifacts = {
-                "generated_at": datetime.now().isoformat(),
-                "artifact_type": "system_module",
-                "generation_context": context,
-                "artifact_id": f"art_{self.current_iteration}_{int(time.time())}",
-                "quality_metrics": {
-                    "completeness": 0.92,
-                    "accuracy": 0.88,
-                    "consistency": 0.95
+            mock_mode = context.get("mock_mode", False)
+
+            if mock_mode:
+                # mock 降级方案
+                time.sleep(0.1)
+                artifacts = {
+                    "generated_at": datetime.now().isoformat(),
+                    "artifact_type": "system_module",
+                    "generation_context": context,
+                    "artifact_id": f"art_{self.current_iteration}_{int(time.time())}",
+                    "quality_metrics": {
+                        "completeness": 0.92,
+                        "accuracy": 0.88,
+                        "consistency": 0.95
+                    }
                 }
-            }
-            
-            # 模拟生成过程
-            time.sleep(0.1)  # 模拟处理时间
+            else:
+                # 实际调用 DocumentPreprocessor + AdvancedEntityExtractor
+                preprocessor = _get_preprocessor()
+                extractor = _get_extractor()
+
+                preprocess_result = preprocessor.execute(context)
+
+                extract_context = {**context, "preprocessed": preprocess_result}
+                extract_result = extractor.execute(extract_context)
+
+                artifacts = {
+                    "generated_at": datetime.now().isoformat(),
+                    "artifact_type": "system_module",
+                    "generation_context": context,
+                    "artifact_id": f"art_{self.current_iteration}_{int(time.time())}",
+                    "preprocess_result": preprocess_result,
+                    "extract_result": extract_result,
+                    "quality_metrics": {
+                        "completeness": float(preprocess_result.get("quality_metrics", {}).get("completeness", 0.0)),
+                        "accuracy": float(extract_result.get("quality_metrics", {}).get("accuracy", 0.0)),
+                        "consistency": float(preprocess_result.get("quality_metrics", {}).get("consistency", 0.0)),
+                    }
+                }
             
             duration = time.time() - start_time
             self.logger.info(f"生成阶段完成，耗时: {duration:.2f}s")
@@ -254,31 +317,64 @@ class IterationCycle(PhaseTrackerMixin):
             raise
     
     def test_artifacts(self, artifacts: Dict[str, Any]) -> Dict[str, Any]:
-        """测试生成的艺术作品"""
+        """测试生成的研究产物"""
         start_time = time.time()
         self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代 - 测试阶段")
         
         try:
-            # 这里应该是具体的测试逻辑
-            # 为演示，返回模拟的测试结果
-            test_results = {
-                "tested_at": datetime.now().isoformat(),
-                "artifact_id": artifacts.get("artifact_id", "unknown"),
-                "test_suite": ["unit_tests", "integration_tests", "performance_tests"],
-                "passed": True,
-                "failures": [],
-                "warnings": [],
-                "metrics": {
-                    "execution_time": 0.15,
-                    "memory_usage": 10.5,
-                    "resource_utilization": 0.75,
-                    "quality_score": 0.92,
-                    "confidence_score": 0.88
+            mock_mode = artifacts.get("generation_context", {}).get("mock_mode", False)
+
+            if mock_mode:
+                # mock 降级方案
+                time.sleep(0.05)
+                test_results = {
+                    "tested_at": datetime.now().isoformat(),
+                    "artifact_id": artifacts.get("artifact_id", "unknown"),
+                    "test_suite": ["unit_tests", "integration_tests", "performance_tests"],
+                    "passed": True,
+                    "failures": [],
+                    "warnings": [],
+                    "metrics": {
+                        "execution_time": 0.15,
+                        "memory_usage": 10.5,
+                        "resource_utilization": 0.75,
+                        "quality_score": 0.92,
+                        "confidence_score": 0.88
+                    }
                 }
-            }
-            
-            # 模拟测试过程
-            time.sleep(0.05)  # 模拟测试时间
+            else:
+                # 实际调用 AutomatedTester
+                tester = _get_tester()
+                tester_context = {
+                    "artifacts": artifacts,
+                    "artifact_id": artifacts.get("artifact_id", "unknown"),
+                    "iteration": self.current_iteration,
+                }
+                raw_results = tester.run_all_tests(context=tester_context)
+
+                overall = raw_results.get("overall_summary", {})
+                passed = overall.get("total_failures", 0) == 0 and overall.get("total_errors", 0) == 0
+                failures = []
+                for suite_id, suite_result in raw_results.get("suite_results", {}).items():
+                    for failure in suite_result.get("failures", []):
+                        failures.append(f"[{suite_id}] {failure}")
+
+                test_results = {
+                    "tested_at": datetime.now().isoformat(),
+                    "artifact_id": artifacts.get("artifact_id", "unknown"),
+                    "test_suite": list(raw_results.get("suite_results", {}).keys()),
+                    "passed": passed,
+                    "failures": failures,
+                    "warnings": raw_results.get("warnings", []),
+                    "metrics": {
+                        "execution_time": raw_results.get("execution_time", 0.0),
+                        "memory_usage": overall.get("memory_usage", 0.0),
+                        "resource_utilization": overall.get("resource_utilization", 0.0),
+                        "quality_score": overall.get("quality_score", 0.0),
+                        "confidence_score": overall.get("confidence_score", 0.0),
+                    },
+                    "raw_results": raw_results,
+                }
             
             duration = time.time() - start_time
             self.logger.info(f"测试阶段完成，耗时: {duration:.2f}s")
@@ -297,24 +393,60 @@ class IterationCycle(PhaseTrackerMixin):
         
         try:
             repair_actions = []
-            
-            # 检查测试结果
-            if test_results.get("passed", True) is False:
-                failures = test_results.get("failures", [])
-                for failure in failures:
-                    action = {
-                        "action_type": "repair",
-                        "issue": failure,
-                        "timestamp": datetime.now().isoformat(),
-                        "repaired_by": "automatic",
-                        "details": f"自动修复了问题: {failure}",
-                        "confidence": 0.95
-                    }
-                    repair_actions.append(action)
-                    self.logger.info(f"自动修复问题: {failure}")
-            
-            # 模拟修复过程
-            time.sleep(0.02)  # 模拟修复时间
+            mock_mode = artifacts.get("generation_context", {}).get("mock_mode", False)
+
+            if mock_mode:
+                # mock 降级方案
+                if test_results.get("passed", True) is False:
+                    failures = test_results.get("failures", [])
+                    for failure in failures:
+                        action = {
+                            "action_type": "repair",
+                            "issue": failure,
+                            "timestamp": datetime.now().isoformat(),
+                            "repaired_by": "automatic",
+                            "details": f"自动修复了问题: {failure}",
+                            "confidence": 0.95
+                        }
+                        repair_actions.append(action)
+                        self.logger.info(f"自动修复问题: {failure}")
+                time.sleep(0.02)
+            else:
+                # 实际调用 FixingStage
+                if test_results.get("passed", True) is False:
+                    failures = test_results.get("failures", [])
+                    issues = [
+                        {
+                            "description": failure,
+                            "severity": "high",
+                            "affected_components": [artifacts.get("artifact_id", "unknown")],
+                        }
+                        for failure in failures
+                    ]
+
+                    if issues:
+                        fixing_stage = _get_fixing_stage()
+                        stage_result = fixing_stage.run_fixing_stage(
+                            issues=issues,
+                            context={
+                                "artifacts": artifacts,
+                                "test_results": test_results,
+                                "iteration": self.current_iteration,
+                            },
+                            iteration_id=artifacts.get("artifact_id"),
+                        )
+
+                        for action in stage_result.repair_actions:
+                            repair_actions.append({
+                                "action_type": action.repair_type.value if hasattr(action.repair_type, "value") else str(action.repair_type),
+                                "issue": action.description,
+                                "timestamp": action.end_time or datetime.now().isoformat(),
+                                "repaired_by": "fixing_stage",
+                                "details": action.description,
+                                "confidence": action.confidence,
+                                "success": action.success,
+                                "action_id": action.action_id,
+                            })
             
             duration = time.time() - start_time
             self.logger.info(f"修复阶段完成，耗时: {duration:.2f}s")

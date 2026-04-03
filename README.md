@@ -109,6 +109,22 @@ Docker 容器化
 - 探针验证：`http://127.0.0.1:8000/liveness` 和 `http://127.0.0.1:8000/readiness`
 - 详细步骤见 `DOCKER_DEPLOYMENT.md`
 
+Web 服务启动
+
+```bash
+# 默认启动（监听 0.0.0.0:8000）
+python -m src.web.main
+
+# 指定端口 + 开发热重载
+python -m src.web.main --port 8080 --reload
+```
+
+启动后访问：
+- 登录页面：`http://127.0.0.1:8000/login`
+- 主控台：`http://127.0.0.1:8000/dashboard`
+- API 文档：`http://127.0.0.1:8000/docs`
+- 健康检查：`http://127.0.0.1:8000/health`
+
 Helm Chart
 
 - Chart 路径：`deploy/helm/tcmautoresearch`
@@ -261,15 +277,22 @@ livenessProbe:
 📁 目录结构
 tcmautoresearch/
 ├── src/                    # 源代码目录
-│   ├── core/              # 核心模块
+│   ├── core/              # 核心模块（BaseModule、架构注册）
+│   ├── common/            # 公共工具（@retry、HttpClient、异常体系）
+│   ├── data/              # 数据层（TCM 词典、知识库 JSON）
+│   ├── infra/             # 基础设施（LexiconService、配置加载）
 │   ├── preprocessor/      # 预处理模块
 │   ├── extractors/        # 实体抽取模块
+│   ├── analysis/          # 统一分析上下文（10 个子模块聚合）
 │   ├── semantic_modeling/ # 语义建模模块
 │   ├── reasoning/         # 推理分析模块
-│   ├── output/            # 输出生成模块
+│   ├── output/            # 输出生成（JSON/Markdown/DOCX）
 │   ├── learning/          # 自我学习模块
 │   ├── research/          # 研究框架模块
 │   ├── cycle/             # 迭代循环模块
+│   ├── web/               # Web 服务（FastAPI + JWT + HTMX）
+│   ├── ai_assistant/      # AI 科研助手（意图识别 + 多轮对话）
+│   ├── visualization/     # 可视化（ECharts/Cytoscape JSON）
 │   └── test/              # 测试模块
 ├── tests/                 # 测试文件
 ├── examples/              # 演示示例

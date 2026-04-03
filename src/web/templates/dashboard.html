@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>主控台 — 中医智慧科研平台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+    ></script>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <style>
+      [x-cloak] {
+        display: none !important;
+      }
+      /* HTMX loading indicator */
+      .htmx-indicator {
+        opacity: 0;
+        transition: opacity 300ms ease-in;
+      }
+      .htmx-request .htmx-indicator {
+        opacity: 1;
+      }
+    </style>
+    <script>
+      // ---- JWT helper: attach Authorization header to every HTMX request ----
+      document.addEventListener("htmx:configRequest", function (evt) {
+        var token = localStorage.getItem("access_token");
+        if (token) {
+          evt.detail.headers["Authorization"] = "Bearer " + token;
+        }
+      });
+
+      // If any HTMX response returns 401, redirect to login
+      document.addEventListener("htmx:responseError", function (evt) {
+        if (evt.detail.xhr && evt.detail.xhr.status === 401) {
+          localStorage.removeItem("access_token");
+          localStorage.removeItem("token_type");
+          window.location.href = "/login";
+        }
+      });
+    </script>
+  </head>
+  <body class="min-h-screen bg-gray-50" x-data="dashboardApp()" x-cloak>
+    <!-- ====== Top Bar ====== -->
+    <header
+      class="fixed top-0 inset-x-0 h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 z-30"
+    >
+      <div class="flex items-center gap-3">
+        <button
+          @click="sidebarOpen = !sidebarOpen"
+          class="lg:hidden p-1.5 rounded-lg hover:bg-gray-100"
+        >
+          <svg
+            class="w-5 h-5 text-gray-600"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 6h16M4 12h16M4 18h16"
+            />
+          </svg>
+        </button>
+        <span class="text-xl">🏥</span>
+        <h1 class="text-lg font-bold text-gray-800 hidden sm:block">
+          中医智慧科研平台
+        </h1>
+      </div>
+      <div class="flex items-center gap-4">
+        <span class="text-sm text-gray-600" x-text="'👤 ' + currentUser"></span>
+        <button
+          @click="handleLogout"
+          class="text-sm text-red-600 hover:text-red-800 font-medium transition"
+        >
+          退出登录
+        </button>
+      </div>
+    </header>
+
+    <!-- ====== Sidebar ====== -->
+    <!-- Overlay (mobile) -->
+    <div
+      x-show="sidebarOpen"
+      @click="sidebarOpen = false"
+      class="fixed inset-0 bg-black/30 z-30 lg:hidden"
+      x-transition.opacity
+    ></div>
+
+    <aside
+      :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
+      class="fixed top-14 left-0 bottom-0 w-60 bg-white border-r border-gray-200 z-40 transition-transform duration-200 overflow-y-auto"
+    >
+      <nav class="py-4 space-y-1 px-3">
+        <template x-for="item in navItems" :key="item.id">
+          <button
+            @click="switchTab(item.id)"
+            :class="activeTab === item.id
+                    ? 'bg-emerald-50 text-emerald-700 font-semibold'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
+            class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition"
+          >
+            <span x-text="item.icon" class="text-lg"></span>
+            <span x-text="item.label"></span>
+          </button>
+        </template>
+      </nav>
+    </aside>
+
+    <!-- ====== Main Content Area ====== -->
+    <main class="pt-14 lg:pl-60 min-h-screen">
+      <div class="p-6 max-w-7xl mx-auto space-y-6">
+        <!-- ---- Dashboard Tab ---- -->
+        <template x-if="activeTab === 'dashboard'">
+          <div class="space-y-6">
+            <!-- Stats Row -->
+            <div
+              class="grid grid-cols-2 lg:grid-cols-4 gap-4"
+              hx-get="/api/dashboard/stats"
+              hx-trigger="load"
+              hx-target="#stats-container"
+              hx-indicator="#stats-loading"
+            >
+              <div id="stats-container" class="contents">
+                <div
+                  class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
+                >
+                  <p class="text-xs text-gray-500 uppercase tracking-wide">
+                    进行中项目
+                  </p>
+                  <p class="text-2xl font-bold text-gray-800 mt-1">—</p>
+                </div>
+                <div
+                  class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
+                >
+                  <p class="text-xs text-gray-500 uppercase tracking-wide">
+                    文献总量
+                  </p>
+                  <p class="text-2xl font-bold text-gray-800 mt-1">—</p>
+                </div>
+                <div
+                  class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
+                >
+                  <p class="text-xs text-gray-500 uppercase tracking-wide">
+                    知识实体
+                  </p>
+                  <p class="text-2xl font-bold text-gray-800 mt-1">—</p>
+                </div>
+                <div
+                  class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
+                >
+                  <p class="text-xs text-gray-500 uppercase tracking-wide">
+                    质量均分
+                  </p>
+                  <p class="text-2xl font-bold text-emerald-600 mt-1">—</p>
+                </div>
+              </div>
+              <div
+                id="stats-loading"
+                class="htmx-indicator col-span-full text-center text-sm text-gray-400"
+              >
+                加载中…
+              </div>
+            </div>
+
+            <!-- Current Projects -->
+            <section
+              class="bg-white rounded-xl shadow-sm border border-gray-100"
+            >
+              <div
+                class="px-5 py-4 border-b border-gray-100 flex items-center justify-between"
+              >
+                <h2 class="font-semibold text-gray-800">当前项目操作</h2>
+                <button
+                  class="text-sm text-emerald-600 hover:text-emerald-800 font-medium"
+                  hx-get="/api/projects/recent"
+                  hx-target="#projects-list"
+                  hx-indicator="#proj-loading"
+                >
+                  刷新
+                </button>
+              </div>
+              <div id="projects-list" class="divide-y divide-gray-50">
+                <div class="px-5 py-8 text-center text-sm text-gray-400">
+                  暂无进行中的项目，点击 "科研项目" 创建新项目
+                </div>
+              </div>
+              <div
+                id="proj-loading"
+                class="htmx-indicator text-center text-sm text-gray-400 py-2"
+              >
+                加载中…
+              </div>
+            </section>
+
+            <!-- Quality Score -->
+            <section
+              class="bg-white rounded-xl shadow-sm border border-gray-100"
+              hx-get="/api/dashboard/quality"
+              hx-trigger="load"
+              hx-target="#quality-content"
+              hx-indicator="#quality-loading"
+            >
+              <div class="px-5 py-4 border-b border-gray-100">
+                <h2 class="font-semibold text-gray-800">质量评分概览</h2>
+              </div>
+              <div id="quality-content" class="px-5 py-6">
+                <div class="flex items-center gap-4">
+                  <div
+                    class="w-20 h-20 rounded-full border-4 border-emerald-500 flex items-center justify-center"
+                  >
+                    <span class="text-xl font-bold text-emerald-700">—</span>
+                  </div>
+                  <div class="text-sm text-gray-500 space-y-1">
+                    <p>
+                      完整性：<span class="text-gray-700 font-medium">—</span>
+                    </p>
+                    <p>
+                      准确性：<span class="text-gray-700 font-medium">—</span>
+                    </p>
+                    <p>
+                      可追溯性：<span class="text-gray-700 font-medium">—</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div
+                id="quality-loading"
+                class="htmx-indicator text-center text-sm text-gray-400 py-2"
+              >
+                加载中…
+              </div>
+            </section>
+
+            <!-- Quick Access -->
+            <section>
+              <h2 class="font-semibold text-gray-800 mb-3">快捷入口</h2>
+              <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <button
+                  @click="switchTab('ai_assistant')"
+                  class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center hover:shadow-md hover:border-emerald-200 transition group"
+                >
+                  <span class="text-3xl block mb-2">🤖</span>
+                  <span
+                    class="text-sm font-medium text-gray-700 group-hover:text-emerald-700"
+                    >AI 助手</span
+                  >
+                </button>
+                <button
+                  @click="switchTab('knowledge_graph')"
+                  class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center hover:shadow-md hover:border-emerald-200 transition group"
+                >
+                  <span class="text-3xl block mb-2">🕸️</span>
+                  <span
+                    class="text-sm font-medium text-gray-700 group-hover:text-emerald-700"
+                    >知识图谱</span
+                  >
+                </button>
+                <button
+                  @click="switchTab('literature')"
+                  class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center hover:shadow-md hover:border-emerald-200 transition group"
+                >
+                  <span class="text-3xl block mb-2">📚</span>
+                  <span
+                    class="text-sm font-medium text-gray-700 group-hover:text-emerald-700"
+                    >文献管理</span
+                  >
+                </button>
+                <button
+                  @click="switchTab('analysis')"
+                  class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center hover:shadow-md hover:border-emerald-200 transition group"
+                >
+                  <span class="text-3xl block mb-2">📊</span>
+                  <span
+                    class="text-sm font-medium text-gray-700 group-hover:text-emerald-700"
+                    >分析报告</span
+                  >
+                </button>
+              </div>
+            </section>
+          </div>
+        </template>
+
+        <!-- ---- Other Tabs (placeholder containers with HTMX partial loading) ---- -->
+        <template x-if="activeTab === 'projects'">
+          <div
+            class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
+            hx-get="/api/projects"
+            hx-trigger="load"
+            hx-target="this"
+            hx-indicator="#page-loading"
+          >
+            <h2 class="font-semibold text-gray-800 mb-4">科研项目</h2>
+            <p class="text-sm text-gray-400">加载项目列表…</p>
+          </div>
+        </template>
+
+        <template x-if="activeTab === 'ai_assistant'">
+          <div
+            class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
+            hx-get="/api/ai/assistant"
+            hx-trigger="load"
+            hx-target="this"
+            hx-indicator="#page-loading"
+          >
+            <h2 class="font-semibold text-gray-800 mb-4">AI 助手</h2>
+            <p class="text-sm text-gray-400">加载 AI 助手界面…</p>
+          </div>
+        </template>
+
+        <template x-if="activeTab === 'literature'">
+          <div
+            class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
+            hx-get="/api/literature"
+            hx-trigger="load"
+            hx-target="this"
+            hx-indicator="#page-loading"
+          >
+            <h2 class="font-semibold text-gray-800 mb-4">文献库</h2>
+            <p class="text-sm text-gray-400">加载文献库…</p>
+          </div>
+        </template>
+
+        <template x-if="activeTab === 'knowledge_graph'">
+          <div
+            class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
+            hx-get="/api/knowledge-graph"
+            hx-trigger="load"
+            hx-target="this"
+            hx-indicator="#page-loading"
+          >
+            <h2 class="font-semibold text-gray-800 mb-4">知识图谱</h2>
+            <p class="text-sm text-gray-400">加载知识图谱…</p>
+          </div>
+        </template>
+
+        <template x-if="activeTab === 'analysis'">
+          <div
+            class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
+            hx-get="/api/analysis/tools"
+            hx-trigger="load"
+            hx-target="this"
+            hx-indicator="#page-loading"
+          >
+            <h2 class="font-semibold text-gray-800 mb-4">分析工具</h2>
+            <p class="text-sm text-gray-400">加载分析工具…</p>
+          </div>
+        </template>
+
+        <template x-if="activeTab === 'output'">
+          <div
+            class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
+            hx-get="/api/output"
+            hx-trigger="load"
+            hx-target="this"
+            hx-indicator="#page-loading"
+          >
+            <h2 class="font-semibold text-gray-800 mb-4">输出中心</h2>
+            <p class="text-sm text-gray-400">加载输出列表…</p>
+          </div>
+        </template>
+
+        <template x-if="activeTab === 'settings'">
+          <div
+            class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
+            hx-get="/api/settings"
+            hx-trigger="load"
+            hx-target="this"
+            hx-indicator="#page-loading"
+          >
+            <h2 class="font-semibold text-gray-800 mb-4">系统设置</h2>
+            <p class="text-sm text-gray-400">加载系统设置…</p>
+          </div>
+        </template>
+
+        <!-- Global page-level loading -->
+        <div
+          id="page-loading"
+          class="htmx-indicator text-center text-sm text-gray-400 py-4"
+        >
+          加载中…
+        </div>
+      </div>
+    </main>
+
+    <script>
+      function dashboardApp() {
+        // Redirect to login if no token
+        if (!localStorage.getItem("access_token")) {
+          window.location.href = "/login";
+        }
+
+        return {
+          sidebarOpen: false,
+          activeTab: "dashboard",
+          currentUser: "用户",
+
+          navItems: [
+            { id: "dashboard", icon: "📊", label: "仪表盘" },
+            { id: "projects", icon: "🔬", label: "科研项目" },
+            { id: "ai_assistant", icon: "🤖", label: "AI 助手" },
+            { id: "literature", icon: "📚", label: "文献库" },
+            { id: "knowledge_graph", icon: "🕸️", label: "知识图谱" },
+            { id: "analysis", icon: "🧪", label: "分析工具" },
+            { id: "output", icon: "📤", label: "输出中心" },
+            { id: "settings", icon: "⚙️", label: "系统设置" },
+          ],
+
+          init() {
+            this.loadUserInfo();
+          },
+
+          switchTab(tabId) {
+            this.activeTab = tabId;
+            this.sidebarOpen = false;
+          },
+
+          async loadUserInfo() {
+            var token = localStorage.getItem("access_token");
+            if (!token) return;
+            try {
+              var resp = await fetch("/api/auth/me", {
+                headers: { Authorization: "Bearer " + token },
+              });
+              if (resp.ok) {
+                var data = await resp.json();
+                this.currentUser = data.username || data.user_id || "用户";
+              }
+            } catch (e) {
+              /* ignore */
+            }
+          },
+
+          handleLogout() {
+            localStorage.removeItem("access_token");
+            localStorage.removeItem("token_type");
+            window.location.href = "/login";
+          },
+        };
+      }
+    </script>
+  </body>
+</html>

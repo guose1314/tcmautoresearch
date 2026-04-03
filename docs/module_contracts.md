@@ -4,10 +4,13 @@
 
 ## 1. 分层结构
 
+- L0 基础层: src/common, src/infra
 - L1 核心层: src/core
-- L2 处理层: src/preprocessor, src/extractors, src/semantic_modeling, src/reasoning, src/output, src/learning
+- L2 数据层: src/data
+- L2 处理层: src/preprocessor, src/extractors, src/semantic_modeling, src/reasoning, src/output, src/learning, src/analysis
 - L3 流程层: src/cycle, src/research
-- L4 测试层: tests, integration_tests
+- L4 应用层: src/web, src/ai_assistant, src/visualization
+- L5 测试层: tests, integration_tests
 
 依赖规则:
 - 低层不能反向依赖高层。
@@ -30,6 +33,19 @@
 | src/cycle/test_driven_iteration.py | 测试驱动迭代管理 | test suite/context | TestResult list | unittest (pytest可选) | pytest 仅可选加载，防止运行时硬依赖 |
 | src/research/research_pipeline.py | 科研闭环编排 | cycle context | phase outputs | preprocessor/extractor/LLM | LLMEngine 延迟导入，降低模块导入副作用 |
 | src/llm/llm_engine.py | 本地 GGUF 推理与科研提示词编排 | prompt/system_prompt | model response | llama-cpp-python | 导入失败可诊断、模型路径校验、GPU 参数受控 |
+| src/common/exceptions.py | 统一异常体系（7 种子类） | message/code/detail/context | TCMBaseError 子类 | — | 所有业务异常继承 TCMBaseError，保持可序列化 context |
+| src/common/retry_utils.py | @retry 装饰器（fixed/linear/exponential） | max_attempts/backoff/exceptions | 原函数返回值 | time, asyncio | 支持同步+异步；抖动 ±25% 防惊群 |
+| src/common/http_client.py | 封装 requests.Session（内置重试+超时） | url/params/json | requests.Response | requests, retry_utils | 默认 UA 标识学术爬虫；上下文管理器释放连接 |
+| src/data/tcm_lexicon.py | TCM 词典门面（单例+查询+外部加载） | term(str) | word_type/lookup/stats | infra.lexicon_service | 单例模式，reset_lexicon() 仅用于测试 |
+| src/data/knowledge_base/ | 结构化知识库（5 个 JSON + loaders） | — | Dict/List | json | 启动时一次加载，模块级缓存避免重复 IO |
+| src/analysis/__init__.py | 统一分析上下文（聚合 10 个子模块） | — | 所有分析类 | semantic_modeling, research | 纯重导出层，不含业务逻辑 |
+| src/web/auth.py | JWT 签发/验证/FastAPI 依赖 | user_id/token | access_token/payload | PyJWT, fastapi | 密钥从 secrets.yml 或环境变量加载，不硬编码 |
+| src/web/main.py | FastAPI 入口（路由注册+静态资源） | — | ASGI app | fastapi, uvicorn, Jinja2 | EXPOSE 8000；模板渲染用 Jinja2 |
+| src/web/routes/ | 研究/分析/助手 API 路由 | HTTP request | JSON response | web.auth | 所有写操作需 JWT 鉴权 |
+| src/ai_assistant/assistant_engine.py | AI 对话引擎（意图识别+多轮会话） | message/session_id/context | reply/suggestions/references/intent | LLMEngine（惰性加载） | 无 LLM 时返回占位回复；历史上限截断 |
+| src/ai_assistant/research_advisor.py | 假说/实验/新颖性评估顾问 | question/context | hypothesis/experiment/novelty | LLMEngine | 纯 LLM 驱动，不依赖外部 API |
+| src/ai_assistant/writing_helper.py | IMRD 论文写作 + DOCX 导出 | sections/context | markdown/docx | python-docx | 生成文件写入 output/ |
+| src/visualization/graph_renderer.py | 知识图谱→ECharts/Cytoscape JSON | networkx.Graph/entities | echarts_option/cytoscape_elements | networkx | 纯数据转换，不含渲染依赖 |
 
 ## 3. 流程规范
 

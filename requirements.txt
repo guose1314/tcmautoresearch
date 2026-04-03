@@ -44,6 +44,9 @@ aiohttp
 flask>=2.3,<3.0
 fastapi>=0.110,<1.0
 uvicorn[standard]>=0.29,<1.0
+PyJWT>=2.8,<3.0
+bcrypt>=4.0,<5.0
+Jinja2>=3.1,<4.0                        # FastAPI 模板渲染（login/dashboard）
 
 # 数据库和存储
 sqlalchemy>=2.0,<3.0

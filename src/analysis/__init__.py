@@ -13,13 +13,27 @@
 * :class:`GapAnalyzer`           — 间隙分析
 """
 
+from src.analysis.complexity_dynamics import ComplexityNonlinearDynamicsAnalyzer
 from src.analysis.data_mining import DataMiningService
 from src.analysis.entity_extractor import AdvancedEntityExtractor
+from src.analysis.formula_comparator import FormulaComparator
+from src.analysis.formula_structure import FormulaStructureAnalyzer
 from src.analysis.gap_analyzer import GapAnalysisRequest, GapAnalyzer
+from src.analysis.herb_properties import (
+    HerbPropertyDatabase,
+    HerbTemperature,
+    MeridianType,
+)
+from src.analysis.knowledge_archaeology import ClassicalLiteratureArchaeologyAnalyzer
 from src.analysis.multimodal_fusion import FusionStrategy, MultimodalFusionEngine
+from src.analysis.network_pharmacology import NetworkPharmacologySystemBiologyAnalyzer
+from src.analysis.pharmacology import ModernPharmacologyDatabase, PharmacologicalData
 from src.analysis.preprocessor import DocumentPreprocessor
 from src.analysis.reasoning_engine import ReasoningEngine
+from src.analysis.research_scoring import ResearchScoringPanel
 from src.analysis.semantic_graph import SemanticGraphBuilder
+from src.analysis.summary_analysis import SummaryAnalysisEngine
+from src.analysis.supramolecular import SupramolecularPhysicochemicalAnalyzer
 
 __all__ = [
     "DocumentPreprocessor",
@@ -29,6 +43,19 @@ __all__ = [
     "DataMiningService",
     "MultimodalFusionEngine",
     "FusionStrategy",
+    "FormulaStructureAnalyzer",
+    "FormulaComparator",
+    "HerbTemperature",
+    "MeridianType",
+    "HerbPropertyDatabase",
+    "PharmacologicalData",
+    "ModernPharmacologyDatabase",
+    "NetworkPharmacologySystemBiologyAnalyzer",
+    "SupramolecularPhysicochemicalAnalyzer",
+    "ClassicalLiteratureArchaeologyAnalyzer",
+    "ComplexityNonlinearDynamicsAnalyzer",
+    "ResearchScoringPanel",
+    "SummaryAnalysisEngine",
     "GapAnalyzer",
     "GapAnalysisRequest",
 ]

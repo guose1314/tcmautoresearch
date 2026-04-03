@@ -534,7 +534,7 @@ class TestCoreAndCycleQuality(unittest.TestCase):
     def test_iteration_cycle_export_results_serializes_status_as_string(self):
         cycle = IterationCycle(IterationConfig(export_contract_version="d40.v1"))
         cycle.results.append(
-            cycle.execute_iteration({})
+            cycle.execute_iteration({"mock_mode": True})
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -638,8 +638,8 @@ class TestCoreAndCycleQuality(unittest.TestCase):
         self.assertEqual(cycle.get_module_performance_report()["analysis_summary"]["status"], "needs_followup")
 
     def test_module_iteration_export_module_data_uses_stable_contract(self):
-        cycle = ModuleIterationCycle("reasoning_engine", {"export_contract_version": "d43.v1"})
-        cycle.execute_module_iteration({})
+        cycle = ModuleIterationCycle("reasoning_engine", {"export_contract_version": "d43.v1", "mock_mode": True})
+        cycle.execute_module_iteration({"mock_mode": True})
 
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = os.path.join(temp_dir, "module-data.json")
@@ -657,8 +657,8 @@ class TestCoreAndCycleQuality(unittest.TestCase):
         self.assertEqual(payload["module_report"]["analysis_summary"]["final_status"], "completed")
 
     def test_module_iteration_cleanup_resets_runtime_state(self):
-        cycle = ModuleIterationCycle("reasoning_engine", {"export_contract_version": "d43.v1"})
-        cycle.execute_module_iteration({})
+        cycle = ModuleIterationCycle("reasoning_engine", {"export_contract_version": "d43.v1", "mock_mode": True})
+        cycle.execute_module_iteration({"mock_mode": True})
 
         cleaned = cycle.cleanup()
 
@@ -669,7 +669,7 @@ class TestCoreAndCycleQuality(unittest.TestCase):
     def test_iteration_cycle_cleanup_keeps_shared_executor_available(self):
         cycle = IterationCycle()
         executor = cycle.executor
-        cycle.execute_iteration({})
+        cycle.execute_iteration({"mock_mode": True})
 
         cleaned = cycle._do_cleanup()
 

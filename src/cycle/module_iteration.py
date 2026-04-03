@@ -17,6 +17,14 @@ nx = import_module("networkx")
 
 from src.core.phase_tracker import PhaseTrackerMixin
 
+# 复用 iteration_cycle 中的延迟单例
+from src.cycle.iteration_cycle import (
+    _get_extractor,
+    _get_fixing_stage,
+    _get_preprocessor,
+    _get_tester,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -356,29 +364,57 @@ class ModuleIterationCycle(PhaseTrackerMixin):
         iteration_result.metadata["analysis_summary"] = analysis_summary
 
     def _generate_module_artifact(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """生成模块艺术作品。"""
+        """生成模块研究产物。"""
         self.logger.info(f"生成模块 {self.module_name} 输出")
         start_time = time.time()
 
         try:
-            artifact = {
-                "module": self.module_name,
-                "generated_at": datetime.now().isoformat(),
-                "artifact_id": f"artifact_{self.module_name}_{int(time.time())}",
-                "input_context": context,
-                "quality_metrics": {
-                    "completeness": 0.92,
-                    "accuracy": 0.88,
-                    "consistency": 0.95,
-                    "reliability": 0.90,
-                },
-                "metadata": {
-                    "generation_method": "automated",
-                    "processing_time": time.time() - start_time,
-                },
-            }
+            mock_mode = self.config.get("mock_mode", False) or context.get("mock_mode", False)
 
-            time.sleep(0.05)
+            if mock_mode:
+                time.sleep(0.05)
+                artifact = {
+                    "module": self.module_name,
+                    "generated_at": datetime.now().isoformat(),
+                    "artifact_id": f"artifact_{self.module_name}_{int(time.time())}",
+                    "input_context": context,
+                    "quality_metrics": {
+                        "completeness": 0.92,
+                        "accuracy": 0.88,
+                        "consistency": 0.95,
+                        "reliability": 0.90,
+                    },
+                    "metadata": {
+                        "generation_method": "mock",
+                        "processing_time": time.time() - start_time,
+                    },
+                }
+            else:
+                preprocessor = _get_preprocessor()
+                extractor = _get_extractor()
+
+                preprocess_result = preprocessor.execute(context)
+                extract_context = {**context, "preprocessed": preprocess_result}
+                extract_result = extractor.execute(extract_context)
+
+                artifact = {
+                    "module": self.module_name,
+                    "generated_at": datetime.now().isoformat(),
+                    "artifact_id": f"artifact_{self.module_name}_{int(time.time())}",
+                    "input_context": context,
+                    "preprocess_result": preprocess_result,
+                    "extract_result": extract_result,
+                    "quality_metrics": {
+                        "completeness": float(preprocess_result.get("quality_metrics", {}).get("completeness", 0.0)),
+                        "accuracy": float(extract_result.get("quality_metrics", {}).get("accuracy", 0.0)),
+                        "consistency": float(preprocess_result.get("quality_metrics", {}).get("consistency", 0.0)),
+                        "reliability": 0.90,
+                    },
+                    "metadata": {
+                        "generation_method": "automated",
+                        "processing_time": time.time() - start_time,
+                    },
+                }
 
             self.logger.info(f"模块 {self.module_name} 生成完成")
             return artifact
@@ -392,29 +428,69 @@ class ModuleIterationCycle(PhaseTrackerMixin):
         self.logger.info(f"测试模块 {self.module_name} 输出")
 
         try:
-            test_results = {
-                "module": self.module_name,
-                "tested_at": datetime.now().isoformat(),
-                "artifact_id": artifact.get("artifact_id", "unknown"),
-                "test_suite": ["unit_tests", "integration_tests", "performance_tests"],
-                "passed": True,
-                "failures": [],
-                "warnings": [],
-                "metrics": {
-                    "execution_time": 0.15,
-                    "memory_usage": 10.5,
-                    "resource_utilization": 0.75,
-                    "quality_score": 0.92,
-                    "confidence_score": 0.88,
-                },
-                "validation": {
-                    "academic_compliance": True,
-                    "standard_compliance": True,
-                    "quality_assurance": True,
-                },
-            }
+            mock_mode = self.config.get("mock_mode", False)
 
-            time.sleep(0.03)
+            if mock_mode:
+                time.sleep(0.03)
+                test_results = {
+                    "module": self.module_name,
+                    "tested_at": datetime.now().isoformat(),
+                    "artifact_id": artifact.get("artifact_id", "unknown"),
+                    "test_suite": ["unit_tests", "integration_tests", "performance_tests"],
+                    "passed": True,
+                    "failures": [],
+                    "warnings": [],
+                    "metrics": {
+                        "execution_time": 0.15,
+                        "memory_usage": 10.5,
+                        "resource_utilization": 0.75,
+                        "quality_score": 0.92,
+                        "confidence_score": 0.88,
+                    },
+                    "validation": {
+                        "academic_compliance": True,
+                        "standard_compliance": True,
+                        "quality_assurance": True,
+                    },
+                }
+            else:
+                tester = _get_tester()
+                tester_context = {
+                    "artifacts": artifact,
+                    "artifact_id": artifact.get("artifact_id", "unknown"),
+                    "module": self.module_name,
+                }
+                raw_results = tester.run_all_tests(context=tester_context)
+
+                overall = raw_results.get("overall_summary", {})
+                passed = overall.get("total_failures", 0) == 0 and overall.get("total_errors", 0) == 0
+                failures = []
+                for suite_id, suite_result in raw_results.get("suite_results", {}).items():
+                    for failure in suite_result.get("failures", []):
+                        failures.append(f"[{suite_id}] {failure}")
+
+                test_results = {
+                    "module": self.module_name,
+                    "tested_at": datetime.now().isoformat(),
+                    "artifact_id": artifact.get("artifact_id", "unknown"),
+                    "test_suite": list(raw_results.get("suite_results", {}).keys()),
+                    "passed": passed,
+                    "failures": failures,
+                    "warnings": raw_results.get("warnings", []),
+                    "metrics": {
+                        "execution_time": raw_results.get("execution_time", 0.0),
+                        "memory_usage": overall.get("memory_usage", 0.0),
+                        "resource_utilization": overall.get("resource_utilization", 0.0),
+                        "quality_score": overall.get("quality_score", 0.0),
+                        "confidence_score": overall.get("confidence_score", 0.0),
+                    },
+                    "validation": {
+                        "academic_compliance": True,
+                        "standard_compliance": True,
+                        "quality_assurance": passed,
+                    },
+                    "raw_results": raw_results,
+                }
 
             self.logger.info(f"模块 {self.module_name} 测试完成")
             return test_results
@@ -433,23 +509,60 @@ class ModuleIterationCycle(PhaseTrackerMixin):
 
         try:
             repair_actions = []
+            mock_mode = self.config.get("mock_mode", False)
 
-            if not test_results.get("passed", True):
-                failures = test_results.get("failures", [])
-                for failure in failures:
-                    action = {
-                        "action_type": "repair",
-                        "issue": failure,
-                        "timestamp": datetime.now().isoformat(),
-                        "repaired_by": "automatic",
-                        "details": f"自动修复了问题: {failure}",
-                        "confidence": 0.95,
-                        "priority": "high",
-                    }
-                    repair_actions.append(action)
-                    self.logger.info(f"自动修复问题: {failure}")
+            if mock_mode:
+                if not test_results.get("passed", True):
+                    failures = test_results.get("failures", [])
+                    for failure in failures:
+                        action = {
+                            "action_type": "repair",
+                            "issue": failure,
+                            "timestamp": datetime.now().isoformat(),
+                            "repaired_by": "automatic",
+                            "details": f"自动修复了问题: {failure}",
+                            "confidence": 0.95,
+                            "priority": "high",
+                        }
+                        repair_actions.append(action)
+                        self.logger.info(f"自动修复问题: {failure}")
+                time.sleep(0.02)
+            else:
+                if not test_results.get("passed", True):
+                    failures = test_results.get("failures", [])
+                    issues = [
+                        {
+                            "description": failure,
+                            "severity": "high",
+                            "affected_components": [self.module_name, artifact.get("artifact_id", "unknown")],
+                        }
+                        for failure in failures
+                    ]
 
-            time.sleep(0.02)
+                    if issues:
+                        fixing_stage = _get_fixing_stage()
+                        stage_result = fixing_stage.run_fixing_stage(
+                            issues=issues,
+                            context={
+                                "artifacts": artifact,
+                                "test_results": test_results,
+                                "module": self.module_name,
+                            },
+                            iteration_id=artifact.get("artifact_id"),
+                        )
+
+                        for action in stage_result.repair_actions:
+                            repair_actions.append({
+                                "action_type": action.repair_type.value if hasattr(action.repair_type, "value") else str(action.repair_type),
+                                "issue": action.description,
+                                "timestamp": action.end_time or datetime.now().isoformat(),
+                                "repaired_by": "fixing_stage",
+                                "details": action.description,
+                                "confidence": action.confidence,
+                                "priority": action.priority.value if hasattr(action.priority, "value") else str(action.priority),
+                                "success": action.success,
+                                "action_id": action.action_id,
+                            })
 
             self.logger.info(f"模块 {self.module_name} 修复完成")
             return repair_actions
@@ -473,8 +586,6 @@ class ModuleIterationCycle(PhaseTrackerMixin):
             academic_insights = self._generate_academic_insights(artifacts, test_results, repair_actions)
             recommendations = self._generate_recommendations(artifacts, test_results, repair_actions)
             confidence_scores = self._calculate_confidence_scores(artifacts, test_results, repair_actions)
-
-            time.sleep(0.01)
 
             analysis_results = {
                 "quality_metrics": quality_metrics,

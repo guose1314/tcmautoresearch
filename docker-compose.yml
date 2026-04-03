@@ -10,15 +10,15 @@ services:
     ports:
       - "8000:8000"
     environment:
-      TCM_ENV: development
+      TCM_ENV: production
+      TCM_LOG_LEVEL: WARNING
     volumes:
       - ./config.yml:/app/config.yml:ro
       - ./config:/app/config:ro
-      - ./secrets:/app/secrets:ro
+      - ./secrets.yml:/app/secrets.yml:ro
       - ./output:/app/output
       - ./logs:/app/logs
       - ./data:/app/data
-      - ./models:/app/models
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/liveness', timeout=3).read()"]
       interval: 30s

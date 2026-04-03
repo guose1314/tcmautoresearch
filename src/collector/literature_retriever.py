@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -19,6 +20,8 @@ from datetime import datetime
 from typing import Any, Awaitable, Dict, List, Optional
 
 import httpx
+
+from src.common.retry_utils import retry
 
 PUBMED_EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 SEMANTIC_SCHOLAR_SEARCH = "https://api.semanticscholar.org/graph/v1/paper/search"
@@ -534,20 +537,22 @@ class LiteratureRetriever:
         url: str,
         params: Dict[str, Any],
     ) -> Dict[str, Any]:
-        last_exc: Optional[Exception] = None
-        for attempt in range(self.retry_count + 1):
-            try:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
-                data = response.json()
-                if self.request_interval_sec > 0:
-                    await asyncio.sleep(self.request_interval_sec)
-                return data
-            except Exception as exc:
-                last_exc = exc
-                if attempt < self.retry_count:
-                    await asyncio.sleep(0.4 * (attempt + 1))
-        raise RuntimeError(f"request failed: {url}, params={params}, error={last_exc}")
+        @retry(
+            max_attempts=self.retry_count + 1,
+            backoff_strategy="linear",
+            base_delay=0.4,
+            max_delay=5.0,
+            exceptions=(httpx.HTTPError, RuntimeError),
+        )
+        async def _do() -> Dict[str, Any]:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            if self.request_interval_sec > 0:
+                await asyncio.sleep(self.request_interval_sec)
+            return data
+
+        return await _do()
 
     def _request_text(self, url: str, params: Dict[str, Any]) -> str:
         async def _runner() -> str:
@@ -562,19 +567,21 @@ class LiteratureRetriever:
         url: str,
         params: Dict[str, Any],
     ) -> str:
-        last_exc: Optional[Exception] = None
-        for attempt in range(self.retry_count + 1):
-            try:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
-                if self.request_interval_sec > 0:
-                    await asyncio.sleep(self.request_interval_sec)
-                return response.text
-            except Exception as exc:
-                last_exc = exc
-                if attempt < self.retry_count:
-                    await asyncio.sleep(0.4 * (attempt + 1))
-        raise RuntimeError(f"request failed: {url}, params={params}, error={last_exc}")
+        @retry(
+            max_attempts=self.retry_count + 1,
+            backoff_strategy="linear",
+            base_delay=0.4,
+            max_delay=5.0,
+            exceptions=(httpx.HTTPError, RuntimeError),
+        )
+        async def _do() -> str:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            if self.request_interval_sec > 0:
+                await asyncio.sleep(self.request_interval_sec)
+            return response.text
+
+        return await _do()
 
     def _create_async_client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(headers=dict(self.headers), timeout=self.timeout_sec, follow_redirects=True)

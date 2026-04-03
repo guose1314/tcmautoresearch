@@ -1,13 +1,27 @@
 """高级研究方法模块（架构3.0兼容层）。
 
+.. deprecated::
+    本模块已废弃，请直接从 ``src.analysis`` 导入。
+    例如::
+
+        from src.analysis import FormulaStructureAnalyzer, SummaryAnalysisEngine
+
 说明：
-- 研究方法已按 8 个独立文件拆分至 src/semantic_modeling/methods/。
-- 本文件保留原导入路径，避免现有调用方回归。
+- 研究方法已按独立文件拆分至 src/semantic_modeling/methods/ 及 src/analysis/。
+- 本文件仅保留兼容性重导出，避免现有调用方回归。
 """
 
 import copy
 import json
+import warnings
 from typing import Any, Dict, List, Tuple
+
+warnings.warn(
+    "src.semantic_modeling.research_methods is deprecated, "
+    "import from src.analysis directly",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 from src.semantic_modeling import methods as _methods
 from src.semantic_modeling.methods.integrated_analyzer import (

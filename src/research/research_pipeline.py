@@ -8,10 +8,6 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from src.analysis.entity_extractor import AdvancedEntityExtractor
-from src.analysis.preprocessor import DocumentPreprocessor
-from src.analysis.reasoning_engine import ReasoningEngine
-from src.analysis.semantic_graph import SemanticGraphBuilder
 from src.collector.ctext_corpus_collector import CTextCorpusCollector
 from src.collector.literature_retriever import LiteratureRetriever
 from src.collector.local_collector import LocalCorpusCollector
@@ -84,6 +80,43 @@ except Exception:
 
 ReportGenerator = _ImportedReportGenerator
 
+# 分析模块 — 延迟导入，支持依赖注入
+try:
+    from src.analysis.entity_extractor import (
+        AdvancedEntityExtractor as _ImportedAdvancedEntityExtractor,
+    )
+except Exception:
+    _ImportedAdvancedEntityExtractor = None
+
+AdvancedEntityExtractor = _ImportedAdvancedEntityExtractor
+
+try:
+    from src.analysis.preprocessor import (
+        DocumentPreprocessor as _ImportedDocumentPreprocessor,
+    )
+except Exception:
+    _ImportedDocumentPreprocessor = None
+
+DocumentPreprocessor = _ImportedDocumentPreprocessor
+
+try:
+    from src.analysis.semantic_graph import (
+        SemanticGraphBuilder as _ImportedSemanticGraphBuilder,
+    )
+except Exception:
+    _ImportedSemanticGraphBuilder = None
+
+SemanticGraphBuilder = _ImportedSemanticGraphBuilder
+
+try:
+    from src.analysis.reasoning_engine import (
+        ReasoningEngine as _ImportedReasoningEngine,
+    )
+except Exception:
+    _ImportedReasoningEngine = None
+
+ReasoningEngine = _ImportedReasoningEngine
+
 
 class ResearchPipeline:
     """中医古籍全自动研究系统科研流程管理。"""
@@ -117,10 +150,35 @@ class ResearchPipeline:
         "report_generator": "ReportGenerator",
     }
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        *,
+        preprocessor: Optional[Any] = None,
+        extractor: Optional[Any] = None,
+        graph_builder: Optional[Any] = None,
+        reasoning_engine: Optional[Any] = None,
+        llm_engine: Optional[Any] = None,
+    ):
         self.config = config or {}
         self.event_bus = EventBus()
         self.module_factory = ModuleFactory.from_config(self.config.get("module_factory") or {})
+
+        # 保存注入的实例，供工厂优先使用
+        self._injected: Dict[str, Any] = {}
+        if preprocessor is not None:
+            self._injected["document_preprocessor"] = preprocessor
+        if extractor is not None:
+            self._injected["entity_extractor"] = extractor
+        if graph_builder is not None:
+            self._injected["semantic_graph_builder"] = graph_builder
+        if reasoning_engine is not None:
+            self._injected["reasoning_engine"] = reasoning_engine
+        if llm_engine is not None:
+            self._injected["llm_engine"] = llm_engine
+            # 同时写入 config 供 hypothesis_engine 等组件使用
+            self.config.setdefault("llm_engine", llm_engine)
+
         self._register_default_module_providers()
 
         # 使用全局共享线程池，与 BaseModule 保持一致
@@ -173,6 +231,14 @@ class ResearchPipeline:
     def _register_default_module_providers(self) -> None:
         for key, symbol_name in self._MODULE_KEYS.items():
             if self.module_factory.has(key):
+                continue
+
+            # 若有注入实例，优先使用（忽略后续传入的 config）
+            injected = self._injected.get(key)
+            if injected is not None:
+                def _injected_provider(cfg: Dict[str, Any], _inst=injected):
+                    return _inst
+                self.module_factory.register(key, _injected_provider)
                 continue
 
             def _provider(cfg: Dict[str, Any], _symbol=symbol_name):

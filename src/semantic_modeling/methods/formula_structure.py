@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional
 
+from src.data.knowledge_base import load_formula_structures, load_herb_properties
+
 
 class FormulaDosageForm(Enum):
     """方剂剂型。"""
@@ -60,43 +62,7 @@ class FormulaComposition:
 class FormulaStructureAnalyzer:
     """方剂结构分析器。"""
 
-    FORMULA_STRUCTURES: Dict[str, Dict] = {
-        "补中益气汤": {
-            "dosage_form": "decoction",
-            "sovereign": [{"name": "黄芪", "amount": 15, "unit": "g", "ratio": 0.30}],
-            "minister": [
-                {"name": "人参", "amount": 10, "unit": "g", "ratio": 0.20},
-                {"name": "党参", "amount": 10, "unit": "g", "ratio": 0.20},
-            ],
-            "assistant": [
-                {"name": "白术", "amount": 10, "unit": "g", "ratio": 0.15},
-                {"name": "升麻", "amount": 6, "unit": "g", "ratio": 0.12},
-                {"name": "柴胡", "amount": 6, "unit": "g", "ratio": 0.12},
-            ],
-            "envoy": [
-                {"name": "甘草", "amount": 4, "unit": "g", "ratio": 0.08},
-                {"name": "大枣", "amount": 3, "unit": "枚", "ratio": 0.03},
-            ],
-            "total_dosage": 50,
-            "characteristics": "扶正培本，升阳益气",
-            "pairing_rules": [
-                "黄芪甘温，扶正气之主",
-                "人参、白术健脾益气",
-                "升麻、柴胡升阳举陷",
-                "甘草调和诸药",
-            ],
-        },
-        "四君子汤": {
-            "dosage_form": "decoction",
-            "sovereign": [{"name": "人参", "amount": 10, "unit": "g", "ratio": 0.25}],
-            "minister": [{"name": "白术", "amount": 10, "unit": "g", "ratio": 0.25}],
-            "assistant": [{"name": "茯苓", "amount": 10, "unit": "g", "ratio": 0.25}],
-            "envoy": [{"name": "甘草", "amount": 10, "unit": "g", "ratio": 0.25}],
-            "total_dosage": 40,
-            "characteristics": "脾胃气虚的基础方，比例均等对称",
-            "pairing_rules": ["人参补气健脾", "白术健脾燥湿", "茯苓利水健脾", "甘草调和诸药"],
-        },
-    }
+    FORMULA_STRUCTURES: Dict[str, Dict] = load_formula_structures()
 
     @classmethod
     def analyze_formula_structure(cls, formula_name: str) -> Dict:
@@ -186,63 +152,7 @@ class HerbProperty:
 class HerbPropertyDatabase:
     """药物性味归经数据库。"""
 
-    HERB_PROPERTIES: Dict[str, Dict] = {
-        "黄芪": {
-            "temperature": "warm",
-            "flavors": ["甘"],
-            "meridians": ["lung", "spleen"],
-            "primary_efficacy": "补气、固表",
-            "secondary_efficacy": ["利水", "消肿", "增强免疫"],
-            "toxicity": "low",
-            "dosage": "15-30g",
-        },
-        "人参": {
-            "temperature": "warm",
-            "flavors": ["甘", "微苦"],
-            "meridians": ["spleen", "lung", "heart"],
-            "primary_efficacy": "补气、健脾、生津",
-            "secondary_efficacy": ["安神", "增强体质"],
-            "toxicity": "low",
-            "dosage": "10-15g",
-        },
-        "白术": {
-            "temperature": "warm",
-            "flavors": ["甘", "苦"],
-            "meridians": ["spleen", "stomach"],
-            "primary_efficacy": "健脾、燥湿、补气",
-            "secondary_efficacy": ["安胎", "止汗"],
-            "toxicity": "low",
-            "dosage": "10-15g",
-        },
-        "茯苓": {
-            "temperature": "neutral",
-            "flavors": ["甘", "淡"],
-            "meridians": ["heart", "spleen", "kidney"],
-            "primary_efficacy": "利水、健脾、安神",
-            "secondary_efficacy": ["消肿", "增强免疫"],
-            "toxicity": "low",
-            "dosage": "10-30g",
-        },
-        "甘草": {
-            "temperature": "neutral",
-            "flavors": ["甘"],
-            "meridians": ["all"],
-            "primary_efficacy": "补气、健脾、解毒、调和诸药",
-            "secondary_efficacy": ["缓急止痛", "增强其他药物效果"],
-            "toxicity": "low",
-            "dosage": "3-10g",
-            "note": "使药的代表，常用于调和",
-        },
-        "丹参": {
-            "temperature": "cool",
-            "flavors": ["苦"],
-            "meridians": ["heart", "pericardium", "liver"],
-            "primary_efficacy": "活血、祛瘀、安神",
-            "secondary_efficacy": ["cool_blood", "relieve_pain"],
-            "toxicity": "low",
-            "dosage": "10-15g",
-        },
-    }
+    HERB_PROPERTIES: Dict[str, Dict] = load_herb_properties()
 
     @classmethod
     def get_herb_property(cls, herb_name: str) -> Dict:

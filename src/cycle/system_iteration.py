@@ -18,6 +18,7 @@ nx = import_module("networkx")
 import numpy as np
 
 from src.core.phase_tracker import PhaseTrackerMixin
+from src.cycle.iteration_cycle import _get_tester
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -347,16 +348,18 @@ class SystemIterationCycle(PhaseTrackerMixin):
                     if module_name in self.module_cycles:
                         module_cycle = self.module_cycles[module_name]
                     else:
-                        # 创建新的模块迭代循环
+                        # 创建新的模块迭代循环，传播 mock_mode
                         from .module_iteration import ModuleIterationCycle
-                        module_cycle = ModuleIterationCycle(module_name)
+                        module_config = {"mock_mode": context.get("mock_mode", self.config.get("mock_mode", False))}
+                        module_cycle = ModuleIterationCycle(module_name, module_config)
                         self.module_cycles[module_name] = module_cycle
                     
                     # 执行模块迭代
                     module_context = {
                         "module": module_name,
                         "input_data": context.get("input_data", {}),
-                        "metadata": context.get("metadata", {})
+                        "metadata": context.get("metadata", {}),
+                        "mock_mode": context.get("mock_mode", self.config.get("mock_mode", False)),
                     }
                     
                     result = module_cycle.execute_module_iteration(module_context)
@@ -384,29 +387,68 @@ class SystemIterationCycle(PhaseTrackerMixin):
         start_time = time.time()
         
         try:
-            # 模拟系统级测试
-            system_test_results = {
-                "system_health": "healthy",
-                "performance_score": 0.85,
-                "resource_usage": {
-                    "cpu": 0.65,
-                    "memory": 0.72,
-                    "disk": 0.45
-                },
-                "throughput": 12.5,  # 处理速度
-                "latency": 0.25,     # 响应延迟
-                "reliability": 0.98, # 可靠性
-                "quality_assurance": {
-                    "academic_compliance": True,
-                    "standard_compliance": True,
-                    "quality_metrics": {
-                        "completeness": 0.92,
-                        "accuracy": 0.88,
-                        "consistency": 0.95
-                    }
-                },
-                "test_time": time.time() - start_time
-            }
+            mock_mode = self.config.get("mock_mode", False) or context.get("mock_mode", False)
+
+            if mock_mode:
+                system_test_results = {
+                    "system_health": "healthy",
+                    "performance_score": 0.85,
+                    "resource_usage": {
+                        "cpu": 0.65,
+                        "memory": 0.72,
+                        "disk": 0.45
+                    },
+                    "throughput": 12.5,
+                    "latency": 0.25,
+                    "reliability": 0.98,
+                    "quality_assurance": {
+                        "academic_compliance": True,
+                        "standard_compliance": True,
+                        "quality_metrics": {
+                            "completeness": 0.92,
+                            "accuracy": 0.88,
+                            "consistency": 0.95
+                        }
+                    },
+                    "test_time": time.time() - start_time
+                }
+            else:
+                tester = _get_tester()
+                tester_context = {
+                    "module_results": module_results,
+                    "system_level": True,
+                }
+                raw_results = tester.run_all_tests(context=tester_context)
+
+                overall = raw_results.get("overall_summary", {})
+                execution_time = raw_results.get("execution_time", 0.0)
+                total_tests = overall.get("total_tests", 0)
+                total_passed = overall.get("total_passed", 0)
+                pass_rate = total_passed / total_tests if total_tests > 0 else 0.0
+
+                system_test_results = {
+                    "system_health": "healthy" if pass_rate >= 0.8 else "degraded",
+                    "performance_score": pass_rate,
+                    "resource_usage": {
+                        "cpu": overall.get("cpu_usage", 0.0),
+                        "memory": overall.get("memory_usage", 0.0),
+                        "disk": overall.get("disk_usage", 0.0),
+                    },
+                    "throughput": total_tests / execution_time if execution_time > 0 else 0.0,
+                    "latency": execution_time / total_tests if total_tests > 0 else 0.0,
+                    "reliability": pass_rate,
+                    "quality_assurance": {
+                        "academic_compliance": pass_rate >= 0.8,
+                        "standard_compliance": pass_rate >= 0.7,
+                        "quality_metrics": {
+                            "completeness": pass_rate,
+                            "accuracy": pass_rate,
+                            "consistency": pass_rate,
+                        }
+                    },
+                    "test_time": time.time() - start_time,
+                    "raw_results": raw_results,
+                }
             
             self.logger.info("系统级测试完成")
             return system_test_results

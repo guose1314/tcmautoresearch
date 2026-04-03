@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Set
 import requests
 
 from src.collector.ctext_whitelist import build_batch_manifest, load_whitelist
+from src.common.http_client import HttpClient
 from src.core.module_base import BaseModule
 
 logger = logging.getLogger(__name__)
@@ -29,11 +30,18 @@ class CTextCorpusCollector(BaseModule):
         self.request_interval_sec = float(self.config.get("request_interval_sec", 0.2))
         self.max_depth = int(self.config.get("max_depth", 5))
         self.default_output_dir = self.config.get("output_dir", os.path.join("data", "ctext"))
-        self.session: Optional[requests.Session] = None
+        self._http: Optional[HttpClient] = None
 
     def _do_initialize(self) -> bool:
         try:
-            self.session = requests.Session()
+            self._http = HttpClient(
+                timeout=self.timeout_sec,
+                max_retries=self.retry_count + 1,
+                user_agent=self.config.get(
+                    "user_agent",
+                    "TCM-AutoResearch-CTextCollector/1.0",
+                ),
+            )
             self.logger.info("CText 采集器初始化完成")
             return True
         except Exception as e:
@@ -42,9 +50,9 @@ class CTextCorpusCollector(BaseModule):
 
     def _do_cleanup(self) -> bool:
         try:
-            if self.session:
-                self.session.close()
-                self.session = None
+            if self._http:
+                self._http.close()
+                self._http = None
             return True
         except Exception as e:
             self.logger.error(f"CText 采集器清理失败: {e}")
@@ -220,31 +228,18 @@ class CTextCorpusCollector(BaseModule):
         return self._deduplicate_urns(urns)
 
     def _request_json(self, endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        if self.session is None:
+        if self._http is None:
             raise RuntimeError("采集器未初始化，请先调用 initialize()")
 
         url = f"{self.api_base.rstrip('/')}/{endpoint}"
-        last_error: Optional[Exception] = None
-
-        for attempt in range(self.retry_count + 1):
-            try:
-                response = self.session.get(url, params=params, timeout=self.timeout_sec)
-                response.raise_for_status()
-                data = response.json()
-                if not isinstance(data, dict):
-                    raise ValueError("API 返回不是 JSON 对象")
-                if "error" in data:
-                    raise RuntimeError(f"ctext API 错误: {data['error']}")
-                if self.request_interval_sec > 0:
-                    time.sleep(self.request_interval_sec)
-                return data
-            except Exception as e:
-                last_error = e
-                if attempt < self.retry_count:
-                    backoff = self.retry_backoff_sec * (attempt + 1)
-                    time.sleep(backoff)
-
-        raise RuntimeError(f"请求 ctext API 失败: {endpoint}, params={params}, error={last_error}")
+        data = self._http.get_json(url, params=params)
+        if not isinstance(data, dict):
+            raise ValueError("API 返回不是 JSON 对象")
+        if "error" in data:
+            raise RuntimeError(f"ctext API 错误: {data['error']}")
+        if self.request_interval_sec > 0:
+            time.sleep(self.request_interval_sec)
+        return data
 
     def _deduplicate_urns(self, urns: List[str]) -> List[str]:
         seen: Set[str] = set()
