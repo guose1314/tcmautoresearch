@@ -1,0 +1,250 @@
+"""Architecture 3.0 REST API tests."""
+
+import os
+import tempfile
+import time
+import unittest
+
+from fastapi.testclient import TestClient
+
+from src.api.app import create_app
+from web_console.job_manager import ResearchJobManager
+
+
+class FakeRunner:
+    def __init__(self, _config=None):
+        self._config = _config or {}
+
+    def run(self, payload, emit=None):
+        topic = payload["topic"]
+        if emit is not None:
+            emit("cycle_created", {"topic": topic, "cycle_id": "cycle-rest", "cycle_name": "demo", "scope": "test"})
+            emit("phase_started", {"phase": "observe", "index": 1, "total": 1, "progress": 0.0})
+            emit(
+                "phase_completed",
+                {
+                    "phase": "observe",
+                    "status": "completed",
+                    "duration_sec": 0.01,
+                    "error": "",
+                    "summary": {"observation_count": 1},
+                    "index": 1,
+                    "total": 1,
+                    "progress": 100.0,
+                },
+            )
+            result = {
+                "topic": topic,
+                "cycle_id": "cycle-rest",
+                "status": "completed",
+                "started_at": "2026-03-30T00:00:00",
+                "completed_at": "2026-03-30T00:00:01",
+                "total_duration_sec": 1.0,
+                "phases": [
+                    {"phase": "observe", "status": "completed", "duration_sec": 0.01, "error": "", "summary": {"observation_count": 1}},
+                ],
+                "pipeline_metadata": {"cycle_name": "demo", "scope": "test"},
+            }
+            emit("job_completed", {"status": "completed", "result": result})
+            return _ResultWrapper(result)
+
+        return _ResultWrapper(
+            {
+                "topic": topic,
+                "cycle_id": "cycle-rest-sync",
+                "status": "completed",
+                "started_at": "2026-03-30T00:00:00",
+                "completed_at": "2026-03-30T00:00:01",
+                "total_duration_sec": 1.0,
+                "phases": [],
+                "pipeline_metadata": {"cycle_name": "sync-demo", "scope": "test"},
+            }
+        )
+
+
+class _ResultWrapper:
+    def __init__(self, payload):
+        self._payload = payload
+        self.status = payload["status"]
+
+    def to_dict(self):
+        return self._payload
+
+
+class TestRestApi(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory(dir=os.getcwd())
+        self.manager = ResearchJobManager(
+            runner_factory=lambda config: FakeRunner(config),
+            storage_dir=os.path.join(self.tempdir.name, "jobs"),
+        )
+        app = create_app(job_manager=self.manager)
+        app.state.settings.secrets.pop("security", None)
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        self.manager.close()
+        self.tempdir.cleanup()
+
+    def test_versioned_system_endpoints(self):
+        root_liveness = self.client.get("/liveness")
+        self.assertEqual(root_liveness.status_code, 200)
+        self.assertEqual(root_liveness.json()["probe_type"], "liveness")
+
+        root_readiness = self.client.get("/readiness")
+        self.assertEqual(root_readiness.status_code, 200)
+        self.assertEqual(root_readiness.json()["probe_type"], "readiness")
+
+        health = self.client.get("/api/v1/system/health")
+        self.assertEqual(health.status_code, 200)
+        self.assertEqual(health.json()["status"], "ok")
+        self.assertIn("overall_health", health.json())
+        self.assertIn("checks", health.json())
+
+        liveness = self.client.get("/api/v1/system/liveness")
+        self.assertEqual(liveness.status_code, 200)
+        self.assertEqual(liveness.json()["probe_type"], "liveness")
+
+        readiness = self.client.get("/api/v1/system/readiness")
+        self.assertEqual(readiness.status_code, 200)
+        self.assertEqual(readiness.json()["probe_type"], "readiness")
+
+        status = self.client.get("/api/v1/system/status")
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json()["system_info"]["status"], "running")
+        self.assertIn("health_report", status.json())
+        self.assertIn("monitoring", status.json()["metadata"])
+
+        modules = self.client.get("/api/v1/system/modules")
+        self.assertEqual(modules.status_code, 200)
+        self.assertGreaterEqual(modules.json()["count"], 1)
+
+        metrics = self.client.get("/api/v1/system/metrics")
+        self.assertEqual(metrics.status_code, 200)
+        self.assertIn("jobs", metrics.json())
+        self.assertIn("persistence", metrics.json())
+        self.assertIn("host", metrics.json())
+        self.assertIn("health", metrics.json())
+
+        prometheus_metrics = self.client.get("/api/v1/system/metrics/prometheus")
+        self.assertEqual(prometheus_metrics.status_code, 200)
+        self.assertIn("tcm_system_health_score", prometheus_metrics.text)
+
+    def test_openapi_contains_domain_dtos(self):
+        response = self.client.get("/openapi.json")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        schemas = payload["components"]["schemas"]
+        self.assertIn("ResearchRunRequest", schemas)
+        self.assertIn("ResearchJobAccepted", schemas)
+        self.assertIn("NormalizeDocumentResponse", schemas)
+        self.assertIn("AnalyzeDocumentResponse", schemas)
+        self.assertIn("SystemExportResponse", schemas)
+
+        job_post = payload["paths"]["/api/v1/research/jobs"]["post"]
+        schema_ref = job_post["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+        self.assertTrue(schema_ref.endswith("/ResearchRunRequest"))
+
+    def test_collection_normalize_endpoint(self):
+        response = self.client.post(
+            "/api/v1/collection/documents/normalize",
+            json={
+                "text": "當歸補血湯主治血虛發熱。",
+                "title": "古籍片段",
+                "metadata": {"dynasty": "清"},
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["standard_document"]["metadata"]["dynasty"], "清")
+        self.assertIn("当归补血汤", payload["standard_document"]["text"])
+        self.assertTrue(payload["normalization"]["success"])
+
+    def test_analysis_preview_endpoint(self):
+        response = self.client.post(
+            "/api/v1/analysis/documents/preview",
+            json={"text": "桂枝汤由桂枝、白芍、甘草组成，可治太阳中风。"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertGreaterEqual(payload["analysis_summary"]["entity_count"], 1)
+        self.assertIn("preview_tokens", payload["analysis_summary"])
+        self.assertIn("entities", payload["analysis_result"])
+
+    def test_versioned_research_job_lifecycle(self):
+        create_response = self.client.post("/api/v1/research/jobs", json={"topic": "桂枝汤 REST 研究"})
+        self.assertEqual(create_response.status_code, 202)
+        job_id = create_response.json()["job_id"]
+        self.assertIn("versioned_websocket_url", create_response.json())
+
+        for _ in range(20):
+            status_response = self.client.get(f"/api/v1/research/jobs/{job_id}")
+            payload = status_response.json()
+            if payload["status"] in {"completed", "partial", "failed"}:
+                break
+            time.sleep(0.01)
+
+        self.assertEqual(status_response.status_code, 200)
+        self.assertEqual(payload["status"], "completed")
+
+        report_response = self.client.get(f"/api/v1/research/jobs/{job_id}/report?format=json")
+        self.assertEqual(report_response.status_code, 200)
+        self.assertEqual(report_response.json()["cycle_id"], "cycle-rest")
+
+    def test_websocket_progress_stream_coexists_with_sse(self):
+        create_response = self.client.post("/api/v1/research/jobs", json={"topic": "WebSocket 研究"})
+        self.assertEqual(create_response.status_code, 202)
+        job_id = create_response.json()["job_id"]
+
+        received_events = []
+        with self.client.websocket_connect(f"/api/v1/research/jobs/{job_id}/ws") as websocket:
+            for _ in range(20):
+                event = websocket.receive_json()
+                received_events.append(event["event"])
+                if event["event"] == "job_completed":
+                    break
+
+        self.assertIn("phase_started", received_events)
+        self.assertIn("phase_completed", received_events)
+        self.assertIn("job_completed", received_events)
+
+    def test_system_export_and_persistence_endpoints(self):
+        create_response = self.client.post("/api/v1/research/jobs", json={"topic": "持久化接口研究"})
+        self.assertEqual(create_response.status_code, 202)
+        job_id = create_response.json()["job_id"]
+
+        for _ in range(20):
+            status_response = self.client.get(f"/api/v1/research/jobs/{job_id}")
+            payload = status_response.json()
+            if payload["status"] in {"completed", "partial", "failed"}:
+                break
+            time.sleep(0.01)
+
+        export_response = self.client.post(
+            "/api/v1/system/export",
+            json={"output_name": "rest-api-export.json", "include_payload": True},
+        )
+        self.assertEqual(export_response.status_code, 200)
+        export_payload = export_response.json()
+        self.assertTrue(export_payload["exported"])
+        self.assertTrue(export_payload["output_path"].endswith("rest-api-export.json"))
+        self.assertIn("payload", export_payload)
+
+        inline_export = self.client.get("/api/v1/system/export")
+        self.assertEqual(inline_export.status_code, 200)
+        self.assertIn("system_status", inline_export.json())
+
+        persistence_summary = self.client.get("/api/v1/system/persistence/summary")
+        self.assertEqual(persistence_summary.status_code, 200)
+        self.assertGreaterEqual(persistence_summary.json()["stored_job_count"], 1)
+
+        persisted_jobs = self.client.get("/api/v1/system/persistence/jobs?limit=5")
+        self.assertEqual(persisted_jobs.status_code, 200)
+        jobs_payload = persisted_jobs.json()
+        self.assertTrue(any(item["job_id"] == job_id for item in jobs_payload["jobs"]))
+
+        persisted_job = self.client.get(f"/api/v1/system/persistence/jobs/{job_id}")
+        self.assertEqual(persisted_job.status_code, 200)
+        persisted_payload = persisted_job.json()
+        self.assertEqual(persisted_payload["job"]["job_id"], job_id)
+        self.assertIsInstance(persisted_payload["events"], list)

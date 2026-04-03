@@ -28,6 +28,7 @@ torchvision
 torchaudio
 transformers>=4.20,<5.0
 sentence-transformers>=2.0,<3.0
+# faiss-cpu>=1.8,<2.0            # 可选：向量检索加速；未安装时 embedding_service 自动回退 numpy
 accelerate>=0.10,<1.0
 peft>=0.10,<1.0
 
@@ -44,6 +45,9 @@ aiohttp
 flask>=2.3,<3.0
 fastapi>=0.110,<1.0
 uvicorn[standard]>=0.29,<1.0
+PyJWT>=2.8,<3.0
+bcrypt>=4.0,<5.0
+Jinja2>=3.1,<4.0                        # FastAPI 模板渲染（login/dashboard）
 
 # 数据库和存储
 sqlalchemy>=2.0,<3.0
@@ -52,6 +56,12 @@ sqlalchemy>=2.0,<3.0
 # redis            # 未使用
 # celery           # 未使用
 # rq               # 未使用
+
+# PDF处理和文档解析
+pymupdf>=1.23,<2.0                  # PDF读取（用于PDF论文翻译插件）
+pytesseract>=0.3,<1.0               # OCR 文本识别（需系统安装 Tesseract）
+Pillow>=10.0,<12.0                  # OCR/图片预处理
+# tiktoken>=0.5,<1.0                # Token计数（可选，用于更精确的Token限制）
 
 # 网络分析和图计算
 networkx>=3.0,<4.0
@@ -79,7 +89,7 @@ beautifulsoup4>=4.12,<5.0
 lxml>=5.0,<6.0
 html5lib>=1.1,<2.0
 cssselect>=1.2,<2.0
-# selenium>=4.18,<5.0  # 未使用：无 UI 测试
+selenium>=4.18,<5.0  # 浏览器级 Web Console E2E
 
 # 测试和开发工具
 pytest>=7.4,<9.0

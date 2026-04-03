@@ -7,16 +7,18 @@
 import hashlib
 import json
 import logging
+import os
 import time
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from importlib import import_module
+from typing import Any, Dict, List, Optional
 
-import networkx as nx
+nx = import_module("networkx")
 import numpy as np
-from scipy.stats import entropy
+
+from src.core.phase_tracker import PhaseTrackerMixin
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -380,7 +382,7 @@ class ResearchInsight:
             keywords=data.get("keywords", [])
         )
 
-class TheoreticalFramework:
+class TheoreticalFramework(PhaseTrackerMixin):
     """
     中医古籍全自动研究系统的理论框架
     
@@ -405,6 +407,21 @@ class TheoreticalFramework:
         self.experiments = {}
         self.insights = {}
         self.research_history = []
+        self.failed_operations: List[Dict[str, Any]] = []
+        self.framework_metadata = {
+            "phase_history": [],
+            "phase_timings": {},
+            "completed_phases": [],
+            "failed_phase": None,
+            "final_status": "initialized",
+            "last_completed_phase": None,
+        }
+        self.governance_config = {
+            "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
+            "persist_failed_operations": self.config.get("persist_failed_operations", True),
+            "minimum_validation_rate": float(self.config.get("minimum_validation_rate", 0.5)),
+            "export_contract_version": self.config.get("export_contract_version", "d37.v1"),
+        }
         self.knowledge_graph = nx.MultiDiGraph()
         self.logger = logging.getLogger(__name__)
         
@@ -422,6 +439,92 @@ class TheoreticalFramework:
         self.terminology_dict = self._load_terminology_dict()
         
         self.logger.info("中医研究理论框架初始化完成")
+
+    def _start_operation(self, phase_name: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        phase_entry = {
+            "phase": phase_name,
+            "status": "in_progress",
+            "started_at": datetime.now().isoformat(),
+            "context": self._serialize_value(context or {}),
+        }
+        if self.governance_config.get("enable_phase_tracking", True):
+            self.framework_metadata["phase_history"].append(phase_entry)
+        return phase_entry
+
+    def _complete_operation(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float) -> None:
+        duration = time.perf_counter() - start_time
+        phase_entry["status"] = "completed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        self.framework_metadata["phase_timings"][phase_name] = round(duration, 6)
+        if phase_name not in self.framework_metadata["completed_phases"]:
+            self.framework_metadata["completed_phases"].append(phase_name)
+        self.framework_metadata["last_completed_phase"] = phase_name
+        self.framework_metadata["final_status"] = "completed"
+
+    def _fail_operation(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float, error: str) -> None:
+        duration = time.perf_counter() - start_time
+        phase_entry["status"] = "failed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        phase_entry["error"] = error
+        self.framework_metadata["phase_timings"][phase_name] = round(duration, 6)
+        self.framework_metadata["failed_phase"] = phase_name
+        self.framework_metadata["final_status"] = "failed"
+        if self.governance_config.get("persist_failed_operations", True):
+            self.failed_operations.append(
+                {
+                    "operation": phase_name,
+                    "error": error,
+                    "details": self._serialize_value(phase_entry.get("context", {})),
+                    "timestamp": datetime.now().isoformat(),
+                    "duration_seconds": round(duration, 6),
+                }
+            )
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        return self._build_runtime_metadata_from_dict(self.framework_metadata)
+
+    def _build_analysis_summary(self) -> Dict[str, Any]:
+        validated_hypotheses = sum(1 for h in self.hypotheses.values() if h.status == HypothesisStatus.VALIDATED)
+        active_hypotheses = sum(1 for h in self.hypotheses.values() if h.status == HypothesisStatus.ACTIVE)
+        minimum_validation_rate = self.governance_config["minimum_validation_rate"]
+        validation_rate = float(self.research_metrics.get("validation_rate", 0.0))
+        stable = validation_rate >= minimum_validation_rate or validated_hypotheses > 0
+        if not self.hypotheses and not self.experiments and not self.insights:
+            status = "idle"
+        elif self.failed_operations:
+            status = "needs_followup"
+        else:
+            status = "stable" if stable else "in_progress"
+
+        return {
+            "status": status,
+            "hypotheses_count": len(self.hypotheses),
+            "experiments_count": len(self.experiments),
+            "insights_count": len(self.insights),
+            "active_hypotheses": active_hypotheses,
+            "validated_hypotheses": validated_hypotheses,
+            "validation_rate": validation_rate,
+            "knowledge_graph_ready": self.knowledge_graph.number_of_nodes() > 0,
+            "failed_operation_count": len(self.failed_operations),
+            "last_completed_phase": self.framework_metadata.get("last_completed_phase", ""),
+            "failed_phase": self.framework_metadata.get("failed_phase", ""),
+            "final_status": self.framework_metadata.get("final_status", "initialized"),
+        }
+
+    def _build_report_metadata(self) -> Dict[str, Any]:
+        return {
+            "contract_version": self.governance_config["export_contract_version"],
+            "generated_at": datetime.now().isoformat(),
+            "result_schema": "theoretical_framework_report",
+            "history_entries": len(self.research_history),
+            "completed_phases": list(self.framework_metadata.get("completed_phases", [])),
+            "failed_phase": self.framework_metadata.get("failed_phase"),
+            "failed_operation_count": len(self.failed_operations),
+            "final_status": self.framework_metadata.get("final_status", "initialized"),
+            "last_completed_phase": self.framework_metadata.get("last_completed_phase"),
+        }
     
     def _load_terminology_dict(self) -> Dict[str, Any]:
         """
@@ -452,7 +555,8 @@ class TheoreticalFramework:
         Returns:
             ResearchHypothesis: 生成的研究假设
         """
-        start_time = time.time()
+        start_time = time.perf_counter()
+        phase_entry = self._start_operation("generate_hypothesis", {"has_text": bool(context.get("text_content")), "domain": context.get("domain", ResearchDomain.FORMULA_RESEARCH)})
         
         try:
             # 从上下文中提取信息
@@ -496,14 +600,16 @@ class TheoreticalFramework:
                 "timestamp": datetime.now().isoformat(),
                 "action": "hypothesis_generated",
                 "hypothesis_id": hypothesis_id,
-                "duration": time.time() - start_time
+                "duration": round(time.perf_counter() - start_time, 6)
             })
+            self._complete_operation("generate_hypothesis", phase_entry, start_time)
             
             self.logger.info(f"假设生成完成: {hypothesis.title}")
             return hypothesis
             
         except Exception as e:
             self.logger.error(f"假设生成失败: {e}")
+            self._fail_operation("generate_hypothesis", phase_entry, start_time, str(e))
             raise
     
     def _generate_hypothesis_content(self, text_content: str, domain: ResearchDomain) -> tuple:
@@ -548,7 +654,7 @@ class TheoreticalFramework:
         keywords = []
         
         # 基于专业术语词典提取关键词
-        for category, terms in self.terminology_dict.items():
+        for terms in self.terminology_dict.values():
             for term in terms:
                 if term in text:
                     keywords.append(term)
@@ -568,7 +674,8 @@ class TheoreticalFramework:
         Returns:
             ResearchExperiment: 实验设计
         """
-        start_time = time.time()
+        start_time = time.perf_counter()
+        phase_entry = self._start_operation("design_experiment", {"hypothesis_id": hypothesis.hypothesis_id, "context_keys": sorted((context or {}).keys())})
         
         try:
             # 生成实验ID
@@ -576,6 +683,9 @@ class TheoreticalFramework:
             
             # 基于假设生成实验设计
             experiment_title, experiment_description = self._generate_experiment_content(hypothesis)
+            resolved_context = context or {}
+            evidence_profile = resolved_context.get("evidence_profile") or {}
+            source_weights = resolved_context.get("source_weights") or []
             
             # 创建实验
             experiment = ResearchExperiment(
@@ -583,16 +693,20 @@ class TheoreticalFramework:
                 hypothesis_id=hypothesis.hypothesis_id,
                 title=experiment_title,
                 description=experiment_description,
-                experimental_design="controlled_study",
-                methodology="data_analysis",
-                sample_size=100,
-                duration=30,
+                experimental_design=self._resolve_experimental_design(resolved_context, evidence_profile, source_weights),
+                methodology=self._resolve_experiment_methodology(resolved_context, evidence_profile),
+                sample_size=self._resolve_experiment_sample_size(resolved_context, evidence_profile),
+                duration=self._resolve_experiment_duration(resolved_context, evidence_profile),
                 phase="planning",
-                expected_results="验证假设的有效性",
-                validation_criteria="统计显著性(p<0.05)",
-                quality_score=0.85,
-                reproducibility_score=0.9,
-                scientific_validity=0.95,
+                conditions=self._resolve_experiment_conditions(resolved_context, evidence_profile),
+                controls=self._resolve_experiment_controls(resolved_context, evidence_profile),
+                data_collection_methods=self._resolve_data_collection_methods(resolved_context, evidence_profile),
+                data_sources=self._resolve_data_sources(resolved_context, source_weights),
+                expected_results=self._resolve_expected_results(hypothesis, resolved_context, evidence_profile),
+                validation_criteria=self._resolve_validation_criteria(resolved_context, evidence_profile),
+                quality_score=self._resolve_quality_score(evidence_profile),
+                reproducibility_score=self._resolve_reproducibility_score(evidence_profile),
+                scientific_validity=self._resolve_scientific_validity(evidence_profile),
                 tags=["designed", "automated", "tcmautoresearch"],
                 categories=["formal", "scientific"]
             )
@@ -609,15 +723,184 @@ class TheoreticalFramework:
                 "action": "experiment_designed",
                 "experiment_id": experiment_id,
                 "hypothesis_id": hypothesis.hypothesis_id,
-                "duration": time.time() - start_time
+                "duration": round(time.perf_counter() - start_time, 6)
             })
+            self._complete_operation("design_experiment", phase_entry, start_time)
             
             self.logger.info(f"实验设计完成: {experiment.title}")
             return experiment
             
         except Exception as e:
             self.logger.error(f"实验设计失败: {e}")
+            self._fail_operation("design_experiment", phase_entry, start_time, str(e))
             raise
+
+    def _resolve_experimental_design(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+        source_weights: List[Dict[str, Any]],
+    ) -> str:
+        if context.get("experimental_design"):
+            return str(context["experimental_design"])
+        if evidence_profile.get("clinical_gap_available"):
+            return "gap_informed_controlled_study"
+        if len(source_weights) >= 2:
+            return "multisource_controlled_study"
+        if int(evidence_profile.get("record_count") or 0) > 0:
+            return "evidence_weighted_controlled_study"
+        return "controlled_study"
+
+    def _resolve_experiment_methodology(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> str:
+        if context.get("methodology"):
+            return str(context["methodology"])
+        if str(evidence_profile.get("highest_gap_priority") or "低") == "高":
+            return "high_priority_gap_escalated_validation"
+        if evidence_profile.get("clinical_gap_available"):
+            return "gap_informed_evidence_weighted_analysis"
+        if float(evidence_profile.get("weighted_evidence_score") or 0.0) >= 0.5:
+            return "multisource_weighted_comparative_analysis"
+        if int(evidence_profile.get("record_count") or 0) > 0:
+            return "evidence_weighted_analysis"
+        return "data_analysis"
+
+    def _resolve_experiment_sample_size(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> int:
+        if context.get("sample_size"):
+            return int(context["sample_size"])
+        record_count = int(evidence_profile.get("record_count") or 0)
+        dimension_count = int(evidence_profile.get("dimension_count") or 0)
+        weighted_score = float(evidence_profile.get("weighted_evidence_score") or 0.0)
+        high_gap_count = int(evidence_profile.get("gap_high_count") or 0)
+        medium_gap_count = int(evidence_profile.get("gap_medium_count") or 0)
+        sample_size = 48 + record_count * 10 + dimension_count * 5 + int(weighted_score * 30)
+        sample_size += high_gap_count * 18 + medium_gap_count * 8
+        if str(evidence_profile.get("highest_gap_priority") or "低") == "高":
+            sample_size += 16
+        return max(48, min(sample_size, 240))
+
+    def _resolve_experiment_duration(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> int:
+        if context.get("duration_days"):
+            return int(context["duration_days"])
+        duration = 14 + int(evidence_profile.get("dimension_count") or 0) * 3 + int(evidence_profile.get("record_count") or 0)
+        if evidence_profile.get("clinical_gap_available"):
+            duration += 5
+        return max(14, min(duration, 90))
+
+    def _resolve_experiment_conditions(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return {
+            "research_scope": context.get("research_scope", ""),
+            "validation_plan": context.get("validation_plan", ""),
+            "weighted_evidence_score": float(evidence_profile.get("weighted_evidence_score") or 0.0),
+            "evidence_priority_titles": context.get("evidence_priority_titles") or [],
+            "clinical_gap_available": bool(evidence_profile.get("clinical_gap_available")),
+            "highest_gap_priority": str(evidence_profile.get("highest_gap_priority") or "低"),
+        }
+
+    def _resolve_experiment_controls(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> List[str]:
+        controls = [
+            "证据矩阵覆盖度分层对照",
+            "跨来源文献一致性对照",
+        ]
+        if context.get("contradiction_signals"):
+            controls.append("冲突证据复核对照")
+        if evidence_profile.get("clinical_gap_available"):
+            controls.append("临床证据缺口优先级对照")
+        return controls
+
+    def _resolve_data_collection_methods(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> List[str]:
+        methods = ["evidence_matrix_review"]
+        if int(evidence_profile.get("record_count") or 0) > 0:
+            methods.append("weighted_literature_comparison")
+        if evidence_profile.get("clinical_gap_available"):
+            methods.append("clinical_gap_validation")
+        if context.get("supporting_signals"):
+            methods.append("supporting_signal_traceback")
+        return methods
+
+    def _resolve_data_sources(
+        self,
+        context: Dict[str, Any],
+        source_weights: List[Dict[str, Any]],
+    ) -> List[str]:
+        explicit_sources = context.get("data_sources") or []
+        if explicit_sources:
+            return [str(item) for item in explicit_sources if str(item).strip()]
+        sources = [str(item.get("label") or item.get("source") or "").strip() for item in source_weights]
+        return [item for item in sources if item]
+
+    def _resolve_expected_results(
+        self,
+        hypothesis: ResearchHypothesis,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> str:
+        validation_plan = str(context.get("validation_plan") or "验证假设的有效性")
+        if int(evidence_profile.get("record_count") or 0) > 0:
+            return (
+                f"围绕{hypothesis.title}完成加权证据验证，"
+                f"重点覆盖 {evidence_profile.get('record_count', 0)} 条文献证据与"
+                f" {evidence_profile.get('dimension_count', 0)} 个证据维度；{validation_plan}"
+            )
+        return validation_plan
+
+    def _resolve_validation_criteria(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+    ) -> str:
+        if context.get("validation_criteria"):
+            return str(context["validation_criteria"])
+        weighted_score = float(evidence_profile.get("weighted_evidence_score") or 0.0)
+        return (
+            "统计显著性(p<0.05) + 跨来源一致性 + "
+            f"证据加权得分>= {max(0.3, round(weighted_score, 2))}"
+        )
+
+    def _resolve_quality_score(self, evidence_profile: Dict[str, Any]) -> float:
+        base = 0.72
+        score = base + min(0.18, float(evidence_profile.get("weighted_evidence_score") or 0.0) * 0.2)
+        score += min(0.05, float(evidence_profile.get("source_balance") or 0.0) * 0.05)
+        if evidence_profile.get("clinical_gap_available"):
+            score += 0.03
+        return round(min(score, 0.98), 4)
+
+    def _resolve_reproducibility_score(self, evidence_profile: Dict[str, Any]) -> float:
+        score = 0.78 + min(0.12, float(evidence_profile.get("source_balance") or 0.0) * 0.12)
+        if int(evidence_profile.get("record_count") or 0) >= 3:
+            score += 0.03
+        return round(min(score, 0.96), 4)
+
+    def _resolve_scientific_validity(self, evidence_profile: Dict[str, Any]) -> float:
+        score = 0.8 + min(0.12, float(evidence_profile.get("weighted_evidence_score") or 0.0) * 0.15)
+        if int(evidence_profile.get("dimension_count") or 0) >= 3:
+            score += 0.02
+        if evidence_profile.get("clinical_gap_available"):
+            score += 0.02
+        return round(min(score, 0.97), 4)
     
     def _generate_experiment_content(self, hypothesis: ResearchHypothesis) -> tuple:
         """
@@ -648,7 +931,8 @@ class TheoreticalFramework:
         Returns:
             ResearchInsight: 研究洞察
         """
-        start_time = time.time()
+        start_time = time.perf_counter()
+        phase_entry = self._start_operation("generate_insight", {"hypothesis_id": hypothesis.hypothesis_id, "experiment_id": experiment.experiment_id})
         
         try:
             # 生成洞察ID
@@ -686,14 +970,16 @@ class TheoreticalFramework:
                 "action": "insight_generated",
                 "insight_id": insight_id,
                 "hypothesis_id": hypothesis.hypothesis_id,
-                "duration": time.time() - start_time
+                "duration": round(time.perf_counter() - start_time, 6)
             })
+            self._complete_operation("generate_insight", phase_entry, start_time)
             
             self.logger.info(f"研究洞察生成完成: {insight.title}")
             return insight
             
         except Exception as e:
             self.logger.error(f"研究洞察生成失败: {e}")
+            self._fail_operation("generate_insight", phase_entry, start_time, str(e))
             raise
     
     def _generate_insight_content(self, hypothesis: ResearchHypothesis, 
@@ -729,9 +1015,12 @@ class TheoreticalFramework:
         Returns:
             bool: 验证是否成功
         """
+        start_time = time.perf_counter()
         try:
+            phase_entry = self._start_operation("validate_hypothesis", {"hypothesis_id": hypothesis_id, "validation_result": validation_result})
             if hypothesis_id not in self.hypotheses:
                 self.logger.warning(f"假设 {hypothesis_id} 不存在")
+                self._fail_operation("validate_hypothesis", phase_entry, start_time, f"假设 {hypothesis_id} 不存在")
                 return False
             
             hypothesis = self.hypotheses[hypothesis_id]
@@ -763,11 +1052,14 @@ class TheoreticalFramework:
                 "result": validation_result,
                 "feedback": feedback
             })
+            self._complete_operation("validate_hypothesis", phase_entry, start_time)
             
             return True
             
         except Exception as e:
             self.logger.error(f"假设验证失败: {e}")
+            if 'phase_entry' in locals():
+                self._fail_operation("validate_hypothesis", phase_entry, start_time, str(e))
             return False
     
     def _update_research_metrics(self):
@@ -802,7 +1094,7 @@ class TheoreticalFramework:
             Dict[str, Any]: 研究摘要信息
         """
         return {
-            "research_metrics": self.research_metrics,
+            "research_metrics": self._serialize_value(self.research_metrics),
             "hypotheses_count": len(self.hypotheses),
             "experiments_count": len(self.experiments),
             "insights_count": len(self.insights),
@@ -810,7 +1102,12 @@ class TheoreticalFramework:
                                     if h.status == HypothesisStatus.ACTIVE]),
             "validated_hypotheses": len([h for h in self.hypotheses.values() 
                                        if h.status == HypothesisStatus.VALIDATED]),
-            "recent_activity": self.research_history[-10:] if self.research_history else []
+            "recent_activity": self._serialize_value(self.research_history[-10:] if self.research_history else []),
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "analysis_summary": self._build_analysis_summary(),
+            "report_metadata": self._build_report_metadata(),
+            "metadata": self._build_runtime_metadata(),
+            "framework_metadata": self._build_runtime_metadata(),
         }
     
     def get_hypothesis_by_id(self, hypothesis_id: str) -> Optional[ResearchHypothesis]:
@@ -868,6 +1165,8 @@ class TheoreticalFramework:
             Dict[str, Any]: 知识图谱数据
         """
         try:
+            start_time = time.perf_counter()
+            phase_entry = self._start_operation("build_knowledge_graph")
             # 清空现有图
             self.knowledge_graph.clear()
             
@@ -932,14 +1231,14 @@ class TheoreticalFramework:
                     {
                         "id": node,
                         "type": data.get("type", "unknown"),
-                        "data": data
+                        "data": self._serialize_value(data)
                     } for node, data in self.knowledge_graph.nodes(data=True)
                 ],
                 "edges": [
                     {
                         "source": edge[0],
                         "target": edge[1],
-                        "attributes": edge[2]
+                        "attributes": self._serialize_value(edge[2])
                     } for edge in self.knowledge_graph.edges(data=True)
                 ],
                 "graph_properties": {
@@ -955,11 +1254,14 @@ class TheoreticalFramework:
                 }
             }
             
+            self._complete_operation("build_knowledge_graph", phase_entry, start_time)
             self.logger.info("知识图谱构建完成")
             return graph_data
             
         except Exception as e:
             self.logger.error(f"知识图谱构建失败: {e}")
+            if 'phase_entry' in locals():
+                self._fail_operation("build_knowledge_graph", phase_entry, start_time, str(e))
             raise
     
     def export_research_data(self, output_path: str) -> bool:
@@ -972,28 +1274,71 @@ class TheoreticalFramework:
         Returns:
             bool: 导出是否成功
         """
+        start_time = time.perf_counter()
+        phase_entry = self._start_operation("export_research_data", {"output_path": output_path})
         try:
             research_data = {
+                "report_metadata": {
+                    **self._build_report_metadata(),
+                    "output_path": output_path,
+                    "exported_file": os.path.basename(output_path),
+                },
                 "framework_info": {
                     "version": "2.0.0",
                     "generated_at": datetime.now().isoformat(),
-                    "research_metrics": self.research_metrics
+                    "research_metrics": self._serialize_value(self.research_metrics)
                 },
                 "hypotheses": [h.to_dict() for h in self.hypotheses.values()],
                 "experiments": [e.to_dict() for e in self.experiments.values()],
                 "insights": [i.to_dict() for i in self.insights.values()],
-                "research_history": self.research_history,
-                "knowledge_graph": self.build_knowledge_graph()
+                "research_history": self._serialize_value(self.research_history),
+                "failed_operations": self._serialize_value(self.failed_operations),
+                "metadata": self._build_runtime_metadata(),
+                "research_summary": self.get_research_summary(),
+                "knowledge_graph": self._serialize_value(self.build_knowledge_graph())
             }
             
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(research_data, f, ensure_ascii=False, indent=2)
+            self._complete_operation("export_research_data", phase_entry, start_time)
             
             self.logger.info(f"研究数据已导出到: {output_path}")
             return True
             
         except Exception as e:
+            self._fail_operation("export_research_data", phase_entry, start_time, str(e))
             self.logger.error(f"研究数据导出失败: {e}")
+            return False
+
+    def cleanup(self) -> bool:
+        """清理理论框架运行态资源。"""
+        try:
+            self.hypotheses.clear()
+            self.experiments.clear()
+            self.insights.clear()
+            self.research_history.clear()
+            self.failed_operations.clear()
+            self.knowledge_graph.clear()
+            self.research_metrics = {
+                "hypotheses_count": 0,
+                "experiments_count": 0,
+                "insights_count": 0,
+                "validation_rate": 0.0,
+                "novation_score": 0.0,
+                "practical_impact": 0.0
+            }
+            self.framework_metadata = {
+                "phase_history": [],
+                "phase_timings": {},
+                "completed_phases": [],
+                "failed_phase": None,
+                "final_status": "cleaned",
+                "last_completed_phase": None,
+            }
+            self.logger.info("中医研究理论框架资源清理完成")
+            return True
+        except Exception as e:
+            self.logger.error(f"中医研究理论框架资源清理失败: {e}")
             return False
 
 # 导出主要类和函数

@@ -101,18 +101,198 @@ cp config.yaml.example config.yaml
 
 # 下载预训练模型
 # 请从官方渠道下载所需模型文件至 models/ 目录
+
+Docker 容器化
+
+- 构建镜像：`docker build -t tcmautoresearch:local .`
+- 本地运行：`docker compose up -d --build`
+- 探针验证：`http://127.0.0.1:8000/liveness` 和 `http://127.0.0.1:8000/readiness`
+- 详细步骤见 `DOCKER_DEPLOYMENT.md`
+
+Web 服务启动
+
+```bash
+# 默认启动（监听 0.0.0.0:8000）
+python -m src.web.main
+
+# 指定端口 + 开发热重载
+python -m src.web.main --port 8080 --reload
+```
+
+启动后访问：
+- 登录页面：`http://127.0.0.1:8000/login`
+- 主控台：`http://127.0.0.1:8000/dashboard`
+- API 文档：`http://127.0.0.1:8000/docs`
+- 健康检查：`http://127.0.0.1:8000/health`
+
+Helm Chart
+
+- Chart 路径：`deploy/helm/tcmautoresearch`
+- 安装命令：`helm upgrade --install tcmautoresearch ./deploy/helm/tcmautoresearch -n tcm --create-namespace`
+- 使用已有 Secret：`--set secrets.create=false --set secrets.existingSecret=tcmautoresearch-secrets`
+
+Secrets 管理
+
+敏感信息不要再写进 `config.yml`。当前仓库统一支持三种注入方式，优先级从低到高如下：
+- `secrets.yml`：所有环境共享的基础敏感项。
+- `secrets/<environment>.yml`：环境隔离的敏感项，例如 `secrets/development.yml`、`secrets/production.yml`。
+- secrets 环境变量：适合 CI/CD、Kubernetes 和临时覆盖。
+
+当前已接入统一 secrets 管理的敏感项包括：
+- `monitoring.alerting.email.password`
+- `monitoring.alerting.webhook_url`
+- `models.llm.api_key`
+- `clinical_gap_analysis.api_key`
+- `literature_retrieval.pubmed_email`
+- `literature_retrieval.pubmed_api_key`
+- `literature_retrieval.source_credentials.google_scholar.api_key`
+- `literature_retrieval.source_credentials.cochrane.api_key`
+- `literature_retrieval.source_credentials.embase.api_key`
+- `literature_retrieval.source_credentials.scopus.api_key`
+- `literature_retrieval.source_credentials.web_of_science.api_key`
+- `literature_retrieval.source_credentials.lexicomp.api_key`
+- `literature_retrieval.source_credentials.clinicalkey.api_key`
+
+本地开发建议：
+
+```yaml
+# secrets/development.yml
+models:
+  llm:
+    api_key: "sk-local-xxx"
+
+literature_retrieval:
+  pubmed_email: "developer@example.com"
+  pubmed_api_key: "pubmed-local-key"
+
+monitoring:
+  alerting:
+    email:
+      password: "local-smtp-password"
+    webhook_url: "https://hooks.example.com/dev"
+```
+
+CI 或 Kubernetes 建议直接注入环境变量，不落地明文文件：
+
+```powershell
+$env:TCM_SECRET__MODELS__LLM__API_KEY = "sk-ci-xxx"
+$env:TCM_SECRET__LITERATURE_RETRIEVAL__PUBMED_API_KEY = "pubmed-ci-key"
+$env:TCM_SECRET__MONITORING__ALERTING__WEBHOOK_URL = "https://hooks.example.com/ci"
+```
+
+Kubernetes Secret 注入示例：
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tcmautoresearch-secrets
+type: Opaque
+stringData:
+  TCM_SECRET__MODELS__LLM__API_KEY: "sk-prod-xxx"
+  TCM_SECRET__CLINICAL_GAP_ANALYSIS__API_KEY: "sk-gap-prod-xxx"
+  TCM_SECRET__LITERATURE_RETRIEVAL__PUBMED_EMAIL: "research@example.com"
+  TCM_SECRET__LITERATURE_RETRIEVAL__PUBMED_API_KEY: "pubmed-prod-key"
+  TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__SCOPUS__API_KEY: "scopus-prod-key"
+  TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__WEB_OF_SCIENCE__API_KEY: "wos-prod-key"
+  TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__EMBASE__API_KEY: "embase-prod-key"
+  TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__COCHRANE__API_KEY: "cochrane-prod-key"
+  TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__LEXICOMP__API_KEY: "lexicomp-prod-key"
+  TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__CLINICALKEY__API_KEY: "clinicalkey-prod-key"
+  TCM_SECRET__MONITORING__ALERTING__EMAIL__PASSWORD: "smtp-prod-password"
+  TCM_SECRET__MONITORING__ALERTING__WEBHOOK_URL: "https://hooks.example.com/prod"
+```
+
+```yaml
+envFrom:
+  - secretRef:
+      name: tcmautoresearch-secrets
+```
+
+可直接部署的完整示例清单见 `deploy/k8s/tcmautoresearch-deployment.example.yaml`，已包含 Secret、Deployment、Service，以及 readiness/liveness probes。
+
+Kubernetes 探针示例
+
+系统现在同时提供根路径探针和版本化系统探针：
+- 根路径：`/liveness`、`/readiness`
+- 系统路由：`/api/v1/system/liveness`、`/api/v1/system/readiness`
+
+部署到 Kubernetes、Ingress 或反向代理时，优先使用根路径探针，避免把探测配置绑定到 API 版本前缀。
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tcmautoresearch-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tcmautoresearch-api
+  template:
+    metadata:
+      labels:
+        app: tcmautoresearch-api
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/guose1314/tcmautoresearch:latest
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /readiness
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /liveness
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+```
+
+如果部署的是 Web Console 进程，也可以使用同样的探针路径：
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /readiness
+    port: 8000
+livenessProbe:
+  httpGet:
+    path: /liveness
+    port: 8000
+```
+
+探针语义：
+- `liveness` 用于判定进程是否存活，失败时建议由平台重启容器。
+- `readiness` 用于判定业务是否可接流量，失败时应从 Service Endpoint 中摘除。
+- `degraded` 状态仍返回 HTTP 200，只有 `error` 才返回 HTTP 503。
 📁 目录结构
 tcmautoresearch/
 ├── src/                    # 源代码目录
-│   ├── core/              # 核心模块
+│   ├── core/              # 核心模块（BaseModule、架构注册）
+│   ├── common/            # 公共工具（@retry、HttpClient、异常体系）
+│   ├── data/              # 数据层（TCM 词典、知识库 JSON）
+│   ├── infra/             # 基础设施（LexiconService、配置加载）
 │   ├── preprocessor/      # 预处理模块
 │   ├── extractors/        # 实体抽取模块
+│   ├── analysis/          # 统一分析上下文（10 个子模块聚合）
 │   ├── semantic_modeling/ # 语义建模模块
 │   ├── reasoning/         # 推理分析模块
-│   ├── output/            # 输出生成模块
+│   ├── output/            # 输出生成（JSON/Markdown/DOCX）
 │   ├── learning/          # 自我学习模块
 │   ├── research/          # 研究框架模块
 │   ├── cycle/             # 迭代循环模块
+│   ├── web/               # Web 服务（FastAPI + JWT + HTMX）
+│   ├── ai_assistant/      # AI 科研助手（意图识别 + 多轮对话）
+│   ├── visualization/     # 可视化（ECharts/Cytoscape JSON）
 │   └── test/              # 测试模块
 ├── tests/                 # 测试文件
 ├── examples/              # 演示示例

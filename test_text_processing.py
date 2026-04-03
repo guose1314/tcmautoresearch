@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, '.')
 
-from src.preprocessor.document_preprocessor import DocumentPreprocessor
+from src.analysis.preprocessor import DocumentPreprocessor
 
 print('=' * 70)
 print('中医古籍文本预处理演示（繁简转换 + jieba 分词 + 古文断句）')

@@ -1,6 +1,6 @@
 import unittest
 
-from src.research.multi_source_corpus import (
+from src.collector.multi_source_corpus import (
     build_source_collection_plan,
     build_witnesses_from_records,
     cross_validate_witnesses,
@@ -21,6 +21,17 @@ class TestMultiSourceCorpus(unittest.TestCase):
             recognize_classical_format(content_type="application/pdf", file_name="ancient-book"),
             "pdf"
         )
+
+    def test_format_recognition_by_sample_and_media_type(self):
+        self.assertEqual(
+            recognize_classical_format(content_type="application/xml", sample_text="<TEI><teiHeader>...</teiHeader></TEI>"),
+            "tei_xml",
+        )
+        self.assertEqual(
+            recognize_classical_format(content_type="application/xml", sample_text="<root>plain xml</root>"),
+            "xml",
+        )
+        self.assertEqual(recognize_classical_format(sample_text="{"), "json")
 
     def test_cross_validation(self):
         witnesses = build_witnesses_from_records(

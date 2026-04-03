@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.research.ctext_corpus_collector import CTextCorpusCollector
+from src.collector.ctext_corpus_collector import CTextCorpusCollector
 
 
 class TestCTextCorpusCollector(unittest.TestCase):
@@ -20,15 +20,15 @@ class TestCTextCorpusCollector(unittest.TestCase):
     def tearDown(self):
         self.collector.cleanup()
 
-    @patch("src.research.ctext_corpus_collector.requests.Session.get")
-    def test_collect_urn_recursive(self, mock_get):
-        def side_effect(url, params=None, timeout=None):
+    @patch("requests.Session.request")
+    def test_collect_urn_recursive(self, mock_request):
+        def side_effect(method, url, params=None, timeout=None, **kwargs):
             endpoint = url.split("/")[-1]
             response = MagicMock()
             response.raise_for_status.return_value = None
 
             if endpoint == "gettext":
-                urn = params.get("urn")
+                urn = (params or {}).get("urn")
                 if urn == "ctp:analects":
                     payload = {
                         "title": "论语",
@@ -51,7 +51,7 @@ class TestCTextCorpusCollector(unittest.TestCase):
             response.json.return_value = payload
             return response
 
-        mock_get.side_effect = side_effect
+        mock_request.side_effect = side_effect
 
         with tempfile.TemporaryDirectory() as tmpdir:
             result = self.collector.execute(

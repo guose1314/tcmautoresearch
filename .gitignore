@@ -120,7 +120,7 @@ dmypy.json
 .DS_Store
 Thumbs.db
 
-# Data and models
+# Data and models (runtime directories)
 data/
 !src/data/
 models/

@@ -12,10 +12,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-from src.extractors.advanced_entity_extractor import AdvancedEntityExtractor
+from src.analysis.entity_extractor import AdvancedEntityExtractor
+from src.analysis.preprocessor import DocumentPreprocessor
+from src.analysis.semantic_graph import SemanticGraphBuilder
 from src.llm.llm_engine import LLMEngine
-from src.preprocessor.document_preprocessor import DocumentPreprocessor
-from src.semantic_modeling.semantic_graph_builder import SemanticGraphBuilder
 
 ENCODING_CANDIDATES = ["utf-8", "utf-8-sig", "gb18030", "gbk", "big5"]
 DEFAULT_KEYWORDS = ["神农本草经", "伤寒论", "黄帝内经"]

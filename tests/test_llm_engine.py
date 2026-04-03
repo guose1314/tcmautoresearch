@@ -4,6 +4,7 @@ import types
 import unittest
 from unittest.mock import patch
 
+from src.analysis.gap_analyzer import GapAnalyzer
 from src.llm.llm_engine import LLMEngine, setup_cuda_dll_paths
 
 
@@ -96,7 +97,7 @@ class TestLLMEngine(unittest.TestCase):
 
     def test_clinical_gap_analysis_uses_generate(self):
         engine = LLMEngine(model_path="dummy.gguf")
-        with patch.object(engine, "generate", return_value="gap report") as mock_generate:
+        with patch.object(GapAnalyzer, "analyze", return_value="gap report") as mock_analyze:
             result = engine.clinical_gap_analysis(
                 clinical_question="中医干预证据缺口是什么？",
                 evidence_matrix={"record_count": 1},
@@ -105,8 +106,8 @@ class TestLLMEngine(unittest.TestCase):
             )
 
         self.assertEqual(result, "gap report")
-        called_prompt = mock_generate.call_args.args[0]
-        self.assertIn("clinical_question", called_prompt)
+        self.assertEqual(mock_analyze.call_count, 1)
+        self.assertEqual(mock_analyze.call_args.kwargs["clinical_question"], "中医干预证据缺口是什么？")
 
     def test_research_helpers_delegate_generate(self):
         engine = LLMEngine(model_path="dummy.gguf")

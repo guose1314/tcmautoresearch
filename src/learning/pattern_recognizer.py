@@ -127,41 +127,56 @@ class PatternRecognizer:
         if not context:
             return
 
-        # 实体频率
         entities = context.get("entities", [])
+        self._ingest_entities(entities)
+        self._ingest_topic_sequence(context)
+        self._ingest_numeric_features(context, entities)
+        self._trim_feature_history()
+
+    def _ingest_entities(self, entities: Any) -> None:
+        """累积实体频率信息。"""
         if isinstance(entities, list):
-            for e in entities:
-                key = e.get("name", "") if isinstance(e, dict) else str(e)
+            for entity in entities:
+                key = entity.get("name", "") if isinstance(entity, dict) else str(entity)
                 if key:
                     self._entity_counter[key] += 1
-        elif isinstance(entities, dict):
+            return
+
+        if isinstance(entities, dict):
             for name in entities:
                 self._entity_counter[str(name)] += 1
 
-        # 序列：取最近 N 个上下文的"主题词"形成 n-gram
+    def _ingest_topic_sequence(self, context: Dict[str, Any]) -> None:
+        """累积 topic 序列并更新 n-gram 计数。"""
         topic = context.get("topic", context.get("query", ""))
-        if topic and isinstance(topic, str):
-            self._context_history.append({"topic": topic})
-            if len(self._context_history) > self._history_limit:
-                self._context_history.pop(0)
-            topics = [c["topic"] for c in self._context_history]
-            for window in _ngrams(topics, self._SEQ_WINDOW):
-                self._seq_counter[window] += 1
+        if not topic or not isinstance(topic, str):
+            return
 
-        # 浮点特征积累（用于相关性分析）
+        self._context_history.append({"topic": topic})
+        if len(self._context_history) > self._history_limit:
+            self._context_history.pop(0)
+
+        topics = [item["topic"] for item in self._context_history]
+        for window in _ngrams(topics, self._SEQ_WINDOW):
+            self._seq_counter[window] += 1
+
+    def _ingest_numeric_features(self, context: Dict[str, Any], entities: Any) -> None:
+        """累积数值特征历史。"""
         perf = context.get("performance_score")
         conf = context.get("confidence_score")
         ent_cnt = len(entities) if isinstance(entities, (list, dict)) else 0
+
         if perf is not None:
             self._feature_history["performance"].append(float(perf))
         if conf is not None:
             self._feature_history["confidence"].append(float(conf))
         self._feature_history["entity_count"].append(float(ent_cnt))
 
-        # 上限裁剪
-        for lst in self._feature_history.values():
-            if len(lst) > self._history_limit:
-                del lst[0]
+    def _trim_feature_history(self) -> None:
+        """按 history_limit 裁剪特征历史。"""
+        for values in self._feature_history.values():
+            if len(values) > self._history_limit:
+                del values[0]
 
     # ------------------------------------------------------------------
     # 频率模式

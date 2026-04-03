@@ -7,8 +7,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from src.research.ctext_corpus_collector import CTextCorpusCollector
-from src.research.ctext_whitelist import load_whitelist
+from src.collector.ctext_corpus_collector import CTextCorpusCollector
+from src.collector.ctext_whitelist import load_whitelist
 
 logging.basicConfig(
     level=logging.INFO,

@@ -4,21 +4,22 @@
 基于T/C IATCM 098-2023标准的集成测试系统
 """
 
+import hashlib
+import json
 import logging
 import time
-import json
-import hashlib
 import traceback
-from typing import Dict, List, Any, Optional, Callable, Union
-from datetime import datetime
-from dataclasses import dataclass, field
-from enum import Enum
 from collections import defaultdict
-import networkx as nx
-import asyncio
-import concurrent.futures
-from concurrent.futures import ThreadPoolExecutor
-import numpy as np
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from importlib import import_module
+from typing import Any, Dict, List, Optional
+
+nx = import_module("networkx")
+
+from src.core.module_base import get_global_executor
+from src.core.phase_tracker import PhaseTrackerMixin
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ class TestEnvironment:
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     test_results: List[IntegrationTest] = field(default_factory=list)
 
-class IntegrationTester:
+class IntegrationTester(PhaseTrackerMixin):
     """
     中医古籍全自动研究系统集成测试框架
     
@@ -119,7 +120,31 @@ class IntegrationTester:
         self.test_environments = {}
         self.integration_tests = []
         self.test_history = []
-        self.performance_metrics = {
+        self.failed_operations: List[Dict[str, Any]] = []
+        self.phase_history: List[Dict[str, Any]] = []
+        self.phase_timings: Dict[str, float] = {}
+        self.completed_phases: List[str] = []
+        self.failed_phase: Optional[str] = None
+        self.final_status = "initialized"
+        self.last_completed_phase: Optional[str] = None
+        self.performance_metrics = self._create_performance_metrics()
+        self.executor = get_global_executor(self.config.get("max_workers", 4))
+        self.knowledge_graph = nx.MultiDiGraph()
+        self.logger = logging.getLogger(__name__)
+        self.governance_config = {
+            "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
+            "persist_failed_operations": self.config.get("persist_failed_operations", True),
+            "minimum_stable_pass_rate": float(self.config.get("minimum_stable_pass_rate", 0.85)),
+            "export_contract_version": self.config.get("export_contract_version", "d36.v1"),
+        }
+        
+        # 初始化测试环境
+        self._initialize_test_environments()
+        
+        self.logger.info("集成测试框架初始化完成")
+
+    def _create_performance_metrics(self) -> Dict[str, Any]:
+        return {
             "total_tests": 0,
             "passed_tests": 0,
             "failed_tests": 0,
@@ -129,16 +154,153 @@ class IntegrationTester:
             "average_execution_time": 0.0,
             "total_execution_time": 0.0,
             "integration_quality_score": 0.0,
-            "academic_compliance_score": 0.0
+            "academic_compliance_score": 0.0,
         }
-        self.executor = ThreadPoolExecutor(max_workers=self.config.get("max_workers", 4))
-        self.knowledge_graph = nx.MultiDiGraph()
-        self.logger = logging.getLogger(__name__)
-        
-        # 初始化测试环境
-        self._initialize_test_environments()
-        
-        self.logger.info("集成测试框架初始化完成")
+
+    def _start_phase(self, phase_name: str, details: Optional[Dict[str, Any]] = None) -> float:
+        started_at = time.time()
+        if self.governance_config.get("enable_phase_tracking", True):
+            self.phase_history.append({
+                "phase": phase_name,
+                "status": "in_progress",
+                "started_at": datetime.now().isoformat(),
+                "details": self._serialize_value(details or {}),
+            })
+        return started_at
+
+    def _complete_phase(
+        self,
+        phase_name: str,
+        phase_started_at: float,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        duration = max(0.0, time.time() - phase_started_at)
+        self.phase_timings[phase_name] = round(duration, 6)
+        if phase_name not in self.completed_phases:
+            self.completed_phases.append(phase_name)
+        self.last_completed_phase = phase_name
+        if phase_name != "cleanup":
+            self.final_status = "completed"
+
+        if not self.governance_config.get("enable_phase_tracking", True):
+            return
+
+        for phase in reversed(self.phase_history):
+            if phase.get("phase") == phase_name and phase.get("status") == "in_progress":
+                phase["status"] = "completed"
+                phase["ended_at"] = datetime.now().isoformat()
+                phase["duration_seconds"] = round(duration, 6)
+                if details:
+                    phase["details"] = self._serialize_value({**phase.get("details", {}), **details})
+                break
+
+    def _fail_phase(
+        self,
+        phase_name: str,
+        phase_started_at: float,
+        error: Exception,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        duration = max(0.0, time.time() - phase_started_at)
+        self.phase_timings[phase_name] = round(duration, 6)
+        self.failed_phase = phase_name
+        self.final_status = "failed"
+        self._record_failed_operation(phase_name, error, details, duration)
+
+        if not self.governance_config.get("enable_phase_tracking", True):
+            return
+
+        for phase in reversed(self.phase_history):
+            if phase.get("phase") == phase_name and phase.get("status") == "in_progress":
+                phase["status"] = "failed"
+                phase["ended_at"] = datetime.now().isoformat()
+                phase["duration_seconds"] = round(duration, 6)
+                phase["error"] = str(error)
+                if details:
+                    phase["details"] = self._serialize_value({**phase.get("details", {}), **details})
+                break
+
+    def _record_failed_operation(
+        self,
+        operation_name: str,
+        error: Exception,
+        details: Optional[Dict[str, Any]] = None,
+        duration_seconds: Optional[float] = None,
+    ) -> None:
+        if not self.governance_config.get("persist_failed_operations", True):
+            return
+
+        self.failed_operations.append({
+            "operation": operation_name,
+            "error": str(error),
+            "details": self._serialize_value(details or {}),
+            "timestamp": datetime.now().isoformat(),
+            "duration_seconds": round(duration_seconds or 0.0, 6),
+        })
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        return self._build_runtime_metadata_from_dict(
+            {
+                "phase_history": self.phase_history,
+                "phase_timings": self.phase_timings,
+                "completed_phases": self.completed_phases,
+                "failed_phase": self.failed_phase,
+                "final_status": self.final_status,
+                "last_completed_phase": self.last_completed_phase,
+            }
+        )
+
+    def _serialize_integration_test(self, test: IntegrationTest) -> Dict[str, Any]:
+        return self._serialize_value(test)
+
+    def _serialize_environment(self, environment: TestEnvironment) -> Dict[str, Any]:
+        serialized_environment = self._serialize_value(environment)
+        serialized_environment["test_results"] = [
+            self._serialize_integration_test(test) for test in environment.test_results
+        ]
+        return serialized_environment
+
+    def _build_analysis_summary(self) -> Dict[str, Any]:
+        total_tests = len(self.test_history)
+        passed_tests = self.performance_metrics.get("passed_tests", 0)
+        failed_tests = self.performance_metrics.get("failed_tests", 0)
+        error_tests = self.performance_metrics.get("error_tests", 0)
+        timeout_tests = self.performance_metrics.get("timeout_tests", 0)
+        pass_rate = passed_tests / total_tests if total_tests else 0.0
+
+        status = "stable"
+        if self.failed_phase or self.failed_operations or failed_tests or error_tests or timeout_tests:
+            status = "needs_followup"
+        elif total_tests == 0:
+            status = "idle"
+        elif pass_rate < self.governance_config["minimum_stable_pass_rate"]:
+            status = "degraded"
+
+        return {
+            "status": status,
+            "total_tests": total_tests,
+            "pass_rate": pass_rate,
+            "failed_test_count": failed_tests,
+            "error_test_count": error_tests,
+            "timeout_test_count": timeout_tests,
+            "completed_phase_count": len(self.completed_phases),
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.failed_phase,
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
+
+    def _build_report_metadata(self) -> Dict[str, Any]:
+        return {
+            "contract_version": self.governance_config["export_contract_version"],
+            "generated_at": datetime.now().isoformat(),
+            "result_schema": "integration_tester_report",
+            "completed_phases": list(self.completed_phases),
+            "failed_phase": self.failed_phase,
+            "failed_operation_count": len(self.failed_operations),
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
     
     def _initialize_test_environments(self):
         """初始化测试环境"""
@@ -179,6 +341,8 @@ class IntegrationTester:
         Returns:
             TestEnvironment: 创建的测试环境
         """
+        phase_started_at = self._start_phase("create_test_environment", {"environment_name": env_name})
+
         try:
             env_id = f"env_{int(time.time())}_{hashlib.md5(env_name.encode()).hexdigest()[:8]}"
             
@@ -191,11 +355,19 @@ class IntegrationTester:
             )
             
             self.test_environments[env_id] = test_environment
+            self.failed_phase = None
+            self.final_status = "completed"
+            self._complete_phase(
+                "create_test_environment",
+                phase_started_at,
+                {"environment_id": env_id},
+            )
             
             self.logger.info(f"测试环境 {env_name} 创建成功")
             return test_environment
             
         except Exception as e:
+            self._fail_phase("create_test_environment", phase_started_at, e, {"environment_name": env_name})
             self.logger.error(f"测试环境 {env_name} 创建失败: {e}")
             raise
     
@@ -223,6 +395,8 @@ class IntegrationTester:
         Returns:
             IntegrationTest: 创建的集成测试
         """
+        phase_started_at = self._start_phase("add_integration_test", {"test_name": test_name})
+
         try:
             test_id = f"test_{int(time.time())}_{hashlib.md5(test_name.encode()).hexdigest()[:8]}"
             
@@ -240,11 +414,19 @@ class IntegrationTester:
             )
             
             self.integration_tests.append(integration_test)
+            self.failed_phase = None
+            self.final_status = "completed"
+            self._complete_phase(
+                "add_integration_test",
+                phase_started_at,
+                {"test_id": test_id, "component_count": len(components_involved)},
+            )
             
             self.logger.info(f"集成测试 {test_name} 添加成功")
             return integration_test
             
         except Exception as e:
+            self._fail_phase("add_integration_test", phase_started_at, e, {"test_name": test_name})
             self.logger.error(f"集成测试 {test_name} 添加失败: {e}")
             raise
     
@@ -263,6 +445,8 @@ class IntegrationTester:
             IntegrationTest: 测试结果
         """
         start_time = time.time()
+        phase_started_at = self._start_phase("run_integration_test", {"test_id": test_id, "environment_id": environment_id})
+        test: Optional[IntegrationTest] = None
         
         try:
             # 查找测试
@@ -293,25 +477,41 @@ class IntegrationTester:
             test.confidence_score = test_result.confidence_score
             test.academic_relevance = test_result.academic_relevance
             test.error_message = test_result.error_message
+            test.metadata.setdefault("phase_history", self._serialize_value(self.phase_history))
+            test.metadata["analysis_summary"] = self._build_analysis_summary()
+            test.metadata["report_metadata"] = self._build_report_metadata()
             
             # 添加到测试历史
             self.test_history.append(test)
+            environment.test_results.append(test)
             
             # 更新性能指标
             self._update_performance_metrics(test, time.time() - start_time)
+            self.failed_phase = None if not self.failed_operations else self.failed_phase
+            self._complete_phase(
+                "run_integration_test",
+                phase_started_at,
+                {
+                    "test_id": test_id,
+                    "status": test.status.value,
+                    "environment_id": environment_id,
+                },
+            )
             
             self.logger.info(f"集成测试 {test.test_name} 运行完成")
             return test
             
         except Exception as e:
+            self._fail_phase("run_integration_test", phase_started_at, e, {"test_id": test_id, "environment_id": environment_id})
             self.logger.error(f"集成测试运行失败: {e}")
             self.logger.error(traceback.format_exc())
             
             # 更新测试状态为错误
-            test.status = IntegrationTestStatus.ERROR
-            test.end_time = datetime.now().isoformat()
-            test.duration = time.time() - start_time
-            test.error_message = str(e)
+            if test is not None:
+                test.status = IntegrationTestStatus.ERROR
+                test.end_time = datetime.now().isoformat()
+                test.duration = time.time() - start_time
+                test.error_message = str(e)
             
             raise
     
@@ -825,6 +1025,7 @@ class IntegrationTester:
             Dict[str, Any]: 测试结果汇总
         """
         start_time = time.time()
+        phase_started_at = self._start_phase("run_all_integration_tests", {"environment_id": environment_id, "test_count": len(self.integration_tests)})
         self.logger.info("开始运行所有集成测试")
         
         try:
@@ -839,7 +1040,7 @@ class IntegrationTester:
             for test in self.integration_tests:
                 try:
                     test_result = self.run_integration_test(test.test_id, environment_id, context)
-                    results["test_results"][test.test_id] = test_result.__dict__
+                    results["test_results"][test.test_id] = self._serialize_integration_test(test_result)
                 except Exception as e:
                     self.logger.error(f"集成测试 {test.test_name} 运行失败: {e}")
                     # 创建失败测试结果
@@ -858,16 +1059,28 @@ class IntegrationTester:
                         academic_relevance=0.0,
                         tags=test.tags
                     )
-                    results["test_results"][test.test_id] = failed_result.__dict__
+                    results["test_results"][test.test_id] = self._serialize_integration_test(failed_result)
             
             # 计算总体摘要
             results["overall_summary"] = self._calculate_overall_summary()
             results["execution_time"] = time.time() - start_time
+            results["analysis_summary"] = self._build_analysis_summary()
+            results["report_metadata"] = self._build_report_metadata()
+            self.failed_phase = None if not self.failed_operations else self.failed_phase
+            self._complete_phase(
+                "run_all_integration_tests",
+                phase_started_at,
+                {
+                    "environment_id": environment_id,
+                    "executed_test_count": len(results["test_results"]),
+                },
+            )
             
             self.logger.info("所有集成测试运行完成")
             return results
             
         except Exception as e:
+            self._fail_phase("run_all_integration_tests", phase_started_at, e, {"environment_id": environment_id})
             self.logger.error(f"所有集成测试运行失败: {e}")
             self.logger.error(traceback.format_exc())
             raise
@@ -937,10 +1150,12 @@ class IntegrationTester:
             "priority_distribution": {
                 priority: len(tests) for priority, tests in priority_groups.items()
             },
-            "detailed_results": [test.__dict__ for test in self.test_history],
-            "performance_metrics": self.performance_metrics,
+            "detailed_results": [self._serialize_integration_test(test) for test in self.test_history],
+            "performance_metrics": self._serialize_value(self.performance_metrics),
             "academic_analysis": self._analyze_academic_compliance(),
-            "recommendations": self._generate_integration_recommendations()
+            "recommendations": self._generate_integration_recommendations(),
+            "analysis_summary": self._build_analysis_summary(),
+            "report_metadata": self._build_report_metadata(),
         }
         
         return report
@@ -1055,6 +1270,8 @@ class IntegrationTester:
         Returns:
             bool: 导出是否成功
         """
+        phase_started_at = self._start_phase("export_integration_results", {"output_path": output_path, "format_type": format_type})
+
         try:
             report = self.generate_integration_report()
             
@@ -1065,19 +1282,23 @@ class IntegrationTester:
                 # CSV格式导出（简化实现）
                 pass
             
+            self.failed_phase = None
+            self.final_status = "completed"
+            self._complete_phase("export_integration_results", phase_started_at, {"output_path": output_path})
             self.logger.info(f"集成测试结果已导出到: {output_path}")
             return True
             
         except Exception as e:
+            self._fail_phase("export_integration_results", phase_started_at, e, {"output_path": output_path})
             self.logger.error(f"集成测试结果导出失败: {e}")
             return False
     
     def get_integration_performance_report(self) -> Dict[str, Any]:
         """获取集成测试性能报告"""
         return {
-            "performance_metrics": self.performance_metrics,
+            "performance_metrics": self._serialize_value(self.performance_metrics),
             "test_summary": self._calculate_overall_summary(),
-            "test_history": [test.__dict__ for test in self.test_history],
+            "test_history": [self._serialize_integration_test(test) for test in self.test_history],
             "test_environments": [
                 {
                     "environment_id": env.environment_id,
@@ -1086,11 +1307,17 @@ class IntegrationTester:
                     "test_count": len(env.test_results)
                 } for env in self.test_environments.values()
             ],
-            "latest_results": [test.__dict__ for test in self.test_history[-10:]] if self.test_history else []
+            "latest_results": [self._serialize_integration_test(test) for test in self.test_history[-10:]] if self.test_history else [],
+            "analysis_summary": self._build_analysis_summary(),
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "report_metadata": self._build_report_metadata(),
+            "metadata": self._build_runtime_metadata(),
         }
     
     def cleanup(self) -> bool:
         """清理资源"""
+        phase_started_at = self._start_phase("cleanup")
+
         try:
             # 注意：不关闭全局共享线程池，由应用生命周期管理
             # self.executor.shutdown(wait=True)
@@ -1099,11 +1326,23 @@ class IntegrationTester:
             self.integration_tests.clear()
             self.test_history.clear()
             self.knowledge_graph.clear()
+            for environment in self.test_environments.values():
+                environment.test_results.clear()
+            self.performance_metrics = self._create_performance_metrics()
+            self.failed_operations.clear()
+            self.phase_history.clear()
+            self.phase_timings.clear()
+            self.completed_phases.clear()
+            self.failed_phase = None
+            self.last_completed_phase = None
+            self.final_status = "cleaned"
             
+            self._complete_phase("cleanup", phase_started_at)
             self.logger.info("集成测试框架资源清理完成")
             return True
             
         except Exception as e:
+            self._fail_phase("cleanup", phase_started_at, e)
             self.logger.error(f"资源清理失败: {e}")
             return False
 

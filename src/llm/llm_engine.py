@@ -8,12 +8,13 @@
 """
 
 import glob
-import json
 import logging
 import os
 import sys
 from pathlib import Path
 from typing import Any
+
+from src.research.gap_analyzer import GapAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -247,45 +248,10 @@ class LLMEngine:
             literature_summaries: 文献摘要列表。
             output_language: 输出语言，默认中文。
         """
-        system = (
-            "你是中医临床研究方法学专家与证据综合分析师。"
-            "你需要从证据矩阵中识别研究缺口（Gap），并给出可执行的临床研究建议。"
-            "回答必须严格围绕输入数据，不得编造文献。"
+        analyzer = GapAnalyzer(llm_service=self)
+        return analyzer.analyze(
+            clinical_question=clinical_question,
+            evidence_matrix=evidence_matrix,
+            literature_summaries=literature_summaries,
+            output_language=output_language,
         )
-
-        compact_summaries = []
-        for row in literature_summaries[:20]:
-            compact_summaries.append(
-                {
-                    "source": row.get("source", ""),
-                    "title": row.get("title", ""),
-                    "year": row.get("year"),
-                    "summary_text": (row.get("summary_text", "") or "")[:450],
-                }
-            )
-
-        payload = {
-            "clinical_question": clinical_question,
-            "evidence_matrix": evidence_matrix,
-            "literature_summaries": compact_summaries,
-            "expected_sections": [
-                "临床问题重述",
-                "现有证据覆盖概览",
-                "关键缺口（至少3条）",
-                "每条缺口的潜在偏倚或证据局限",
-                "可执行研究建议（研究设计、核心终点、样本建议）",
-                "优先级排序（高/中/低）",
-            ],
-            "language": output_language,
-        }
-
-        user = (
-            "请基于以下 JSON 输入执行临床关联 Gap Analysis，并输出结构化小标题报告。\n"
-            f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-            "要求：\n"
-            "1) 先给出证据覆盖结论，再给出 Gap。\n"
-            "2) 每个 Gap 必须指向具体维度（condition/intervention/outcome/method）。\n"
-            "3) 每个研究建议必须包含：建议设计、核心纳入标准、主要终点。\n"
-            "4) 如果证据不足，明确写出“不足以支持结论”的范围。"
-        )
-        return self.generate(user, system)

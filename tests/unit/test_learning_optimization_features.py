@@ -1,17 +1,19 @@
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
+from src.analysis.multimodal_fusion import FusionStrategy, MultimodalFusionEngine
 from src.core.algorithm_optimizer import AlgorithmOptimizer
 from src.learning.adaptive_tuner import AdaptiveTuner
 from src.learning.pattern_recognizer import PatternRecognizer
 from src.learning.self_learning_engine import SelfLearningEngine
-from src.research.multimodal_fusion import FusionStrategy, MultimodalFusionEngine
 
 
 class TestOptimizationAndLearningFeatures(unittest.TestCase):
     def test_algorithm_optimizer_can_select_and_benchmark(self):
-        optimizer = AlgorithmOptimizer(exploration_c=1.0)
+        optimizer = AlgorithmOptimizer(exploration_c=1.0, config={"export_contract_version": "d38.v1"})
 
         def fast_algo(context):
             return {"quality_score": 0.7, "result": "fast"}
@@ -29,6 +31,73 @@ class TestOptimizationAndLearningFeatures(unittest.TestCase):
         report = optimizer.benchmark({"x": 1}, candidate_tags=["text"])
         self.assertIn(report["winner"], {"fast", "accurate"})
         self.assertEqual(set(report["results"].keys()), {"fast", "accurate"})
+        self.assertIn("analysis_summary", report)
+        self.assertIn("report_metadata", report)
+
+        summary = optimizer.get_optimization_summary()
+        self.assertEqual(summary["analysis_summary"]["status"], "stable")
+        self.assertEqual(
+            [phase["phase"] for phase in summary["metadata"]["phase_history"][:2]],
+            ["run_best", "invoke_algorithm"],
+        )
+        self.assertEqual(summary["report_metadata"]["contract_version"], "d38.v1")
+        self.assertEqual(summary["report_metadata"]["final_status"], "completed")
+
+    def test_algorithm_optimizer_tracks_failed_operations(self):
+        optimizer = AlgorithmOptimizer(config={"export_contract_version": "d38.v1"})
+
+        def failing_algo(context):
+            raise RuntimeError("boom")
+
+        optimizer.register("failing", failing_algo, tags=["text"])
+
+        with self.assertRaises(RuntimeError):
+            optimizer.run_best({"x": 1}, candidate_tags=["text"])
+
+        summary = optimizer.get_optimization_summary()
+        self.assertEqual(summary["analysis_summary"]["failed_operation_count"], 2)
+        self.assertEqual(summary["analysis_summary"]["status"], "needs_followup")
+        self.assertIn(summary["analysis_summary"]["failed_phase"], {"invoke_algorithm", "run_best"})
+        self.assertEqual(summary["failed_operations"][0]["operation"], "invoke_algorithm")
+        self.assertIn("details", summary["failed_operations"][0])
+
+    def test_algorithm_optimizer_export_uses_json_safe_contract(self):
+        optimizer = AlgorithmOptimizer(config={"export_contract_version": "d38.v1"})
+
+        def stable_algo(context):
+            return {"quality_score": 0.88, "result": "stable"}
+
+        optimizer.register("stable", stable_algo, tags=["text"])
+        optimizer.benchmark({"x": 1}, candidate_tags=["text"])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "optimizer-report.json")
+            exported = optimizer.export_optimization_data(output_path)
+
+            self.assertTrue(exported)
+            with open(output_path, "r", encoding="utf-8") as file_obj:
+                payload = json.load(file_obj)
+
+        self.assertEqual(payload["report_metadata"]["contract_version"], "d38.v1")
+        self.assertEqual(payload["optimizer_summary"]["profiles"]["stable"]["name"], "stable")
+        self.assertIn("report_metadata", payload["optimizer_summary"])
+
+    def test_algorithm_optimizer_cleanup_resets_runtime_state(self):
+        optimizer = AlgorithmOptimizer(config={"export_contract_version": "d38.v1"})
+
+        def stable_algo(context):
+            return {"quality_score": 0.88, "result": "stable"}
+
+        optimizer.register("stable", stable_algo, tags=["text"])
+        optimizer.run_best({"x": 1}, candidate_tags=["text"])
+
+        cleaned = optimizer.cleanup()
+        summary = optimizer.get_optimization_summary()
+
+        self.assertTrue(cleaned)
+        self.assertEqual(summary["analysis_summary"]["status"], "idle")
+        self.assertEqual(summary["analysis_summary"]["total_calls"], 0)
+        self.assertEqual(summary["metadata"]["final_status"], "cleaned")
 
     def test_pattern_recognizer_detects_patterns(self):
         recognizer = PatternRecognizer(min_frequency=2, anomaly_z_threshold=2.0)

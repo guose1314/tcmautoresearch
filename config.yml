@@ -1,13 +1,13 @@
-# 中医古籍全自动研究系统 - 专业学术配置文件
-# 基于T/C IATCM 098-2023标准的配置文件
+# TCM Ancient Texts Auto-Research System - Configuration
+# Configuration based on T/C IATCM 098-2023 standard
 
-# 系统基本信息
+# System basic information
 system:
-  name: "中医古籍全自动研究系统"
+  name: "TCM Ancient Texts Auto-Research System"
   version: "2.0.0"
-  description: "基于AI技术的中医古籍智能分析与研究系统"
-  author: "中医古籍全自动研究团队"
-  organization: "中医药研究院"
+  description: "AI-based intelligent analysis and research system for TCM ancient texts"
+  author: "TCM Ancient Texts Research Team"
+  organization: "Institute of Traditional Chinese Medicine"
   contact: "tcmautoresearch@example.com"
   license: "MIT"
   standards:
@@ -15,19 +15,38 @@ system:
     - "GB/T 15657"
     - "ISO 21000"
   principles:
-    - "系统性原则"
-    - "科学性原则"
-    - "实用性原则"
-    - "创新性原则"
+    - "Systematic Principle"
+    - "Scientific Principle"
+    - "Practical Principle"
+    - "Innovative Principle"
 
-# 核心模块配置
+config_center:
+  default_environment: "development"
+  environments_dir: "./config"
+  env_prefix: "TCM"
+  isolate_paths: true
+
+api:
+  title: "TCM Auto Research API"
+  version: "3.0.0"
+  cors_origins:
+    - "*"
+
+web_console:
+  title: "TCM Auto Research Web Console"
+  version: "0.2.0"
+  job_storage_dir: "./output/web_console_jobs"
+  cors_origins:
+    - "*"
+
+# Core module configuration
 modules:
-  # 文档预处理模块
+  # Document preprocessing module
   document_preprocessing:
     enabled: true
     name: "DocumentPreprocessor"
     version: "2.0.0"
-    description: "中医古籍文档预处理模块"
+    description: "TCM document preprocessing module"
     priority: "high"
     timeout: 30
     max_concurrent: 4
@@ -37,12 +56,12 @@ modules:
     metadata_extraction: true
     quality_threshold: 0.95
 
-  # 实体抽取模块
+  # Entity extraction module
   entity_extraction:
     enabled: true
     name: "EntityExtractor"
     version: "2.0.0"
-    description: "中医古籍实体抽取模块"
+    description: "TCM entity extraction module"
     priority: "high"
     timeout: 60
     max_concurrent: 4
@@ -55,12 +74,12 @@ modules:
     semantic_matching: true
     pattern_matching: true
 
-  # 语义建模模块
+  # Semantic modeling module
   semantic_modeling:
     enabled: true
     name: "SemanticModeler"
     version: "2.0.0"
-    description: "中医古籍语义建模模块"
+    description: "TCM semantic modeling module"
     priority: "high"
     timeout: 120
     max_concurrent: 2
@@ -70,12 +89,12 @@ modules:
     graph_quality_threshold: 0.90
     node_embedding_dimension: 384
 
-  # 推理分析模块
+  # Reasoning analysis module
   reasoning:
     enabled: true
     name: "ReasoningEngine"
     version: "2.0.0"
-    description: "中医古籍推理分析模块"
+    description: "TCM reasoning analysis module"
     priority: "high"
     timeout: 180
     max_concurrent: 2
@@ -85,12 +104,12 @@ modules:
     confidence_threshold: 0.85
     academic_validation: true
 
-  # 输出生成模块
+  # Output generation module
   output_generation:
     enabled: true
     name: "OutputGenerator"
     version: "2.0.0"
-    description: "中医古籍输出生成模块"
+    description: "TCM output generation module"
     priority: "high"
     timeout: 30
     max_concurrent: 4
@@ -106,12 +125,12 @@ modules:
     metadata_inclusion: true
     quality_assurance: true
 
-  # 自我学习模块
+  # Self-learning module
   self_learning:
     enabled: true
     name: "SelfLearningEngine"
     version: "2.0.0"
-    description: "系统自我学习模块"
+    description: "System self-learning module"
     priority: "medium"
     timeout: 300
     max_concurrent: 1
@@ -122,12 +141,12 @@ modules:
     auto_update: true
     performance_monitoring: true
 
-  # 研究框架模块
+  # Research framework module
   research_framework:
     enabled: true
     name: "ResearchFramework"
     version: "2.0.0"
-    description: "学术研究框架模块"
+    description: "Academic research framework module"
     priority: "high"
     timeout: 120
     max_concurrent: 2
@@ -137,9 +156,9 @@ modules:
     academic_validation: true
     standard_compliance: true
 
-# 模型配置
+# Model configuration
 models:
-  # 大语言模型配置
+  # Large language model configuration
   llm:
     name: "Qwen1.5-7B-Chat"
     path: "./models/qwen1.5-7b-chat-q8_0.gguf"
@@ -152,8 +171,10 @@ models:
     streaming: false
     cache_enabled: true
     cache_size: 1000
+    cache_dir: "./cache/llm"
+    cache_ttl_seconds: null  # null = never expire; set integer (seconds) to enable TTL
 
-  # 嵌入模型配置
+  # Embedding model configuration
   embedding:
     name: "all-MiniLM-L6-v2"
     path: "./models/embedding"
@@ -163,7 +184,7 @@ models:
     max_sequence_length: 512
     normalization: true
 
-  # 专用中医模型
+  # Specialized TCM model
   traditional_chinese_medicine:
     name: "TCM-BERT"
     path: "./models/tcm-bert-base"
@@ -173,7 +194,7 @@ models:
     training_dataset: "tcm_corpus"
     validation_dataset: "tcm_validation"
 
-# 数据库配置
+# Database configuration
 database:
   type: "sqlite"
   path: "./data/tcmautoresearch.db"
@@ -185,7 +206,7 @@ database:
   backup_frequency: "daily"
   backup_retention_days: 30
 
-# 输入输出配置
+# Input/output configuration
 input:
   directory: "./corpus"
   file_extensions:
@@ -194,7 +215,7 @@ input:
     - ".docx"
     - ".pdf"
     - ".epub"
-  max_file_size: 10485760  # 单位: 字节 (10MB)
+  max_file_size: 10485760  # unit: bytes (10MB)
   encoding_detection: true
   recursive_scan: true
   exclude_patterns:
@@ -215,31 +236,31 @@ output:
   file_suffix: "_results"
   preserve_structure: true
 
-# 性能配置
+# Performance configuration
 performance:
-  max_workers: 4  # 单位: 个
-  timeout: 600  # 单位: 秒
-  retry_attempts: 3  # 单位: 次
-  retry_delay: 1.0  # 单位: 秒
-  memory_limit_mb: 4096  # 单位: MB
-  cpu_threshold: 80  # 单位: 百分比
-  memory_threshold: 85  # 单位: 百分比
-  throughput_target: 1000  # 单位: 条/秒
-  concurrency_target: 10  # 单位: 个
+  max_workers: 4  # unit: count
+  timeout: 600  # unit: seconds
+  retry_attempts: 3  # unit: times
+  retry_delay: 1.0  # unit: seconds
+  memory_limit_mb: 4096  # unit: MB
+  cpu_threshold: 80  # unit: percent
+  memory_threshold: 85  # unit: percent
+  throughput_target: 1000  # unit: entries/sec
+  concurrency_target: 10  # unit: count
 
-# 日志配置
+# Logging configuration
 logging:
   level: "INFO"
   file: "./logs/tcmautoresearch.log"
-  max_file_size: 10485760  # 单位: 字节 (10MB)
-  backup_count: 5  # 单位: 个
+  max_file_size: 10485760  # unit: bytes (10MB)
+  backup_count: 5  # unit: count
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   console_output: true
   file_output: true
   log_to_db: false
   log_rotation: "daily"
 
-# 监控配置
+# Monitoring configuration
 monitoring:
   enabled: true
   interval_seconds: 60
@@ -256,10 +277,30 @@ monitoring:
     academic_compliance: true
   alerting:
     enabled: true
+    resend_interval_seconds: 300
     thresholds:
       cpu_usage: 80
+      memory_usage: 85
+      error_rate: 0.05
+      processing_time: 300
+    notification_channels:
+      - "email"
+      - "slack"
+      - "webhook"
+    email_recipients:
+      - "admin@example.com"
+      - "research-team@example.com"
+    email:
+      sender: "noreply@example.com"
+      smtp_host: "smtp.example.com"
+      smtp_port: 587
+      username: "${SMTP_USERNAME}"
+      password: "${SMTP_PASSWORD}"
+      use_tls: true
+      timeout_seconds: 10
+    webhook_url: "https://example.invalid/slack-webhook-placeholder"
 
-# ctext 标准语料采集配置
+# ctext standard corpus collection configuration
 ctext_corpus:
   enabled: true
   api_base: "https://api.ctext.org"
@@ -289,7 +330,7 @@ ctext_corpus:
       - "research-team@example.com"
     webhook_url: "https://example.invalid/slack-webhook-placeholder"
 
-# 安全配置
+# Security configuration
 security:
   data_encryption:
     enabled: true
@@ -316,7 +357,7 @@ security:
     data_retention: "5 years"
     compliance_check: true
 
-# 学术规范配置
+# Academic standards configuration
 academic:
   standards_compliance:
     enabled: true
@@ -349,7 +390,7 @@ academic:
     reference_extraction: true
     bibliography_generation: true
 
-# 迭代循环配置
+# Iteration cycle configuration
 iteration_cycle:
   enabled: true
   max_iterations: 10
@@ -362,6 +403,14 @@ iteration_cycle:
   quality_assurance_level: "high"
   parallel_execution: true
   max_concurrent_tasks: 4
+  optimization:
+    enabled: true
+    quality_threshold: 0.8
+    confidence_threshold: 0.8
+    max_actions_per_iteration: 3
+    expected_improvements:
+      quality_score: 0.15
+      confidence_score: 0.1
   cycle_validation:
     enabled: true
     validation_frequency: "every_iteration"
@@ -380,37 +429,174 @@ iteration_cycle:
       - "reproducibility"
       - "standard_compliance"
     compliance_threshold: 0.95
+  system_iteration:
+    enabled: true
+    max_recommendations: 5
+    academic_insight_min_quality: 0.85
+    failed_module_attention_threshold: 1
+    minimum_stable_quality: 0.85
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    export_contract_version: "d42.v1"
+  orchestration:
+    enable_phase_tracking: true
+    persist_failed_iterations: true
+  export_contract:
+    enabled: true
+    contract_version: "d15.v1"
+    include_failed_iterations: true
+    include_report_metadata: true
+  module_iteration:
+    enable_phase_tracking: true
+    minimum_stable_quality: 0.85
+    persist_failed_operations: true
+    export_contract_version: "d43.v1"
+  test_driven_iteration:
+    enable_phase_tracking: true
+    minimum_stable_pass_rate: 0.85
+    persist_failed_operations: true
+    export_contract_version: "d33.v1"
+  fixing_stage:
+    enable_phase_tracking: true
+    minimum_stable_success_rate: 0.8
+    export_contract_version: "d41.v1"
+    persist_failed_stages: true
+    persist_failed_operations: true
+  research_pipeline:
+    enable_phase_tracking: true
+    persist_failed_cycles: true
+    persist_failed_operations: true
+    minimum_stable_completion_rate: 0.8
+    export_contract_version: "d44.v1"
+  theoretical_framework:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_validation_rate: 0.5
+    export_contract_version: "d37.v1"
+  iteration_cycle:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_quality: 0.8
+    export_contract_version: "d40.v1"
+  algorithm_optimizer:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_quality: 0.8
+    export_contract_version: "d38.v1"
+  system_architecture:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_health_score: 0.8
+    export_contract_version: "d45.v1"
+  module_base:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_success_rate: 0.8
+    export_contract_version: "d46.v1"
+  module_interface:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_success_rate: 0.8
+    export_contract_version: "d47.v1"
+  interface_consistency_test:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_compliance_score: 0.85
+    export_contract_version: "d48.v1"
+  quality_assessment:
+    min_overall_score: 85.0
+    min_dimension_score: 70.0
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_overall_score: 85.0
+    export_contract_version: "d49.v1"
+  continuous_improvement:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_overall_score: 85.0
+    export_contract_version: "d66.v1"
+  quality_improvement_archive:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_quality_score: 85.0
+    export_contract_version: "d65.v1"
+  quality_feedback:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_overall_score: 85.0
+    export_contract_version: "d77.v1"
+  quality_gate:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_success_rate: 1.0
+    export_contract_version: "d63.v1"
+  cycle_demo:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_quality_score: 0.85
+    export_contract_version: "d58.v1"
+  autorresearch_runner:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_improvement_count: 1
+    export_contract_version: "d61.v1"
+  quality_consumer_inventory:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    include_root_scripts: true
+    minimum_candidate_score: 40
+    export_contract_version: "d62.v1"
+  stage1_runner:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_pass_rate: 85.0
+    export_contract_version: "d67.v1"
+  stage2_runner:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_pass_rate: 85.0
+    export_contract_version: "d67.v1"
+  automated_tester:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_pass_rate: 0.85
+    export_contract_version: "d35.v1"
+  integration_tester:
+    enable_phase_tracking: true
+    persist_failed_operations: true
+    minimum_stable_pass_rate: 0.85
+    export_contract_version: "d36.v1"
 
-# 系统资源配置
+# System resource configuration
 resources:
   cpu:
-    cores: 8  # 单位: 个
+    cores: 8  # unit: count
     allocation: "dynamic"
     scheduling: "round_robin"
     priority: "high"
   memory:
-    total_mb: 16384  # 单位: MB
+    total_mb: 16384  # unit: MB
     allocation: "dynamic"
     swap_enabled: true
-    swap_size_mb: 4096  # 单位: MB
+    swap_size_mb: 4096  # unit: MB
   storage:
-    total_gb: 100  # 单位: GB
+    total_gb: 100  # unit: GB
     allocation: "dynamic"
     backup_storage: "./backup"
     temp_storage: "./temp"
   network:
-    bandwidth_limit: 1000Mbps  # 单位: Mbps
-    connection_timeout: 30  # 单位: 秒
-    retry_count: 3  # 单位: 次
-    retry_delay: 1.0  # 单位: 秒
+    bandwidth_limit: "1000Mbps"  # unit: Mbps
+    connection_timeout: 30  # unit: seconds
+    retry_count: 3  # unit: times
+    retry_delay: 1.0  # unit: seconds
 
-# 环境配置
+# Environment configuration
 environment:
   development:
     name: "Development Environment"
-    description: "用于开发和测试的环境"
+    description: "Environment for development and testing"
     debug: true
-    # 日志级别策略：开发环境使用DEBUG，便于详细调试
+    # Log level strategy: use DEBUG in dev for detailed debugging
     logging_level: "DEBUG"
     test_mode: true
     performance_monitoring: true
@@ -418,9 +604,9 @@ environment:
     security_level: "medium"
   staging:
     name: "Staging Environment"
-    description: "用于预生产测试的环境"
+    description: "Environment for pre-production testing"
     debug: false
-    # 日志级别策略：预生产环境使用INFO，记录关键信息
+    # Log level strategy: use INFO in staging to record key info
     logging_level: "INFO"
     test_mode: false
     performance_monitoring: true
@@ -428,16 +614,16 @@ environment:
     security_level: "high"
   production:
     name: "Production Environment"
-    description: "用于正式运行的环境"
+    description: "Environment for production use"
     debug: false
-    # 日志级别策略：生产环境使用WARN，仅记录警告及以上级别日志
+    # Log level strategy: use WARN in production, only warnings and above
     logging_level: "WARN"
     test_mode: false
     performance_monitoring: true
     data_privacy: true
     security_level: "maximum"
 
-# 系统维护配置
+# System maintenance configuration
 maintenance:
   scheduled_tasks:
     - name: "daily_backup"
@@ -465,6 +651,12 @@ maintenance:
     enabled: true
     interval_seconds: 300
     timeout_seconds: 30
+    readiness_checks:
+      - "config_loaded"
+      - "job_manager"
+      - "job_storage"
+      - "database_connection"
+      - "model_loading"
     health_metrics:
       - "cpu_usage"
       - "memory_usage"
@@ -477,7 +669,7 @@ maintenance:
       memory_usage: 85
       disk_space: 90
 
-# 高级配置
+# Advanced configuration
 advanced:
   caching:
     enabled: true
@@ -511,7 +703,7 @@ advanced:
     load_balancing: "round_robin"
     fault_tolerance: true
 
-# 实验室配置（学术研究专用）
+# Lab configuration (for academic research)
 lab:
   research_mode: true
   academic_validation:

@@ -64,10 +64,28 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertTrue(self.pipeline.complete_research_cycle(cycle.cycle_id))
         status = self.pipeline.get_cycle_status(cycle.cycle_id)
         self.assertEqual(status["status"], ResearchCycleStatus.COMPLETED.value)
+        self.assertEqual(
+            [phase["phase"] for phase in status["metadata"]["phase_history"]],
+            [
+                ResearchPhase.OBSERVE.value,
+                ResearchPhase.HYPOTHESIS.value,
+                ResearchPhase.EXPERIMENT.value,
+                ResearchPhase.ANALYZE.value,
+                ResearchPhase.PUBLISH.value,
+                ResearchPhase.REFLECT.value,
+            ],
+        )
+        self.assertEqual(status["metadata"]["analysis_summary"]["status"], "stable")
+        self.assertEqual(status["metadata"]["analysis_summary"]["final_status"], ResearchCycleStatus.COMPLETED.value)
 
         summary = self.pipeline.get_pipeline_summary()["pipeline_summary"]
         self.assertEqual(summary["total_cycles"], 1)
         self.assertEqual(summary["completed_cycles"], 1)
+        self.assertIn("report_metadata", summary)
+        self.assertEqual(summary["report_metadata"]["contract_version"], "d44.v1")
+        self.assertEqual(summary["report_metadata"]["final_status"], "completed")
+        self.assertIn("analysis_summary", summary)
+        self.assertEqual(summary["metadata"]["final_status"], "completed")
         all_cycles = self.pipeline.get_all_cycles()
         self.assertEqual(len(all_cycles), 1)
 
@@ -100,6 +118,55 @@ class TestResearchPipelineQuality(unittest.TestCase):
         result = self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.OBSERVE)
         self.assertIn("error", result)
 
+    def test_analyze_phase_generates_evidence_grade_from_observe_literature(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="analyze-grade-cycle",
+            description="analyze evidence grade",
+            objective="GRADE evidence synthesis",
+            scope="src/research",
+            researchers=["tester"],
+        )
+        self.assertTrue(self.pipeline.start_research_cycle(cycle.cycle_id))
+        cycle.phase_executions[ResearchPhase.OBSERVE] = {
+            "result": {
+                "literature_pipeline": {
+                    "records": [
+                        {
+                            "source": "pubmed",
+                            "title": "Systematic review and meta-analysis of 桂枝汤 randomized controlled trials",
+                            "authors": ["Alice"],
+                            "year": 2025,
+                            "doi": "10.1000/meta-grade",
+                            "url": "https://example.org/meta",
+                            "abstract": "This systematic review and meta-analysis included 16 randomized controlled trials and 1260 patients with low heterogeneity and stable results.",
+                            "citation_count": 36,
+                            "external_id": "meta-grade",
+                        },
+                        {
+                            "source": "semantic_scholar",
+                            "title": "Prospective cohort study of 桂枝汤 in chronic fatigue",
+                            "authors": ["Bob"],
+                            "year": 2024,
+                            "doi": "10.1000/cohort-grade",
+                            "url": "https://example.org/cohort",
+                            "abstract": "This prospective cohort study included 210 patients and produced generally consistent outcome estimates over 12 months.",
+                            "citation_count": 12,
+                            "external_id": "cohort-grade",
+                        },
+                    ]
+                }
+            }
+        }
+
+        result = self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.ANALYZE, {})
+
+        self.assertEqual(result["phase"], "analyze")
+        self.assertIn("evidence_grade", result["results"])
+        self.assertIn("evidence_grade_summary", result["results"])
+        self.assertEqual(result["results"]["evidence_grade"]["study_count"], 2)
+        self.assertTrue(result["metadata"]["evidence_grade_generated"])
+        self.assertEqual(result["metadata"]["evidence_study_count"], 2)
+
     def test_collect_and_resolve_ctext_config(self):
         pipeline = ResearchPipeline(
             {
@@ -113,6 +180,52 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertEqual(pipeline._resolve_observe_data_source({}), "ctext_whitelist")
         self.assertEqual(pipeline._resolve_whitelist_groups({}), ["jing"])
         pipeline.cleanup()
+
+    def test_collect_observe_corpus_prefers_bundle_over_fallback_error(self):
+        local_bundle = {
+            "schema_version": "1.0",
+            "bundle_id": "local-bundle",
+            "sources": ["local"],
+            "collected_at": "2026-03-31T00:00:00",
+            "stats": {"total_documents": 1},
+            "errors": [],
+            "documents": [],
+        }
+
+        with patch.object(self.pipeline, "_should_collect_ctext_corpus", return_value=True), patch.object(
+            self.pipeline, "_should_collect_local_corpus", return_value=True
+        ), patch.object(self.pipeline, "_collect_ctext_observation_corpus", return_value={"error": "ctext failed"}), patch.object(
+            self.pipeline, "_collect_local_observation_corpus", return_value=local_bundle
+        ):
+            result = self.pipeline._collect_observe_corpus_if_enabled({})
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get("sources"), ["local"])
+        self.assertNotIn("error", result)
+
+    def test_build_observe_metadata_marks_local_bundle_without_ctext(self):
+        local_bundle = {
+            "schema_version": "1.0",
+            "bundle_id": "local-bundle",
+            "sources": ["local"],
+            "collected_at": "2026-03-31T00:00:00",
+            "stats": {"total_documents": 2},
+            "errors": [],
+            "documents": [],
+        }
+
+        metadata = self.pipeline._build_observe_metadata(
+            context={"data_source": "local"},
+            observations=["o1"],
+            findings=["f1"],
+            corpus_result=local_bundle,
+            ingestion_result=None,
+            literature_result=None,
+        )
+
+        self.assertFalse(metadata["auto_collected_ctext"])
+        self.assertTrue(metadata["auto_collected_corpus"])
+        self.assertEqual(metadata["corpus_schema"], "bundle")
 
     @patch("src.research.research_pipeline.CTextCorpusCollector.cleanup")
     @patch("src.research.research_pipeline.CTextCorpusCollector.execute", side_effect=RuntimeError("x"))
@@ -184,29 +297,25 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertIn("error", result)
 
     def test_run_clinical_gap_analysis_success_and_error(self):
-        class _GoodEngine:
-            def __init__(self, **kwargs):
-                _ = kwargs
+        from src.llm.llm_service import CachedLLMService
 
-            def load(self):
-                return None
+        class _GoodService:
+            def load(self): return None
+            def generate(self, prompt, system_prompt=""): return "ok"
+            def unload(self): return None
+            def cache_stats(self): return {"session_hits": 0, "session_misses": 1}
 
-            def clinical_gap_analysis(self, **kwargs):
-                _ = kwargs
-                return "ok"
+        class _BadService(_GoodService):
+            def load(self): raise RuntimeError("load failed")
 
-            def unload(self):
-                return None
-
-        class _BadEngine(_GoodEngine):
-            def load(self):
-                raise RuntimeError("load failed")
-
-        with patch("src.research.research_pipeline.LLMEngine", _GoodEngine):
+        with patch.object(CachedLLMService, "from_gap_config", return_value=_GoodService()):
             ok = self.pipeline._run_clinical_gap_analysis({}, [], {})
             self.assertEqual(ok.get("report"), "ok")
+            self.assertIn("gaps", ok)
+            self.assertIn("priority_summary", ok)
+            self.assertEqual(ok.get("output_language"), "zh")
 
-        with patch("src.research.research_pipeline.LLMEngine", _BadEngine):
+        with patch.object(CachedLLMService, "from_gap_config", return_value=_BadService()):
             bad = self.pipeline._run_clinical_gap_analysis({}, [], {})
             self.assertIn("error", bad)
 
@@ -334,8 +443,14 @@ class TestResearchPipelineQuality(unittest.TestCase):
             self.assertTrue(self.pipeline.export_pipeline_data(output_path))
             with open(output_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            self.assertEqual(data["report_metadata"]["contract_version"], "d44.v1")
             self.assertIn("pipeline_info", data)
             self.assertIn("research_cycles", data)
+            self.assertIn("metadata", data)
+            self.assertIn("failed_operations", data)
+            self.assertIn("report_metadata", data["pipeline_info"]["pipeline_summary"]["pipeline_summary"])
+            self.assertIn("failed_operations", data["pipeline_info"]["pipeline_summary"]["pipeline_summary"])
+            self.assertEqual(data["metadata"]["final_status"], "completed")
             history = self.pipeline.get_cycle_history(cycle.cycle_id)
             self.assertTrue(len(history) >= 2)
         finally:
@@ -352,7 +467,34 @@ class TestResearchPipelineQuality(unittest.TestCase):
         )
         self.assertFalse(self.pipeline.complete_research_cycle(cycle.cycle_id))
 
-    def test_cleanup_failure_returns_false(self):
+    def test_phase_failure_tracks_failed_cycle_and_failed_phase(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="failing-cycle",
+            description="failing",
+            objective="track failed phase",
+            scope="src/research",
+            researchers=["tester"],
+        )
+        self.assertTrue(self.pipeline.start_research_cycle(cycle.cycle_id))
+
+        with patch.object(self.pipeline, "_execute_phase_internal", side_effect=RuntimeError("observe exploded")):
+            result = self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.OBSERVE)
+
+        self.assertIn("error", result)
+        status = self.pipeline.get_cycle_status(cycle.cycle_id)
+        self.assertEqual(status["status"], ResearchCycleStatus.FAILED.value)
+        self.assertEqual(status["metadata"]["failed_phase"], ResearchPhase.OBSERVE.value)
+        self.assertEqual(status["metadata"]["phase_history"][-1]["status"], "failed")
+        self.assertEqual(status["metadata"]["analysis_summary"]["status"], "needs_followup")
+        self.assertEqual(status["metadata"]["failed_operations"][-1]["operation"], ResearchPhase.OBSERVE.value)
+        self.assertIn("details", status["metadata"]["failed_operations"][-1])
+        self.assertEqual(status["metadata"]["failed_operations"][-1]["details"]["cycle_id"], cycle.cycle_id)
+        summary = self.pipeline.get_pipeline_summary()["pipeline_summary"]
+        self.assertEqual(summary["failed_operations"][-1]["operation"], ResearchPhase.OBSERVE.value)
+        self.assertEqual(summary["failed_operations"][-1]["details"]["cycle_id"], cycle.cycle_id)
+        self.assertEqual(len(self.pipeline.failed_cycles), 1)
+
+    def test_cleanup_keeps_shared_executor_available(self):
         pipeline = ResearchPipeline({})
         # Simulate a failure in cleanup by making .clear() raise
         bad_dict = Mock()

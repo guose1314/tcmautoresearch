@@ -5,6 +5,184 @@ from src.research.research_pipeline import ResearchPhase, ResearchPipeline
 
 
 class TestResearchPipelineObserve(unittest.TestCase):
+    @patch("src.research.research_pipeline.ReasoningEngine.cleanup")
+    @patch("src.research.research_pipeline.ReasoningEngine.execute")
+    @patch("src.research.research_pipeline.ReasoningEngine.initialize")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.cleanup")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.execute")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.initialize")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.cleanup")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.execute")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.initialize")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.cleanup")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.execute")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.initialize")
+    def test_observe_ingestion_merges_reasoning_relationships(
+        self,
+        mock_pre_initialize,
+        mock_pre_execute,
+        mock_pre_cleanup,
+        mock_ex_initialize,
+        mock_ex_execute,
+        mock_ex_cleanup,
+        mock_sem_initialize,
+        mock_sem_execute,
+        mock_sem_cleanup,
+        mock_reason_initialize,
+        mock_reason_execute,
+        mock_reason_cleanup,
+    ):
+        mock_pre_initialize.return_value = True
+        mock_pre_cleanup.return_value = True
+        mock_pre_execute.return_value = {"processed_text": "补中益气汤 IL6 JAK-STAT"}
+
+        mock_ex_initialize.return_value = True
+        mock_ex_cleanup.return_value = True
+        mock_ex_execute.return_value = {
+            "entities": [
+                {"name": "补中益气汤", "type": "formula", "confidence": 0.95},
+                {"name": "IL6", "type": "target", "confidence": 0.92},
+                {"name": "JAK-STAT", "type": "pathway", "confidence": 0.9},
+            ],
+            "statistics": {"by_type": {"formula": 1, "target": 1, "pathway": 1}},
+            "confidence_scores": {"average_confidence": 0.9233},
+        }
+
+        mock_sem_initialize.return_value = True
+        mock_sem_cleanup.return_value = True
+        mock_sem_execute.return_value = {
+            "semantic_graph": {
+                "nodes": [
+                    {"id": "formula:补中益气汤", "data": {"name": "补中益气汤", "type": "formula"}},
+                    {"id": "target:IL6", "data": {"name": "IL6", "type": "target"}},
+                    {"id": "pathway:JAK-STAT", "data": {"name": "JAK-STAT", "type": "pathway"}},
+                ],
+                "edges": [
+                    {
+                        "source": "target:IL6",
+                        "target": "pathway:JAK-STAT",
+                        "attributes": {"relationship_type": "participates_in", "confidence": 0.8},
+                    }
+                ],
+            },
+            "graph_statistics": {
+                "nodes_count": 3,
+                "edges_count": 1,
+                "relationships_by_type": {"participates_in": {"count": 1}},
+            },
+        }
+
+        mock_reason_initialize.return_value = True
+        mock_reason_cleanup.return_value = True
+        mock_reason_execute.return_value = {
+            "reasoning_results": {
+                "entity_relationships": [
+                    {
+                        "source": "补中益气汤",
+                        "target": "IL6",
+                        "type": "associated_target",
+                        "confidence": 0.83,
+                    }
+                ]
+            }
+        }
+
+        pipeline = ResearchPipeline({})
+        result = pipeline.phase_handlers._run_observe_ingestion_pipeline(
+            {
+                "sources": ["local"],
+                "stats": {"total_documents": 1},
+                "documents": [{"text": "补中益气汤调控 IL6 并影响 JAK-STAT", "urn": "doc:1", "title": "doc1"}],
+            },
+            {
+                "max_texts": 1,
+                "max_chars_per_text": 1200,
+            },
+        )
+
+        aggregate_relationships = result["aggregate"]["semantic_relationships"]
+        relation_keys = {(item["source"], item["type"], item["target"]) for item in aggregate_relationships}
+        self.assertIn(("补中益气汤", "associated_target", "IL6"), relation_keys)
+        self.assertIn(("IL6", "participates_in", "JAK-STAT"), relation_keys)
+        self.assertTrue(any(item["metadata"]["source"] == "observe_reasoning_engine" for item in aggregate_relationships))
+
+    def test_relationship_conflict_resolution_prefers_priority_and_confidence(self):
+        pipeline = ResearchPipeline({})
+        handlers = pipeline.phase_handlers
+
+        merged = handlers._merge_relationship_sources(
+            [
+                {
+                    "source": "黄芪",
+                    "target": "IL6",
+                    "type": "associated_target",
+                    "source_type": "herb",
+                    "target_type": "target",
+                    "metadata": {"confidence": 0.91, "source": "observe_semantic_graph"},
+                }
+            ],
+            [
+                {
+                    "source": "黄芪",
+                    "target": "IL6",
+                    "type": "associated_target",
+                    "source_type": "herb",
+                    "target_type": "target",
+                    "metadata": {"confidence": 0.74, "source": "observe_reasoning_engine"},
+                }
+            ],
+        )
+
+        self.assertEqual(len(merged), 1)
+        relation = merged[0]
+        self.assertEqual(relation["metadata"]["source"], "observe_reasoning_engine")
+        self.assertEqual(relation["metadata"]["confidence"], 0.91)
+        self.assertIn("observe_semantic_graph", relation["metadata"]["merged_sources"])
+        self.assertIn("observe_reasoning_engine", relation["metadata"]["merged_sources"])
+
+    def test_relationship_conflict_resolution_can_prefer_confidence_by_relation_type(self):
+        pipeline = ResearchPipeline(
+            {
+                "relationship_conflict_resolution": {
+                    "relation_type_strategies": {
+                        "associated_target": "confidence_then_source_priority",
+                    }
+                }
+            }
+        )
+        handlers = pipeline.phase_handlers
+
+        merged = handlers._merge_relationship_sources(
+            [
+                {
+                    "source": "黄芪",
+                    "target": "IL6",
+                    "type": "associated_target",
+                    "source_type": "herb",
+                    "target_type": "target",
+                    "metadata": {"confidence": 0.91, "source": "observe_semantic_graph"},
+                }
+            ],
+            [
+                {
+                    "source": "黄芪",
+                    "target": "IL6",
+                    "type": "associated_target",
+                    "source_type": "herb",
+                    "target_type": "target",
+                    "metadata": {"confidence": 0.74, "source": "observe_reasoning_engine"},
+                }
+            ],
+        )
+
+        self.assertEqual(len(merged), 1)
+        relation = merged[0]
+        self.assertEqual(relation["metadata"]["source"], "observe_semantic_graph")
+        self.assertEqual(
+            relation["metadata"]["conflict_resolution"]["strategy"],
+            "confidence_then_source_priority",
+        )
+
     @patch("src.research.research_pipeline.CTextCorpusCollector.cleanup")
     @patch("src.research.research_pipeline.CTextCorpusCollector.execute")
     @patch("src.research.research_pipeline.CTextCorpusCollector.initialize")
