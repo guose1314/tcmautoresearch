@@ -1,6 +1,6 @@
 # src/data/tcm_lexicon.py
 """
-中医术语词典模块 — 提供 6000+ 中医术语的全局单例词典。
+中医术语词典模块 — 提供 770+ 中医术语的全局单例词典。
 
 分类：
 - herbs:      中药材
@@ -10,6 +10,8 @@
 - acupoints:  穴位
 - meridians:  经络
 - theories:   理论术语
+
+支持通过 load_from_file() 从 THUOCL 等外部词典扩展至数万词汇。
 
 用法::
 

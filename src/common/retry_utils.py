@@ -65,6 +65,8 @@ def retry(
 
     if backoff_strategy not in ("fixed", "linear", "exponential"):
         raise ValueError(f"不支持的退避策略: {backoff_strategy}")
+    if max_attempts < 1:
+        raise ValueError(f"max_attempts 必须 >= 1, 实际: {max_attempts}")
 
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
