@@ -355,6 +355,66 @@
       "package": "src.semantic_modeling"
     },
     {
+      "module": "src.semantic_modeling.methods",
+      "file_path": "src/semantic_modeling/methods/__init__.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.classical_literature",
+      "file_path": "src/semantic_modeling/methods/classical_literature.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.complexity_science",
+      "file_path": "src/semantic_modeling/methods/complexity_science.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.formula_comparator",
+      "file_path": "src/semantic_modeling/methods/formula_comparator.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.formula_structure",
+      "file_path": "src/semantic_modeling/methods/formula_structure.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.herb_properties",
+      "file_path": "src/semantic_modeling/methods/herb_properties.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.integrated_analyzer",
+      "file_path": "src/semantic_modeling/methods/integrated_analyzer.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.network_pharmacology",
+      "file_path": "src/semantic_modeling/methods/network_pharmacology.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.pharmacology",
+      "file_path": "src/semantic_modeling/methods/pharmacology.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.scoring_panel",
+      "file_path": "src/semantic_modeling/methods/scoring_panel.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.summary_engine",
+      "file_path": "src/semantic_modeling/methods/summary_engine.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.supramolecular",
+      "file_path": "src/semantic_modeling/methods/supramolecular.py",
+      "package": "src.semantic_modeling"
+    },
+    {
       "module": "src.semantic_modeling.research_methods",
       "file_path": "src/semantic_modeling/research_methods.py",
       "package": "src.semantic_modeling"
@@ -729,6 +789,10 @@
     },
     {
       "source": "src.research.ctext_corpus_collector",
+      "target": "src.common.http_client"
+    },
+    {
+      "source": "src.research.ctext_corpus_collector",
       "target": "src.core.module_base"
     },
     {
@@ -1080,6 +1144,10 @@
     {
       "source": "src.research",
       "target": "src.analytics"
+    },
+    {
+      "source": "src.research",
+      "target": "src.common"
     },
     {
       "source": "src.research",
