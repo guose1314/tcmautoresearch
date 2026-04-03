@@ -1,0 +1,20 @@
+environment:
+  name: "production"
+
+database:
+  path: "./data/production/tcmautoresearch.db"
+
+output:
+  directory: "./output/production"
+  backup_directory: "./backup/production"
+
+logging:
+  level: "WARNING"
+  file: "./logs/production/tcmautoresearch.log"
+
+models:
+  llm:
+    cache_dir: "./cache/llm/production"
+
+web_console:
+  job_storage_dir: "./output/production/web_console_jobs"

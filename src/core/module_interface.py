@@ -4,14 +4,17 @@
 基于T/C IATCM 098-2023标准的模块接口设计
 """
 
+import json
 import logging
 import time
-import json
-from typing import Dict, List, Any, Optional, Callable
-from datetime import datetime
-from dataclasses import dataclass, field
-from enum import Enum
 import traceback
+import warnings
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from src.core.module_base import BaseModule
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -71,8 +74,7 @@ class ModuleOutput:
     performance_metrics: Dict[str, Any] = field(default_factory=dict)
     tags: List[str] = field(default_factory=list)
 
-@dataclass
-class ModuleInterface:
+class ModuleInterface(BaseModule):
     """
     模块接口定义
     
@@ -89,49 +91,69 @@ class ModuleInterface:
     """
     
     def __init__(self, module_name: str, config: Dict[str, Any] = None):
-        self.module_name = module_name
-        self.config = config or {}
-        self.logger = logging.getLogger(f"{__name__}.{module_name}")
+        super().__init__(module_name, config)
+        self.governance_config["export_contract_version"] = self.config.get("export_contract_version", "d47.v1")
         self.status = ModuleStatus.CREATED
-        self.initialized = False
-        self.metrics = {
-            "execution_count": 0,
-            "total_execution_time": 0.0,
-            "last_execution_time": 0.0,
-            "last_success": False,
-            "quality_score": 0.0
+        self.final_status = self.status.value
+        warnings.warn(
+            "ModuleInterface 已弃用，请继承 BaseModule。"
+            "ModuleContext/ModuleOutput 可从 src.core.module_base 导入。",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    def _status_value(self) -> str:
+        return self.status.value if isinstance(self.status, ModuleStatus) else str(self.status)
+
+    def _build_analysis_summary(self) -> Dict[str, Any]:
+        total_executions = int(self.metrics.get("execution_count", 0) or 0)
+        success_count = sum(1 for phase in self.phase_history if phase.get("phase") == "execute" and phase.get("status") == "completed")
+        success_rate = success_count / total_executions if total_executions else 0.0
+
+        status = "idle"
+        if total_executions or self.failed_operations:
+            status = (
+                "stable"
+                if self.failed_phase is None and success_rate >= self.governance_config["minimum_stable_success_rate"]
+                else "needs_followup"
+            )
+        if self.final_status == "cleaned":
+            status = "idle"
+
+        return {
+            "status": status,
+            "total_executions": total_executions,
+            "successful_executions": success_count,
+            "failed_executions": total_executions - success_count,
+            "success_rate": success_rate,
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.failed_phase,
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
         }
+
+    def _build_report_metadata(self) -> Dict[str, Any]:
+        return {
+            "contract_version": self.governance_config["export_contract_version"],
+            "generated_at": datetime.now().isoformat(),
+            "result_schema": "module_interface_report",
+            "module_name": self.module_name,
+            "failed_operation_count": len(self.failed_operations),
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
+
+    def _attach_contract_metadata(self, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        merged = dict(metadata or {})
+        merged["failed_operations"] = self._serialize_value(self.failed_operations)
+        merged["runtime_metadata"] = self._build_runtime_metadata()
+        merged["report_metadata"] = self._build_report_metadata()
+        return merged
         
     def initialize(self, config: Dict[str, Any] = None) -> bool:
-        """
-        初始化模块
-        
-        Args:
-            config (Dict[str, Any]): 模块配置
-            
-        Returns:
-            bool: 初始化是否成功
-        """
-        start_time = time.time()
-        try:
-            # 更新配置
-            if config:
-                self.config.update(config)
-            
-            # 执行具体初始化逻辑
-            if self._do_initialize():
-                self.status = ModuleStatus.INITIALIZED
-                self.initialized = True
-                self.metrics["last_execution_time"] = time.time() - start_time
-                self.logger.info(f"模块 {self.module_name} 初始化成功")
-                return True
-                
-        except Exception as e:
-            self.status = ModuleStatus.ERROR
-            self.logger.error(f"模块 {self.module_name} 初始化失败: {e}")
-            self.logger.error(traceback.format_exc())
-            
-        return False
+        initialized = super().initialize(config)
+        self.status = ModuleStatus.INITIALIZED if initialized else ModuleStatus.ERROR
+        return initialized
     
     def _do_initialize(self) -> bool:
         """
@@ -153,6 +175,14 @@ class ModuleInterface:
             ModuleOutput: 执行结果
         """
         start_time = time.time()
+        phase_started_at = self._start_phase(
+            "execute",
+            {
+                "module_id": getattr(context, "module_id", ""),
+                "context_id": getattr(context, "context_id", ""),
+                "module_name": getattr(context, "module_name", self.module_name),
+            },
+        )
         self.logger.info(f"开始执行模块: {self.module_name}")
         
         try:
@@ -171,7 +201,7 @@ class ModuleInterface:
                 timestamp=datetime.now().isoformat(),
                 success=True,
                 output_data=result.get("output_data", {}),
-                metadata=result.get("metadata", {}),
+                metadata=self._attach_contract_metadata(result.get("metadata", {})),
                 execution_time=time.time() - start_time,
                 error_message="",
                 warnings=result.get("warnings", []),
@@ -185,6 +215,14 @@ class ModuleInterface:
             
             # 更新指标
             self._update_metrics(output, start_time)
+            self.final_status = "completed"
+            self._complete_phase(
+                "execute",
+                phase_started_at,
+                {"context_id": context.context_id, "module_id": context.module_id},
+                final_status="completed",
+            )
+            output.metadata = self._attach_contract_metadata(output.metadata)
             
             self.logger.info(f"模块 {self.module_name} 执行成功，耗时: {output.execution_time:.2f}s")
             return output
@@ -216,8 +254,18 @@ class ModuleInterface:
             self.logger.error(traceback.format_exc())
             
             # 更新错误指标
-            self.metrics["last_execution_time"] = execution_time
-            self.metrics["last_success"] = False
+            self._update_metrics(output, start_time)
+            self._fail_phase(
+                "execute",
+                phase_started_at,
+                e,
+                {
+                    "module_id": getattr(context, "module_id", ""),
+                    "context_id": getattr(context, "context_id", ""),
+                    "module_name": getattr(context, "module_name", self.module_name),
+                },
+            )
+            output.metadata = self._attach_contract_metadata(output.metadata)
             
             return output
     
@@ -262,29 +310,9 @@ class ModuleInterface:
         raise NotImplementedError("子类必须实现 _do_execute 方法")
     
     def cleanup(self) -> bool:
-        """
-        清理模块资源
-        
-        Returns:
-            bool: 清理是否成功
-        """
-        start_time = time.time()
-        self.logger.info(f"开始清理模块资源: {self.module_name}")
-        
-        try:
-            if self._do_cleanup():
-                self.status = ModuleStatus.TERMINATED
-                self.initialized = False
-                self.metrics["last_execution_time"] = time.time() - start_time
-                self.logger.info(f"模块 {self.module_name} 资源清理完成")
-                return True
-                
-        except Exception as e:
-            self.status = ModuleStatus.ERROR
-            self.logger.error(f"模块 {self.module_name} 资源清理失败: {e}")
-            self.logger.error(traceback.format_exc())
-            
-        return False
+        cleaned = super().cleanup()
+        self.status = ModuleStatus.TERMINATED if cleaned else ModuleStatus.ERROR
+        return cleaned
     
     def _do_cleanup(self) -> bool:
         """
@@ -320,7 +348,10 @@ class ModuleInterface:
                 "get_module_info"
             ],
             "compatibility_score": 1.0,
-            "standards_compliance": ["T/C IATCM 098-2023", "GB/T 15657", "ISO 21000"]
+            "standards_compliance": ["T/C IATCM 098-2023", "GB/T 15657", "ISO 21000"],
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+            "report_metadata": self._build_report_metadata(),
         }
     
     def get_module_info(self) -> Dict[str, Any]:
@@ -335,13 +366,16 @@ class ModuleInterface:
             "version": self.config.get("version", "1.0.0"),
             "description": self.config.get("description", "模块描述"),
             "type": self.config.get("type", "generic"),
-            "status": self.status.value,
+            "status": self._status_value(),
             "initialized": self.initialized,
-            "config": self.config,
-            "metrics": self.metrics,
+            "config": self._serialize_value(self.config),
+            "metrics": self._serialize_value(self.metrics),
             "last_execution": self.metrics["last_execution_time"],
             "last_success": self.metrics["last_success"],
-            "quality_score": self.metrics["quality_score"]
+            "quality_score": self.metrics["quality_score"],
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+            "report_metadata": self._build_report_metadata(),
         }
     
     def _update_metrics(self, output: ModuleOutput, start_time: float):
@@ -422,8 +456,62 @@ class ModuleInterface:
         # 计算总体合规性评分
         compliance_score = 0.95  # 简化实现
         compliance_results["compliance_score"] = compliance_score
+        compliance_results["failed_operations"] = self._serialize_value(self.failed_operations)
+        compliance_results["metadata"] = self._build_runtime_metadata()
+        compliance_results["report_metadata"] = self._build_report_metadata()
         
         return compliance_results
+
+    def get_execution_report(self) -> Dict[str, Any]:
+        if self.metrics.get("execution_count", 0) == 0 and not self.failed_operations:
+            return {
+                "message": "没有执行历史记录",
+                "analysis_summary": self._build_analysis_summary(),
+                "failed_operations": self._serialize_value(self.failed_operations),
+                "metadata": self._build_runtime_metadata(),
+                "report_metadata": self._build_report_metadata(),
+            }
+
+        average_execution_time = self.metrics["total_execution_time"] / max(1, self.metrics["execution_count"])
+        return {
+            "module_name": self.module_name,
+            "metrics": self._serialize_value(self.metrics),
+            "average_execution_time": average_execution_time,
+            "analysis_summary": self._build_analysis_summary(),
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+            "report_metadata": self._build_report_metadata(),
+        }
+
+    def export_interface_data(self, output_path: str) -> bool:
+        phase_started_at = self._start_phase("export_interface_data", {"output_path": output_path})
+
+        try:
+            self.final_status = self.final_status if self.final_status == "cleaned" else "completed"
+            self._complete_phase(
+                "export_interface_data",
+                phase_started_at,
+                {"output_path": output_path},
+                final_status=self.final_status,
+            )
+            payload = {
+                "report_metadata": {
+                    **self._build_report_metadata(),
+                    "output_path": output_path,
+                },
+                "module_info": self.get_module_info(),
+                "interface_compatibility": self.get_interface_compatibility(),
+                "execution_report": self.get_execution_report(),
+                "failed_operations": self._serialize_value(self.failed_operations),
+                "metadata": self._build_runtime_metadata(),
+            }
+            with open(output_path, "w", encoding="utf-8") as file_obj:
+                json.dump(payload, file_obj, ensure_ascii=False, indent=2)
+            return True
+        except Exception as error:
+            self._fail_phase("export_interface_data", phase_started_at, error, {"output_path": output_path})
+            self.logger.error(f"模块 {self.module_name} 接口数据导出失败: {error}")
+            return False
 
 # 导出主要类和函数
 __all__ = [

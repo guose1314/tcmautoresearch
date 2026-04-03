@@ -1,6 +1,6 @@
 import unittest
 
-from src.cycle.fixing_stage import FixingStage
+from src.cycle.fixing_stage import FixingStage, RepairAction, RepairPriority, RepairType
 
 
 class TestFixingStageClassification(unittest.TestCase):
@@ -24,6 +24,47 @@ class TestFixingStageClassification(unittest.TestCase):
             {"message": "Unknown anomaly", "category": "misc"}
         )
         self.assertEqual(issue_type, "general_issue")
+
+    def test_calculate_comprehensive_confidence(self):
+        actions = [
+            RepairAction(
+                action_id="a1",
+                repair_type=RepairType.CODE_FIX,
+                priority=RepairPriority.CRITICAL,
+                description="d1",
+                affected_components=["x"],
+                estimated_effort=1.0,
+                confidence=0.9,
+                success=True,
+            ),
+            RepairAction(
+                action_id="a2",
+                repair_type=RepairType.QUALITY,
+                priority=RepairPriority.MEDIUM,
+                description="d2",
+                affected_components=["y"],
+                estimated_effort=1.0,
+                confidence=0.7,
+                success=True,
+            ),
+            RepairAction(
+                action_id="a3",
+                repair_type=RepairType.CONFIGURATION,
+                priority=RepairPriority.LOW,
+                description="d3",
+                affected_components=["z"],
+                estimated_effort=1.0,
+                confidence=0.4,
+                success=False,
+            ),
+        ]
+
+        result = self.stage._calculate_comprehensive_confidence(actions)
+
+        self.assertAlmostEqual(result["repair_confidence"], 0.8)
+        self.assertAlmostEqual(result["quality_confidence"], 2 / 3)
+        self.assertAlmostEqual(result["academic_confidence"], 0.8)
+        self.assertAlmostEqual(result["overall"], 0.8 * 0.4 + (2 / 3) * 0.3 + 0.8 * 0.3)
 
 
 if __name__ == "__main__":

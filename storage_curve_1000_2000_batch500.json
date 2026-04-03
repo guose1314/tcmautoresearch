@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-03-28T14:13:25.117945",
+  "batch_size": 500,
+  "rounds": {
+    "1000": {
+      "total_ms": 4264.66,
+      "entity_throughput_per_sec": 234.49,
+      "relationship_throughput_per_sec": 468.27,
+      "rel_phase_pct": 76.46,
+      "ent_phase_pct": 22.85
+    },
+    "2000": {
+      "total_ms": 9595.09,
+      "entity_throughput_per_sec": 208.44,
+      "relationship_throughput_per_sec": 416.57,
+      "rel_phase_pct": 76.95,
+      "ent_phase_pct": 22.97
+    }
+  }
+}

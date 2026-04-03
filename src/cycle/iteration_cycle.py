@@ -4,19 +4,58 @@
 基于T/C IATCM 098-2023标准的智能迭代循环管理
 """
 
-import asyncio
-import concurrent.futures
 import json
 import logging
+import os
 import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 from src.core.module_base import get_global_executor
+from src.core.phase_tracker import PhaseTrackerMixin
+
+# 实际模块（延迟导入，在方法内按需加载）
+_preprocessor_instance = None
+_extractor_instance = None
+_tester_instance = None
+_fixing_stage_instance = None
+
+
+def _get_preprocessor():
+    global _preprocessor_instance
+    if _preprocessor_instance is None:
+        from src.analysis.preprocessor import DocumentPreprocessor
+        _preprocessor_instance = DocumentPreprocessor()
+        _preprocessor_instance.initialize()
+    return _preprocessor_instance
+
+
+def _get_extractor():
+    global _extractor_instance
+    if _extractor_instance is None:
+        from src.analysis.entity_extractor import AdvancedEntityExtractor
+        _extractor_instance = AdvancedEntityExtractor()
+        _extractor_instance.initialize()
+    return _extractor_instance
+
+
+def _get_tester():
+    global _tester_instance
+    if _tester_instance is None:
+        from src.test.automated_tester import AutomatedTester
+        _tester_instance = AutomatedTester()
+    return _tester_instance
+
+
+def _get_fixing_stage():
+    global _fixing_stage_instance
+    if _fixing_stage_instance is None:
+        from src.cycle.fixing_stage import FixingStage
+        _fixing_stage_instance = FixingStage()
+    return _fixing_stage_instance
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -68,8 +107,15 @@ class IterationConfig:
     quality_assurance_level: str = "high"
     parallel_execution: bool = False
     max_concurrent_tasks: int = 4
+    optimization_quality_threshold: float = 0.8
+    optimization_confidence_threshold: float = 0.8
+    max_optimization_actions: int = 3
+    enable_phase_tracking: bool = True
+    persist_failed_operations: bool = True
+    minimum_stable_quality: float = 0.8
+    export_contract_version: str = "d40.v1"
 
-class IterationCycle:
+class IterationCycle(PhaseTrackerMixin):
     """
     生成-测试-修复迭代循环管理器
     
@@ -86,15 +132,24 @@ class IterationCycle:
     6. 知识沉淀与传承
     """
     
-    def __init__(self, config: IterationConfig = None):
+    def __init__(self, config: IterationConfig | None = None):
         self.config = config or IterationConfig()
         self.current_iteration = 0
-        self.results = []
-        self.failed_iterations = []
+        self.results: List[IterationResult] = []
+        self.failed_iterations: List[IterationResult] = []
+        self.failed_operations: List[Dict[str, Any]] = []
         self.iteration_lock = False
-        self.start_time = None
-        self.end_time = None
+        self.start_time: datetime | None = None
+        self.end_time: datetime | None = None
         self.total_duration = 0.0
+        self.cycle_metadata = {
+            "phase_history": [],
+            "phase_timings": {},
+            "completed_phases": [],
+            "failed_phase": None,
+            "final_status": "initialized",
+            "last_completed_phase": None,
+        }
         # 使用全局共享线程池，避免每个实例各自创建线程池导致资源泄漏
         self.executor = get_global_executor(self.config.max_concurrent_tasks)
         self.logger = logging.getLogger(__name__)
@@ -111,7 +166,70 @@ class IterationCycle:
         }
         
         self.logger.info("迭代循环管理器初始化完成")
-    
+
+    def _start_cycle_phase(self, phase_name: str, context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        phase_entry: Dict[str, Any] = {
+            "phase": phase_name,
+            "status": "in_progress",
+            "started_at": datetime.now().isoformat(),
+            "context": self._serialize_value(context or {}),
+        }
+        if self.config.enable_phase_tracking:
+            self.cycle_metadata["phase_history"].append(phase_entry)
+        return phase_entry
+
+    def _complete_cycle_phase(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float) -> None:
+        duration = time.perf_counter() - start_time
+        phase_entry["status"] = "completed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        self.cycle_metadata["phase_timings"][phase_name] = round(duration, 6)
+        if phase_name not in self.cycle_metadata["completed_phases"]:
+            self.cycle_metadata["completed_phases"].append(phase_name)
+        self.cycle_metadata["last_completed_phase"] = phase_name
+        self.cycle_metadata["final_status"] = "completed"
+
+    def _fail_cycle_phase(
+        self,
+        phase_name: str,
+        phase_entry: Dict[str, Any],
+        start_time: float,
+        error: str,
+        details: Dict[str, Any] | None = None,
+    ) -> None:
+        duration = time.perf_counter() - start_time
+        phase_entry["status"] = "failed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        phase_entry["error"] = error
+        self.cycle_metadata["phase_timings"][phase_name] = round(duration, 6)
+        self.cycle_metadata["failed_phase"] = phase_name
+        self.cycle_metadata["final_status"] = "failed"
+        self._record_failed_operation(self.failed_operations, phase_name, error, duration, details)
+
+    def _record_failed_operation(
+        self,
+        container: List[Dict[str, Any]],
+        operation: str,
+        error: str,
+        duration: float,
+        details: Dict[str, Any] | None = None,
+    ) -> None:
+        if not self.config.persist_failed_operations:
+            return
+        failure_entry = {
+            "operation": operation,
+            "error": error,
+            "timestamp": datetime.now().isoformat(),
+            "duration_seconds": round(duration, 6),
+        }
+        if details:
+            failure_entry["details"] = self._serialize_value(details)
+        container.append(failure_entry)
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        return self._build_runtime_metadata_from_dict(self.cycle_metadata)
+
     def start_cycle(self) -> bool:
         """启动迭代循环"""
         try:
@@ -119,6 +237,15 @@ class IterationCycle:
             self.current_iteration = 0
             self.results.clear()
             self.failed_iterations.clear()
+            self.failed_operations.clear()
+            self.cycle_metadata = {
+                "phase_history": [],
+                "phase_timings": {},
+                "completed_phases": [],
+                "failed_phase": None,
+                "final_status": "running",
+                "last_completed_phase": None,
+            }
             self.performance_metrics = {
                 "total_iterations": 0,
                 "successful_iterations": 0,
@@ -135,27 +262,50 @@ class IterationCycle:
             return False
     
     def generate_artifacts(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """生成艺术作品（模块输出）"""
+        """生成研究产物（文档预处理 + 实体抽取）"""
         start_time = time.time()
         self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代 - 生成阶段")
         
         try:
-            # 这里应该是具体的生成逻辑
-            # 为演示，返回模拟的生成结果
-            artifacts = {
-                "generated_at": datetime.now().isoformat(),
-                "artifact_type": "system_module",
-                "generation_context": context,
-                "artifact_id": f"art_{self.current_iteration}_{int(time.time())}",
-                "quality_metrics": {
-                    "completeness": 0.92,
-                    "accuracy": 0.88,
-                    "consistency": 0.95
+            mock_mode = context.get("mock_mode", False)
+
+            if mock_mode:
+                # mock 降级方案
+                time.sleep(0.1)
+                artifacts = {
+                    "generated_at": datetime.now().isoformat(),
+                    "artifact_type": "system_module",
+                    "generation_context": context,
+                    "artifact_id": f"art_{self.current_iteration}_{int(time.time())}",
+                    "quality_metrics": {
+                        "completeness": 0.92,
+                        "accuracy": 0.88,
+                        "consistency": 0.95
+                    }
                 }
-            }
-            
-            # 模拟生成过程
-            time.sleep(0.1)  # 模拟处理时间
+            else:
+                # 实际调用 DocumentPreprocessor + AdvancedEntityExtractor
+                preprocessor = _get_preprocessor()
+                extractor = _get_extractor()
+
+                preprocess_result = preprocessor.execute(context)
+
+                extract_context = {**context, "preprocessed": preprocess_result}
+                extract_result = extractor.execute(extract_context)
+
+                artifacts = {
+                    "generated_at": datetime.now().isoformat(),
+                    "artifact_type": "system_module",
+                    "generation_context": context,
+                    "artifact_id": f"art_{self.current_iteration}_{int(time.time())}",
+                    "preprocess_result": preprocess_result,
+                    "extract_result": extract_result,
+                    "quality_metrics": {
+                        "completeness": float(preprocess_result.get("quality_metrics", {}).get("completeness", 0.0)),
+                        "accuracy": float(extract_result.get("quality_metrics", {}).get("accuracy", 0.0)),
+                        "consistency": float(preprocess_result.get("quality_metrics", {}).get("consistency", 0.0)),
+                    }
+                }
             
             duration = time.time() - start_time
             self.logger.info(f"生成阶段完成，耗时: {duration:.2f}s")
@@ -167,31 +317,64 @@ class IterationCycle:
             raise
     
     def test_artifacts(self, artifacts: Dict[str, Any]) -> Dict[str, Any]:
-        """测试生成的艺术作品"""
+        """测试生成的研究产物"""
         start_time = time.time()
         self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代 - 测试阶段")
         
         try:
-            # 这里应该是具体的测试逻辑
-            # 为演示，返回模拟的测试结果
-            test_results = {
-                "tested_at": datetime.now().isoformat(),
-                "artifact_id": artifacts.get("artifact_id", "unknown"),
-                "test_suite": ["unit_tests", "integration_tests", "performance_tests"],
-                "passed": True,
-                "failures": [],
-                "warnings": [],
-                "metrics": {
-                    "execution_time": 0.15,
-                    "memory_usage": 10.5,
-                    "resource_utilization": 0.75,
-                    "quality_score": 0.92,
-                    "confidence_score": 0.88
+            mock_mode = artifacts.get("generation_context", {}).get("mock_mode", False)
+
+            if mock_mode:
+                # mock 降级方案
+                time.sleep(0.05)
+                test_results = {
+                    "tested_at": datetime.now().isoformat(),
+                    "artifact_id": artifacts.get("artifact_id", "unknown"),
+                    "test_suite": ["unit_tests", "integration_tests", "performance_tests"],
+                    "passed": True,
+                    "failures": [],
+                    "warnings": [],
+                    "metrics": {
+                        "execution_time": 0.15,
+                        "memory_usage": 10.5,
+                        "resource_utilization": 0.75,
+                        "quality_score": 0.92,
+                        "confidence_score": 0.88
+                    }
                 }
-            }
-            
-            # 模拟测试过程
-            time.sleep(0.05)  # 模拟测试时间
+            else:
+                # 实际调用 AutomatedTester
+                tester = _get_tester()
+                tester_context = {
+                    "artifacts": artifacts,
+                    "artifact_id": artifacts.get("artifact_id", "unknown"),
+                    "iteration": self.current_iteration,
+                }
+                raw_results = tester.run_all_tests(context=tester_context)
+
+                overall = raw_results.get("overall_summary", {})
+                passed = overall.get("total_failures", 0) == 0 and overall.get("total_errors", 0) == 0
+                failures = []
+                for suite_id, suite_result in raw_results.get("suite_results", {}).items():
+                    for failure in suite_result.get("failures", []):
+                        failures.append(f"[{suite_id}] {failure}")
+
+                test_results = {
+                    "tested_at": datetime.now().isoformat(),
+                    "artifact_id": artifacts.get("artifact_id", "unknown"),
+                    "test_suite": list(raw_results.get("suite_results", {}).keys()),
+                    "passed": passed,
+                    "failures": failures,
+                    "warnings": raw_results.get("warnings", []),
+                    "metrics": {
+                        "execution_time": raw_results.get("execution_time", 0.0),
+                        "memory_usage": overall.get("memory_usage", 0.0),
+                        "resource_utilization": overall.get("resource_utilization", 0.0),
+                        "quality_score": overall.get("quality_score", 0.0),
+                        "confidence_score": overall.get("confidence_score", 0.0),
+                    },
+                    "raw_results": raw_results,
+                }
             
             duration = time.time() - start_time
             self.logger.info(f"测试阶段完成，耗时: {duration:.2f}s")
@@ -210,24 +393,60 @@ class IterationCycle:
         
         try:
             repair_actions = []
-            
-            # 检查测试结果
-            if test_results.get("passed", True) is False:
-                failures = test_results.get("failures", [])
-                for failure in failures:
-                    action = {
-                        "action_type": "repair",
-                        "issue": failure,
-                        "timestamp": datetime.now().isoformat(),
-                        "repaired_by": "automatic",
-                        "details": f"自动修复了问题: {failure}",
-                        "confidence": 0.95
-                    }
-                    repair_actions.append(action)
-                    self.logger.info(f"自动修复问题: {failure}")
-            
-            # 模拟修复过程
-            time.sleep(0.02)  # 模拟修复时间
+            mock_mode = artifacts.get("generation_context", {}).get("mock_mode", False)
+
+            if mock_mode:
+                # mock 降级方案
+                if test_results.get("passed", True) is False:
+                    failures = test_results.get("failures", [])
+                    for failure in failures:
+                        action = {
+                            "action_type": "repair",
+                            "issue": failure,
+                            "timestamp": datetime.now().isoformat(),
+                            "repaired_by": "automatic",
+                            "details": f"自动修复了问题: {failure}",
+                            "confidence": 0.95
+                        }
+                        repair_actions.append(action)
+                        self.logger.info(f"自动修复问题: {failure}")
+                time.sleep(0.02)
+            else:
+                # 实际调用 FixingStage
+                if test_results.get("passed", True) is False:
+                    failures = test_results.get("failures", [])
+                    issues = [
+                        {
+                            "description": failure,
+                            "severity": "high",
+                            "affected_components": [artifacts.get("artifact_id", "unknown")],
+                        }
+                        for failure in failures
+                    ]
+
+                    if issues:
+                        fixing_stage = _get_fixing_stage()
+                        stage_result = fixing_stage.run_fixing_stage(
+                            issues=issues,
+                            context={
+                                "artifacts": artifacts,
+                                "test_results": test_results,
+                                "iteration": self.current_iteration,
+                            },
+                            iteration_id=artifacts.get("artifact_id"),
+                        )
+
+                        for action in stage_result.repair_actions:
+                            repair_actions.append({
+                                "action_type": action.repair_type.value if hasattr(action.repair_type, "value") else str(action.repair_type),
+                                "issue": action.description,
+                                "timestamp": action.end_time or datetime.now().isoformat(),
+                                "repaired_by": "fixing_stage",
+                                "details": action.description,
+                                "confidence": action.confidence,
+                                "success": action.success,
+                                "action_id": action.action_id,
+                            })
             
             duration = time.time() - start_time
             self.logger.info(f"修复阶段完成，耗时: {duration:.2f}s")
@@ -263,6 +482,13 @@ class IterationCycle:
                 "academic_insights": academic_insights,
                 "recommendations": recommendations,
                 "confidence_scores": confidence_scores,
+                "analysis_summary": self._build_analysis_summary(
+                    test_results,
+                    repair_actions,
+                    quality_metrics,
+                    academic_insights,
+                    recommendations,
+                ),
                 "analysis_time": time.time() - start_time
             }
             
@@ -281,51 +507,124 @@ class IterationCycle:
         self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代 - 优化阶段")
         
         try:
-            # 基于分析结果进行优化
-            optimization_actions = []
-            
-            # 检查质量指标
-            quality_metrics = analysis_results.get("quality_metrics", {})
-            if quality_metrics:
-                # 如果质量偏低，提出优化建议
-                if quality_metrics.get("quality_score", 0.0) < 0.8:
-                    optimization_action = {
-                        "action": "process_optimization",
-                        "description": "根据质量分析结果优化处理流程",
-                        "priority": "high",
-                        "expected_improvement": "提高质量评分0.15",
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    optimization_actions.append(optimization_action)
-            
-            # 检查置信度
-            confidence_scores = analysis_results.get("confidence_scores", {})
-            if confidence_scores:
-                avg_confidence = sum(confidence_scores.values()) / len(confidence_scores) if confidence_scores else 0.0
-                if avg_confidence < 0.8:
-                    optimization_action = {
-                        "action": "confidence_improvement",
-                        "description": "提升模型置信度",
-                        "priority": "medium",
-                        "expected_improvement": "提高置信度0.1",
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    optimization_actions.append(optimization_action)
-            
-            # 模拟优化过程
-            time.sleep(0.01)  # 模拟优化时间
-            
+            optimization_actions = self._build_optimization_actions(analysis_results)
+            optimization_summary = self._build_optimization_summary(
+                analysis_results,
+                optimization_actions,
+            )
+
+            self._simulate_optimization_process()
+
             duration = time.time() - start_time
             self.logger.info(f"优化阶段完成，耗时: {duration:.2f}s")
-            
+
             return {
+                "optimization_status": optimization_summary["status"],
                 "optimization_actions": optimization_actions,
+                "optimization_summary": optimization_summary,
                 "optimization_time": duration
             }
             
         except Exception as e:
             self.logger.error(f"优化阶段失败: {e}")
             raise
+
+    def _build_optimization_actions(self, analysis_results: Dict[str, Any]) -> List[Dict[str, Any]]:
+        actions: List[Dict[str, Any]] = []
+
+        quality_action = self._create_quality_optimization_action(
+            analysis_results.get("quality_metrics", {})
+        )
+        if quality_action is not None:
+            actions.append(quality_action)
+
+        confidence_action = self._create_confidence_optimization_action(
+            analysis_results.get("confidence_scores", {})
+        )
+        if confidence_action is not None:
+            actions.append(confidence_action)
+
+        return self._prioritize_optimization_actions(actions)
+
+    def _create_quality_optimization_action(
+        self,
+        quality_metrics: Dict[str, Any],
+    ) -> Dict[str, Any] | None:
+        quality_score = float(quality_metrics.get("quality_score", 0.0))
+        threshold = self.config.optimization_quality_threshold
+        if not quality_metrics or quality_score >= threshold:
+            return None
+
+        return {
+            "action": "process_optimization",
+            "description": "根据质量分析结果优化处理流程",
+            "priority": "high",
+            "current_score": quality_score,
+            "target_score": threshold,
+            "gap": round(threshold - quality_score, 4),
+            "expected_improvement": "提高质量评分0.15",
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    def _create_confidence_optimization_action(
+        self,
+        confidence_scores: Dict[str, Any],
+    ) -> Dict[str, Any] | None:
+        average_confidence = self._calculate_average_confidence(confidence_scores)
+        threshold = self.config.optimization_confidence_threshold
+        if not confidence_scores or average_confidence >= threshold:
+            return None
+
+        return {
+            "action": "confidence_improvement",
+            "description": "提升模型置信度",
+            "priority": "medium",
+            "current_score": average_confidence,
+            "target_score": threshold,
+            "gap": round(threshold - average_confidence, 4),
+            "expected_improvement": "提高置信度0.1",
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    def _prioritize_optimization_actions(
+        self,
+        optimization_actions: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        ranked_actions = sorted(
+            optimization_actions,
+            key=lambda action: priority_order.get(str(action.get("priority", "low")), 99),
+        )
+        return ranked_actions[: self.config.max_optimization_actions]
+
+    def _build_optimization_summary(
+        self,
+        analysis_results: Dict[str, Any],
+        optimization_actions: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        quality_metrics = analysis_results.get("quality_metrics", {})
+        confidence_scores = analysis_results.get("confidence_scores", {})
+        average_confidence = self._calculate_average_confidence(confidence_scores)
+        status = "optimization_required" if optimization_actions else "no_action_needed"
+
+        return {
+            "status": status,
+            "action_count": len(optimization_actions),
+            "highest_priority": optimization_actions[0]["priority"] if optimization_actions else "none",
+            "quality_score": float(quality_metrics.get("quality_score", 0.0)),
+            "quality_threshold": self.config.optimization_quality_threshold,
+            "average_confidence": average_confidence,
+            "confidence_threshold": self.config.optimization_confidence_threshold,
+        }
+
+    def _calculate_average_confidence(self, confidence_scores: Dict[str, Any]) -> float:
+        if not confidence_scores:
+            return 0.0
+        values = [float(value) for value in confidence_scores.values()]
+        return sum(values) / len(values)
+
+    def _simulate_optimization_process(self) -> None:
+        time.sleep(0.01)  # 模拟优化时间
     
     def validate_results(self, artifacts: Dict[str, Any], 
                         analysis_results: Dict[str, Any]) -> Dict[str, Any]:
@@ -334,31 +633,127 @@ class IterationCycle:
         self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代 - 验证阶段")
         
         try:
-            # 验证结果的学术有效性
-            validation_results = {
-                "validation_status": "passed",
-                "validation_date": datetime.now().isoformat(),
-                "validation_score": 0.95,
-                "validation_comments": [
-                    "结果符合T/C IATCM 098-2023标准",
-                    "学术价值较高",
-                    "方法论严谨"
-                ],
-                "validation_certification": "academic_approved",
-                "validation_timestamp": datetime.now().isoformat()
-            }
-            
+            validation_results = self._create_validation_results()
+
             # 模拟验证过程
-            time.sleep(0.01)  # 模拟验证时间
-            
-            duration = time.time() - start_time
-            self.logger.info(f"验证阶段完成，耗时: {duration:.2f}s")
-            
+            self._simulate_validation_process(start_time)
+
             return validation_results
-            
+
         except Exception as e:
             self.logger.error(f"验证阶段失败: {e}")
             raise
+
+    def _create_validation_results(self) -> dict:
+        return {
+            "validation_status": "passed",
+            "validation_date": datetime.now().isoformat(),
+            "validation_score": 0.95,
+            "validation_comments": [
+                "结果符合T/C IATCM 098-2023标准",
+                "学术价值较高",
+                "方法论严谨"
+            ],
+            "validation_certification": "academic_approved",
+            "validation_timestamp": datetime.now().isoformat()
+        }
+
+    def _simulate_validation_process(self, start_time: float) -> None:
+        time.sleep(0.01)  # 模拟验证时间
+        duration = time.time() - start_time
+        self.logger.info(f"验证阶段完成，耗时: {duration:.2f}s")
+
+    def _initialize_phase_tracking(self, iteration_result: IterationResult) -> None:
+        iteration_result.metadata["phase_history"] = []
+        iteration_result.metadata["phase_timings"] = {}
+        iteration_result.metadata["completed_phases"] = []
+        iteration_result.metadata["failed_phase"] = None
+        iteration_result.metadata["final_status"] = iteration_result.status.value
+        iteration_result.metadata["last_completed_phase"] = None
+        iteration_result.metadata["failed_operations"] = []
+
+    def _execute_phase(
+        self,
+        iteration_result: IterationResult,
+        phase_name: str,
+        status: CycleStatus,
+        operation: Callable[[], Any],
+    ) -> Any:
+        phase_started_at = datetime.now().isoformat()
+        phase_start_time = time.perf_counter()
+        phase_entry: Dict[str, Any] = {
+            "phase": phase_name,
+            "status": "in_progress",
+            "started_at": phase_started_at,
+        }
+        iteration_result.metadata["phase_history"].append(phase_entry)
+        iteration_result.status = status
+
+        try:
+            result = operation()
+        except Exception as exc:
+            duration = time.perf_counter() - phase_start_time
+            phase_entry["status"] = "failed"
+            phase_entry["ended_at"] = datetime.now().isoformat()
+            phase_entry["duration_seconds"] = round(duration, 6)
+            phase_entry["error"] = str(exc)
+            iteration_result.metadata["phase_timings"][phase_name] = round(duration, 6)
+            iteration_result.metadata["failed_phase"] = phase_name
+            iteration_result.metadata["final_status"] = "failed"
+            failure_details = {
+                "iteration_id": iteration_result.iteration_id,
+                "cycle_number": iteration_result.cycle_number,
+                "status": status.value,
+            }
+            self._record_failed_operation(iteration_result.metadata["failed_operations"], phase_name, str(exc), duration, failure_details)
+            self._record_failed_operation(self.failed_operations, phase_name, str(exc), duration, failure_details)
+            raise
+
+        duration = time.perf_counter() - phase_start_time
+        phase_entry["status"] = "completed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        iteration_result.metadata["phase_timings"][phase_name] = round(duration, 6)
+        if phase_name not in iteration_result.metadata["completed_phases"]:
+            iteration_result.metadata["completed_phases"].append(phase_name)
+        iteration_result.metadata["last_completed_phase"] = phase_name
+        iteration_result.metadata["final_status"] = "completed"
+        return result
+
+    def _finalize_iteration_result(
+        self,
+        iteration_result: IterationResult,
+        iteration_start: float,
+        success: bool,
+    ) -> None:
+        iteration_result.status = CycleStatus.COMPLETED if success else CycleStatus.FAILED
+        iteration_result.end_time = datetime.now().isoformat()
+        iteration_result.duration = time.perf_counter() - iteration_start
+        iteration_result.metadata["final_status"] = iteration_result.status.value
+
+    def _build_analysis_summary(
+        self,
+        test_results: Dict[str, Any],
+        repair_actions: List[Dict[str, Any]],
+        quality_metrics: Dict[str, Any],
+        academic_insights: List[Dict[str, Any]],
+        recommendations: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        failed_tests = len(test_results.get("failures", []))
+        quality_score = float(quality_metrics.get("quality_score", quality_metrics.get("overall_quality", 0.0)))
+        return {
+            "test_passed": bool(test_results.get("passed", False)),
+            "failed_test_count": failed_tests,
+            "repair_action_count": len(repair_actions),
+            "academic_insight_count": len(academic_insights),
+            "recommendation_count": len(recommendations),
+            "quality_score": quality_score,
+            "iteration_status": "stable" if failed_tests == 0 and quality_score >= self.config.confidence_threshold else "needs_followup",
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.cycle_metadata.get("failed_phase"),
+            "last_completed_phase": self.cycle_metadata.get("last_completed_phase"),
+            "final_status": self.cycle_metadata.get("final_status", "initialized"),
+        }
     
     def execute_iteration(self, context: Dict[str, Any]) -> IterationResult:
         """执行单次迭代"""
@@ -366,64 +761,89 @@ class IterationCycle:
             raise RuntimeError("迭代循环正在执行中")
         
         self.iteration_lock = True
+        iteration_start = time.perf_counter()
+        cycle_phase_start = time.perf_counter()
+        cycle_phase_entry = self._start_cycle_phase(
+            "execute_iteration",
+            {
+                "iteration_index": self.current_iteration,
+                "context_keys": sorted(context.keys()),
+            },
+        )
         iteration_result = IterationResult(
             iteration_id=f"iter_{self.current_iteration}_{int(time.time())}",
             cycle_number=self.current_iteration,
             status=CycleStatus.INITIALIZED,
             start_time=datetime.now().isoformat()
         )
+        self._initialize_phase_tracking(iteration_result)
         
         try:
-            # 1. 生成阶段
-            iteration_result.status = CycleStatus.GENERATING
-            artifacts = self.generate_artifacts(context)
+            artifacts = self._execute_phase(
+                iteration_result,
+                "generate",
+                CycleStatus.GENERATING,
+                lambda: self.generate_artifacts(context),
+            )
             iteration_result.generated_artifacts = artifacts
             
-            # 2. 测试阶段
-            iteration_result.status = CycleStatus.TESTING
-            test_results = self.test_artifacts(artifacts)
+            test_results = self._execute_phase(
+                iteration_result,
+                "test",
+                CycleStatus.TESTING,
+                lambda: self.test_artifacts(artifacts),
+            )
             iteration_result.test_results = test_results
             
-            # 3. 修复阶段
-            iteration_result.status = CycleStatus.FIXING
-            repair_actions = self.repair_artifacts(artifacts, test_results)
+            repair_actions = self._execute_phase(
+                iteration_result,
+                "repair",
+                CycleStatus.FIXING,
+                lambda: self.repair_artifacts(artifacts, test_results),
+            )
             iteration_result.repair_actions = repair_actions
             
-            # 4. 分析阶段
-            iteration_result.status = CycleStatus.ANALYZING
-            analysis_results = self.analyze_results(artifacts, test_results, repair_actions)
+            analysis_results = self._execute_phase(
+                iteration_result,
+                "analyze",
+                CycleStatus.ANALYZING,
+                lambda: self.analyze_results(artifacts, test_results, repair_actions),
+            )
             iteration_result.academic_insights = analysis_results.get("academic_insights", [])
             iteration_result.quality_assessment = analysis_results.get("quality_metrics", {})
             iteration_result.confidence_scores = analysis_results.get("confidence_scores", {})
-            iteration_result.recommendations = analysis_results.get("recommendations", {})
+            iteration_result.recommendations = analysis_results.get("recommendations", [])
+            iteration_result.metadata["analysis_summary"] = analysis_results.get("analysis_summary", {})
             
-            # 5. 优化阶段
-            iteration_result.status = CycleStatus.OPTIMIZING
-            optimization_results = self.optimize_process(analysis_results)
+            optimization_results = self._execute_phase(
+                iteration_result,
+                "optimize",
+                CycleStatus.OPTIMIZING,
+                lambda: self.optimize_process(analysis_results),
+            )
             iteration_result.metadata["optimization_actions"] = optimization_results.get("optimization_actions", [])
+            iteration_result.metadata["optimization_summary"] = optimization_results.get("optimization_summary", {})
             
-            # 6. 验证阶段
-            iteration_result.status = CycleStatus.VALIDATING
-            validation_results = self.validate_results(artifacts, analysis_results)
+            validation_results = self._execute_phase(
+                iteration_result,
+                "validate",
+                CycleStatus.VALIDATING,
+                lambda: self.validate_results(artifacts, analysis_results),
+            )
             iteration_result.metadata["validation"] = validation_results
-            
-            # 7. 记录问题
+
             if test_results.get("failures"):
                 iteration_result.issues_found = test_results["failures"]
-            
-            # 8. 性能指标
+
             if test_results.get("metrics"):
                 iteration_result.performance_metrics = test_results["metrics"]
             
-            # 9. 完成阶段
-            iteration_result.status = CycleStatus.COMPLETED
-            iteration_result.end_time = datetime.now().isoformat()
-            iteration_result.duration = time.time() - float(iteration_result.start_time)
+            self._finalize_iteration_result(iteration_result, iteration_start, success=True)
+            self._complete_cycle_phase("execute_iteration", cycle_phase_entry, cycle_phase_start)
+            self._sync_analysis_summary(iteration_result)
             
-            # 10. 更新性能指标
             self._update_performance_metrics(iteration_result)
             
-            # 11. 保存结果
             self.results.append(iteration_result)
             self.current_iteration += 1
             
@@ -431,18 +851,45 @@ class IterationCycle:
             return iteration_result
             
         except Exception as e:
-            iteration_result.status = CycleStatus.FAILED
-            iteration_result.end_time = datetime.now().isoformat()
-            iteration_result.duration = time.time() - float(iteration_result.start_time)
             iteration_result.issues_found.append(str(e))
+            self._finalize_iteration_result(iteration_result, iteration_start, success=False)
+            self.cycle_metadata["failed_phase"] = iteration_result.metadata.get("failed_phase")
+            self._fail_cycle_phase(
+                "execute_iteration",
+                cycle_phase_entry,
+                cycle_phase_start,
+                str(e),
+                {
+                    "iteration_id": iteration_result.iteration_id,
+                    "cycle_number": iteration_result.cycle_number,
+                    "failed_phase": iteration_result.metadata.get("failed_phase"),
+                },
+            )
+            self._sync_analysis_summary(iteration_result)
             self.logger.error(f"第 {self.current_iteration} 次迭代失败: {e}")
             self.logger.error(traceback.format_exc())
             
-            # 记录失败的迭代
+            self._update_performance_metrics(iteration_result)
+            self.results.append(iteration_result)
             self.failed_iterations.append(iteration_result)
             raise
         finally:
             self.iteration_lock = False
+
+    def _sync_analysis_summary(self, iteration_result: IterationResult) -> None:
+        analysis_summary = iteration_result.metadata.get("analysis_summary") or {}
+        analysis_summary["failed_operation_count"] = len(self.failed_operations)
+        analysis_summary["failed_phase"] = iteration_result.metadata.get("failed_phase") or self.cycle_metadata.get("failed_phase")
+        analysis_summary["last_completed_phase"] = iteration_result.metadata.get("last_completed_phase")
+        analysis_summary["final_status"] = iteration_result.status.value
+        analysis_summary.setdefault(
+            "iteration_status",
+            "stable"
+            if iteration_result.status == CycleStatus.COMPLETED
+            and float(iteration_result.quality_assessment.get("quality_score", iteration_result.quality_assessment.get("overall_quality", 0.0))) >= self.config.minimum_stable_quality
+            else "needs_followup",
+        )
+        iteration_result.metadata["analysis_summary"] = analysis_summary
     
     def _update_performance_metrics(self, iteration_result: IterationResult):
         """更新性能指标"""
@@ -498,7 +945,8 @@ class IterationCycle:
                         break
             
             self.end_time = datetime.now()
-            self.total_duration = (self.end_time - self.start_time).total_seconds()
+            if self.start_time is not None:
+                self.total_duration = (self.end_time - self.start_time).total_seconds()
             
             # 更新最终性能指标
             self.performance_metrics["total_iterations"] = len(results)
@@ -534,60 +982,133 @@ class IterationCycle:
         """获取循环摘要"""
         if not self.results:
             return {"message": "还没有执行任何迭代"}
-        
+
         completed_iterations = len(self.results)
         failed_iterations = len(self.failed_iterations)
         total_duration = self.total_duration
-        
-        # 计算平均性能指标
-        avg_execution_time = 0
-        avg_memory_usage = 0
-        avg_quality_score = 0
-        avg_confidence_score = 0
-        
-        if completed_iterations > 0:
-            execution_times = [r.duration for r in self.results]
-            avg_execution_time = sum(execution_times) / len(execution_times)
-            
-            memory_usages = [r.performance_metrics.get("memory_usage", 0) 
-                           for r in self.results if r.performance_metrics]
-            if memory_usages:
-                avg_memory_usage = sum(memory_usages) / len(memory_usages)
-            
-            quality_scores = [r.quality_assessment.get("quality_score", 0.0) 
-                            for r in self.results if r.quality_assessment]
-            if quality_scores:
-                avg_quality_score = sum(quality_scores) / len(quality_scores)
-            
-            confidence_scores = [r.confidence_scores.get("overall", 0.0) 
-                               for r in self.results if r.confidence_scores]
-            if confidence_scores:
-                avg_confidence_score = sum(confidence_scores) / len(confidence_scores)
-        
+        average_metrics = self._build_average_metrics()
+        stable_iterations = self._count_stable_iterations()
+        cycle_status = (
+            "stable"
+            if failed_iterations == 0 and average_metrics["average_quality_score"] >= self.config.minimum_stable_quality
+            else "needs_followup"
+        )
+
         return {
             "total_iterations": completed_iterations,
             "failed_iterations": failed_iterations,
             "successful_iterations": completed_iterations - failed_iterations,
+            "stable_iterations": stable_iterations,
             "total_duration_seconds": total_duration,
-            "average_iteration_time": avg_execution_time,
-            "average_memory_usage_mb": avg_memory_usage,
-            "average_quality_score": avg_quality_score,
-            "average_confidence_score": avg_confidence_score,
-            "latest_results": [r.__dict__ for r in self.results[-3:]],  # 最近3次结果
-            "failed_iterations_details": [r.__dict__ for r in self.failed_iterations],
-            "performance_metrics": self.performance_metrics
+            "average_iteration_time": average_metrics["average_iteration_time"],
+            "average_memory_usage_mb": average_metrics["average_memory_usage_mb"],
+            "average_quality_score": average_metrics["average_quality_score"],
+            "average_confidence_score": average_metrics["average_confidence_score"],
+            "analysis_summary": {
+                "status": cycle_status,
+                "failed_operation_count": len(self.failed_operations),
+                "failed_phase": self.cycle_metadata.get("failed_phase"),
+                "last_completed_phase": self.cycle_metadata.get("last_completed_phase"),
+                "final_status": self.cycle_metadata.get("final_status", "initialized"),
+            },
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+            "latest_results": [self._serialize_iteration_result(r) for r in self.results[-3:]],
+            "failed_iterations_details": [self._serialize_iteration_result(r) for r in self.failed_iterations],
+            "report_metadata": self._build_report_metadata(),
+            "performance_metrics": self._serialize_value(self.performance_metrics)
         }
+
+    def _build_average_metrics(self) -> Dict[str, float]:
+        if not self.results:
+            return {
+                "average_iteration_time": 0.0,
+                "average_memory_usage_mb": 0.0,
+                "average_quality_score": 0.0,
+                "average_confidence_score": 0.0,
+            }
+
+        avg_iteration_time = sum(result.duration for result in self.results) / len(self.results)
+        memory_usages = [
+            result.performance_metrics.get("memory_usage", 0)
+            for result in self.results
+            if result.performance_metrics
+        ]
+        quality_scores = [
+            result.quality_assessment.get("quality_score", 0.0)
+            for result in self.results
+            if result.quality_assessment
+        ]
+        confidence_scores = [
+            result.confidence_scores.get("overall", 0.0)
+            for result in self.results
+            if result.confidence_scores
+        ]
+        return {
+            "average_iteration_time": avg_iteration_time,
+            "average_memory_usage_mb": sum(memory_usages) / len(memory_usages) if memory_usages else 0.0,
+            "average_quality_score": sum(quality_scores) / len(quality_scores) if quality_scores else 0.0,
+            "average_confidence_score": sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.0,
+        }
+
+    def _count_stable_iterations(self) -> int:
+        return sum(
+            1
+            for result in self.results
+            if result.metadata.get("analysis_summary", {}).get("iteration_status") == "stable"
+        )
+
+    def _build_report_metadata(self) -> Dict[str, Any]:
+        return {
+            "contract_version": self.config.export_contract_version,
+            "generated_at": datetime.now().isoformat(),
+            "result_schema": "iteration_cycle_report",
+            "latest_iteration_id": self.results[-1].iteration_id if self.results else "",
+            "failed_operation_count": len(self.failed_operations),
+            "final_status": self.cycle_metadata.get("final_status", "initialized"),
+            "last_completed_phase": self.cycle_metadata.get("last_completed_phase"),
+        }
+
+    def _serialize_iteration_result(self, iteration_result: IterationResult) -> Dict[str, Any]:
+        return self._serialize_value({
+            "iteration_id": iteration_result.iteration_id,
+            "cycle_number": iteration_result.cycle_number,
+            "status": iteration_result.status.value,
+            "start_time": iteration_result.start_time,
+            "end_time": iteration_result.end_time,
+            "duration": iteration_result.duration,
+            "generated_artifacts": iteration_result.generated_artifacts,
+            "test_results": iteration_result.test_results,
+            "repair_actions": iteration_result.repair_actions,
+            "issues_found": iteration_result.issues_found,
+            "performance_metrics": iteration_result.performance_metrics,
+            "metadata": iteration_result.metadata,
+            "confidence_scores": iteration_result.confidence_scores,
+            "academic_insights": iteration_result.academic_insights,
+            "quality_assessment": iteration_result.quality_assessment,
+            "recommendations": iteration_result.recommendations,
+        })
+
+    def _build_export_payload(self, output_path: str) -> Dict[str, Any]:
+        return self._serialize_value({
+            "report_metadata": {
+                **self._build_report_metadata(),
+                "output_path": output_path,
+                "exported_file": os.path.basename(output_path),
+            },
+            "cycle_summary": self.get_cycle_summary(),
+            "iteration_results": [self._serialize_iteration_result(r) for r in self.results],
+            "failed_iterations": [self._serialize_iteration_result(r) for r in self.failed_iterations],
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+            "configuration": self.config.__dict__,
+            "performance_metrics": self.performance_metrics,
+        })
     
     def export_results(self, output_path: str = "iteration_results.json"):
         """导出结果"""
         try:
-            results_data = {
-                "cycle_summary": self.get_cycle_summary(),
-                "iteration_results": [r.__dict__ for r in self.results],
-                "failed_iterations": [r.__dict__ for r in self.failed_iterations],
-                "configuration": self.config.__dict__,
-                "performance_metrics": self.performance_metrics
-            }
+            results_data = self._build_export_payload(output_path)
             
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(results_data, f, ensure_ascii=False, indent=2)
@@ -632,6 +1153,7 @@ class IterationCycle:
                 quality_scores.append(quality_metrics[metric] * weight)
         
         quality_metrics["overall_quality"] = sum(quality_scores) if quality_scores else 0.0
+        quality_metrics["quality_score"] = quality_metrics["overall_quality"]
         
         return quality_metrics
     
@@ -753,12 +1275,31 @@ class IterationCycle:
     def _do_cleanup(self) -> bool:
         """清理资源"""
         try:
-            # 关闭线程池
-            self.executor.shutdown(wait=True)
-            
             # 清理数据结构
             self.results.clear()
             self.failed_iterations.clear()
+            self.failed_operations.clear()
+            self.current_iteration = 0
+            self.start_time = None
+            self.end_time = None
+            self.total_duration = 0.0
+            self.cycle_metadata = {
+                "phase_history": [],
+                "phase_timings": {},
+                "completed_phases": [],
+                "failed_phase": None,
+                "final_status": "cleaned",
+                "last_completed_phase": None,
+            }
+            self.performance_metrics = {
+                "total_iterations": 0,
+                "successful_iterations": 0,
+                "failed_iterations": 0,
+                "average_duration": 0.0,
+                "total_processing_time": 0.0,
+                "quality_score": 0.0,
+                "confidence_score": 0.0,
+            }
             
             self.logger.info("迭代循环管理器资源清理完成")
             return True

@@ -1,10 +1,10 @@
-"""超分子化学和物理化学 - Supramolecular Chemistry & Physicochemistry"""
+"""超分子化学与物理化学分析。"""
 
 from typing import Any, Dict, List
 
 
 class SupramolecularPhysicochemicalAnalyzer:
-    """超分子化学与物理化学分析器"""
+    """超分子化学与物理化学分析器。"""
 
     HERB_PHYSICOCHEMISTRY: Dict[str, Dict[str, float]] = {
         "黄芪": {"solubility": 0.82, "h_bond": 0.74, "pi_stack": 0.21, "dispersion": 0.66},
@@ -17,7 +17,6 @@ class SupramolecularPhysicochemicalAnalyzer:
 
     @classmethod
     def analyze_formula_physicochemical(cls, formula_name: str, herbs: List[str]) -> Dict[str, Any]:
-        """评估方剂在溶解性、非共价作用与协同稳定性方面的理化特征"""
         profiles = [cls.HERB_PHYSICOCHEMISTRY[h] for h in herbs if h in cls.HERB_PHYSICOCHEMISTRY]
         if not profiles:
             return {"formula_name": formula_name, "available": False}

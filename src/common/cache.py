@@ -1,41 +1,28 @@
-# src/common/cache.py
-"""
-缓存装饰器 — 基于 functools.lru_cache，增加可选 TTL 过期机制。
-
-用法示例::
-
-    @tcm_cache(maxsize=128, ttl=3600)
-    def expensive_lookup(term: str) -> dict:
-        ...
-"""
-
-from __future__ import annotations
+# -*- coding: utf-8 -*-
+"""带 TTL 的缓存装饰器 — 基于 functools.lru_cache 扩展可选过期机制。"""
 
 import functools
 import time
 from typing import Any, Callable, Optional
 
 
-def tcm_cache(
-    maxsize: int = 128,
-    ttl: Optional[int] = None,
-) -> Callable:
-    """
-    带可选 TTL 的 LRU 缓存装饰器。
+def tcm_cache(maxsize: int = 128, ttl: Optional[int] = None) -> Callable:
+    """可参数化缓存装饰器。
 
-    Args:
-        maxsize: 缓存最大条目数。
-        ttl:     缓存生存时间（秒），None 表示永不过期。
-
-    返回的函数额外拥有 ``cache_clear()`` 和 ``cache_info()`` 方法。
+    Parameters
+    ----------
+    maxsize : int
+        LRU 缓存最大条目数，``None`` 表示无限。
+    ttl : int | None
+        缓存存活时间（秒）。为 ``None`` 时永不过期，等同于 ``lru_cache``。
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(fn: Callable) -> Callable:
         if ttl is None:
-            # 无 TTL：直接使用 lru_cache
-            cached = functools.lru_cache(maxsize=maxsize)(func)
+            # 无 TTL，直接使用 lru_cache
+            cached = functools.lru_cache(maxsize=maxsize)(fn)
 
-            @functools.wraps(func)
+            @functools.wraps(fn)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 return cached(*args, **kwargs)
 
@@ -43,38 +30,30 @@ def tcm_cache(
             wrapper.cache_info = cached.cache_info  # type: ignore[attr-defined]
             return wrapper
 
-        # 有 TTL：自定义过期逻辑
-        _cache: dict = {}
-        _timestamps: dict = {}
+        # 有 TTL：用 lru_cache + 时间窗口轮转实现过期
+        _epoch = [time.time()]
 
-        @functools.wraps(func)
+        def _time_slot() -> int:
+            """返回当前时间窗口编号，窗口切换时旧缓存自动被淘汰。"""
+            return int((time.time() - _epoch[0]) // ttl)
+
+        @functools.lru_cache(maxsize=maxsize)
+        def _cached(_slot: int, *args: Any) -> Any:
+            return fn(*args)
+
+        @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            key = (args, tuple(sorted(kwargs.items())))
-            now = time.time()
-
-            # 检查缓存是否存在且未过期
-            if key in _cache and (now - _timestamps[key]) < ttl:
-                return _cache[key]
-
-            # 执行并缓存
-            result = func(*args, **kwargs)
-            _cache[key] = result
-            _timestamps[key] = now
-
-            # 简单 LRU：超出 maxsize 时删除最老条目
-            if len(_cache) > maxsize:
-                oldest_key = min(_timestamps, key=_timestamps.get)  # type: ignore[arg-type]
-                _cache.pop(oldest_key, None)
-                _timestamps.pop(oldest_key, None)
-
-            return result
+            if kwargs:
+                # lru_cache 不支持 kwargs，回退到直接调用
+                return fn(*args, **kwargs)
+            return _cached(_time_slot(), *args)
 
         def cache_clear() -> None:
-            _cache.clear()
-            _timestamps.clear()
+            _cached.cache_clear()
+            _epoch[0] = time.time()
 
-        def cache_info() -> dict:
-            return {"size": len(_cache), "maxsize": maxsize, "ttl": ttl}
+        def cache_info():
+            return _cached.cache_info()
 
         wrapper.cache_clear = cache_clear  # type: ignore[attr-defined]
         wrapper.cache_info = cache_info  # type: ignore[attr-defined]

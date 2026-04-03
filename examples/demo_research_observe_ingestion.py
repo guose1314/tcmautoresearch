@@ -7,8 +7,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from src.research.ctext_whitelist import load_whitelist
-from src.research.multi_source_corpus import build_source_collection_plan
+from src.collector.ctext_whitelist import load_whitelist
+from src.collector.multi_source_corpus import build_source_collection_plan
 from src.research.research_pipeline import ResearchPhase, ResearchPipeline
 
 logging.basicConfig(

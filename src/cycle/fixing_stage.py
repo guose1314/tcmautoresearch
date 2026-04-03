@@ -7,15 +7,19 @@
 import hashlib
 import json
 import logging
+import os
 import time
 import traceback
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from importlib import import_module
+from typing import Any, Callable, Dict, List, Optional
 
-import networkx as nx
+nx = import_module("networkx")
+
+from src.core.phase_tracker import PhaseTrackerMixin
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -89,7 +93,7 @@ class FixingStageResult:
     confidence_scores: Dict[str, float] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-class FixingStage:
+class FixingStage(PhaseTrackerMixin):
     """
     修复阶段管理器
     
@@ -106,10 +110,18 @@ class FixingStage:
     6. 知识沉淀与传承
     """
     
-    def __init__(self, config: Dict[str, Any] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
-        self.repair_actions = []
-        self.repair_history = []
+        self.governance_config = {
+            "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
+            "persist_failed_operations": self.config.get("persist_failed_operations", True),
+            "minimum_stable_success_rate": float(self.config.get("minimum_stable_success_rate", 0.8)),
+            "export_contract_version": self.config.get("export_contract_version", "d41.v1"),
+        }
+        self.repair_actions: List[RepairAction] = []
+        self.repair_history: List[FixingStageResult] = []
+        self.failed_stages: List[FixingStageResult] = []
+        self.failed_operations: List[Dict[str, Any]] = []
         self.performance_metrics = {
             "total_repairs": 0,
             "successful_repairs": 0,
@@ -119,11 +131,259 @@ class FixingStage:
             "quality_improvement": 0.0,
             "confidence_improvement": 0.0
         }
+        self.stage_metadata = {
+            "phase_history": [],
+            "phase_timings": {},
+            "completed_phases": [],
+            "failed_phase": None,
+            "final_status": "initialized",
+            "last_completed_phase": None,
+        }
         self.knowledge_graph = nx.MultiDiGraph()
         self.repair_rules = self._load_repair_rules()
         self.logger = logging.getLogger(__name__)
         
         self.logger.info("修复阶段管理器初始化完成")
+
+    def _initialize_phase_tracking(self, stage_result: FixingStageResult) -> None:
+        stage_result.metadata["phase_history"] = []
+        stage_result.metadata["phase_timings"] = {}
+        stage_result.metadata["completed_phases"] = []
+        stage_result.metadata["failed_phase"] = None
+        stage_result.metadata["final_status"] = stage_result.status
+        stage_result.metadata["last_completed_phase"] = None
+        stage_result.metadata["failed_operations"] = []
+
+    def _record_failed_operation(
+        self,
+        container: List[Dict[str, Any]],
+        operation: str,
+        error: str,
+        duration: float,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self.governance_config["persist_failed_operations"]:
+            return
+        failure_entry = {
+            "operation": operation,
+            "error": error,
+            "timestamp": datetime.now().isoformat(),
+            "duration_seconds": round(duration, 6),
+        }
+        if details:
+            failure_entry["details"] = self._serialize_value(details)
+        container.append(failure_entry)
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        return self._build_runtime_metadata_from_dict(self.stage_metadata)
+
+    def _start_stage_phase(self, phase_name: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        phase_entry = {
+            "phase": phase_name,
+            "status": "in_progress",
+            "started_at": datetime.now().isoformat(),
+            "context": self._serialize_value(context or {}),
+        }
+        if self.governance_config["enable_phase_tracking"]:
+            self.stage_metadata["phase_history"].append(phase_entry)
+        return phase_entry
+
+    def _complete_stage_phase(self, phase_name: str, phase_entry: Dict[str, Any], start_time: float) -> None:
+        duration = time.perf_counter() - start_time
+        phase_entry["status"] = "completed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        self.stage_metadata["phase_timings"][phase_name] = round(duration, 6)
+        if phase_name not in self.stage_metadata["completed_phases"]:
+            self.stage_metadata["completed_phases"].append(phase_name)
+        self.stage_metadata["last_completed_phase"] = phase_name
+        self.stage_metadata["final_status"] = "completed"
+
+    def _fail_stage_phase(
+        self,
+        phase_name: str,
+        phase_entry: Dict[str, Any],
+        start_time: float,
+        error: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        duration = time.perf_counter() - start_time
+        phase_entry["status"] = "failed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        phase_entry["error"] = error
+        self.stage_metadata["phase_timings"][phase_name] = round(duration, 6)
+        self.stage_metadata["failed_phase"] = phase_name
+        self.stage_metadata["final_status"] = "failed"
+        self._record_failed_operation(self.failed_operations, phase_name, error, duration, details)
+
+    def _execute_phase(
+        self,
+        stage_result: FixingStageResult,
+        phase_name: str,
+        status: str,
+        operation: Callable[[], Any],
+    ) -> Any:
+        phase_start = time.perf_counter()
+        phase_entry: Dict[str, Any] = {
+            "phase": phase_name,
+            "status": "in_progress",
+            "started_at": datetime.now().isoformat(),
+        }
+        stage_result.metadata["phase_history"].append(phase_entry)
+        stage_result.status = status
+
+        try:
+            result = operation()
+        except Exception as exc:
+            duration = time.perf_counter() - phase_start
+            phase_entry["status"] = "failed"
+            phase_entry["ended_at"] = datetime.now().isoformat()
+            phase_entry["duration_seconds"] = round(duration, 6)
+            phase_entry["error"] = str(exc)
+            stage_result.metadata["phase_timings"][phase_name] = round(duration, 6)
+            stage_result.metadata["failed_phase"] = phase_name
+            stage_result.metadata["final_status"] = "failed"
+            failure_details = {
+                "stage_id": stage_result.stage_id,
+                "iteration_id": stage_result.iteration_id,
+                "status": status,
+            }
+            self._record_failed_operation(stage_result.metadata["failed_operations"], phase_name, str(exc), duration, failure_details)
+            self._record_failed_operation(self.failed_operations, phase_name, str(exc), duration, failure_details)
+            raise
+
+        duration = time.perf_counter() - phase_start
+        phase_entry["status"] = "completed"
+        phase_entry["ended_at"] = datetime.now().isoformat()
+        phase_entry["duration_seconds"] = round(duration, 6)
+        stage_result.metadata["phase_timings"][phase_name] = round(duration, 6)
+        if phase_name not in stage_result.metadata["completed_phases"]:
+            stage_result.metadata["completed_phases"].append(phase_name)
+        stage_result.metadata["last_completed_phase"] = phase_name
+        stage_result.metadata["final_status"] = "completed"
+        return result
+
+    def _finalize_stage_result(
+        self,
+        stage_result: FixingStageResult,
+        start_time: float,
+        success: bool,
+    ) -> None:
+        stage_result.status = "completed" if success else "failed"
+        stage_result.end_time = datetime.now().isoformat()
+        stage_result.duration = time.perf_counter() - start_time
+        stage_result.metadata["final_status"] = stage_result.status
+
+    def _build_analysis_summary(
+        self,
+        repair_actions: List[RepairAction],
+        validation_results: Dict[str, Any],
+        academic_insights: List[Dict[str, Any]],
+        recommendations: List[Dict[str, Any]],
+        confidence_scores: Dict[str, float],
+    ) -> Dict[str, Any]:
+        successful_repairs = sum(1 for action in repair_actions if action.success)
+        total_repairs = len(repair_actions)
+        success_rate = successful_repairs / total_repairs if total_repairs else 0.0
+        minimum_success_rate = self.governance_config["minimum_stable_success_rate"]
+        return {
+            "total_repairs": total_repairs,
+            "successful_repairs": successful_repairs,
+            "failed_repairs": total_repairs - successful_repairs,
+            "success_rate": success_rate,
+            "quality_improvement": float(validation_results.get("quality_improvement", 0.0)),
+            "overall_confidence": float(confidence_scores.get("overall", 0.0)),
+            "academic_insight_count": len(academic_insights),
+            "recommendation_count": len(recommendations),
+            "stage_status": "stable" if success_rate >= minimum_success_rate else "needs_followup",
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.stage_metadata.get("failed_phase"),
+            "last_completed_phase": self.stage_metadata.get("last_completed_phase"),
+            "final_status": self.stage_metadata.get("final_status", "initialized"),
+        }
+
+    def _serialize_repair_action(self, action: RepairAction) -> Dict[str, Any]:
+        return self._serialize_value({
+            "action_id": action.action_id,
+            "repair_type": action.repair_type.value,
+            "priority": action.priority.value,
+            "description": action.description,
+            "affected_components": action.affected_components,
+            "estimated_effort": action.estimated_effort,
+            "confidence": action.confidence,
+            "status": action.status,
+            "start_time": action.start_time,
+            "end_time": action.end_time,
+            "duration": action.duration,
+            "success": action.success,
+            "error_message": action.error_message,
+            "impact_analysis": action.impact_analysis,
+            "academic_impact": action.academic_impact,
+            "metadata": action.metadata,
+        })
+
+    def _serialize_stage_result(self, stage_result: FixingStageResult) -> Dict[str, Any]:
+        return self._serialize_value({
+            "stage_id": stage_result.stage_id,
+            "iteration_id": stage_result.iteration_id,
+            "status": stage_result.status,
+            "start_time": stage_result.start_time,
+            "end_time": stage_result.end_time,
+            "duration": stage_result.duration,
+            "repair_actions": [self._serialize_repair_action(action) for action in stage_result.repair_actions],
+            "resolved_issues": stage_result.resolved_issues,
+            "unresolved_issues": stage_result.unresolved_issues,
+            "quality_improvement": stage_result.quality_improvement,
+            "academic_insights": stage_result.academic_insights,
+            "recommendations": stage_result.recommendations,
+            "confidence_scores": stage_result.confidence_scores,
+            "metadata": stage_result.metadata,
+        })
+
+    def _serialize_repair_rules(self) -> Dict[str, Any]:
+        serialized_rules: Dict[str, Any] = {}
+        for issue_type, rule in self.repair_rules.items():
+            serialized_rules[issue_type] = {
+                **rule,
+                "priority": rule.get("priority").value if isinstance(rule.get("priority"), RepairPriority) else rule.get("priority"),
+                "type": rule.get("type").value if isinstance(rule.get("type"), RepairType) else rule.get("type"),
+            }
+        return serialized_rules
+
+    def _build_report_metadata(self) -> Dict[str, Any]:
+        return {
+            "contract_version": self.governance_config["export_contract_version"],
+            "generated_at": datetime.now().isoformat(),
+            "result_schema": "fixing_stage_report",
+            "latest_stage_id": self.repair_history[-1].stage_id if self.repair_history else "",
+            "failed_operation_count": len(self.failed_operations),
+            "final_status": self.stage_metadata.get("final_status", "initialized"),
+            "last_completed_phase": self.stage_metadata.get("last_completed_phase"),
+        }
+
+    def _build_stage_analysis_summary(self) -> Dict[str, Any]:
+        total_stages = len(self.repair_history)
+        failed_stages = len(self.failed_stages)
+        stable_stages = len(
+            [
+                stage
+                for stage in self.repair_history
+                if stage.metadata.get("analysis_summary", {}).get("stage_status") == "stable"
+            ]
+        )
+        return {
+            "status": "stable"
+            if failed_stages == 0 and total_stages > 0
+            else "needs_followup",
+            "total_stages": total_stages,
+            "failed_stage_count": failed_stages,
+            "stable_stage_count": stable_stages,
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.stage_metadata.get("failed_phase"),
+            "last_completed_phase": self.stage_metadata.get("last_completed_phase"),
+            "final_status": self.stage_metadata.get("final_status", "initialized"),
+        }
     
     def _load_repair_rules(self) -> Dict[str, Any]:
         """加载修复规则"""
@@ -190,7 +450,6 @@ class FixingStage:
         Returns:
             List[RepairAction]: 修复行动列表
         """
-        start_time = time.time()
         self.logger.info("开始识别问题并生成修复行动")
         
         try:
@@ -202,9 +461,6 @@ class FixingStage:
                 repair_action = self._generate_single_repair_action(issue, context, i)
                 if repair_action:
                     repair_actions.append(repair_action)
-            
-            # 更新性能指标
-            self._update_performance_metrics(len(repair_actions), time.time() - start_time)
             
             self.logger.info(f"问题识别和修复行动生成完成，共生成 {len(repair_actions)} 个修复行动")
             return repair_actions
@@ -302,9 +558,8 @@ class FixingStage:
                 executed_action = self._execute_single_repair_action(action)
                 executed_actions.append(executed_action)
             
-            # 更新性能指标
             successful_repairs = sum(1 for a in executed_actions if a.success)
-            self._update_performance_metrics(successful_repairs, time.time() - start_time)
+            self._update_performance_metrics(len(executed_actions), successful_repairs, time.time() - start_time)
             
             self.logger.info(f"修复行动执行完成，成功 {successful_repairs} 个")
             return executed_actions
@@ -401,43 +656,180 @@ class FixingStage:
         self.logger.info("开始验证修复效果")
         
         try:
-            validation_results = {
-                "total_repairs": len(repair_actions),
-                "successful_repairs": 0,
-                "failed_repairs": 0,
-                "quality_improvement": 0.0,
-                "confidence_improvement": 0.0,
-                "validation_time": 0.0
-            }
-            
+            validation_results = self._initialize_validation_results(len(repair_actions))
+
             # 统计修复结果
-            for action in repair_actions:
-                if action.success:
-                    validation_results["successful_repairs"] += 1
-                else:
-                    validation_results["failed_repairs"] += 1
-            
+            self._update_repair_statistics(validation_results, repair_actions)
+
             # 计算质量提升
-            if validation_results["successful_repairs"] > 0:
-                validation_results["quality_improvement"] = (
-                    validation_results["successful_repairs"] / validation_results["total_repairs"]
-                )
-            
+            self._calculate_quality_improvement(validation_results)
+
             # 计算置信度提升
-            if repair_actions:
-                avg_confidence = sum(a.confidence for a in repair_actions if a.success) / len([a for a in repair_actions if a.success])
-                validation_results["confidence_improvement"] = avg_confidence
-            
+            self._calculate_confidence_improvement(validation_results, repair_actions)
+
             validation_results["validation_time"] = time.time() - start_time
-            
+
             self.logger.info("修复效果验证完成")
             return validation_results
             
         except Exception as e:
             self.logger.error(f"修复效果验证失败: {e}")
             raise
+
+    def run_fixing_stage(
+        self,
+        issues: List[Dict[str, Any]],
+        context: Dict[str, Any],
+        iteration_id: str | None = None,
+    ) -> FixingStageResult:
+        start_time = time.perf_counter()
+        self.stage_metadata = {
+            "phase_history": [],
+            "phase_timings": {},
+            "completed_phases": [],
+            "failed_phase": None,
+            "final_status": "running",
+            "last_completed_phase": None,
+        }
+        stage_phase_start = time.perf_counter()
+        stage_phase_entry = self._start_stage_phase(
+            "run_fixing_stage",
+            {
+                "iteration_id": iteration_id,
+                "issue_count": len(issues),
+                "context_keys": sorted(context.keys()),
+            },
+        )
+        stage_result = FixingStageResult(
+            stage_id=f"fix_stage_{int(time.time())}",
+            iteration_id=iteration_id or f"fix_iter_{int(time.time())}",
+            status="pending",
+            start_time=datetime.now().isoformat(),
+        )
+        self._initialize_phase_tracking(stage_result)
+
+        try:
+            generated_actions = self._execute_phase(
+                stage_result,
+                "identify_repairs",
+                "identifying_repairs",
+                lambda: self.identify_and_generate_repairs(issues, context),
+            )
+            executed_actions = self._execute_phase(
+                stage_result,
+                "execute_repairs",
+                "executing_repairs",
+                lambda: self.execute_repair_actions(generated_actions),
+            )
+            stage_result.repair_actions = executed_actions
+            self.repair_actions.extend(executed_actions)
+
+            validation_results = self._execute_phase(
+                stage_result,
+                "validate_repairs",
+                "validating_repairs",
+                lambda: self.validate_repair_effects(executed_actions),
+            )
+            stage_result.quality_improvement = validation_results
+            stage_result.resolved_issues = [action.metadata.get("issue", {}) for action in executed_actions if action.success]
+            stage_result.unresolved_issues = [action.metadata.get("issue", {}) for action in executed_actions if not action.success]
+
+            analysis_results = self._execute_phase(
+                stage_result,
+                "analyze_repairs",
+                "analyzing_repairs",
+                lambda: self.analyze_repair_outcomes(executed_actions, validation_results),
+            )
+            stage_result.academic_insights = analysis_results.get("academic_insights", [])
+            stage_result.recommendations = analysis_results.get("recommendations", [])
+            stage_result.confidence_scores = analysis_results.get("confidence_scores", {})
+            stage_result.metadata["analysis_summary"] = analysis_results.get("analysis_summary", {})
+
+            self._finalize_stage_result(stage_result, start_time, success=True)
+            self._complete_stage_phase("run_fixing_stage", stage_phase_entry, stage_phase_start)
+            self._sync_analysis_summary(stage_result)
+            self.repair_history.append(stage_result)
+            return stage_result
+
+        except Exception as exc:
+            stage_result.metadata["error"] = str(exc)
+            self._finalize_stage_result(stage_result, start_time, success=False)
+            self.stage_metadata["failed_phase"] = stage_result.metadata.get("failed_phase")
+            self._fail_stage_phase(
+                "run_fixing_stage",
+                stage_phase_entry,
+                stage_phase_start,
+                str(exc),
+                {
+                    "stage_id": stage_result.stage_id,
+                    "iteration_id": stage_result.iteration_id,
+                    "failed_phase": stage_result.metadata.get("failed_phase"),
+                },
+            )
+            self._sync_analysis_summary(stage_result)
+            self.repair_history.append(stage_result)
+            self.failed_stages.append(stage_result)
+            self.logger.error(f"修复阶段执行失败: {exc}")
+            self.logger.error(traceback.format_exc())
+            raise
+
+    def _sync_analysis_summary(self, stage_result: FixingStageResult) -> None:
+        analysis_summary = stage_result.metadata.get("analysis_summary") or {}
+        analysis_summary["failed_operation_count"] = len(self.failed_operations)
+        analysis_summary["failed_phase"] = stage_result.metadata.get("failed_phase") or self.stage_metadata.get("failed_phase")
+        analysis_summary["last_completed_phase"] = stage_result.metadata.get("last_completed_phase")
+        analysis_summary["final_status"] = stage_result.status
+        analysis_summary.setdefault(
+            "stage_status",
+            "stable"
+            if stage_result.status == "completed"
+            and float(stage_result.quality_improvement.get("quality_improvement", 0.0)) >= self.governance_config["minimum_stable_success_rate"]
+            else "needs_followup",
+        )
+        stage_result.metadata["analysis_summary"] = analysis_summary
+
+    def _initialize_validation_results(self, total_repairs: int) -> Dict[str, Any]:
+        return {
+            "total_repairs": total_repairs,
+            "successful_repairs": 0,
+            "failed_repairs": 0,
+            "quality_improvement": 0.0,
+            "confidence_improvement": 0.0,
+            "validation_time": 0.0
+        }
+
+    def _update_repair_statistics(
+        self,
+        validation_results: Dict[str, Any],
+        repair_actions: List[RepairAction],
+    ) -> None:
+        for action in repair_actions:
+            if action.success:
+                validation_results["successful_repairs"] += 1
+            else:
+                validation_results["failed_repairs"] += 1
+
+    def _calculate_quality_improvement(self, validation_results: Dict[str, Any]) -> None:
+        if validation_results["successful_repairs"] > 0:
+            validation_results["quality_improvement"] = (
+                validation_results["successful_repairs"] / validation_results["total_repairs"]
+            )
+
+    def _calculate_confidence_improvement(
+        self,
+        validation_results: Dict[str, Any],
+        repair_actions: List[RepairAction],
+    ) -> None:
+        successful_actions = [a for a in repair_actions if a.success]
+        if successful_actions:
+            avg_confidence = sum(a.confidence for a in successful_actions) / len(successful_actions)
+            validation_results["confidence_improvement"] = avg_confidence
     
-    def analyze_repair_outcomes(self, repair_actions: List[RepairAction]) -> Dict[str, Any]:
+    def analyze_repair_outcomes(
+        self,
+        repair_actions: List[RepairAction],
+        validation_results: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         分析修复结果
         
@@ -469,6 +861,7 @@ class FixingStage:
             
             # 计算综合置信度
             confidence_scores = self._calculate_comprehensive_confidence(repair_actions)
+            effective_validation_results = validation_results or self.validate_repair_effects(repair_actions)
             
             analysis_results = {
                 "repair_statistics": {
@@ -480,6 +873,13 @@ class FixingStage:
                 "academic_insights": academic_insights,
                 "recommendations": recommendations,
                 "confidence_scores": confidence_scores,
+                "analysis_summary": self._build_analysis_summary(
+                    repair_actions,
+                    effective_validation_results,
+                    academic_insights,
+                    recommendations,
+                    confidence_scores,
+                ),
                 "analysis_time": time.time() - start_time
             }
             
@@ -584,59 +984,67 @@ class FixingStage:
             "academic_confidence": 0.0,
             "overall": 0.0
         }
-        
-        # 计算修复置信度
-        if repair_actions:
-            repair_confidences = [a.confidence for a in repair_actions if a.success]
-            if repair_confidences:
-                confidence_scores["repair_confidence"] = sum(repair_confidences) / len(repair_confidences)
-        
-        # 计算质量置信度（基于修复成功率）
-        if repair_actions:
-            success_rate = sum(1 for a in repair_actions if a.success) / len(repair_actions)
-            confidence_scores["quality_confidence"] = success_rate
-        
-        # 计算学术置信度（基于修复质量）
-        if repair_actions:
-            # 假设高质量修复具有更高的学术价值
-            quality_scores = []
-            for action in repair_actions:
-                if action.success:
-                    # 基于修复类型和优先级计算质量得分
-                    quality = 0.0
-                    if action.priority == RepairPriority.CRITICAL:
-                        quality = 0.9
-                    elif action.priority == RepairPriority.HIGH:
-                        quality = 0.8
-                    elif action.priority == RepairPriority.MEDIUM:
-                        quality = 0.7
-                    else:
-                        quality = 0.6
-                    quality_scores.append(quality)
-            
-            if quality_scores:
-                confidence_scores["academic_confidence"] = sum(quality_scores) / len(quality_scores)
-        
+
+        confidence_scores["repair_confidence"] = self._calculate_repair_confidence(repair_actions)
+        confidence_scores["quality_confidence"] = self._calculate_success_rate(repair_actions)
+        confidence_scores["academic_confidence"] = self._calculate_academic_confidence(repair_actions)
+
         # 计算综合置信度
         weights = {
             "repair_confidence": 0.4,
             "quality_confidence": 0.3,
             "academic_confidence": 0.3
         }
-        
+
         scores = []
         for metric, weight in weights.items():
             if metric in confidence_scores:
                 scores.append(confidence_scores[metric] * weight)
-        
+
         confidence_scores["overall"] = sum(scores) if scores else 0.0
-        
+
         return confidence_scores
+
+    def _calculate_repair_confidence(self, repair_actions: List[RepairAction]) -> float:
+        if not repair_actions:
+            return 0.0
+        repair_confidences = [a.confidence for a in repair_actions if a.success]
+        if not repair_confidences:
+            return 0.0
+        return sum(repair_confidences) / len(repair_confidences)
+
+    def _calculate_success_rate(self, repair_actions: List[RepairAction]) -> float:
+        if not repair_actions:
+            return 0.0
+        successful_count = sum(1 for action in repair_actions if action.success)
+        return successful_count / len(repair_actions)
+
+    def _calculate_academic_confidence(self, repair_actions: List[RepairAction]) -> float:
+        if not repair_actions:
+            return 0.0
+        quality_scores = [
+            self._priority_academic_score(action.priority)
+            for action in repair_actions
+            if action.success
+        ]
+        if not quality_scores:
+            return 0.0
+        return sum(quality_scores) / len(quality_scores)
+
+    def _priority_academic_score(self, priority: RepairPriority) -> float:
+        mapping = {
+            RepairPriority.CRITICAL: 0.9,
+            RepairPriority.HIGH: 0.8,
+            RepairPriority.MEDIUM: 0.7,
+            RepairPriority.LOW: 0.6,
+        }
+        return mapping.get(priority, 0.6)
     
-    def _update_performance_metrics(self, successful_repairs: int, duration: float):
+    def _update_performance_metrics(self, total_repairs: int, successful_repairs: int, duration: float):
         """更新性能指标"""
-        self.performance_metrics["total_repairs"] += successful_repairs
+        self.performance_metrics["total_repairs"] += total_repairs
         self.performance_metrics["successful_repairs"] += successful_repairs
+        self.performance_metrics["failed_repairs"] += total_repairs - successful_repairs
         self.performance_metrics["total_repair_time"] += duration
         
         # 更新平均修复时间
@@ -648,33 +1056,55 @@ class FixingStage:
     def get_repair_performance_report(self) -> Dict[str, Any]:
         """获取修复性能报告"""
         if not self.repair_actions:
-            return {"message": "还没有执行任何修复行动"}
+            return {
+                "message": "还没有执行任何修复行动",
+                "performance_metrics": self._serialize_value(self.performance_metrics),
+                "failed_stages": [self._serialize_stage_result(stage) for stage in self.failed_stages],
+                "failed_operations": self._serialize_value(self.failed_operations),
+                "metadata": self._build_runtime_metadata(),
+                "analysis_summary": self._build_stage_analysis_summary(),
+                "report_metadata": self._build_report_metadata(),
+            }
         
         return {
-            "performance_metrics": self.performance_metrics,
+            "performance_metrics": self._serialize_value(self.performance_metrics),
             "total_repairs": self.performance_metrics["total_repairs"],
             "successful_repairs": self.performance_metrics["successful_repairs"],
             "failed_repairs": self.performance_metrics["failed_repairs"],
             "average_repair_time": self.performance_metrics["average_repair_time"],
             "total_repair_time": self.performance_metrics["total_repair_time"],
             "success_rate": self.performance_metrics["successful_repairs"] / max(1, self.performance_metrics["total_repairs"]),
-            "latest_repair_actions": [a.__dict__ for a in self.repair_actions[-5:]] if self.repair_actions else []
+            "latest_repair_actions": [self._serialize_repair_action(a) for a in self.repair_actions[-5:]] if self.repair_actions else [],
+            "failed_stages": [self._serialize_stage_result(stage) for stage in self.failed_stages],
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+            "analysis_summary": self._build_stage_analysis_summary(),
+            "report_metadata": self._build_report_metadata(),
         }
     
     def export_repair_data(self, output_path: str) -> bool:
         """导出修复数据"""
         try:
-            repair_data = {
+            repair_data = self._serialize_value({
+                "report_metadata": {
+                    **self._build_report_metadata(),
+                    "output_path": output_path,
+                    "exported_file": os.path.basename(output_path),
+                },
                 "repair_framework_info": {
                     "framework_name": "智能修复框架",
                     "version": "2.0.0",
                     "generated_at": datetime.now().isoformat(),
                     "performance_metrics": self.performance_metrics
                 },
-                "repair_actions": [a.__dict__ for a in self.repair_actions],
-                "repair_history": [a.__dict__ for a in self.repair_history],
-                "repair_rules": self.repair_rules
-            }
+                "repair_actions": [self._serialize_repair_action(a) for a in self.repair_actions],
+                "repair_history": [self._serialize_stage_result(stage) for stage in self.repair_history],
+                "failed_stages": [self._serialize_stage_result(stage) for stage in self.failed_stages],
+                    "failed_operations": self._serialize_value(self.failed_operations),
+                    "metadata": self._build_runtime_metadata(),
+                "repair_rules": self._serialize_repair_rules(),
+                "repair_performance_report": self.get_repair_performance_report(),
+            })
             
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(repair_data, f, ensure_ascii=False, indent=2)
@@ -692,7 +1122,26 @@ class FixingStage:
             # 清理数据结构
             self.repair_actions.clear()
             self.repair_history.clear()
+            self.failed_stages.clear()
+            self.failed_operations.clear()
             self.knowledge_graph.clear()
+            self.stage_metadata = {
+                "phase_history": [],
+                "phase_timings": {},
+                "completed_phases": [],
+                "failed_phase": None,
+                "final_status": "cleaned",
+                "last_completed_phase": None,
+            }
+            self.performance_metrics = {
+                "total_repairs": 0,
+                "successful_repairs": 0,
+                "failed_repairs": 0,
+                "average_repair_time": 0.0,
+                "total_repair_time": 0.0,
+                "quality_improvement": 0.0,
+                "confidence_improvement": 0.0,
+            }
             
             self.logger.info("修复阶段管理器资源清理完成")
             return True

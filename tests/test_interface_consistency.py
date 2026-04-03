@@ -4,16 +4,16 @@
 基于T/C IATCM 098-2023标准的接口一致性验证
 """
 
-import hashlib
-import inspect
 import json
 import logging
+import os
+import tempfile
 import time
 import traceback
 import unittest
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -71,8 +71,14 @@ class InterfaceConsistencyTest:
     6. 学术规范符合性
     """
     
-    def __init__(self, config: Dict[str, Any] = None):
+    def __init__(self, config: Dict[str, Any] | None = None):
         self.config = config or {}
+        self.governance_config = {
+            "enable_phase_tracking": self.config.get("enable_phase_tracking", True),
+            "persist_failed_operations": self.config.get("persist_failed_operations", True),
+            "minimum_stable_compliance_score": float(self.config.get("minimum_stable_compliance_score", 0.85)),
+            "export_contract_version": self.config.get("export_contract_version", "d48.v1"),
+        }
         self.test_results = []
         self.test_history = []
         self.performance_metrics = {
@@ -85,9 +91,169 @@ class InterfaceConsistencyTest:
             "interface_compliance_score": 0.0,
             "academic_compliance_score": 0.0
         }
+        self.phase_history: List[Dict[str, Any]] = []
+        self.phase_timings: Dict[str, float] = {}
+        self.completed_phases: List[str] = []
+        self.failed_phase: str | None = None
+        self.failed_operations: List[Dict[str, Any]] = []
+        self.final_status = "initialized"
+        self.last_completed_phase: str | None = None
         self.logger = logging.getLogger(__name__)
         
         self.logger.info("接口一致性测试框架初始化完成")
+
+    def _start_phase(self, phase_name: str, details: Dict[str, Any] | None = None) -> float:
+        started_at = time.time()
+        if self.governance_config.get("enable_phase_tracking", True):
+            self.phase_history.append(
+                {
+                    "phase": phase_name,
+                    "status": "in_progress",
+                    "started_at": datetime.now().isoformat(),
+                    "details": self._serialize_value(details or {}),
+                }
+            )
+        return started_at
+
+    def _complete_phase(
+        self,
+        phase_name: str,
+        phase_started_at: float,
+        details: Dict[str, Any] | None = None,
+        final_status: str | None = None,
+    ) -> None:
+        duration = max(0.0, time.time() - phase_started_at)
+        self.phase_timings[phase_name] = round(duration, 6)
+        if phase_name not in self.completed_phases:
+            self.completed_phases.append(phase_name)
+        self.last_completed_phase = phase_name
+        self.failed_phase = None
+        self.final_status = final_status or self.final_status
+
+        if not self.governance_config.get("enable_phase_tracking", True):
+            return
+
+        for phase in reversed(self.phase_history):
+            if phase.get("phase") == phase_name and phase.get("status") == "in_progress":
+                phase["status"] = "completed"
+                phase["ended_at"] = datetime.now().isoformat()
+                phase["duration_seconds"] = round(duration, 6)
+                if details:
+                    phase["details"] = self._serialize_value({**phase.get("details", {}), **details})
+                break
+
+    def _fail_phase(
+        self,
+        phase_name: str,
+        phase_started_at: float,
+        error: Exception,
+        details: Dict[str, Any] | None = None,
+    ) -> None:
+        duration = max(0.0, time.time() - phase_started_at)
+        self.phase_timings[phase_name] = round(duration, 6)
+        self.failed_phase = phase_name
+        self.final_status = "failed"
+        self._record_failed_operation(phase_name, error, details, duration)
+
+        if not self.governance_config.get("enable_phase_tracking", True):
+            return
+
+        for phase in reversed(self.phase_history):
+            if phase.get("phase") == phase_name and phase.get("status") == "in_progress":
+                phase["status"] = "failed"
+                phase["ended_at"] = datetime.now().isoformat()
+                phase["duration_seconds"] = round(duration, 6)
+                phase["error"] = str(error)
+                if details:
+                    phase["details"] = self._serialize_value({**phase.get("details", {}), **details})
+                break
+
+    def _record_failed_operation(
+        self,
+        operation_name: str,
+        error: Exception,
+        details: Dict[str, Any] | None = None,
+        duration_seconds: float | None = None,
+    ) -> None:
+        if not self.governance_config.get("persist_failed_operations", True):
+            return
+
+        self.failed_operations.append(
+            {
+                "operation": operation_name,
+                "error": str(error),
+                "details": self._serialize_value(details or {}),
+                "timestamp": datetime.now().isoformat(),
+                "duration_seconds": round(duration_seconds or 0.0, 6),
+            }
+        )
+
+    def _serialize_value(self, value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {str(key): self._serialize_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._serialize_value(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._serialize_value(item) for item in value]
+        if hasattr(value, "__dataclass_fields__"):
+            return {
+                field_name: self._serialize_value(getattr(value, field_name))
+                for field_name in value.__dataclass_fields__
+            }
+        return value
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        return {
+            "phase_history": self._serialize_value(self.phase_history),
+            "phase_timings": self._serialize_value(self.phase_timings),
+            "completed_phases": list(self.completed_phases),
+            "failed_phase": self.failed_phase,
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
+
+    def _build_analysis_summary(self) -> Dict[str, Any]:
+        total_runs = int(self.performance_metrics.get("total_tests", 0) or 0)
+        passed_runs = int(self.performance_metrics.get("passed_tests", 0) or 0)
+        failed_runs = int(self.performance_metrics.get("failed_tests", 0) or 0)
+        average_compliance = float(self.performance_metrics.get("interface_compliance_score", 0.0) or 0.0)
+
+        status = "idle"
+        if total_runs or self.failed_operations:
+            status = (
+                "stable"
+                if self.failed_phase is None and average_compliance >= self.governance_config["minimum_stable_compliance_score"]
+                else "needs_followup"
+            )
+        if self.final_status == "cleaned":
+            status = "idle"
+
+        return {
+            "status": status,
+            "total_runs": total_runs,
+            "passed_runs": passed_runs,
+            "failed_runs": failed_runs,
+            "average_compliance_score": average_compliance,
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.failed_phase,
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
+
+    def _build_report_metadata(self) -> Dict[str, Any]:
+        return {
+            "contract_version": self.governance_config["export_contract_version"],
+            "generated_at": datetime.now().isoformat(),
+            "result_schema": "interface_consistency_report",
+            "failed_operation_count": len(self.failed_operations),
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
+
+    def _serialize_interface_result(self, result: InterfaceConsistencyResult) -> Dict[str, Any]:
+        return self._serialize_value(result)
     
     def validate_module_interfaces(self, modules: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -100,64 +266,100 @@ class InterfaceConsistencyTest:
             Dict[str, Any]: 验证结果
         """
         start_time = time.time()
+        phase_started_at = self._start_phase("validate_module_interfaces", {"module_count": len(modules)})
         self.logger.info("开始验证模块接口一致性")
         
         try:
-            validation_results = {
+            validation_results = self._initialize_validation_results()
+
+            module_results = self._validate_all_modules(modules)
+            validation_results["module_results"] = module_results
+            validation_results["validation_summary"] = self._build_validation_summary(module_results)
+            validation_results["compliance_report"] = self._generate_compliance_report(module_results)
+            validation_results["academic_analysis"] = self._generate_academic_analysis(module_results)
+            validation_results["recommendations"] = self._generate_recommendations(module_results)
+
+            total_duration = time.time() - start_time
+            self._update_performance_metrics(module_results, total_duration)
+            run_result = InterfaceConsistencyResult(
+                test_id=f"interface_consistency_{int(time.time())}",
+                test_name="module_interface_consistency",
+                test_type="governance_validation",
+                status="passed" if validation_results["compliance_report"].get("average_compliance_score", 0.0) >= self.governance_config["minimum_stable_compliance_score"] else "failed",
+                start_time=datetime.fromtimestamp(start_time).isoformat(),
+                end_time=datetime.now().isoformat(),
+                duration=total_duration,
+                interface_compliance=validation_results["compliance_report"],
+                compatibility_results=validation_results["module_results"],
+                validation_results=validation_results["validation_summary"],
+                quality_metrics=self._serialize_value(self.performance_metrics),
+                academic_insights=validation_results["academic_analysis"].get("insights", []),
+                recommendations=validation_results["recommendations"],
+                confidence_score=validation_results["compliance_report"].get("average_compliance_score", 0.0),
+                academic_relevance=validation_results["academic_analysis"].get("summary", {}).get("average_academic_relevance", 0.0),
+                metadata={
+                    "analysis_summary": self._build_analysis_summary(),
+                    "runtime_metadata": self._build_runtime_metadata(),
+                    "report_metadata": self._build_report_metadata(),
+                },
+            )
+            self.test_results.append(run_result)
+            self.test_history.append(run_result)
+            self.final_status = "completed"
+            self._complete_phase(
+                "validate_module_interfaces",
+                phase_started_at,
+                {"module_count": len(modules), "average_compliance_score": validation_results["compliance_report"].get("average_compliance_score", 0.0)},
+                final_status="completed",
+            )
+            validation_results["failed_operations"] = self._serialize_value(self.failed_operations)
+            validation_results["metadata"] = self._build_runtime_metadata()
+            validation_results["report_metadata"] = self._build_report_metadata()
+
+            self.logger.info("模块接口一致性验证完成")
+            return validation_results
+            
+        except Exception as e:
+            self.performance_metrics["failed_tests"] += 1
+            self._fail_phase(
+                "validate_module_interfaces",
+                phase_started_at,
+                e,
+                {"module_count": len(modules)},
+            )
+            self.logger.error(f"模块接口一致性验证失败: {e}")
+            self.logger.error(traceback.format_exc())
+            raise
+
+    def _initialize_validation_results(self) -> Dict[str, Any]:
+        return {
                 "validation_summary": {},
                 "module_results": {},
                 "compliance_report": {},
                 "academic_analysis": {},
                 "recommendations": []
             }
-            
-            # 验证每个模块的接口
-            for module_info in modules:
-                module_name = module_info.get("name", "unknown")
-                module_interface = module_info.get("interface", {})
-                
-                # 执行模块接口验证
-                module_result = self._validate_single_module_interface(
-                    module_name, module_interface
-                )
-                
-                validation_results["module_results"][module_name] = module_result
-                
-                # 更新验证摘要
-                validation_results["validation_summary"][module_name] = {
-                    "status": module_result["status"],
-                    "compliance_score": module_result["compliance_score"],
-                    "academic_score": module_result["academic_relevance"]
-                }
-            
-            # 生成合规报告
-            validation_results["compliance_report"] = self._generate_compliance_report(
-                validation_results["module_results"]
+
+    def _validate_all_modules(self, modules: List[Dict[str, Any]]) -> Dict[str, Any]:
+        module_results: Dict[str, Any] = {}
+        for module_info in modules:
+            module_name = module_info.get("name", "unknown")
+            module_interface = module_info.get("interface", {})
+            module_results[module_name] = self._validate_single_module_interface(
+                module_name,
+                module_interface,
             )
-            
-            # 生成学术分析
-            validation_results["academic_analysis"] = self._generate_academic_analysis(
-                validation_results["module_results"]
-            )
-            
-            # 生成改进建议
-            validation_results["recommendations"] = self._generate_recommendations(
-                validation_results["module_results"]
-            )
-            
-            # 更新性能指标
-            self._update_performance_metrics(
-                validation_results["module_results"], 
-                time.time() - start_time
-            )
-            
-            self.logger.info("模块接口一致性验证完成")
-            return validation_results
-            
-        except Exception as e:
-            self.logger.error(f"模块接口一致性验证失败: {e}")
-            self.logger.error(traceback.format_exc())
-            raise
+        return module_results
+
+    def _build_validation_summary(self, module_results: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            module_name: {
+                "status": result["status"],
+                "compliance_score": result["compliance_score"],
+                "academic_score": result["academic_relevance"],
+            }
+            for module_name, result in module_results.items()
+        }
     
     def _validate_single_module_interface(self, module_name: str, 
                                         module_interface: Dict[str, Any]) -> Dict[str, Any]:
@@ -455,7 +657,10 @@ class InterfaceConsistencyTest:
                     "academic_relevance": result.get("academic_relevance", 0.0),
                     "status": result.get("status", "unknown")
                 } for module_name, result in module_results.items()
-            }
+            },
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+            "report_metadata": self._build_report_metadata(),
         }
     
     def _generate_academic_analysis(self, module_results: Dict[str, Any]) -> Dict[str, Any]:
@@ -526,7 +731,10 @@ class InterfaceConsistencyTest:
                 "average_academic_relevance": avg_academic,
                 "compliance_status": "compliant" if avg_compliance >= 0.9 else "needs_improvement",
                 "academic_status": "high_value" if avg_academic >= 0.85 else "medium_value"
-            }
+            },
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+            "report_metadata": self._build_report_metadata(),
         }
     
     def _generate_recommendations(self, module_results: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -634,6 +842,10 @@ class InterfaceConsistencyTest:
         """更新性能指标"""
         self.performance_metrics["total_tests"] += 1
         self.performance_metrics["total_execution_time"] += total_duration
+        if any(result.get("status") in {"failed", "error"} for result in module_results.values()):
+            self.performance_metrics["failed_tests"] += 1
+        else:
+            self.performance_metrics["passed_tests"] += 1
         
         # 更新平均执行时间
         if self.performance_metrics["total_tests"] > 0:
@@ -659,15 +871,25 @@ class InterfaceConsistencyTest:
     def get_compliance_report(self) -> Dict[str, Any]:
         """获取合规报告"""
         return {
-            "performance_metrics": self.performance_metrics,
+            "performance_metrics": self._serialize_value(self.performance_metrics),
             "test_summary": self._calculate_test_summary(),
-            "latest_results": [r.__dict__ for r in self.test_results[-5:]] if self.test_results else []
+            "latest_results": [self._serialize_interface_result(r) for r in self.test_results[-5:]] if self.test_results else [],
+            "analysis_summary": self._build_analysis_summary(),
+            "failed_operations": self._serialize_value(self.failed_operations),
+            "metadata": self._build_runtime_metadata(),
+            "report_metadata": self._build_report_metadata(),
         }
     
     def _calculate_test_summary(self) -> Dict[str, Any]:
         """计算测试摘要"""
         if not self.test_results:
-            return {"message": "没有测试结果"}
+            return {
+                "message": "没有测试结果",
+                "analysis_summary": self._build_analysis_summary(),
+                "failed_operations": self._serialize_value(self.failed_operations),
+                "metadata": self._build_runtime_metadata(),
+                "report_metadata": self._build_report_metadata(),
+            }
         
         # 统计测试状态
         status_counts = {}
@@ -687,22 +909,45 @@ class InterfaceConsistencyTest:
             "status_distribution": status_counts,
             "average_compliance_score": avg_compliance,
             "average_academic_relevance": avg_academic,
-            "quality_assurance": self.performance_metrics["interface_compliance_score"]
+            "quality_assurance": self.performance_metrics["interface_compliance_score"],
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.failed_phase,
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
         }
     
     def export_test_results(self, output_path: str) -> bool:
         """导出测试结果"""
+        phase_started_at = self._start_phase("export_test_results", {"output_path": output_path})
         try:
             test_data = {
+                "report_metadata": {
+                    **self._build_report_metadata(),
+                    "output_path": output_path,
+                },
                 "test_framework_info": {
                     "framework_name": "接口一致性测试框架",
                     "version": "2.0.0",
                     "generated_at": datetime.now().isoformat(),
-                    "performance_metrics": self.performance_metrics
+                    "performance_metrics": self._serialize_value(self.performance_metrics)
                 },
-                "test_results": [r.__dict__ for r in self.test_results],
-                "test_history": [r.__dict__ for r in self.test_history],
-                "compliance_report": self.get_compliance_report()
+                "test_results": [self._serialize_interface_result(r) for r in self.test_results],
+                "test_history": [self._serialize_interface_result(r) for r in self.test_history],
+                "compliance_report": self.get_compliance_report(),
+                "failed_operations": self._serialize_value(self.failed_operations),
+                "metadata": self._build_runtime_metadata(),
+            }
+            self.final_status = "completed" if self.final_status != "cleaned" else self.final_status
+            self._complete_phase(
+                "export_test_results",
+                phase_started_at,
+                {"output_path": output_path},
+                final_status=self.final_status,
+            )
+            test_data["metadata"] = self._build_runtime_metadata()
+            test_data["report_metadata"] = {
+                **self._build_report_metadata(),
+                "output_path": output_path,
             }
             
             with open(output_path, 'w', encoding='utf-8') as f:
@@ -712,6 +957,7 @@ class InterfaceConsistencyTest:
             return True
             
         except Exception as e:
+            self._fail_phase("export_test_results", phase_started_at, e, {"output_path": output_path})
             self.logger.error(f"接口一致性测试结果导出失败: {e}")
             return False
 
@@ -720,6 +966,23 @@ class InterfaceConsistencyTest:
         try:
             self.test_results.clear()
             self.test_history.clear()
+            self.performance_metrics = {
+                "total_tests": 0,
+                "passed_tests": 0,
+                "failed_tests": 0,
+                "skipped_tests": 0,
+                "average_execution_time": 0.0,
+                "total_execution_time": 0.0,
+                "interface_compliance_score": 0.0,
+                "academic_compliance_score": 0.0,
+            }
+            self.phase_history.clear()
+            self.phase_timings.clear()
+            self.completed_phases.clear()
+            self.failed_operations.clear()
+            self.failed_phase = None
+            self.last_completed_phase = None
+            self.final_status = "cleaned"
             self.logger.info("接口一致性测试框架资源清理完成")
             return True
         except Exception as e:
@@ -791,10 +1054,14 @@ class ModuleInterfaceTest(unittest.TestCase):
             self.assertIn("compliance_report", result)
             self.assertIn("academic_analysis", result)
             self.assertIn("recommendations", result)
+            self.assertIn("metadata", result)
+            self.assertIn("report_metadata", result)
             
             # 验证合规性评分
             compliance_report = result["compliance_report"]
             self.assertGreaterEqual(compliance_report.get("average_compliance_score", 0.0), 0.8)
+            self.assertEqual(result["report_metadata"]["contract_version"], "d48.v1")
+            self.assertEqual(result["metadata"]["last_completed_phase"], "validate_module_interfaces")
             
             self.logger.info("接口合规性测试通过")
             
@@ -847,15 +1114,130 @@ class ModuleInterfaceTest(unittest.TestCase):
         except Exception as e:
             self.logger.error(f"学术合规性测试失败: {e}")
             raise
+
+    def test_export_test_results_uses_json_safe_contract(self):
+        test_modules = [
+            {
+                "name": "DemoModule",
+                "interface": {
+                    "initialize": {"parameters": ["config"], "return_type": "bool"},
+                    "execute": {"parameters": ["context"], "return_type": "Dict[str, Any]"},
+                    "cleanup": {"parameters": [], "return_type": "bool"},
+                    "get_interface_compatibility": {"parameters": [], "return_type": "Dict[str, Any]"},
+                },
+            }
+        ]
+        self.tester.validate_module_interfaces(test_modules)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "interface-consistency-report.json")
+            exported = self.tester.export_test_results(output_path)
+
+            self.assertTrue(exported)
+            with open(output_path, "r", encoding="utf-8") as file_obj:
+                payload = json.load(file_obj)
+
+        self.assertEqual(payload["report_metadata"]["contract_version"], "d48.v1")
+        self.assertEqual(payload["metadata"]["last_completed_phase"], "export_test_results")
+        self.assertIn("failed_operations", payload)
+        self.assertIn("report_metadata", payload["compliance_report"])
+
+    def test_cleanup_resets_runtime_state(self):
+        test_modules = [
+            {
+                "name": "DemoModule",
+                "interface": {
+                    "initialize": {"parameters": ["config"], "return_type": "bool"},
+                    "execute": {"parameters": ["context"], "return_type": "Dict[str, Any]"},
+                    "cleanup": {"parameters": [], "return_type": "bool"},
+                    "get_interface_compatibility": {"parameters": [], "return_type": "Dict[str, Any]"},
+                },
+            }
+        ]
+        self.tester.validate_module_interfaces(test_modules)
+
+        cleaned = self.tester.cleanup()
+        report = self.tester.get_compliance_report()
+
+        self.assertTrue(cleaned)
+        self.assertEqual(report["metadata"]["final_status"], "cleaned")
+        self.assertEqual(report["test_summary"]["message"], "没有测试结果")
     
     def tearDown(self):
         """测试后清理"""
         self.tester.cleanup()
+
+
+class TestHealthCheckAndModuleId(unittest.TestCase):
+    """BaseModule.health_check() 和 get_module_id() 的验收测试"""
+
+    def _make_module(self, name="demo"):
+        from src.core.module_base import BaseModule
+
+        class _Mod(BaseModule):
+            def _do_initialize(self): return True
+            def _do_execute(self, ctx): return {"ok": True}
+            def _do_cleanup(self): return True
+
+        return _Mod(name)
+
+    def test_get_module_id_format(self):
+        mod = self._make_module("health_mod")
+        mid = mod.get_module_id()
+        self.assertIsInstance(mid, str)
+        self.assertTrue(mid.startswith("health_mod_"), f"Unexpected id: {mid}")
+
+    def test_get_module_id_unique_per_instance(self):
+        a = self._make_module("m")
+        b = self._make_module("m")
+        self.assertNotEqual(a.get_module_id(), b.get_module_id())
+
+    def test_health_check_keys(self):
+        mod = self._make_module("hc")
+        result = mod.health_check()
+        for key in ("module_id", "status", "initialized", "metrics", "timestamp"):
+            self.assertIn(key, result, f"Missing key: {key}")
+
+    def test_health_check_module_id_matches(self):
+        mod = self._make_module("hc2")
+        self.assertEqual(mod.health_check()["module_id"], mod.get_module_id())
+
+    def test_health_check_initialized_false_before_init(self):
+        mod = self._make_module("hc3")
+        self.assertFalse(mod.health_check()["initialized"])
+
+    def test_health_check_initialized_true_after_init(self):
+        mod = self._make_module("hc4")
+        mod.initialize()
+        self.assertTrue(mod.health_check()["initialized"])
+        mod.cleanup()
+
+    def test_health_check_timestamp_is_iso(self):
+        from datetime import datetime
+        mod = self._make_module("hc5")
+        ts = mod.health_check()["timestamp"]
+        # Should parse without error
+        datetime.fromisoformat(ts)
+
+    def test_health_check_callable_on_any_subclass(self):
+        """Any BaseModule subclass should support health_check without override."""
+        from src.core.module_base import BaseModule
+
+        class MinimalMod(BaseModule):
+            def _do_initialize(self): return True
+            def _do_execute(self, ctx): return {}
+            def _do_cleanup(self): return True
+
+        mod = MinimalMod("minimal")
+        result = mod.health_check()
+        self.assertIn("module_id", result)
+
 
 # 导出主要类和函数
 __all__ = [
     'InterfaceConsistencyTest',
     'ModuleInterfaceTest',
     'InterfaceConsistencyResult',
-    'ModuleInterfaceCase'
+    'ModuleInterfaceCase',
+    'TestHealthCheckAndModuleId',
 ]

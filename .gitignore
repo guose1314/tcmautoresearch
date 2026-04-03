@@ -133,3 +133,11 @@ logs/
 # Temporary files
 *.tmp
 *.temp
+
+# Secrets
+secrets.yml
+secrets.yaml
+secrets/
+!secrets/.gitkeep
+!secrets/*.example.yml
+!secrets/*.example.yaml

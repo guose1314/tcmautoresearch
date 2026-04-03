@@ -1,0 +1,104 @@
+{
+  "timestamp": "2026-03-28T14:05:13.618247",
+  "rounds": {
+    "100": {
+      "entity_count": 100,
+      "relationship_count": 197,
+      "total_ms": 2407.94,
+      "entity_throughput_per_sec": 41.53,
+      "relationship_throughput_per_sec": 81.81,
+      "phases": [
+        {
+          "name": "save_document",
+          "duration_ms": 6.45,
+          "count": 1,
+          "throughput_per_sec": 155.07
+        },
+        {
+          "name": "save_entities",
+          "duration_ms": 756.27,
+          "count": 100,
+          "throughput_per_sec": 132.23
+        },
+        {
+          "name": "save_relationships",
+          "duration_ms": 1642.66,
+          "count": 197,
+          "throughput_per_sec": 119.93
+        },
+        {
+          "name": "save_statistics",
+          "duration_ms": 2.37,
+          "count": 1,
+          "throughput_per_sec": 422.74
+        }
+      ]
+    },
+    "300": {
+      "entity_count": 300,
+      "relationship_count": 597,
+      "total_ms": 4477.46,
+      "entity_throughput_per_sec": 67.0,
+      "relationship_throughput_per_sec": 133.33,
+      "phases": [
+        {
+          "name": "save_document",
+          "duration_ms": 1.55,
+          "count": 1,
+          "throughput_per_sec": 645.41
+        },
+        {
+          "name": "save_entities",
+          "duration_ms": 1531.54,
+          "count": 300,
+          "throughput_per_sec": 195.88
+        },
+        {
+          "name": "save_relationships",
+          "duration_ms": 2941.7,
+          "count": 597,
+          "throughput_per_sec": 202.94
+        },
+        {
+          "name": "save_statistics",
+          "duration_ms": 1.89,
+          "count": 1,
+          "throughput_per_sec": 528.74
+        }
+      ]
+    },
+    "500": {
+      "entity_count": 500,
+      "relationship_count": 997,
+      "total_ms": 7257.71,
+      "entity_throughput_per_sec": 68.89,
+      "relationship_throughput_per_sec": 137.37,
+      "phases": [
+        {
+          "name": "save_document",
+          "duration_ms": 2.12,
+          "count": 1,
+          "throughput_per_sec": 472.63
+        },
+        {
+          "name": "save_entities",
+          "duration_ms": 2366.15,
+          "count": 500,
+          "throughput_per_sec": 211.31
+        },
+        {
+          "name": "save_relationships",
+          "duration_ms": 4887.03,
+          "count": 997,
+          "throughput_per_sec": 204.01
+        },
+        {
+          "name": "save_statistics",
+          "duration_ms": 1.62,
+          "count": 1,
+          "throughput_per_sec": 615.57
+        }
+      ]
+    }
+  }
+}

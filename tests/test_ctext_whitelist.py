@@ -3,8 +3,8 @@ import os
 import tempfile
 import unittest
 
-from src.research.ctext_corpus_collector import CTextCorpusCollector
-from src.research.ctext_whitelist import build_batch_manifest, load_whitelist
+from src.collector.ctext_corpus_collector import CTextCorpusCollector
+from src.collector.ctext_whitelist import build_batch_manifest, load_whitelist
 
 
 class TestCTextWhitelist(unittest.TestCase):
@@ -28,6 +28,29 @@ class TestCTextWhitelist(unittest.TestCase):
         self.assertIn("ctp:analects", urns)
         self.assertIn("ctp:shang-han-lun/bian-mai-fa", urns)
         self.assertIn("https://ctext.org/shang-han-lun/bian-mai-fa", urls)
+
+    def test_build_batch_manifest_skips_duplicates_and_invalid_items(self):
+        whitelist = {
+            "version": "test",
+            "groups": {
+                "g1": {
+                    "name": "G1",
+                    "items": [
+                        {"title": "A", "urn": "ctp:a", "url": "", "priority": "high"},
+                        {"title": "A-dup", "urn": "ctp:a", "url": "", "priority": "low"},
+                        {"title": "B", "urn": "", "url": "https://x/b", "priority": "medium"},
+                        {"title": "B-dup", "urn": "", "url": "https://x/b", "priority": "low"},
+                        {"title": "empty"},
+                        "invalid",
+                    ],
+                }
+            },
+        }
+
+        manifest = build_batch_manifest(whitelist, ["g1"])
+
+        self.assertEqual(manifest["count"], 2)
+        self.assertEqual([item["title"] for item in manifest["entries"]], ["A", "B"])
 
     def test_generate_manifest_and_write_output_file(self):
         collector = CTextCorpusCollector({"request_interval_sec": 0, "retry_count": 0})

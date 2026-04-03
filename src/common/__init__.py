@@ -1,13 +1,5 @@
-# src/common/__init__.py
-"""
-公共工具包 — 提供跨模块复用的基础设施。
-
-包含：
-- retry_utils: 统一重试装饰器
-- http_client: 统一 HTTP 客户端
-- exceptions: 统一异常体系
-- cache: 缓存装饰器
-"""
+# -*- coding: utf-8 -*-
+"""src.common — 公共工具包，为各模块提供通用辅助函数与常量。"""
 
 from src.common.cache import tcm_cache
 from src.common.exceptions import (

@@ -34,6 +34,20 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install test dependencies
+        run: pip install pytest pytest-asyncio pytest-mock PyJWT bcrypt fastapi uvicorn Jinja2
+
+      - name: Run new-module unit tests
+        run: |
+          python -m pytest \
+            tests/test_output_generator.py \
+            tests/test_tcm_lexicon.py \
+            tests/test_common_utils.py \
+            tests/test_analysis_modules.py \
+            tests/test_web_auth.py \
+            tests/test_ai_assistant.py \
+            -v --tb=short
+
       - name: Run unified quality gate
         run: python tools/quality_gate.py --report output/quality-gate.json
 

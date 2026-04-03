@@ -1,0 +1,26 @@
+environment:
+  name: "test"
+
+database:
+  path: "./data/test/tcmautoresearch.db"
+
+output:
+  directory: "./output/test"
+  backup_directory: "./backup/test"
+
+logging:
+  file: "./logs/test/tcmautoresearch.log"
+
+models:
+  llm:
+    cache_dir: "./cache/llm/test"
+
+modules:
+  document_preprocessing:
+    timeout: 5
+    max_input_chars: 100000
+  entity_extraction:
+    threshold: 0.5
+
+web_console:
+  job_storage_dir: "./output/test/web_console_jobs"

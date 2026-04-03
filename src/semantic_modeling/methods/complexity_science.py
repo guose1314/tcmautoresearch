@@ -1,10 +1,10 @@
-"""复杂性科学与非线性动力学 - Complexity Science & Nonlinear Dynamics"""
+"""复杂性科学与非线性动力学分析。"""
 
 from typing import Any, Dict, List
 
 
 class ComplexityNonlinearDynamicsAnalyzer:
-    """复杂性科学与非线性动力学分析器"""
+    """复杂性科学与非线性动力学分析器。"""
 
     FORMULA_DYNAMIC_PRIOR: Dict[str, Dict[str, float]] = {
         "补中益气汤": {"stability": 0.79, "adaptivity": 0.74, "feedback_gain": 0.63},
@@ -14,7 +14,6 @@ class ComplexityNonlinearDynamicsAnalyzer:
 
     @classmethod
     def analyze_formula_complexity_dynamics(cls, formula_name: str, herbs: List[str]) -> Dict[str, Any]:
-        """估计方剂系统的稳态恢复能力、非线性响应和协同复杂度"""
         prior = cls.FORMULA_DYNAMIC_PRIOR.get(
             formula_name,
             {"stability": 0.60, "adaptivity": 0.58, "feedback_gain": 0.50},
