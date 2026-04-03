@@ -274,6 +274,8 @@ ctext_corpus:
       - "five_classics"
       - "tcm_classics"
   batch_manifest_output: "./output/ctext_batch_manifest.json"
+  monitoring:
+    thresholds:
       memory_usage: 85
       error_rate: 0.05
       processing_time: 300
