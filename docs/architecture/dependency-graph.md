@@ -4,16 +4,17 @@ This document is generated from internal imports under src/.
 
 ## Summary
 
-- Module count: 43
-- Module edges: 45
-- Package count: 13
-- Package edges: 13
+- Module count: 48
+- Module edges: 55
+- Package count: 14
+- Package edges: 14
 
 ## Package Graph
 
 ```mermaid
 flowchart LR
     src["src"]
+    src_common["common"]
     src_core["core"]
     src_cycle["cycle"]
     src_data["data"]
@@ -33,6 +34,7 @@ flowchart LR
     src_output --> src_core
     src_preprocessor --> src_core
     src_reasoning --> src_core
+    src_research --> src_common
     src_research --> src_core
     src_research --> src_extractors
     src_research --> src_llm
@@ -46,6 +48,7 @@ flowchart LR
 | Package | In Degree | Out Degree |
 |---|---:|---:|
 | src | 0 | 0 |
+| src.common | 1 | 0 |
 | src.core | 8 | 0 |
 | src.cycle | 0 | 1 |
 | src.data | 1 | 0 |
@@ -55,6 +58,6 @@ flowchart LR
 | src.output | 0 | 1 |
 | src.preprocessor | 1 | 1 |
 | src.reasoning | 0 | 1 |
-| src.research | 0 | 5 |
+| src.research | 0 | 6 |
 | src.semantic_modeling | 1 | 1 |
 | src.test | 0 | 0 |

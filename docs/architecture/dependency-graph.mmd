@@ -1,5 +1,6 @@
 flowchart LR
     src["src"]
+    src_common["common"]
     src_core["core"]
     src_cycle["cycle"]
     src_data["data"]
@@ -19,6 +20,7 @@ flowchart LR
     src_output --> src_core
     src_preprocessor --> src_core
     src_reasoning --> src_core
+    src_research --> src_common
     src_research --> src_core
     src_research --> src_extractors
     src_research --> src_llm

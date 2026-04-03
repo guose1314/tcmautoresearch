@@ -1,13 +1,38 @@
 {
-  "module_count": 43,
-  "module_edge_count": 45,
-  "package_count": 13,
-  "package_edge_count": 13,
+  "module_count": 48,
+  "module_edge_count": 55,
+  "package_count": 14,
+  "package_edge_count": 14,
   "modules": [
     {
       "module": "src",
       "file_path": "src/__init__.py",
       "package": "src"
+    },
+    {
+      "module": "src.common",
+      "file_path": "src/common/__init__.py",
+      "package": "src.common"
+    },
+    {
+      "module": "src.common.cache",
+      "file_path": "src/common/cache.py",
+      "package": "src.common"
+    },
+    {
+      "module": "src.common.exceptions",
+      "file_path": "src/common/exceptions.py",
+      "package": "src.common"
+    },
+    {
+      "module": "src.common.http_client",
+      "file_path": "src/common/http_client.py",
+      "package": "src.common"
+    },
+    {
+      "module": "src.common.retry_utils",
+      "file_path": "src/common/retry_utils.py",
+      "package": "src.common"
     },
     {
       "module": "src.core",
@@ -222,6 +247,30 @@
   ],
   "module_edges": [
     {
+      "source": "src.common",
+      "target": "src.common.cache"
+    },
+    {
+      "source": "src.common",
+      "target": "src.common.exceptions"
+    },
+    {
+      "source": "src.common",
+      "target": "src.common.http_client"
+    },
+    {
+      "source": "src.common",
+      "target": "src.common.retry_utils"
+    },
+    {
+      "source": "src.common.http_client",
+      "target": "src.common.exceptions"
+    },
+    {
+      "source": "src.common.http_client",
+      "target": "src.common.retry_utils"
+    },
+    {
       "source": "src.core",
       "target": "src.core.algorithm_optimizer"
     },
@@ -270,6 +319,10 @@
       "target": "src.cycle.module_iteration"
     },
     {
+      "source": "src.data",
+      "target": "src.data.tcm_lexicon"
+    },
+    {
       "source": "src.extractors.advanced_entity_extractor",
       "target": "src.core.module_base"
     },
@@ -304,6 +357,10 @@
     {
       "source": "src.llm",
       "target": "src.llm.llm_engine"
+    },
+    {
+      "source": "src.output",
+      "target": "src.output.output_generator"
     },
     {
       "source": "src.output.output_generator",
@@ -347,11 +404,19 @@
     },
     {
       "source": "src.research.ctext_corpus_collector",
+      "target": "src.common.http_client"
+    },
+    {
+      "source": "src.research.ctext_corpus_collector",
       "target": "src.core.module_base"
     },
     {
       "source": "src.research.ctext_corpus_collector",
       "target": "src.research.ctext_whitelist"
+    },
+    {
+      "source": "src.research.literature_retriever",
+      "target": "src.common.http_client"
     },
     {
       "source": "src.research.research_pipeline",
@@ -409,6 +474,11 @@
       "out_degree": 0
     },
     {
+      "package": "src.common",
+      "in_degree": 1,
+      "out_degree": 0
+    },
+    {
       "package": "src.core",
       "in_degree": 8,
       "out_degree": 0
@@ -456,7 +526,7 @@
     {
       "package": "src.research",
       "in_degree": 0,
-      "out_degree": 5
+      "out_degree": 6
     },
     {
       "package": "src.semantic_modeling",
@@ -497,6 +567,10 @@
     {
       "source": "src.reasoning",
       "target": "src.core"
+    },
+    {
+      "source": "src.research",
+      "target": "src.common"
     },
     {
       "source": "src.research",
