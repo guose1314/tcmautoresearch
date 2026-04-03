@@ -135,9 +135,14 @@ class HttpClient:
 
         for attempt in range(self.retry_count + 1):
             try:
-                response = self.session.request(
-                    method, url, timeout=timeout, **kwargs
-                )
+                # Use method-specific calls (get/post) to maintain mock compatibility
+                method_fn = getattr(self.session, method.lower(), self.session.request)
+                if method_fn is self.session.request:
+                    response = self.session.request(
+                        method, url, timeout=timeout, **kwargs
+                    )
+                else:
+                    response = method_fn(url, timeout=timeout, **kwargs)
                 response.raise_for_status()
                 if self.request_interval > 0:
                     time.sleep(self.request_interval)

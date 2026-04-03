@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from src.common.http_client import HttpClient
+
 PUBMED_EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 SEMANTIC_SCHOLAR_SEARCH = "https://api.semanticscholar.org/graph/v1/paper/search"
 PLOS_SEARCH_API = "https://api.plos.org/search"
@@ -63,18 +65,22 @@ class LiteratureRetriever:
         self.timeout_sec = float(self.config.get("timeout_sec", 20))
         self.retry_count = int(self.config.get("retry_count", 2))
         self.request_interval_sec = float(self.config.get("request_interval_sec", 0.2))
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "User-Agent": self.config.get(
-                    "user_agent",
-                    "TCM-AutoResearch-LiteratureRetriever/1.0 (mailto:research@example.com)",
-                )
-            }
+        self.http = HttpClient(
+            timeout=self.timeout_sec,
+            retry_count=self.retry_count,
+            backoff_strategy="linear",
+            base_delay=0.4,
+            request_interval=self.request_interval_sec,
+            user_agent=self.config.get(
+                "user_agent",
+                "TCM-AutoResearch-LiteratureRetriever/1.0 (mailto:research@example.com)",
+            ),
         )
+        # Keep session reference for backward compatibility
+        self.session = self.http.session
 
     def close(self) -> None:
-        self.session.close()
+        self.http.close()
 
     def search(
         self,
@@ -421,32 +427,7 @@ class LiteratureRetriever:
         }
 
     def _request_json(self, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        last_exc: Optional[Exception] = None
-        for attempt in range(self.retry_count + 1):
-            try:
-                response = self.session.get(url, params=params, timeout=self.timeout_sec)
-                response.raise_for_status()
-                data = response.json()
-                if self.request_interval_sec > 0:
-                    time.sleep(self.request_interval_sec)
-                return data
-            except Exception as exc:
-                last_exc = exc
-                if attempt < self.retry_count:
-                    time.sleep(0.4 * (attempt + 1))
-        raise RuntimeError(f"request failed: {url}, params={params}, error={last_exc}")
+        return self.http.get_json(url, params=params)
 
     def _request_text(self, url: str, params: Dict[str, Any]) -> str:
-        last_exc: Optional[Exception] = None
-        for attempt in range(self.retry_count + 1):
-            try:
-                response = self.session.get(url, params=params, timeout=self.timeout_sec)
-                response.raise_for_status()
-                if self.request_interval_sec > 0:
-                    time.sleep(self.request_interval_sec)
-                return response.text
-            except Exception as exc:
-                last_exc = exc
-                if attempt < self.retry_count:
-                    time.sleep(0.4 * (attempt + 1))
-        raise RuntimeError(f"request failed: {url}, params={params}, error={last_exc}")
+        return self.http.get_text(url, params=params)
