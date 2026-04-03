@@ -1350,11 +1350,11 @@ class ResearchPipeline:
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(pipeline_data, f, ensure_ascii=False, indent=2)
             
-            self.logger.info(f"流程数据已导出到: {output_path}")
+            self.logger.info("流程数据已导出到: %s", output_path)
             return True
             
         except Exception as e:
-            self.logger.error(f"流程数据导出失败: {e}")
+            self.logger.error("流程数据导出失败: %s", e)
             return False
     
     def cleanup(self) -> bool:
@@ -1365,8 +1365,8 @@ class ResearchPipeline:
             bool: 清理是否成功
         """
         try:
-            # 关闭线程池
-            self.executor.shutdown(wait=True)
+            # 注意：不关闭全局共享线程池，由应用生命周期管理
+            # self.executor.shutdown(wait=True)
             
             # 清空数据结构
             self.research_cycles.clear()
@@ -1377,7 +1377,7 @@ class ResearchPipeline:
             return True
             
         except Exception as e:
-            self.logger.error(f"资源清理失败: {e}")
+            self.logger.error("资源清理失败: %s", e)
             return False
 
 # 导出主要类和函数

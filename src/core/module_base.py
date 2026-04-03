@@ -7,9 +7,11 @@
 import asyncio
 import json
 import logging
+import threading
 import time
 import traceback
 from abc import ABC, abstractmethod
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Dict
@@ -17,15 +19,17 @@ from typing import Any, Dict
 # 全局线程池管理
 _global_executor = None
 _global_executor_max_workers = None
+_executor_lock = threading.Lock()
 
 def get_global_executor(max_workers=4):
     global _global_executor, _global_executor_max_workers
-    if _global_executor is None or _global_executor_max_workers != max_workers:
-        if _global_executor is not None:
-            _global_executor.shutdown(wait=True)
-        _global_executor = ThreadPoolExecutor(max_workers=max_workers)
-        _global_executor_max_workers = max_workers
-    return _global_executor
+    with _executor_lock:
+        if _global_executor is None or _global_executor_max_workers != max_workers:
+            if _global_executor is not None:
+                _global_executor.shutdown(wait=True)
+            _global_executor = ThreadPoolExecutor(max_workers=max_workers)
+            _global_executor_max_workers = max_workers
+        return _global_executor
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -65,11 +69,11 @@ class BaseModule(ABC):
         self.module_start_time = None
         # 使用全局线程池，避免每个模块实例都创建线程池
         self.executor = get_global_executor(self.config.get("max_workers", 4))
-        self.performance_history = []
-        self.academic_insights = []
-        self.recommendations = []
+        self.performance_history: deque = deque(maxlen=100)
+        self.academic_insights: deque = deque(maxlen=200)
+        self.recommendations: deque = deque(maxlen=200)
         
-        self.logger.info(f"模块 {module_name} 基类初始化完成")
+        self.logger.info("模块 %s 基类初始化完成", module_name)
     
     def initialize(self, config: Dict[str, Any] | None = None) -> bool:
         """
@@ -315,10 +319,6 @@ class BaseModule(ABC):
         }
         
         self.performance_history.append(history_entry)
-        
-        # 保持历史记录数量
-        if len(self.performance_history) > 100:
-            self.performance_history.pop(0)
     
     def _generate_academic_insights(self, result: Dict[str, Any]):
         """
@@ -547,7 +547,7 @@ class AsyncBaseModule(BaseModule):
         
         try:
             # 异步执行具体逻辑
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(
                 self.executor, self._do_execute, context
             )

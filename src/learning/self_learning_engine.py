@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
-import pickle
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -267,8 +267,9 @@ class SelfLearningEngine(BaseModule):
 
     def _save_learning_data(self) -> None:
         try:
-            with open(self.config.get("learning_data_file", "learning_data.pkl"), "wb") as f:
-                pickle.dump(
+            file_path = self.config.get("learning_data_file", "learning_data.json")
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(
                     {
                         "records": [r.to_dict() for r in self.learning_records],
                         "performance_history": self.performance_history,
@@ -276,15 +277,17 @@ class SelfLearningEngine(BaseModule):
                         "ewma_score": self._ewma_score,
                     },
                     f,
+                    ensure_ascii=False,
+                    indent=2,
                 )
         except Exception as exc:
             self.logger.error("保存学习数据失败: %s", exc)
 
     def _load_learning_data(self) -> None:
         try:
-            file_path = self.config.get("learning_data_file", "learning_data.pkl")
-            with open(file_path, "rb") as f:
-                data = pickle.load(f)
+            file_path = self.config.get("learning_data_file", "learning_data.json")
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
             self.learning_records = [
                 LearningRecord.from_dict(item) for item in data.get("records", [])
             ]

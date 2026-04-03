@@ -122,10 +122,13 @@ Thumbs.db
 
 # Data and models
 data/
+!src/data/
 models/
 output/
+!src/output/
 logs/
 
-# Temporary files
+# Temporary and backup files
 *.tmp
 *.temp
+*.bak

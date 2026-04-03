@@ -820,8 +820,8 @@ class AutomatedTester:
     def cleanup(self) -> bool:
         """清理资源"""
         try:
-            # 关闭线程池
-            self.executor.shutdown(wait=True)
+            # 注意：不关闭全局共享线程池，由应用生命周期管理
+            # self.executor.shutdown(wait=True)
             
             # 清理数据结构
             self.test_suites.clear()

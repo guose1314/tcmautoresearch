@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import time
 import urllib.parse
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -22,7 +22,7 @@ import requests
 PUBMED_EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 SEMANTIC_SCHOLAR_SEARCH = "https://api.semanticscholar.org/graph/v1/paper/search"
 PLOS_SEARCH_API = "https://api.plos.org/search"
-ARXIV_API = "http://export.arxiv.org/api/query"
+ARXIV_API = "https://export.arxiv.org/api/query"
 
 
 @dataclass
@@ -420,6 +420,15 @@ class LiteratureRetriever:
             "note": "暂无检索 URL 模板。",
         }
 
+    @staticmethod
+    def _redact_params(params: Dict[str, Any]) -> Dict[str, Any]:
+        """Redact sensitive keys from params before logging/error messages."""
+        _SENSITIVE_KEYS = {"api_key", "apikey", "key", "token", "email", "password"}
+        return {
+            k: "***REDACTED***" if k.lower() in _SENSITIVE_KEYS else v
+            for k, v in params.items()
+        }
+
     def _request_json(self, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
         last_exc: Optional[Exception] = None
         for attempt in range(self.retry_count + 1):
@@ -434,7 +443,8 @@ class LiteratureRetriever:
                 last_exc = exc
                 if attempt < self.retry_count:
                     time.sleep(0.4 * (attempt + 1))
-        raise RuntimeError(f"request failed: {url}, params={params}, error={last_exc}")
+        safe_params = self._redact_params(params)
+        raise RuntimeError(f"request failed: {url}, params={safe_params}, error={last_exc}")
 
     def _request_text(self, url: str, params: Dict[str, Any]) -> str:
         last_exc: Optional[Exception] = None
@@ -449,4 +459,5 @@ class LiteratureRetriever:
                 last_exc = exc
                 if attempt < self.retry_count:
                     time.sleep(0.4 * (attempt + 1))
-        raise RuntimeError(f"request failed: {url}, params={params}, error={last_exc}")
+        safe_params = self._redact_params(params)
+        raise RuntimeError(f"request failed: {url}, params={safe_params}, error={last_exc}")

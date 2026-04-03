@@ -274,6 +274,9 @@ ctext_corpus:
       - "five_classics"
       - "tcm_classics"
   batch_manifest_output: "./output/ctext_batch_manifest.json"
+  monitoring:
+    enabled: true
+    thresholds:
       memory_usage: 85
       error_rate: 0.05
       processing_time: 300
@@ -500,14 +503,10 @@ advanced:
   async_processing:
     enabled: true
     event_loop: "asyncio"
-    enabled: false
     # 配置分布式节点示例: 
     # cluster_nodes:
     #   - "192.168.1.101:8000"
     #   - "192.168.1.102:8000"
-    cluster_nodes: []
-    load_balancing: "round_robin"
-    fault_tolerance: true
     cluster_nodes: []
     load_balancing: "round_robin"
     fault_tolerance: true
