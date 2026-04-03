@@ -1,6 +1,6 @@
 {
-  "module_count": 48,
-  "module_edge_count": 55,
+  "module_count": 60,
+  "module_edge_count": 77,
   "package_count": 14,
   "package_edge_count": 14,
   "modules": [
@@ -212,6 +212,66 @@
     {
       "module": "src.semantic_modeling",
       "file_path": "src/semantic_modeling/__init__.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods",
+      "file_path": "src/semantic_modeling/methods/__init__.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.classical_literature",
+      "file_path": "src/semantic_modeling/methods/classical_literature.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.complexity_science",
+      "file_path": "src/semantic_modeling/methods/complexity_science.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.formula_comparator",
+      "file_path": "src/semantic_modeling/methods/formula_comparator.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.formula_structure",
+      "file_path": "src/semantic_modeling/methods/formula_structure.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.herb_properties",
+      "file_path": "src/semantic_modeling/methods/herb_properties.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.integrated_analyzer",
+      "file_path": "src/semantic_modeling/methods/integrated_analyzer.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.network_pharmacology",
+      "file_path": "src/semantic_modeling/methods/network_pharmacology.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.pharmacology",
+      "file_path": "src/semantic_modeling/methods/pharmacology.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.scoring_panel",
+      "file_path": "src/semantic_modeling/methods/scoring_panel.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.summary_engine",
+      "file_path": "src/semantic_modeling/methods/summary_engine.py",
+      "package": "src.semantic_modeling"
+    },
+    {
+      "module": "src.semantic_modeling.methods.supramolecular",
+      "file_path": "src/semantic_modeling/methods/supramolecular.py",
       "package": "src.semantic_modeling"
     },
     {
@@ -445,6 +505,94 @@
     {
       "source": "src.research.research_pipeline",
       "target": "src.semantic_modeling.semantic_graph_builder"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.classical_literature"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.complexity_science"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.formula_comparator"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.formula_structure"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.herb_properties"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.integrated_analyzer"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.network_pharmacology"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.pharmacology"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.scoring_panel"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.summary_engine"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.supramolecular"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.classical_literature"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.complexity_science"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.formula_comparator"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.formula_structure"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.herb_properties"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.network_pharmacology"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.pharmacology"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.supramolecular"
+    },
+    {
+      "source": "src.semantic_modeling.methods.summary_engine",
+      "target": "src.semantic_modeling.methods.formula_structure"
+    },
+    {
+      "source": "src.semantic_modeling.methods.summary_engine",
+      "target": "src.semantic_modeling.methods.pharmacology"
+    },
+    {
+      "source": "src.semantic_modeling.research_methods",
+      "target": "src.semantic_modeling.methods"
     },
     {
       "source": "src.semantic_modeling.semantic_graph_builder",

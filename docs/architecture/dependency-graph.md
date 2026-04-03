@@ -4,8 +4,8 @@ This document is generated from internal imports under src/.
 
 ## Summary
 
-- Module count: 48
-- Module edges: 55
+- Module count: 60
+- Module edges: 77
 - Package count: 14
 - Package edges: 14
 
