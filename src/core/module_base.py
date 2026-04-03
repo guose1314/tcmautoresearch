@@ -7,9 +7,11 @@
 import asyncio
 import json
 import logging
+import threading
 import time
 import traceback
 from abc import ABC, abstractmethod
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -29,16 +31,17 @@ def __getattr__(name):
 # 全局线程池管理
 _global_executor = None
 _global_executor_max_workers = None
+_executor_lock = threading.Lock()
 
 def get_global_executor(max_workers=4):
     global _global_executor, _global_executor_max_workers
-    executor_shutdown = bool(getattr(_global_executor, "_shutdown", False))
-    if _global_executor is None or executor_shutdown or _global_executor_max_workers != max_workers:
-        if _global_executor is not None:
-            _global_executor.shutdown(wait=True)
-        _global_executor = ThreadPoolExecutor(max_workers=max_workers)
-        _global_executor_max_workers = max_workers
-    return _global_executor
+    with _executor_lock:
+        if _global_executor is None or _global_executor_max_workers != max_workers:
+            if _global_executor is not None:
+                _global_executor.shutdown(wait=True)
+            _global_executor = ThreadPoolExecutor(max_workers=max_workers)
+            _global_executor_max_workers = max_workers
+        return _global_executor
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -84,82 +87,11 @@ class BaseModule(PhaseTrackerMixin, ABC):
         self.module_start_time = None
         # 使用全局线程池，避免每个模块实例都创建线程池
         self.executor = get_global_executor(self.config.get("max_workers", 4))
-        self.performance_history = []
-        self.academic_insights = []
-        self.recommendations = []
-        self.phase_history: List[Dict[str, Any]] = []
-        self.phase_timings: Dict[str, float] = {}
-        self.completed_phases: List[str] = []
-        self.failed_phase: Optional[str] = None
-        self.failed_operations: List[Dict[str, Any]] = []
-        self.final_status = self.status
-        self.last_completed_phase: Optional[str] = None
+        self.performance_history: deque = deque(maxlen=100)
+        self.academic_insights: deque = deque(maxlen=200)
+        self.recommendations: deque = deque(maxlen=200)
         
-        self.logger.info(f"模块 {module_name} 基类初始化完成")
-
-        # Auto-register with global ModuleRegistry (best-effort, never raises)
-        try:
-            from src.core.architecture import (
-                ModuleRegistry,  # local import avoids circular dep
-            )
-            ModuleRegistry.get_instance().register(self)
-        except Exception as _reg_err:
-            import warnings as _w
-            _w.warn(f"ModuleRegistry auto-register failed for {module_name}: {_reg_err}", stacklevel=2)
-
-    def _build_analysis_summary(self) -> Dict[str, Any]:
-        total_executions = len(self.performance_history)
-        success_count = sum(1 for item in self.performance_history if item.get("success"))
-        success_rate = success_count / total_executions if total_executions else 0.0
-
-        status = "idle"
-        if total_executions or self.failed_operations:
-            status = (
-                "stable"
-                if self.failed_phase is None
-                and success_rate >= self.governance_config["minimum_stable_success_rate"]
-                else "needs_followup"
-            )
-        if self.final_status == "cleaned":
-            status = "idle"
-
-        return {
-            "status": status,
-            "total_executions": total_executions,
-            "successful_executions": success_count,
-            "failed_executions": total_executions - success_count,
-            "success_rate": success_rate,
-            "failed_operation_count": len(self.failed_operations),
-            "failed_phase": self.failed_phase,
-            "final_status": self.final_status,
-            "last_completed_phase": self.last_completed_phase,
-        }
-
-    def _build_report_metadata(self) -> Dict[str, Any]:
-        return {
-            "contract_version": self.governance_config["export_contract_version"],
-            "generated_at": datetime.now().isoformat(),
-            "result_schema": "base_module_report",
-            "module_name": self.module_name,
-            "failed_operation_count": len(self.failed_operations),
-            "final_status": self.final_status,
-            "last_completed_phase": self.last_completed_phase,
-        }
-
-    def _build_export_payload(self, output_path: str) -> Dict[str, Any]:
-        return {
-            "report_metadata": {
-                **self._build_report_metadata(),
-                "output_path": output_path,
-            },
-            "module_info": self._serialize_value(self.get_module_info()),
-            "performance_report": self._serialize_value(self.get_performance_report()),
-            "metrics_history": self._serialize_value(self.performance_history),
-            "academic_insights": self._serialize_value(self.academic_insights),
-            "recommendations": self._serialize_value(self.recommendations),
-            "failed_operations": self._serialize_value(self.failed_operations),
-            "metadata": self._build_runtime_metadata(),
-        }
+        self.logger.info("模块 %s 基类初始化完成", module_name)
     
     def initialize(self, config: Dict[str, Any] | None = None) -> bool:
         """
@@ -485,10 +417,6 @@ class BaseModule(PhaseTrackerMixin, ABC):
         }
         
         self.performance_history.append(history_entry)
-        
-        # 保持历史记录数量
-        if len(self.performance_history) > 100:
-            self.performance_history.pop(0)
     
     def _generate_academic_insights(self, result: Dict[str, Any]):
         """
@@ -739,7 +667,7 @@ class AsyncBaseModule(BaseModule):
         
         try:
             # 异步执行具体逻辑
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(
                 self.executor, self._do_execute, context
             )

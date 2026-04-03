@@ -340,27 +340,52 @@ class ResearchPipeline:
         return self.phase_orchestrator.get_pipeline_summary()
 
     def export_pipeline_data(self, output_path: str) -> bool:
-        return self.phase_orchestrator.export_pipeline_data(output_path)
+        """
+        导出流程数据
+        
+        Args:
+            output_path (str): 输出路径
+            
+        Returns:
+            bool: 导出是否成功
+        """
+        try:
+            serialized_cycles: List[Dict[str, Any]] = []
+            for cycle in self.research_cycles.values():
+                cycle_dict = asdict(cycle)
+                cycle_dict["status"] = cycle.status.value
+                cycle_dict["current_phase"] = cycle.current_phase.value
+                cycle_dict["phase_executions"] = {k.value: v for k, v in cycle.phase_executions.items()}
+                serialized_cycles.append(cycle_dict)
 
-    def _persist_result(self, cycle: ResearchCycle) -> bool:
-        return self.phase_orchestrator._persist_result(cycle)
-
-    def _run_clinical_gap_analysis(
-        self,
-        evidence_matrix: Dict[str, Any],
-        summaries: List[Dict[str, Any]],
-        context: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        import src.research.phase_orchestrator as phase_orchestrator_module
-
-        phase_orchestrator_module.CachedLLMService = CachedLLMService
-        phase_orchestrator_module.GapAnalyzer = GapAnalyzer
-        return self.phase_orchestrator._run_clinical_gap_analysis(evidence_matrix, summaries, context)
-
+            pipeline_data = {
+                "pipeline_info": {
+                    "version": "2.0.0",
+                    "generated_at": datetime.now().isoformat(),
+                    "pipeline_summary": self.get_pipeline_summary()
+                },
+                "research_cycles": serialized_cycles,
+                "execution_history": self.execution_history,
+                "quality_metrics": self.quality_metrics,
+                "resource_usage": self.resource_usage
+            }
+            
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(pipeline_data, f, ensure_ascii=False, indent=2)
+            
+            self.logger.info("流程数据已导出到: %s", output_path)
+            return True
+            
+        except Exception as e:
+            self.logger.error("流程数据导出失败: %s", e)
+            return False
+    
     def cleanup(self) -> bool:
         try:
-            self.hypothesis_engine.cleanup()
-            self.audit_history.detach_from_event_bus()
+            # 注意：不关闭全局共享线程池，由应用生命周期管理
+            # self.executor.shutdown(wait=True)
+            
+            # 清空数据结构
             self.research_cycles.clear()
             self.active_cycles.clear()
             self.failed_cycles.clear()
@@ -380,7 +405,7 @@ class ResearchPipeline:
             return True
 
         except Exception as e:
-            self.logger.error(f"资源清理失败: {e}")
+            self.logger.error("资源清理失败: %s", e)
             return False
 
     def __getattr__(self, name: str) -> Any:

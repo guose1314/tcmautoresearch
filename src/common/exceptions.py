@@ -1,90 +1,34 @@
-# -*- coding: utf-8 -*-
-"""统一异常体系 — 为各模块提供结构化、可区分的异常类型。"""
-
-from typing import Any, Dict, Optional
+# src/common/exceptions.py
+"""TCM 异常层次结构。"""
 
 
 class TCMBaseError(Exception):
-    """所有 TCM 系统异常的基类。
-
-    Parameters
-    ----------
-    message : str
-        人类可读的错误描述。
-    code : str
-        机器可读的错误码，如 ``"CFG_MISSING_KEY"``。
-    detail : str
-        补充说明或建议。
-    context : dict | None
-        与错误相关的上下文数据。
-    """
-
-    def __init__(
-        self,
-        message: str = "",
-        *,
-        code: str = "UNKNOWN",
-        detail: str = "",
-        context: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.detail = detail
-        self.context = context or {}
-
-    def __str__(self) -> str:
-        parts = [super().__str__()]
-        if self.code != "UNKNOWN":
-            parts.append(f"[{self.code}]")
-        if self.detail:
-            parts.append(self.detail)
-        return " ".join(parts)
+    """所有 TCM 系统异常的基类。"""
 
 
-class ConfigError(TCMBaseError):
-    """配置加载或校验失败。"""
-
-    def __init__(self, message: str = "configuration error", **kwargs: Any) -> None:
-        super().__init__(message, **kwargs)
+class TCMConfigError(TCMBaseError):
+    """配置错误。"""
 
 
-class DataError(TCMBaseError):
-    """数据加载、解析或验证失败。"""
-
-    def __init__(self, message: str = "data error", **kwargs: Any) -> None:
-        super().__init__(message, **kwargs)
+class TCMDataError(TCMBaseError):
+    """数据处理错误。"""
 
 
-class PipelineError(TCMBaseError):
-    """研究管线执行异常。"""
-
-    def __init__(self, message: str = "pipeline error", **kwargs: Any) -> None:
-        super().__init__(message, **kwargs)
+class TCMHTTPError(TCMBaseError):
+    """HTTP 请求错误。"""
 
 
-class ModuleError(TCMBaseError):
-    """模块生命周期（初始化/执行/清理）异常。"""
-
-    def __init__(self, message: str = "module error", **kwargs: Any) -> None:
-        super().__init__(message, **kwargs)
+class TCMModuleError(TCMBaseError):
+    """模块运行时错误。"""
 
 
-class LLMError(TCMBaseError):
-    """LLM 推理调用失败。"""
-
-    def __init__(self, message: str = "LLM error", **kwargs: Any) -> None:
-        super().__init__(message, **kwargs)
+class TCMParseError(TCMBaseError):
+    """解析错误（XML / JSON / YAML 等）。"""
 
 
-class NetworkError(TCMBaseError):
-    """网络请求失败（超时、连接、HTTP 错误等）。"""
-
-    def __init__(self, message: str = "network error", **kwargs: Any) -> None:
-        super().__init__(message, **kwargs)
+class TCMTimeoutError(TCMBaseError):
+    """超时错误。"""
 
 
-class ValidationError(TCMBaseError):
-    """输入参数或数据格式校验失败。"""
-
-    def __init__(self, message: str = "validation error", **kwargs: Any) -> None:
-        super().__init__(message, **kwargs)
+class TCMValidationError(TCMBaseError):
+    """输入验证错误。"""

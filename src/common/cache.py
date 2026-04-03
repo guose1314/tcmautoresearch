@@ -1,62 +1,52 @@
-# -*- coding: utf-8 -*-
-"""带 TTL 的缓存装饰器 — 基于 functools.lru_cache 扩展可选过期机制。"""
+# src/common/cache.py
+"""LRU + TTL 缓存装饰器。"""
+
+from __future__ import annotations
 
 import functools
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 
-def tcm_cache(maxsize: int = 128, ttl: Optional[int] = None) -> Callable:
-    """可参数化缓存装饰器。
+def tcm_cache(maxsize: int = 128, ttl: float = 300.0) -> Callable:
+    """
+    LRU + TTL 缓存装饰器。
 
-    Parameters
-    ----------
-    maxsize : int
-        LRU 缓存最大条目数，``None`` 表示无限。
-    ttl : int | None
-        缓存存活时间（秒）。为 ``None`` 时永不过期，等同于 ``lru_cache``。
+    Args:
+        maxsize: 最大缓存条目数。
+        ttl: 生存时间（秒），0 表示无过期。
     """
 
-    def decorator(fn: Callable) -> Callable:
-        if ttl is None:
-            # 无 TTL，直接使用 lru_cache
-            cached = functools.lru_cache(maxsize=maxsize)(fn)
+    def decorator(func: Callable) -> Callable:
+        cache: dict[Any, tuple[Any, float]] = {}
+        hits = 0
+        misses = 0
 
-            @functools.wraps(fn)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
-                return cached(*args, **kwargs)
-
-            wrapper.cache_clear = cached.cache_clear  # type: ignore[attr-defined]
-            wrapper.cache_info = cached.cache_info  # type: ignore[attr-defined]
-            return wrapper
-
-        # 有 TTL：用 lru_cache + 时间窗口轮转实现过期
-        _epoch = [time.time()]
-
-        def _time_slot() -> int:
-            """返回当前时间窗口编号，窗口切换时旧缓存自动被淘汰。"""
-            return int((time.time() - _epoch[0]) // ttl)
-
-        @functools.lru_cache(maxsize=maxsize)
-        def _cached(_slot: int, *args: Any) -> Any:
-            return fn(*args)
-
-        @functools.wraps(fn)
+        @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            if kwargs:
-                # lru_cache 不支持 kwargs，回退到直接调用
-                return fn(*args, **kwargs)
-            return _cached(_time_slot(), *args)
+            nonlocal hits, misses
+            key = (args, tuple(sorted(kwargs.items())))
+            now = time.monotonic()
 
-        def cache_clear() -> None:
-            _cached.cache_clear()
-            _epoch[0] = time.time()
+            if key in cache:
+                value, ts = cache[key]
+                if ttl <= 0 or (now - ts) < ttl:
+                    hits += 1
+                    return value
+                else:
+                    del cache[key]
 
-        def cache_info():
-            return _cached.cache_info()
+            misses += 1
+            result = func(*args, **kwargs)
+            if len(cache) >= maxsize:
+                # 移除最旧条目
+                oldest_key = next(iter(cache))
+                del cache[oldest_key]
+            cache[key] = (result, now)
+            return result
 
-        wrapper.cache_clear = cache_clear  # type: ignore[attr-defined]
-        wrapper.cache_info = cache_info  # type: ignore[attr-defined]
+        wrapper.cache_info = lambda: {"hits": hits, "misses": misses, "size": len(cache)}  # type: ignore[attr-defined]
+        wrapper.cache_clear = lambda: cache.clear()  # type: ignore[attr-defined]
         return wrapper
 
     return decorator

@@ -1,16 +1,18 @@
-"""研究方法子模块（架构3.0拆分）。"""
+# src/semantic_modeling/methods/__init__.py
+"""
+research_methods 子模块包 — 向后兼容 re-export shim。
 
-from src.semantic_modeling.methods.classical_literature import (
+所有公共类/枚举均可通过以下方式访问：
+    from src.semantic_modeling.methods import FormulaStructureAnalyzer
+或原始路径:
+    from src.semantic_modeling.research_methods import FormulaStructureAnalyzer
+"""
+
+from src.semantic_modeling.research_methods import (
     ClassicalLiteratureArchaeologyAnalyzer,
-)
-from src.semantic_modeling.methods.complexity_science import (
     ComplexityNonlinearDynamicsAnalyzer,
-)
-from src.semantic_modeling.methods.formula_comparator import (
     FormulaComparator,
     FormulaComparison,
-)
-from src.semantic_modeling.methods.formula_structure import (
     FormulaComposition,
     FormulaDosageForm,
     FormulaStructure,
@@ -19,37 +21,35 @@ from src.semantic_modeling.methods.formula_structure import (
     HerbProperty,
     HerbPropertyDatabase,
     HerbTemperature,
+    IntegratedResearchAnalyzer,
     MeridianType,
-)
-from src.semantic_modeling.methods.integrated_analyzer import IntegratedResearchAnalyzer
-from src.semantic_modeling.methods.network_pharmacology import (
-    NetworkPharmacologySystemBiologyAnalyzer,
-)
-from src.semantic_modeling.methods.pharmacology import (
     ModernPharmacologyDatabase,
+    NetworkPharmacologySystemBiologyAnalyzer,
     PharmacologicalData,
-)
-from src.semantic_modeling.methods.supramolecular import (
+    ResearchScoringPanel,
+    SummaryAnalysisEngine,
     SupramolecularPhysicochemicalAnalyzer,
 )
 
 __all__ = [
-    "FormulaDosageForm",
-    "HerbDosage",
-    "FormulaStructure",
-    "FormulaComposition",
-    "FormulaStructureAnalyzer",
-    "HerbTemperature",
-    "MeridianType",
-    "HerbProperty",
-    "HerbPropertyDatabase",
-    "FormulaComparison",
-    "FormulaComparator",
-    "PharmacologicalData",
-    "ModernPharmacologyDatabase",
-    "NetworkPharmacologySystemBiologyAnalyzer",
-    "SupramolecularPhysicochemicalAnalyzer",
     "ClassicalLiteratureArchaeologyAnalyzer",
     "ComplexityNonlinearDynamicsAnalyzer",
+    "FormulaComparator",
+    "FormulaComparison",
+    "FormulaComposition",
+    "FormulaDosageForm",
+    "FormulaStructure",
+    "FormulaStructureAnalyzer",
+    "HerbDosage",
+    "HerbProperty",
+    "HerbPropertyDatabase",
+    "HerbTemperature",
     "IntegratedResearchAnalyzer",
+    "MeridianType",
+    "ModernPharmacologyDatabase",
+    "NetworkPharmacologySystemBiologyAnalyzer",
+    "PharmacologicalData",
+    "ResearchScoringPanel",
+    "SummaryAnalysisEngine",
+    "SupramolecularPhysicochemicalAnalyzer",
 ]

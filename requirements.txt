@@ -2,6 +2,7 @@
 # 核心Python依赖
 
 # ── 实际运行时依赖（项目核心链路）──────────────────────────────────
+defusedxml>=0.7,<1.0                    # 安全 XML 解析（防 XXE 攻击）
 jieba>=0.42,<1.0                        # 中文分词（document_preprocessor.py）
 opencc-python-reimplemented>=0.1,<1.0   # 繁简转换（document_preprocessor.py）
 chardet>=5.0,<6.0                       # 编码检测（文件读取）

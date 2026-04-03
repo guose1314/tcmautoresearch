@@ -122,22 +122,13 @@ Thumbs.db
 
 # Data and models (runtime directories)
 data/
+!src/data/
 models/
 output/
+!src/output/
 logs/
 
-# But keep source-code packages under src/
-!src/data/
-!src/output/
-
-# Temporary files
+# Temporary and backup files
 *.tmp
 *.temp
-
-# Secrets
-secrets.yml
-secrets.yaml
-secrets/
-!secrets/.gitkeep
-!secrets/*.example.yml
-!secrets/*.example.yaml
+*.bak

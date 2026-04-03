@@ -315,6 +315,20 @@ ctext_corpus:
       - "five_classics"
       - "tcm_classics"
   batch_manifest_output: "./output/ctext_batch_manifest.json"
+  monitoring:
+    enabled: true
+    thresholds:
+      memory_usage: 85
+      error_rate: 0.05
+      processing_time: 300
+    notification_channels:
+      - "email"
+      - "slack"
+      - "webhook"
+    email_recipients:
+      - "admin@example.com"
+      - "research-team@example.com"
+    webhook_url: "https://example.invalid/slack-webhook-placeholder"
 
 # Security configuration
 security:
@@ -681,8 +695,7 @@ advanced:
   async_processing:
     enabled: true
     event_loop: "asyncio"
-    distributed_mode: false
-    # Distributed node configuration example: 
+    # 配置分布式节点示例: 
     # cluster_nodes:
     #   - "192.168.1.101:8000"
     #   - "192.168.1.102:8000"

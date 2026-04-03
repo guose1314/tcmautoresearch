@@ -1,30 +1,37 @@
-# -*- coding: utf-8 -*-
-"""src.common — 公共工具包，为各模块提供通用辅助函数与常量。"""
+# src/common — 通用工具包
+"""
+提供项目范围内的共享工具：
 
-from src.common.cache import tcm_cache
+- exceptions: TCMBaseError 异常层次结构
+- retry_utils: @retry 重试装饰器
+- http_client: HttpClient（requests.Session 封装）
+- cache: @tcm_cache（LRU + TTL）
+"""
+
 from src.common.exceptions import (
-    ConfigError,
-    DataError,
-    LLMError,
-    ModuleError,
-    NetworkError,
-    PipelineError,
     TCMBaseError,
-    ValidationError,
+    TCMConfigError,
+    TCMDataError,
+    TCMHTTPError,
+    TCMModuleError,
+    TCMParseError,
+    TCMTimeoutError,
+    TCMValidationError,
 )
-from src.common.http_client import HttpClient
 from src.common.retry_utils import retry
+from src.common.http_client import HttpClient
+from src.common.cache import tcm_cache
 
 __all__ = [
+    "TCMBaseError",
+    "TCMConfigError",
+    "TCMDataError",
+    "TCMHTTPError",
+    "TCMModuleError",
+    "TCMParseError",
+    "TCMTimeoutError",
+    "TCMValidationError",
     "retry",
     "HttpClient",
     "tcm_cache",
-    "TCMBaseError",
-    "ConfigError",
-    "DataError",
-    "PipelineError",
-    "ModuleError",
-    "LLMError",
-    "NetworkError",
-    "ValidationError",
 ]

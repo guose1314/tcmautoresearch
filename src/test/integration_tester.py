@@ -1319,6 +1319,10 @@ class IntegrationTester(PhaseTrackerMixin):
         phase_started_at = self._start_phase("cleanup")
 
         try:
+            # 注意：不关闭全局共享线程池，由应用生命周期管理
+            # self.executor.shutdown(wait=True)
+            
+            # 清理数据结构
             self.integration_tests.clear()
             self.test_history.clear()
             self.knowledge_graph.clear()

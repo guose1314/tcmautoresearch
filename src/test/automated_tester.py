@@ -1066,6 +1066,10 @@ class AutomatedTester(PhaseTrackerMixin):
         phase_started_at = self._start_phase("cleanup")
 
         try:
+            # 注意：不关闭全局共享线程池，由应用生命周期管理
+            # self.executor.shutdown(wait=True)
+            
+            # 清理数据结构
             self.test_suites.clear()
             self.test_results.clear()
             self.performance_metrics = self._create_performance_metrics()
