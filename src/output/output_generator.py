@@ -130,7 +130,7 @@ class OutputGenerator(BaseModule):
             return obj[: self.max_string_length]
         if isinstance(obj, dict):
             return {
-                str(k)[: self.max_string_length]: self._make_json_safe(v, _depth + 1)
+                str(k): self._make_json_safe(v, _depth + 1)
                 for k, v in obj.items()
             }
         if isinstance(obj, (list, tuple)):

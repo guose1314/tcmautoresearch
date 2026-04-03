@@ -354,9 +354,10 @@ class TestResearchPipelineQuality(unittest.TestCase):
 
     def test_cleanup_failure_returns_false(self):
         pipeline = ResearchPipeline({})
-        bad_executor = Mock()
-        bad_executor.shutdown.side_effect = RuntimeError("shutdown failed")
-        pipeline.executor = bad_executor
+        # Simulate a failure in cleanup by making .clear() raise
+        bad_dict = Mock()
+        bad_dict.clear.side_effect = RuntimeError("clear failed")
+        pipeline.research_cycles = bad_dict
         self.assertFalse(pipeline.cleanup())
 
 
