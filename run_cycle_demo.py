@@ -1732,7 +1732,7 @@ def export_research_session_reports(
     output_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """基于 session_result 直接导出 IMRD 报告。"""
-    from src.output.report_generator import ReportGenerator
+    from src.generation.report_generator import ReportGenerator
 
     normalized_formats = [
         str(item).strip().lower()

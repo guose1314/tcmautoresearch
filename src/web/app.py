@@ -64,14 +64,21 @@ def create_app(
     # ---- 额外配置 ----
     app.state.config = extra_config or {}
 
+    # ---- 认证 & 页面路由 ----
+    from src.web.routes.auth import router as auth_router
+
+    app.include_router(auth_router)
+
     # ---- 业务路由 ----
     from src.web.routes.analysis import router as analysis_router
     from src.web.routes.assistant import router as assistant_router
+    from src.web.routes.dashboard import router as dashboard_router
     from src.web.routes.research import router as research_router
 
     app.include_router(research_router)
     app.include_router(analysis_router)
     app.include_router(assistant_router)
+    app.include_router(dashboard_router)
 
     # ---- 健康检查 ----
     @app.get("/health", tags=["system"])

@@ -11,6 +11,13 @@ from typing import Any, Dict, List, Optional
 from src.collector.ctext_corpus_collector import CTextCorpusCollector
 from src.collector.literature_retriever import LiteratureRetriever
 from src.collector.local_collector import LocalCorpusCollector
+from src.core.adapters import (
+    DefaultAnalysisAdapter,
+    DefaultCollectionAdapter,
+    DefaultOutputAdapter,
+    DefaultQualityAdapter,
+    DefaultResearchAdapter,
+)
 from src.core.event_bus import EventBus
 from src.core.module_base import get_global_executor
 from src.core.module_factory import ModuleFactory
@@ -72,7 +79,7 @@ except Exception:
 OutputGenerator = _ImportedOutputGenerator
 
 try:
-    from src.output.report_generator import (
+    from src.generation.report_generator import (
         ReportGenerator as _ImportedReportGenerator,
     )
 except Exception:
@@ -181,6 +188,17 @@ class ResearchPipeline:
 
         self._register_default_module_providers()
 
+        self._bootstrap_infrastructure()
+        self._bootstrap_research_services()
+
+        self.logger.info("研究流程管理器初始化完成")
+
+    # ------------------------------------------------------------------
+    # 初始化辅助方法
+    # ------------------------------------------------------------------
+
+    def _bootstrap_infrastructure(self) -> None:
+        """基础设施初始化：线程池、治理配置、会话管理、审计绑定。"""
         # 使用全局共享线程池，与 BaseModule 保持一致
         self.executor = get_global_executor(max_workers=4)
         self.logger = logging.getLogger(__name__)
@@ -213,6 +231,8 @@ class ResearchPipeline:
         self.failed_cycles = self.session_manager.failed_cycles
         self.execution_history = self.audit_history.entries
 
+    def _bootstrap_research_services(self) -> None:
+        """研究服务初始化：质量评估、假设引擎、阶段编排器、Port适配器。"""
         self.quality_assessor = QualityAssessor()
         self.quality_metrics = self.quality_assessor.quality_metrics
         self.resource_usage = self.quality_assessor.resource_usage
@@ -226,7 +246,13 @@ class ResearchPipeline:
         self.phase_orchestrator = PhaseOrchestrator(self)
         self.phase_handlers = ResearchPhaseHandlers(self)
         self.orchestrator = ResearchPipelineOrchestrator(self, self.phase_handlers)
-        self.logger.info("研究流程管理器初始化完成")
+
+        # Port adapters — bounded-context interfaces (Phase 2)
+        self.collection_port = DefaultCollectionAdapter(self.module_factory, self.config)
+        self.analysis_port = DefaultAnalysisAdapter(self.module_factory)
+        self.research_port = DefaultResearchAdapter(self.hypothesis_engine)
+        self.quality_port = DefaultQualityAdapter(self.quality_assessor)
+        self.output_port = DefaultOutputAdapter(self.module_factory)
 
     def _register_default_module_providers(self) -> None:
         for key, symbol_name in self._MODULE_KEYS.items():
@@ -384,6 +410,11 @@ class ResearchPipeline:
             return False
 
     def __getattr__(self, name: str) -> Any:
+        """将未定义的属性访问委托到 phase_orchestrator。
+
+        委托目标包含: get_pipeline_summary, export_pipeline_data,
+        _build_runtime_metadata, _persist_result 等 PhaseOrchestrator 公开方法。
+        """
         try:
             phase_orchestrator = object.__getattribute__(self, "phase_orchestrator")
             return getattr(phase_orchestrator, name)

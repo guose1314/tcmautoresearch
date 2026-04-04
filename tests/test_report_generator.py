@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from src.output.report_generator import ReportFormat, ReportGenerator
+from src.generation.report_generator import ReportFormat, ReportGenerator
 
 
 def _build_session_result():

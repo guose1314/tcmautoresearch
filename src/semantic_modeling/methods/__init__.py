@@ -29,6 +29,8 @@ from src.semantic_modeling.methods.pharmacology import (
     ModernPharmacologyDatabase,
     PharmacologicalData,
 )
+from src.semantic_modeling.methods.scoring_panel import ResearchScoringPanel
+from src.semantic_modeling.methods.summary_engine import SummaryAnalysisEngine
 from src.semantic_modeling.methods.supramolecular import (
     SupramolecularPhysicochemicalAnalyzer,
 )
@@ -52,4 +54,6 @@ __all__ = [
     "ClassicalLiteratureArchaeologyAnalyzer",
     "ComplexityNonlinearDynamicsAnalyzer",
     "IntegratedResearchAnalyzer",
+    "ResearchScoringPanel",
+    "SummaryAnalysisEngine",
 ]

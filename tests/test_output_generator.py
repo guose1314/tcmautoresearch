@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from src.generation.report_generator import Report, ReportFormat, ReportGenerator
 from src.output.output_generator import OutputGenerator
-from src.output.report_generator import Report, ReportFormat, ReportGenerator
 
 
 @pytest.fixture

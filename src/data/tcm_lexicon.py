@@ -61,6 +61,11 @@ class TCMLexicon:
         """返回指定词的元数据；不存在返回 None。"""
         return self._words.get(word)
 
+    def get_word_type(self, word: str) -> Optional[str]:
+        """返回指定词的类型字符串；不存在返回 None。"""
+        info = self._words.get(word)
+        return info.get("type") if info else None
+
     def contains(self, word: str) -> bool:
         """判断词汇是否存在于词典中。"""
         return word in self._words

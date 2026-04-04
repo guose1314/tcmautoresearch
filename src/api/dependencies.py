@@ -12,7 +12,7 @@ from src.analysis.entity_extractor import AdvancedEntityExtractor
 from src.analysis.preprocessor import DocumentPreprocessor
 from src.collector.normalizer import Normalizer
 from src.core.architecture import ModuleInfo, ModuleType, SystemArchitecture
-from src.core.module_interface import ModuleStatus
+from src.core.module_base import ModuleStatus
 from src.extraction.relation_extractor import RelationExtractor
 from src.infrastructure.config_loader import AppSettings, load_settings
 from src.infrastructure.monitoring import MonitoringService

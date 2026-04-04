@@ -1,7 +1,10 @@
 # core/module_interface.py
 """
-中医古籍全自动研究系统 - 专业学术模块接口
-基于T/C IATCM 098-2023标准的模块接口设计
+中医古籍全自动研究系统 - 专业学术模块接口（已弃用）
+
+数据类型（ModuleContext / ModuleOutput / ModuleStatus / ModulePriority）
+已迁移至 src.core.module_base，此文件仅保留向后兼容重导出。
+ModuleInterface 类保留供极少数旧消费者使用，新代码应直接继承 BaseModule。
 """
 
 import json
@@ -9,70 +12,19 @@ import logging
 import time
 import traceback
 import warnings
-from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from src.core.module_base import BaseModule
+from src.core.module_base import (
+    BaseModule,
+    ModuleContext,
+    ModuleOutput,
+    ModulePriority,
+    ModuleStatus,
+)
 
 # 配置日志
 logger = logging.getLogger(__name__)
-
-class ModuleStatus(Enum):
-    """模块状态枚举"""
-    CREATED = "created"
-    INITIALIZING = "initializing"
-    INITIALIZED = "initialized"
-    ACTIVATING = "activating"
-    ACTIVE = "active"
-    DEACTIVATING = "deactivating"
-    INACTIVE = "inactive"
-    TERMINATING = "terminating"
-    TERMINATED = "terminated"
-    ERROR = "error"
-
-class ModulePriority(Enum):
-    """模块优先级枚举"""
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
-
-@dataclass
-class ModuleContext:
-    """模块执行上下文数据结构"""
-    context_id: str
-    module_id: str
-    module_name: str
-    timestamp: str
-    input_data: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    parameters: Dict[str, Any] = field(default_factory=dict)
-    execution_options: Dict[str, Any] = field(default_factory=dict)
-    security_context: Dict[str, Any] = field(default_factory=dict)
-    academic_context: Dict[str, Any] = field(default_factory=dict)
-    performance_context: Dict[str, Any] = field(default_factory=dict)
-
-@dataclass
-class ModuleOutput:
-    """模块输出数据结构"""
-    output_id: str
-    module_id: str
-    module_name: str
-    timestamp: str
-    success: bool
-    output_data: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    execution_time: float = 0.0
-    error_message: str = ""
-    warnings: List[str] = field(default_factory=list)
-    quality_metrics: Dict[str, Any] = field(default_factory=dict)
-    academic_relevance: Dict[str, Any] = field(default_factory=dict)
-    confidence_scores: Dict[str, float] = field(default_factory=dict)
-    security_info: Dict[str, Any] = field(default_factory=dict)
-    performance_metrics: Dict[str, Any] = field(default_factory=dict)
-    tags: List[str] = field(default_factory=list)
 
 class ModuleInterface(BaseModule):
     """

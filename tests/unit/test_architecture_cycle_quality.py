@@ -6,8 +6,8 @@ from importlib.util import find_spec
 
 from src.core import __all__ as core_all
 from src.core.architecture import ModuleInfo, ModuleType, SystemArchitecture
-from src.core.module_base import BaseModule
-from src.core.module_interface import ModuleContext, ModuleInterface, ModuleStatus
+from src.core.module_base import BaseModule, ModuleContext, ModuleStatus
+from src.core.module_interface import ModuleInterface
 from src.cycle.fixing_stage import FixingStage
 from src.cycle.iteration_cycle import CycleStatus, IterationConfig, IterationCycle
 from src.cycle.module_iteration import ModuleIterationCycle

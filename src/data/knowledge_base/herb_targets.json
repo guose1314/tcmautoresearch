@@ -1,0 +1,8 @@
+{
+  "黄芪": ["IL6", "TNF", "AKT1", "VEGFA"],
+  "人参": ["AKT1", "MAPK1", "CASP3", "SIRT1"],
+  "白术": ["IL1B", "PPARG", "STAT3"],
+  "茯苓": ["HIF1A", "NFKB1", "JUN"],
+  "甘草": ["PTGS2", "RELA", "TP53", "IL6"],
+  "丹参": ["NOS3", "MMP9", "AKT1", "VEGFA"]
+}

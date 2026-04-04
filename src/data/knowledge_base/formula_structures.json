@@ -1,0 +1,37 @@
+{
+  "补中益气汤": {
+    "dosage_form": "decoction",
+    "sovereign": [{"name": "黄芪", "amount": 15, "unit": "g", "ratio": 0.30}],
+    "minister": [
+      {"name": "人参", "amount": 10, "unit": "g", "ratio": 0.20},
+      {"name": "党参", "amount": 10, "unit": "g", "ratio": 0.20}
+    ],
+    "assistant": [
+      {"name": "白术", "amount": 10, "unit": "g", "ratio": 0.15},
+      {"name": "升麻", "amount": 6, "unit": "g", "ratio": 0.12},
+      {"name": "柴胡", "amount": 6, "unit": "g", "ratio": 0.12}
+    ],
+    "envoy": [
+      {"name": "甘草", "amount": 4, "unit": "g", "ratio": 0.08},
+      {"name": "大枣", "amount": 3, "unit": "枚", "ratio": 0.03}
+    ],
+    "total_dosage": 50,
+    "characteristics": "扶正培本，升阳益气",
+    "pairing_rules": [
+      "黄芪甘温，扶正气之主",
+      "人参、白术健脾益气",
+      "升麻、柴胡升阳举陷",
+      "甘草调和诸药"
+    ]
+  },
+  "四君子汤": {
+    "dosage_form": "decoction",
+    "sovereign": [{"name": "人参", "amount": 10, "unit": "g", "ratio": 0.25}],
+    "minister": [{"name": "白术", "amount": 10, "unit": "g", "ratio": 0.25}],
+    "assistant": [{"name": "茯苓", "amount": 10, "unit": "g", "ratio": 0.25}],
+    "envoy": [{"name": "甘草", "amount": 10, "unit": "g", "ratio": 0.25}],
+    "total_dosage": 40,
+    "characteristics": "脾胃气虚的基础方，比例均等对称",
+    "pairing_rules": ["人参补气健脾", "白术健脾燥湿", "茯苓利水健脾", "甘草调和诸药"]
+  }
+}

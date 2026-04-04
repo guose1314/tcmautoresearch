@@ -23,6 +23,7 @@ from src.generation.citation_manager import (
 from src.generation.figure_generator import FigureGenerator, FigureResult, FigureSpec
 from src.generation.output_formatter import OutputGenerator
 from src.generation.paper_writer import PaperDraft, PaperSection, PaperWriter
+from src.generation.report_generator import Report, ReportFormat, ReportGenerator
 
 # 架构 3.0 规范名称
 OutputFormatter = OutputGenerator
@@ -39,4 +40,7 @@ __all__ = [
     "PaperSection",
     "OutputGenerator",
     "OutputFormatter",
+    "Report",
+    "ReportFormat",
+    "ReportGenerator",
 ]

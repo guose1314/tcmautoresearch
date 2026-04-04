@@ -1,0 +1,57 @@
+{
+  "黄芪": {
+    "temperature": "warm",
+    "flavors": ["甘"],
+    "meridians": ["lung", "spleen"],
+    "primary_efficacy": "补气、固表",
+    "secondary_efficacy": ["利水", "消肿", "增强免疫"],
+    "toxicity": "low",
+    "dosage": "15-30g"
+  },
+  "人参": {
+    "temperature": "warm",
+    "flavors": ["甘", "微苦"],
+    "meridians": ["spleen", "lung", "heart"],
+    "primary_efficacy": "补气、健脾、生津",
+    "secondary_efficacy": ["安神", "增强体质"],
+    "toxicity": "low",
+    "dosage": "10-15g"
+  },
+  "白术": {
+    "temperature": "warm",
+    "flavors": ["甘", "苦"],
+    "meridians": ["spleen", "stomach"],
+    "primary_efficacy": "健脾、燥湿、补气",
+    "secondary_efficacy": ["安胎", "止汗"],
+    "toxicity": "low",
+    "dosage": "10-15g"
+  },
+  "茯苓": {
+    "temperature": "neutral",
+    "flavors": ["甘", "淡"],
+    "meridians": ["heart", "spleen", "kidney"],
+    "primary_efficacy": "利水、健脾、安神",
+    "secondary_efficacy": ["消肿", "增强免疫"],
+    "toxicity": "low",
+    "dosage": "10-30g"
+  },
+  "甘草": {
+    "temperature": "neutral",
+    "flavors": ["甘"],
+    "meridians": ["all"],
+    "primary_efficacy": "补气、健脾、解毒、调和诸药",
+    "secondary_efficacy": ["缓急止痛", "增强其他药物效果"],
+    "toxicity": "low",
+    "dosage": "3-10g",
+    "note": "使药的代表，常用于调和"
+  },
+  "丹参": {
+    "temperature": "cool",
+    "flavors": ["苦"],
+    "meridians": ["heart", "pericardium", "liver"],
+    "primary_efficacy": "活血、祛瘀、安神",
+    "secondary_efficacy": ["cool_blood", "relieve_pain"],
+    "toxicity": "low",
+    "dosage": "10-15g"
+  }
+}

@@ -260,9 +260,8 @@ class SummaryAnalysisEngine:
 
         return StatisticalDataMiner.bayesian_network_analysis(records)
 
-所有实现已拆分至 src/semantic_modeling/methods/ 子包。
-本文件仅保留重导出以确保现有 import 路径不中断。
-"""
+# 所有实现已拆分至 src/semantic_modeling/methods/ 子包。
+# 本文件仅保留重导出以确保现有 import 路径不中断。
 
 __all__ = [
     "FormulaStructureAnalyzer",

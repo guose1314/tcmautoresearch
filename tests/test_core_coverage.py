@@ -16,8 +16,8 @@ from src.core.architecture import (
     SystemConfiguration,
 )
 from src.core.event_bus import EventBus
+from src.core.module_base import ModuleContext, ModuleOutput, ModuleStatus
 from src.core.module_factory import ModuleFactory
-from src.core.module_interface import ModuleContext, ModuleOutput, ModuleStatus
 
 
 # ===================================================================

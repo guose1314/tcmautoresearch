@@ -7,9 +7,9 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script
       defer
-      src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"
     ></script>
-    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.9.12/dist/htmx.min.js"></script>
     <style>
       [x-cloak] {
         display: none !important;
@@ -412,11 +412,19 @@
 
           init() {
             this.loadUserInfo();
+            // Alpine 渲染完 <template x-if> 后通知 HTMX 处理新元素
+            this.$nextTick(() => {
+              if (window.htmx) htmx.process(document.body);
+            });
           },
 
           switchTab(tabId) {
             this.activeTab = tabId;
             this.sidebarOpen = false;
+            // 切换 tab 后 Alpine 会重建 DOM 节点，需要让 HTMX 重新扫描
+            this.$nextTick(() => {
+              if (window.htmx) htmx.process(document.body);
+            });
           },
 
           async loadUserInfo() {

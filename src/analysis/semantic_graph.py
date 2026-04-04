@@ -14,7 +14,7 @@ from src.core.module_base import BaseModule
 from src.extraction.relation_extractor import RelationExtractor
 from src.knowledge.embedding_service import EmbeddingService
 from src.knowledge.ontology_manager import OntologyManager
-from src.semantic_modeling.research_methods import (
+from src.semantic_modeling.methods import (
     ClassicalLiteratureArchaeologyAnalyzer,
     ComplexityNonlinearDynamicsAnalyzer,
     FormulaComparator,

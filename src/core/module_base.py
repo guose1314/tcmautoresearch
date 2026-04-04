@@ -11,20 +11,74 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from src.core.phase_tracker import PhaseTrackerMixin
 
+# ---------------------------------------------------------------------------
+# 共享数据类型（原 module_interface.py，现为权威位置）
+# ---------------------------------------------------------------------------
 
-# Re-export deprecated helper types from module_interface (lazy to avoid circular import)
-def __getattr__(name):
-    _interface_types = ("ModuleContext", "ModuleOutput", "ModuleStatus", "ModulePriority")
-    if name in _interface_types:
-        import importlib
-        mod = importlib.import_module("src.core.module_interface")
-        return getattr(mod, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+class ModuleStatus(Enum):
+    """模块状态枚举"""
+    CREATED = "created"
+    INITIALIZING = "initializing"
+    INITIALIZED = "initialized"
+    ACTIVATING = "activating"
+    ACTIVE = "active"
+    DEACTIVATING = "deactivating"
+    INACTIVE = "inactive"
+    TERMINATING = "terminating"
+    TERMINATED = "terminated"
+    ERROR = "error"
+
+
+class ModulePriority(Enum):
+    """模块优先级枚举"""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+@dataclass
+class ModuleContext:
+    """模块执行上下文数据结构"""
+    context_id: str
+    module_id: str
+    module_name: str
+    timestamp: str
+    input_data: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    execution_options: Dict[str, Any] = field(default_factory=dict)
+    security_context: Dict[str, Any] = field(default_factory=dict)
+    academic_context: Dict[str, Any] = field(default_factory=dict)
+    performance_context: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ModuleOutput:
+    """模块输出数据结构"""
+    output_id: str
+    module_id: str
+    module_name: str
+    timestamp: str
+    success: bool
+    output_data: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    execution_time: float = 0.0
+    error_message: str = ""
+    warnings: List[str] = field(default_factory=list)
+    quality_metrics: Dict[str, Any] = field(default_factory=dict)
+    academic_relevance: Dict[str, Any] = field(default_factory=dict)
+    confidence_scores: Dict[str, float] = field(default_factory=dict)
+    security_info: Dict[str, Any] = field(default_factory=dict)
+    performance_metrics: Dict[str, Any] = field(default_factory=dict)
+    tags: List[str] = field(default_factory=list)
 
 # 全局线程池管理
 _global_executor = None
@@ -790,5 +844,9 @@ class AsyncBaseModule(BaseModule):
 # 导出主要类和函数
 __all__ = [
     'BaseModule',
-    'AsyncBaseModule'
+    'AsyncBaseModule',
+    'ModuleStatus',
+    'ModulePriority',
+    'ModuleContext',
+    'ModuleOutput',
 ]

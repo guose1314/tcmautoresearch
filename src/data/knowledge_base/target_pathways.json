@@ -1,0 +1,8 @@
+{
+  "AKT1": ["PI3K-Akt", "Insulin signaling"],
+  "IL6": ["JAK-STAT", "NF-kB signaling"],
+  "TNF": ["TNF signaling", "NF-kB signaling"],
+  "VEGFA": ["Angiogenesis", "HIF-1 signaling"],
+  "MAPK1": ["MAPK signaling"],
+  "PTGS2": ["Arachidonic acid metabolism"]
+}
