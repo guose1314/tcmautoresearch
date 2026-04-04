@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
 from src.core.module_base import BaseModule
-from src.knowledge.tcm_knowledge_graph import KnowledgeGap, TCMKnowledgeGraph
+from src.storage.graph_interface import IKnowledgeGraph, KnowledgeGap
+from src.storage.neo4j_driver import create_knowledge_graph
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,42 @@ class HypothesisEngine(BaseModule):
 评分要求：novelty、feasibility、evidence_support 使用 0 到 1 的浮点数。
 """
 
+	KG_ENHANCED_PROMPT = """你是中医科研假设生成专家。请基于以下知识图谱缺口分析生成高质量研究假设。
+
+## 知识图谱缺口分析
+
+共发现 {gap_count} 个知识缺口：
+{gap_details}
+
+## 图谱结构摘要
+
+{kg_structure_summary}
+
+## 研究上下文
+
+{context_summary}
+
+## 要求
+
+请基于上述图谱缺口和结构信息，生成 {num_hypotheses} 条可验证的中医科研假设。
+每条假设应：
+1. 直接回应一个或多个知识缺口
+2. 利用图谱中已有的结构线索
+3. 提出可检验的机制解释
+
+输出 JSON 数组，每个元素必须包含：
+- title: 假设标题
+- statement: 假设声明
+- rationale: 论据（须引用图谱证据）
+- novelty: 创新性评分 (0-1)
+- feasibility: 可行性评分 (0-1)
+- evidence_support: 证据支持评分 (0-1)
+- validation_plan: 验证方案
+- keywords: 关键词列表
+- source_gap_type: 对应的缺口类型
+- source_entities: 涉及的实体列表
+"""
+
 	DEFAULT_SCORE_WEIGHTS = {
 		"novelty": 0.35,
 		"feasibility": 0.25,
@@ -102,11 +139,13 @@ class HypothesisEngine(BaseModule):
 		self,
 		config: Optional[Dict[str, Any]] = None,
 		llm_engine: Any = None,
-		knowledge_graph: Optional[TCMKnowledgeGraph] = None,
+		knowledge_graph: Optional[IKnowledgeGraph] = None,
 	) -> None:
 		super().__init__("research_hypothesis_engine", config)
 		self.llm_engine = llm_engine
-		self.knowledge_graph = knowledge_graph or TCMKnowledgeGraph(preload_formulas=False)
+		self.knowledge_graph = knowledge_graph or create_knowledge_graph(
+			self.config, preload_formulas=False
+		)
 		self.max_hypotheses = int(self.config.get("max_hypotheses", 5))
 		self.score_weights = {
 			**self.DEFAULT_SCORE_WEIGHTS,
@@ -125,7 +164,7 @@ class HypothesisEngine(BaseModule):
 		knowledge_gap = context.get("knowledge_gap")
 		runtime_graph = context.get("knowledge_graph")
 		previous_graph = self.knowledge_graph
-		if isinstance(runtime_graph, TCMKnowledgeGraph):
+		if isinstance(runtime_graph, IKnowledgeGraph):
 			self.knowledge_graph = runtime_graph
 
 		try:
@@ -135,7 +174,8 @@ class HypothesisEngine(BaseModule):
 			self.knowledge_graph = previous_graph
 
 		top_hypothesis = ranked[0] if ranked else None
-		used_llm_generation = any(item.generation_mode == "llm" for item in ranked)
+		used_llm_generation = any(item.generation_mode in ("llm", "kg_enhanced") for item in ranked)
+		used_kg_enhanced = any(item.generation_mode == "kg_enhanced" for item in ranked)
 		return {
 			"phase": "hypothesis",
 			"hypotheses": [item.to_dict() for item in ranked],
@@ -148,6 +188,7 @@ class HypothesisEngine(BaseModule):
 				"validation_iteration_count": 0,
 				"selected_hypothesis_id": top_hypothesis.hypothesis_id if top_hypothesis else "",
 				"used_llm_generation": used_llm_generation,
+				"used_kg_enhanced": used_kg_enhanced,
 				"used_llm_closed_loop": False,
 				"llm_iteration_count": 0,
 				"research_direction": top_hypothesis.title if top_hypothesis else str(context.get("research_objective") or ""),
@@ -166,6 +207,20 @@ class HypothesisEngine(BaseModule):
 		prepared_context = context or {}
 		gap = self._normalize_gap(knowledge_gap, prepared_context)
 		active_llm_engine = self._resolve_llm_engine(prepared_context)
+
+		# --- P3.2 KG 增强路径 ---
+		if active_llm_engine is not None:
+			kg_gaps = self.extract_kg_gaps(prepared_context)
+			if kg_gaps:
+				kg_hypotheses = self._generate_kg_enhanced(
+					kg_gaps, gap, prepared_context, active_llm_engine,
+				)
+				if kg_hypotheses:
+					return self._enrich_hypotheses(
+						self.rank_hypotheses(kg_hypotheses), prepared_context,
+					)
+
+		# --- 原有 LLM 路径 ---
 		if active_llm_engine is not None:
 			llm_hypotheses = self._generate_with_llm(gap, prepared_context, active_llm_engine)
 			if llm_hypotheses:
@@ -261,6 +316,168 @@ class HypothesisEngine(BaseModule):
 				)
 			)
 		return hypotheses
+
+	# ------------------------------------------------------------------ #
+	# P3.2  KG 增强假设生成
+	# ------------------------------------------------------------------ #
+
+	def extract_kg_gaps(self, context: Dict[str, Any]) -> List[KnowledgeGap]:
+		"""从知识图谱提取知识缺口列表。
+
+		优先使用 context 中的运行时 KG，回退到 self.knowledge_graph。
+		"""
+		graph = context.get("knowledge_graph") or self.knowledge_graph
+		try:
+			gaps = graph.find_gaps()
+		except Exception as exc:
+			self.logger.warning("KG 缺口提取失败: %s", exc)
+			return []
+		if not gaps:
+			return []
+		# 按严重度排序：high > medium > low
+		severity_order = {"high": 0, "medium": 1, "low": 2}
+		gaps.sort(key=lambda g: severity_order.get(g.severity, 3))
+		return gaps
+
+	def _generate_kg_enhanced(
+		self,
+		kg_gaps: List[KnowledgeGap],
+		fallback_gap: Dict[str, Any],
+		context: Dict[str, Any],
+		llm_engine: Any,
+	) -> List[Hypothesis]:
+		"""用 KG 缺口 + 图谱结构组装增强 prompt，调用 LLM 生成假设。"""
+		if not hasattr(llm_engine, "generate"):
+			return []
+
+		gap_details = self._format_kg_gaps(kg_gaps)
+		kg_summary = self._build_kg_structure_summary(kg_gaps, context)
+		context_summary = self._build_context_summary(context)
+
+		prompt = self.KG_ENHANCED_PROMPT.format(
+			gap_count=len(kg_gaps),
+			gap_details=gap_details,
+			kg_structure_summary=kg_summary,
+			context_summary=context_summary,
+			num_hypotheses=min(self.max_hypotheses, max(3, len(kg_gaps))),
+		)
+
+		try:
+			raw = llm_engine.generate(prompt, system_prompt=self.system_prompt)
+		except Exception as exc:
+			self.logger.warning("KG 增强 LLM 生成失败，回退: %s", exc)
+			return []
+
+		return self._parse_kg_enhanced_response(raw, kg_gaps, fallback_gap)
+
+	def _format_kg_gaps(self, gaps: List[KnowledgeGap]) -> str:
+		"""将知识缺口列表格式化为 prompt 文本。"""
+		lines: List[str] = []
+		for i, gap in enumerate(gaps[:10], 1):  # 最多 10 个避免 prompt 过长
+			lines.append(
+				f"{i}. [{gap.severity.upper()}] {gap.gap_type}: "
+				f"{gap.entity} ({gap.entity_type}) — {gap.description}"
+			)
+		return "\n".join(lines)
+
+	def _build_kg_structure_summary(
+		self,
+		gaps: List[KnowledgeGap],
+		context: Dict[str, Any],
+	) -> str:
+		"""围绕缺口实体构建图谱结构摘要。"""
+		graph = context.get("knowledge_graph") or self.knowledge_graph
+		parts: List[str] = []
+
+		# 实体统计
+		try:
+			if hasattr(graph, "entity_count"):
+				parts.append(f"图谱节点数: {graph.entity_count}，边数: {graph.relation_count}")
+		except Exception:
+			pass
+
+		# 缺口实体的邻域信息
+		seen_entities: set[str] = set()
+		for gap in gaps[:5]:
+			if gap.entity in seen_entities:
+				continue
+			seen_entities.add(gap.entity)
+			try:
+				subgraph = graph.get_subgraph(gap.entity, depth=1)
+				neighbor_count = max(0, subgraph.number_of_nodes() - 1)
+				if neighbor_count > 0:
+					neighbor_names = [
+						str(n) for n in subgraph.nodes
+						if str(n) != gap.entity
+					][:5]
+					parts.append(
+						f"「{gap.entity}」邻域: {neighbor_count} 个邻居 "
+						f"({', '.join(neighbor_names)})"
+					)
+				else:
+					parts.append(f"「{gap.entity}」无直接邻居")
+			except Exception:
+				pass
+
+		# 缺口实体间的路径
+		gap_entities = list({g.entity for g in gaps[:6]})
+		for i in range(min(len(gap_entities), 3)):
+			for j in range(i + 1, min(len(gap_entities), 4)):
+				try:
+					paths = graph.query_path(gap_entities[i], gap_entities[j])
+					if paths:
+						parts.append(
+							f"路径: {gap_entities[i]} → {' → '.join(paths[0])} → {gap_entities[j]}"
+						)
+				except Exception:
+					pass
+
+		return "\n".join(parts) if parts else "图谱结构信息不足。"
+
+	def _parse_kg_enhanced_response(
+		self,
+		raw: Any,
+		kg_gaps: List[KnowledgeGap],
+		fallback_gap: Dict[str, Any],
+	) -> List[Hypothesis]:
+		"""解析 KG 增强 prompt 的 LLM 响应。
+
+		比普通解析多处理 source_gap_type / source_entities 字段。
+		"""
+		# 复用基础解析逻辑
+		base_hypotheses = self._parse_llm_response(raw, fallback_gap)
+
+		# 对于成功解析的，覆盖 source_gap_type / source_entities（如果 LLM 返回了）
+		if isinstance(raw, str):
+			text = raw.strip()
+			if text.startswith("```"):
+				lines = text.splitlines()
+				if len(lines) >= 3:
+					text = "\n".join(lines[1:-1]).strip()
+			try:
+				payload = json.loads(text)
+			except Exception:
+				payload = []
+		elif isinstance(raw, list):
+			payload = raw
+		elif isinstance(raw, dict):
+			payload = raw.get("hypotheses") or raw.get("items") or [raw]
+		else:
+			payload = []
+
+		gap_type_set = {g.gap_type for g in kg_gaps}
+		for i, hyp in enumerate(base_hypotheses):
+			if i < len(payload) and isinstance(payload[i], dict):
+				item = payload[i]
+				returned_gap_type = str(item.get("source_gap_type") or "").strip()
+				returned_entities = self._ensure_text_list(item.get("source_entities"))
+				if returned_gap_type and returned_gap_type in gap_type_set:
+					hyp.source_gap_type = returned_gap_type
+				if returned_entities:
+					hyp.source_entities = returned_entities
+			hyp.generation_mode = "kg_enhanced"
+
+		return base_hypotheses
 
 	def _generate_with_rules(self, gap: Dict[str, Any], context: Dict[str, Any]) -> List[Hypothesis]:
 		hypotheses: List[Hypothesis] = []
