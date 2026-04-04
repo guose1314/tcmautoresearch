@@ -9,7 +9,7 @@ src/infra/llm_service.py（基础设施层统一管理）。
 ``from src.llm.llm_service import CachedLLMService``
 等导入语句无需修改。
 """
-from src.infra import llm_service as _impl
+from src.infrastructure import llm_service as _impl
 
 LLMService = _impl.LLMService
 APILLMEngine = _impl.APILLMEngine
