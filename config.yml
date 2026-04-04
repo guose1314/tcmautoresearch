@@ -196,6 +196,7 @@ models:
 
 # Database configuration
 database:
+  # Default / fallback — used when PostgreSQL is not configured
   type: "sqlite"
   path: "./data/tcmautoresearch.db"
   connection_pool_size: 10
@@ -205,6 +206,25 @@ database:
   backup_enabled: true
   backup_frequency: "daily"
   backup_retention_days: 30
+
+  # PostgreSQL — structured business data, sessions, audit logs
+  postgresql:
+    enabled: false
+    url: "postgresql://tcm:tcm@localhost:5432/tcmautoresearch"
+    pool_size: 10
+    max_overflow: 20
+    pool_timeout: 30
+    echo: false
+
+  # Neo4j — knowledge graph (formula → syndrome → target → pathway)
+  neo4j:
+    enabled: false
+    uri: "bolt://localhost:7687"
+    username: "neo4j"
+    password: "neo4j"
+    database: "neo4j"
+    max_connection_pool_size: 50
+    connection_timeout: 30
 
 # Input/output configuration
 input:

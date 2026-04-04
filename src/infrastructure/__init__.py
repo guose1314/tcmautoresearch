@@ -11,6 +11,7 @@ from .config_loader import (
 from .config_manager import ConfigManager
 from .event_bus import EventBus
 from .lexicon_service import LexiconService, get_lexicon
+from .llm_gateway import LLMGateway, create_llm_gateway
 from .llm_service import APILLMEngine, CachedLLMService, LLMService
 
 # Monitoring and persistence have deep dependency chains that may fail in
@@ -73,6 +74,7 @@ __all__ = [
     "EntityTypeEnum",
     "EventBus",
     "LLMDiskCache",
+    "LLMGateway",
     "LLMService",
     "LexiconService",
     "LogStatusEnum",
@@ -87,6 +89,7 @@ __all__ = [
     "ResearchAnalysis",
     "ResearchRecord",
     "_DiskCache",
+    "create_llm_gateway",
     "get_lexicon",
     "load_secret_section",
     "load_settings",
