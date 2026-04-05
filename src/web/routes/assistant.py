@@ -130,6 +130,13 @@ async def ws_stream(ws: WebSocket):
 
     await ws.send_json({"type": "auth_ok", "user_id": payload.get("user_id", "")})
 
+    # ---- register with ConnectionManager ----
+    from src.web.ws_manager import get_manager
+
+    manager = get_manager()
+    session_room = f"assistant:{payload.get('user_id', 'anon')}"
+    await manager.connect(ws, session_room)
+
     # ---- Step 2: conversation loop ----
     engine = _get_engine()
     try:
@@ -172,6 +179,8 @@ async def ws_stream(ws: WebSocket):
             await ws.send_json({"type": "error", "detail": str(exc)})
         except Exception:
             pass
+    finally:
+        manager.disconnect(ws, session_room)
 
 
 def _split_into_chunks(text: str, max_chunk: int = 80) -> list[str]:

@@ -1,14 +1,22 @@
 # -*- coding: utf-8 -*-
-"""科研路由 — 研究课题的创建、查询与阶段执行。"""
+"""科研路由 — 研究课题的创建、查询、阶段执行与 WebSocket 实时推送。"""
 
 import dataclasses
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from pydantic import BaseModel, Field
 
-from src.web.auth import get_current_user
+from src.web.auth import get_current_user, verify_token
 
 logger = logging.getLogger(__name__)
 
@@ -206,3 +214,63 @@ async def list_research(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取研究列表失败: {exc}",
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# WebSocket — 研究进度实时推送
+# ---------------------------------------------------------------------------
+
+
+@router.websocket("/progress/{cycle_id}")
+async def ws_research_progress(ws: WebSocket, cycle_id: str):
+    """WebSocket 端点 — 实时推送研究阶段执行进度。
+
+    连接协议::
+
+        1. 客户端发送首条消息进行认证:  {"token": "<JWT>"}
+        2. 认证通过后服务端推送:        {"type": "auth_ok"}
+        3. 阶段开始时推送:              {"type": "phase_started",  "data": {...}}
+        4. 阶段进度推送:                {"type": "phase_progress", "data": {"phase": str, "progress": float}}
+        5. 阶段完成推送:                {"type": "phase_completed","data": {...}}
+        6. 全部完成推送:                {"type": "research_done",  "data": {...}}
+        7. 客户端可发送 {"action": "ping"} 保持连接
+    """
+    await ws.accept()
+
+    # ---- Step 1: authenticate ----
+    try:
+        auth_msg = await ws.receive_text()
+        auth_data = json.loads(auth_msg)
+        token = auth_data.get("token", "")
+        payload = verify_token(token)
+        if payload is None:
+            await ws.send_json({"type": "error", "detail": "认证失败"})
+            await ws.close(code=4001)
+            return
+    except Exception:
+        await ws.send_json({"type": "error", "detail": "认证失败"})
+        await ws.close(code=4001)
+        return
+
+    await ws.send_json({"type": "auth_ok", "user_id": payload.get("user_id", "")})
+
+    # ---- Step 2: register to room ----
+    from src.web.ws_manager import get_manager
+
+    manager = get_manager()
+    room = f"research:{cycle_id}"
+    await manager.connect(ws, room)
+
+    try:
+        while True:
+            raw = await ws.receive_text()
+            data = json.loads(raw)
+            action = data.get("action", "")
+            if action == "ping":
+                await ws.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        logger.info("研究进度 WS 断开: cycle=%s", cycle_id)
+    except Exception as exc:
+        logger.debug("研究进度 WS 异常: %s", exc)
+    finally:
+        manager.disconnect(ws, room)
