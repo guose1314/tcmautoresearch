@@ -1,5 +1,41 @@
 # 阶段性推进摘要
 
+## 增量收口（2026-04-05）
+
+### 收口范围
+- 研究看板 P4.2 收尾：失败阶段高亮、健康度分级、异常阶段一键过滤、阶段详情弹层。
+- 研究看板 P4.3 首版：知识关系图谱预览 + 放大弹层，支持节点/边/关键关系摘要展示。
+- 登录配置更新：控制台账号改为 `hgk1988`。
+
+### 已落地结果
+- 后端 dashboard payload 新增 `knowledge_graph_board`（节点、边、统计、高亮关系）。
+- 前端看板新增关系图渲染模块（SVG），并提供“放大展示知识关系”交互。
+- 研究看板与阶段看板交互已统一：异常过滤、阶段点击弹层、ESC/遮罩关闭。
+- 登录参数已更新到运行配置：`secrets.yml -> security.console_auth.users`。
+
+### 关键改动文件（本轮）
+- `src/api/research_utils.py`
+- `src/api/schemas.py`
+- `web_console/static/index.html`
+- `tests/test_web_console_api.py`
+- `secrets.yml`
+
+### 验证结论
+- 已执行：`tests/test_web_console_api.py`
+- 结果：`63 passed, 0 failed`
+
+### 任意日期续接指引
+1. 先拉取并切到收口提交后版本，阅读本文件顶部“增量收口（2026-04-05）”与“未开始”章节。
+2. 启动服务后访问 `/login`，使用新账号登录，再访问 `/console` 验证看板可用。
+3. 创建研究任务后验证三类交互：异常过滤、阶段详情弹层、知识关系放大弹层。
+4. 若要继续 P4.3 深化，优先按顺序推进：布局优化（拥挤场景）-> 边筛选（阈值/类型）-> 缩放/拖拽。
+5. 提交前至少执行一次定向回归：`python -m pytest tests/test_web_console_api.py -q`。
+
+### 待办建议（下一接力点）
+- 增加知识图谱视图的“关系权重阈值”筛选。
+- 对节点/边数量较大场景增加性能保护（抽样、分页、懒渲染）。
+- 为 `knowledge_graph_board` 增加异常/缺省数据测试样例。
+
 > 分支 `stage2-s2_1-preprocessor-opt` · 基线 `2febb2c` (merge main)
 > 截止 2026-04-04 · 测试基线 **38 failed / 1482 passed / 1 skipped**
 
