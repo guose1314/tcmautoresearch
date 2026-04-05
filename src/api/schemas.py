@@ -14,6 +14,10 @@ class ResearchRunRequest(BaseModel):
     cycle_name: Optional[str] = Field(default=None, description="研究周期名称")
     description: Optional[str] = Field(default=None, description="研究描述")
     scope: Optional[str] = Field(default=None, description="研究范围")
+    study_type: Optional[str] = Field(default=None, description="显式研究类型（如 rct/cohort）")
+    primary_outcome: Optional[str] = Field(default=None, description="显式主要结局")
+    intervention: Optional[str] = Field(default=None, description="显式干预方案")
+    comparison: Optional[str] = Field(default=None, description="显式对照方案")
 
 
 class ResearchPhaseOutcome(BaseModel):
@@ -61,6 +65,30 @@ class ResearchJobSnapshot(BaseModel):
     error: str = Field(default="", description="错误信息")
     result: Optional[Dict[str, Any]] = Field(default=None, description="最终研究结果")
     event_count: int = Field(default=0, description="已记录事件数")
+
+
+class ResearchDashboardPhaseItem(BaseModel):
+    index: int = Field(default=0, description="阶段顺序")
+    phase: str = Field(default="", description="阶段标识")
+    label: str = Field(default="", description="阶段名称")
+    status: str = Field(default="pending", description="阶段状态")
+    status_label: str = Field(default="待开始", description="阶段状态文案")
+    duration_sec: float = Field(default=0.0, description="阶段耗时（秒）")
+    summary: Dict[str, Any] = Field(default_factory=dict, description="阶段摘要")
+    error: str = Field(default="", description="阶段错误")
+
+
+class ResearchDashboardResponse(BaseModel):
+    job_id: str = Field(..., description="任务 ID")
+    topic: str = Field(default="", description="研究主题")
+    cycle_id: str = Field(default="", description="周期 ID")
+    overview: Dict[str, Any] = Field(default_factory=dict, description="看板概览")
+    phase_board: Dict[str, Any] = Field(default_factory=dict, description="阶段看板数据")
+    quality_board: Dict[str, Any] = Field(default_factory=dict, description="质量看板数据")
+    evidence_board: Dict[str, Any] = Field(default_factory=dict, description="证据看板数据")
+    knowledge_graph_board: Dict[str, Any] = Field(default_factory=dict, description="知识关系图谱看板数据")
+    protocol_inputs: Dict[str, Any] = Field(default_factory=dict, description="研究协议输入")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="看板元数据")
 
 
 class ResearchJobListItem(BaseModel):

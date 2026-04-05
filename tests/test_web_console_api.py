@@ -14,11 +14,18 @@ from web_console.job_manager import ResearchJobManager
 
 
 class FakeRunner:
+
     def __init__(self, _config=None):
         self._config = _config or {}
 
     def run(self, payload, emit=None):
         topic = payload["topic"]
+        protocol_inputs = {
+            "study_type": payload.get("study_type"),
+            "primary_outcome": payload.get("primary_outcome"),
+            "intervention": payload.get("intervention"),
+            "comparison": payload.get("comparison"),
+        }
         if emit is not None:
             emit("cycle_created", {"topic": topic, "cycle_id": "cycle-1", "cycle_name": "demo", "scope": "test"})
             emit("phase_started", {"phase": "observe", "index": 1, "total": 2, "progress": 0.0})
@@ -95,7 +102,7 @@ class FakeRunner:
                     {"phase": "observe", "status": "completed", "duration_sec": 0.01, "error": "", "summary": {"observation_count": 2}},
                     {"phase": "analyze", "status": "completed", "duration_sec": 0.01, "error": "", "summary": {"key_findings": ["A"]}},
                 ],
-                "pipeline_metadata": {"cycle_name": "demo"},
+                "pipeline_metadata": {"cycle_name": "demo", "protocol_inputs": protocol_inputs},
             }
             emit("job_completed", {"status": "completed", "result": result})
             return _ResultWrapper(result)
@@ -109,12 +116,13 @@ class FakeRunner:
                 "completed_at": "2026-03-30T00:00:01",
                 "total_duration_sec": 1.0,
                 "phases": [],
-                "pipeline_metadata": {"cycle_name": "sync-demo"},
+                "pipeline_metadata": {"cycle_name": "sync-demo", "protocol_inputs": protocol_inputs},
             }
         )
 
 
 class _ResultWrapper:
+
     def __init__(self, payload):
         self._payload = payload
         self.status = payload["status"]
@@ -124,6 +132,7 @@ class _ResultWrapper:
 
 
 class BlockingRunner:
+
     def __init__(self, _config=None):
         self._config = _config or {}
         self._started = self._config["started"]
@@ -179,6 +188,7 @@ class BlockingRunner:
 
 
 class TestWebConsoleApi(unittest.TestCase):
+
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory(dir=os.getcwd())
         self.artifact_markdown_path = os.path.join(self.tempdir.name, "final-report.md")
@@ -218,12 +228,10 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.headers["content-type"])
         self.assertIn("中医自动科研控制台", response.text)
-        self.assertIn('id="auth-shell"', response.text)
-        self.assertIn('id="login-form"', response.text)
-        self.assertIn('id="login-token-input"', response.text)
-        self.assertIn('id="open-login-button"', response.text)
-        self.assertIn("登录凭证", response.text)
-        self.assertIn("控制台会话令牌", response.text)
+        # 统一 JWT 认证（auth-shell 已迁移到 /login）
+        self.assertIn("initializeJwtAuth", response.text)
+        self.assertIn("authenticatedFetch", response.text)
+        self.assertIn("getJwtToken", response.text)
         self.assertIn("Console Session", response.text)
         self.assertIn('id="progress-bar"', response.text)
         self.assertIn("EventSource", response.text)
@@ -231,10 +239,29 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertIn('id="transport-select"', response.text)
         self.assertIn('id="active-transport"', response.text)
         self.assertIn("openRealtimeChannel", response.text)
-        self.assertIn("initializeConsoleAuth", response.text)
-        self.assertIn("authenticatedFetch", response.text)
         self.assertIn("结果摘要", response.text)
         self.assertIn('id="result-summary"', response.text)
+        self.assertIn("研究看板", response.text)
+        self.assertIn('id="research-dashboard"', response.text)
+        self.assertIn("renderResearchDashboard", response.text)
+        self.assertIn("queueResearchDashboardRefresh", response.text)
+        self.assertIn("resolveHealthTier", response.text)
+        self.assertIn("buildPhaseSegmentTitle", response.text)
+        self.assertIn("dashboard-alert", response.text)
+        self.assertIn("dashboard-phase-error", response.text)
+        self.assertIn('id="dashboard-phase-modal"', response.text)
+        self.assertIn('id="dashboard-graph-modal"', response.text)
+        self.assertIn("toggleDashboardPhaseFilter", response.text)
+        self.assertIn("openDashboardPhaseDetail", response.text)
+        self.assertIn("bindDashboardModalEvents", response.text)
+        self.assertIn("buildKnowledgeGraphBoardSection", response.text)
+        self.assertIn("openDashboardKnowledgeGraphModal", response.text)
+        self.assertIn("renderKnowledgeGraphStage", response.text)
+        self.assertIn("放大展示知识关系", response.text)
+        self.assertIn('id="study-type-input"', response.text)
+        self.assertIn('id="primary-outcome-input"', response.text)
+        self.assertIn('id="intervention-input"', response.text)
+        self.assertIn('id="comparison-input"', response.text)
         self.assertIn('observe: "观察阶段"', response.text)
         self.assertIn('observation_count: "观察记录数"', response.text)
         self.assertIn('analysis_results: "分析结果"', response.text)
@@ -278,6 +305,7 @@ class TestWebConsoleApi(unittest.TestCase):
     def test_console_auth_endpoints_require_management_key_when_enabled(self):
         app = create_app(job_manager=self.manager)
         app.state.settings.secrets.setdefault("security", {})["management_api_key"] = "console-secret"
+        app.state.settings.secrets.setdefault("security", {}).pop("console_auth", None)
         client = TestClient(app)
 
         status_response = client.get("/api/v1/console/auth/status")
@@ -392,6 +420,53 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertEqual(payload["status"], "completed")
         self.assertEqual(payload["pipeline_metadata"]["cycle_name"], "sync-demo")
 
+    def test_sync_run_endpoint_accepts_explicit_protocol_inputs(self):
+        response = self.client.post(
+            "/api/research/run",
+            json={
+                "topic": "黄芪颗粒治疗疲劳",
+                "study_type": "rct",
+                "primary_outcome": "疲劳量表评分变化",
+                "intervention": "黄芪颗粒",
+                "comparison": "安慰剂",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        protocol_inputs = payload["pipeline_metadata"]["protocol_inputs"]
+        self.assertEqual(protocol_inputs["study_type"], "rct")
+        self.assertEqual(protocol_inputs["primary_outcome"], "疲劳量表评分变化")
+        self.assertEqual(protocol_inputs["intervention"], "黄芪颗粒")
+        self.assertEqual(protocol_inputs["comparison"], "安慰剂")
+
+    def test_create_job_accepts_explicit_protocol_inputs(self):
+        create_response = self.client.post(
+            "/api/research/jobs",
+            json={
+                "topic": "黄芪颗粒治疗疲劳",
+                "study_type": "rct",
+                "primary_outcome": "疲劳量表评分变化",
+                "intervention": "黄芪颗粒",
+                "comparison": "安慰剂",
+            },
+        )
+        self.assertEqual(create_response.status_code, 202)
+        job_id = create_response.json()["job_id"]
+
+        for _ in range(20):
+            status_response = self.client.get(f"/api/research/jobs/{job_id}")
+            payload = status_response.json()
+            if payload["status"] in {"completed", "partial", "failed"}:
+                break
+            time.sleep(0.01)
+
+        self.assertEqual(payload["status"], "completed")
+        protocol_inputs = payload["result"]["pipeline_metadata"]["protocol_inputs"]
+        self.assertEqual(protocol_inputs["study_type"], "rct")
+        self.assertEqual(protocol_inputs["primary_outcome"], "疲劳量表评分变化")
+        self.assertEqual(protocol_inputs["intervention"], "黄芪颗粒")
+        self.assertEqual(protocol_inputs["comparison"], "安慰剂")
+
     def test_create_job_and_get_status(self):
         create_response = self.client.post("/api/research/jobs", json={"topic": "麻黄汤研究"})
         self.assertEqual(create_response.status_code, 202)
@@ -410,6 +485,65 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertEqual(payload["result"]["cycle_id"], "cycle-1")
         self.assertEqual(payload["result"]["analysis_results"]["statistical_analysis"]["p_value"], 0.003)
         self.assertEqual(payload["result"]["research_artifact"]["similar_formula_graph_evidence_summary"]["match_count"], 1)
+
+    def test_dashboard_endpoint_returns_visualization_payload(self):
+        create_response = self.client.post(
+            "/api/research/jobs",
+            json={
+                "topic": "桂枝汤证据看板",
+                "study_type": "rct",
+                "primary_outcome": "症状评分",
+                "intervention": "桂枝汤",
+                "comparison": "常规治疗",
+            },
+        )
+        self.assertEqual(create_response.status_code, 202)
+        job_id = create_response.json()["job_id"]
+
+        for _ in range(20):
+            status_response = self.client.get(f"/api/research/jobs/{job_id}")
+            status_payload = status_response.json()
+            if status_payload["status"] in {"completed", "partial", "failed"}:
+                break
+            time.sleep(0.01)
+
+        dashboard_response = self.client.get(f"/api/research/jobs/{job_id}/dashboard")
+        self.assertEqual(dashboard_response.status_code, 200)
+        payload = dashboard_response.json()
+
+        self.assertEqual(payload["job_id"], job_id)
+        self.assertEqual(payload["topic"], "桂枝汤证据看板")
+        self.assertEqual(payload["overview"]["status"], "completed")
+        self.assertGreaterEqual(payload["overview"]["health_score"], 0.0)
+        self.assertLessEqual(payload["overview"]["health_score"], 1.0)
+
+        self.assertEqual(payload["phase_board"]["total"], 2)
+        self.assertEqual(payload["phase_board"]["completed"], 2)
+        self.assertEqual(payload["phase_board"]["failed"], 0)
+        self.assertAlmostEqual(payload["phase_board"]["completion_rate"], 1.0, places=3)
+        self.assertEqual(len(payload["phase_board"]["items"]), 2)
+
+        self.assertAlmostEqual(payload["quality_board"]["confidence_score"], 0.92, places=3)
+        self.assertAlmostEqual(payload["quality_board"]["completeness"], 0.88, places=3)
+        self.assertAlmostEqual(payload["quality_board"]["quality_score"], 0.9, places=3)
+
+        self.assertEqual(payload["evidence_board"]["evidence_count"], 1)
+        self.assertEqual(payload["evidence_board"]["claim_count"], 1)
+        self.assertEqual(payload["evidence_board"]["association_rule_count"], 1)
+        self.assertEqual(payload["evidence_board"]["cluster_count"], 1)
+
+        self.assertEqual(payload["knowledge_graph_board"]["source"], "research_artifact.similar_formula_graph_evidence_summary")
+        self.assertEqual(payload["knowledge_graph_board"]["stats"]["node_count"], 2)
+        self.assertEqual(payload["knowledge_graph_board"]["stats"]["edge_count"], 1)
+        self.assertEqual(payload["knowledge_graph_board"]["stats"]["formula_count"], 1)
+        self.assertEqual(payload["knowledge_graph_board"]["stats"]["match_count"], 1)
+        self.assertEqual(payload["knowledge_graph_board"]["edges"][0]["source"], "桂枝汤")
+        self.assertEqual(payload["knowledge_graph_board"]["edges"][0]["target"], "桂麻各半汤")
+
+        self.assertEqual(payload["protocol_inputs"]["study_type"], "rct")
+        self.assertEqual(payload["protocol_inputs"]["primary_outcome"], "症状评分")
+        self.assertEqual(payload["protocol_inputs"]["intervention"], "桂枝汤")
+        self.assertEqual(payload["protocol_inputs"]["comparison"], "常规治疗")
 
     def test_list_jobs_endpoint_returns_recent_persisted_jobs(self):
         first_job = self.client.post("/api/research/jobs", json={"topic": "最近任务 A"}).json()["job_id"]

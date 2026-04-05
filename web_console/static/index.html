@@ -34,10 +34,6 @@
                 linear-gradient(160deg, var(--bg-top), var(--bg-bottom));
         }
 
-            body.auth-overlay-open {
-                overflow: hidden;
-            }
-
         body::before {
             content: "";
             position: fixed;
@@ -706,6 +702,513 @@
             white-space: pre-wrap;
         }
 
+        .dashboard-shell {
+            display: grid;
+            gap: 14px;
+        }
+
+        .dashboard-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .dashboard-head-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .dashboard-title {
+            margin: 0;
+            font-size: 1.08rem;
+        }
+
+        .dashboard-subtitle {
+            margin: 4px 0 0;
+            color: var(--muted);
+            font-size: 0.88rem;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        .dashboard-kpi {
+            padding: 12px 14px;
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.64);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+        }
+
+        .dashboard-kpi span {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--muted);
+            font-size: 0.8rem;
+        }
+
+        .dashboard-kpi strong {
+            display: block;
+            font-size: 1rem;
+            word-break: break-word;
+        }
+
+        .dashboard-kpi-note {
+            display: block;
+            margin-top: 6px;
+            font-size: 0.78rem;
+            color: var(--muted);
+        }
+
+        .dashboard-kpi.health {
+            border-width: 1px;
+            box-shadow: inset 0 0 0 1px rgba(37, 49, 45, 0.04);
+        }
+
+        .dashboard-kpi.health.good {
+            border-color: rgba(47, 106, 73, 0.34);
+            background: linear-gradient(160deg, rgba(47, 106, 73, 0.13), rgba(255, 255, 255, 0.72));
+            box-shadow: 0 6px 16px rgba(47, 106, 73, 0.11);
+        }
+
+        .dashboard-kpi.health.watch {
+            border-color: rgba(179, 92, 46, 0.34);
+            background: linear-gradient(160deg, rgba(179, 92, 46, 0.12), rgba(255, 255, 255, 0.72));
+            box-shadow: 0 6px 16px rgba(179, 92, 46, 0.11);
+        }
+
+        .dashboard-kpi.health.risk {
+            border-color: rgba(137, 44, 44, 0.36);
+            background: linear-gradient(160deg, rgba(137, 44, 44, 0.14), rgba(255, 255, 255, 0.74));
+            box-shadow: 0 7px 18px rgba(137, 44, 44, 0.14);
+        }
+
+        .dashboard-kpi.health.good strong {
+            color: var(--success);
+        }
+
+        .dashboard-kpi.health.watch strong {
+            color: var(--accent);
+        }
+
+        .dashboard-kpi.health.risk strong {
+            color: #892c2c;
+        }
+
+        .dashboard-phase-track {
+            display: grid;
+            gap: 8px;
+        }
+
+        .dashboard-phase-bar {
+            display: flex;
+            gap: 4px;
+            height: 12px;
+            border-radius: 999px;
+            background: rgba(37, 49, 45, 0.08);
+            padding: 2px;
+            overflow: hidden;
+        }
+
+        .dashboard-phase-segment {
+            min-width: 14px;
+            border-radius: 999px;
+            background: rgba(37, 49, 45, 0.18);
+            cursor: help;
+            transition: transform 0.18s ease, opacity 0.18s ease;
+        }
+
+        .dashboard-phase-segment:hover {
+            transform: translateY(-1px);
+            opacity: 0.92;
+        }
+
+        .dashboard-phase-segment.completed {
+            background: rgba(47, 106, 73, 0.8);
+        }
+
+        .dashboard-phase-segment.running,
+        .dashboard-phase-segment.queued,
+        .dashboard-phase-segment.pending {
+            background: rgba(179, 92, 46, 0.8);
+        }
+
+        .dashboard-phase-segment.failed,
+        .dashboard-phase-segment.partial {
+            background: rgba(137, 44, 44, 0.82);
+            box-shadow: 0 0 0 1px rgba(137, 44, 44, 0.42), 0 0 8px rgba(137, 44, 44, 0.24);
+        }
+
+        .dashboard-phase-segment.failed-marker {
+            animation: dashboard-risk-pulse 1.8s ease-in-out infinite;
+        }
+
+        .dashboard-phase-segment.skipped,
+        .dashboard-phase-segment.idle {
+            background: rgba(102, 116, 111, 0.75);
+        }
+
+        .dashboard-phase-list {
+            display: grid;
+            gap: 8px;
+        }
+
+        .dashboard-phase-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: center;
+            padding: 9px 11px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.56);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+        }
+
+        .dashboard-phase-item strong {
+            font-size: 0.92rem;
+        }
+
+        .dashboard-phase-meta {
+            color: var(--muted);
+            font-size: 0.8rem;
+        }
+
+        .dashboard-phase-item.running,
+        .dashboard-phase-item.queued,
+        .dashboard-phase-item.pending {
+            border-color: rgba(179, 92, 46, 0.32);
+            background: rgba(179, 92, 46, 0.09);
+        }
+
+        .dashboard-phase-item.failed,
+        .dashboard-phase-item.partial {
+            border-color: rgba(137, 44, 44, 0.46);
+            background: rgba(137, 44, 44, 0.09);
+            box-shadow: 0 0 0 1px rgba(137, 44, 44, 0.17), 0 7px 16px rgba(137, 44, 44, 0.1);
+        }
+
+        .dashboard-phase-item.failed strong,
+        .dashboard-phase-item.partial strong {
+            color: #892c2c;
+        }
+
+        .dashboard-phase-error {
+            margin-top: 5px;
+            color: #892c2c;
+            font-size: 0.8rem;
+            line-height: 1.45;
+            white-space: pre-wrap;
+        }
+
+        .dashboard-phase-guide {
+            color: var(--muted);
+            font-size: 0.8rem;
+            line-height: 1.5;
+        }
+
+        .dashboard-alert {
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            font-size: 0.84rem;
+            line-height: 1.45;
+            background: rgba(255, 255, 255, 0.56);
+            color: var(--muted);
+        }
+
+        .dashboard-alert.failed {
+            border-color: rgba(137, 44, 44, 0.36);
+            background: rgba(137, 44, 44, 0.1);
+            color: #892c2c;
+        }
+
+        .dashboard-health-pill.good {
+            background: rgba(47, 106, 73, 0.13);
+            color: var(--success);
+        }
+
+        .dashboard-health-pill.watch {
+            background: rgba(179, 92, 46, 0.15);
+            color: var(--accent);
+        }
+
+        .dashboard-health-pill.risk {
+            background: rgba(137, 44, 44, 0.16);
+            color: #892c2c;
+        }
+
+        .dashboard-filter-button {
+            padding: 7px 12px;
+            font-size: 0.8rem;
+            border-radius: 999px;
+            border: 1px solid rgba(37, 49, 45, 0.14);
+            background: rgba(255, 255, 255, 0.78);
+            color: var(--ink);
+        }
+
+        .dashboard-filter-button.active {
+            border-color: rgba(137, 44, 44, 0.34);
+            background: rgba(137, 44, 44, 0.1);
+            color: #892c2c;
+        }
+
+        .dashboard-filter-button:disabled {
+            opacity: 0.56;
+            cursor: not-allowed;
+        }
+
+        .dashboard-phase-segment.interactive:focus-visible,
+        .dashboard-phase-item.clickable:focus-visible {
+            outline: 2px solid rgba(179, 92, 46, 0.38);
+            outline-offset: 2px;
+        }
+
+        .dashboard-phase-item.clickable {
+            cursor: pointer;
+        }
+
+        .dashboard-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 35;
+            display: grid;
+            place-items: center;
+            padding: 20px;
+        }
+
+        .dashboard-modal.hidden {
+            display: none;
+        }
+
+        .dashboard-modal-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(23, 30, 27, 0.42);
+            backdrop-filter: blur(2px);
+        }
+
+        .dashboard-modal-panel {
+            position: relative;
+            width: min(760px, 100%);
+            max-height: calc(100vh - 56px);
+            overflow: auto;
+            border-radius: 18px;
+            border: 1px solid rgba(37, 49, 45, 0.16);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(246, 239, 228, 0.95));
+            box-shadow: 0 22px 46px rgba(20, 26, 24, 0.24);
+            padding: 18px 18px 16px;
+            animation: fade-slide 0.22s ease;
+        }
+
+        .dashboard-modal-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            padding: 6px 11px;
+            border-radius: 999px;
+            border: 1px solid rgba(37, 49, 45, 0.16);
+            background: rgba(255, 255, 255, 0.88);
+            color: var(--ink);
+            cursor: pointer;
+            font-size: 0.82rem;
+        }
+
+        .dashboard-modal-title {
+            margin: 0 0 8px;
+            font-size: 1.04rem;
+            color: var(--ink);
+        }
+
+        .dashboard-modal-meta {
+            margin-bottom: 12px;
+            font-size: 0.86rem;
+            color: var(--muted);
+            white-space: pre-wrap;
+        }
+
+        .dashboard-modal-section {
+            margin-top: 10px;
+            border-radius: 12px;
+            border: 1px solid rgba(37, 49, 45, 0.12);
+            background: rgba(255, 255, 255, 0.72);
+            padding: 10px 11px;
+        }
+
+        .dashboard-modal-section h5 {
+            margin: 0 0 6px;
+            font-size: 0.88rem;
+            color: var(--ink);
+        }
+
+        .dashboard-modal-code {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            color: var(--ink);
+        }
+
+        .dashboard-graph-board {
+            margin-top: 12px;
+            padding: 12px;
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            background: linear-gradient(165deg, rgba(255, 255, 255, 0.74), rgba(246, 239, 228, 0.78));
+        }
+
+        .dashboard-graph-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+
+        .dashboard-graph-head h4 {
+            margin: 0;
+            font-size: 0.98rem;
+        }
+
+        .dashboard-graph-meta {
+            color: var(--muted);
+            font-size: 0.8rem;
+        }
+
+        .dashboard-graph-stage {
+            position: relative;
+            border-radius: 12px;
+            border: 1px solid rgba(37, 49, 45, 0.16);
+            background:
+                radial-gradient(circle at top right, rgba(179, 92, 46, 0.12), transparent 32%),
+                linear-gradient(170deg, rgba(255, 255, 255, 0.94), rgba(242, 236, 227, 0.92));
+            overflow: hidden;
+        }
+
+        .dashboard-graph-stage.small {
+            height: 264px;
+        }
+
+        .dashboard-graph-stage.large {
+            height: 520px;
+        }
+
+        .dashboard-graph-stage svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .dashboard-graph-empty {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            color: var(--muted);
+            font-size: 0.84rem;
+            text-align: center;
+            padding: 0 16px;
+        }
+
+        .dashboard-graph-actions {
+            margin-top: 10px;
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .dashboard-graph-legend {
+            display: inline-flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            color: var(--muted);
+            font-size: 0.78rem;
+        }
+
+        .dashboard-legend-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            border: 1px solid rgba(37, 49, 45, 0.12);
+            background: rgba(255, 255, 255, 0.72);
+        }
+
+        .dashboard-legend-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+        }
+
+        .dashboard-graph-hints {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 0.78rem;
+            line-height: 1.5;
+        }
+
+        .dashboard-graph-modal-panel {
+            width: min(1080px, 100%);
+        }
+
+        .dashboard-graph-highlight-list {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 0.82rem;
+            line-height: 1.55;
+            color: var(--ink);
+        }
+
+        @keyframes dashboard-risk-pulse {
+            0%,
+            100% {
+                box-shadow: 0 0 0 1px rgba(137, 44, 44, 0.44), 0 0 6px rgba(137, 44, 44, 0.2);
+            }
+
+            50% {
+                box-shadow: 0 0 0 1px rgba(137, 44, 44, 0.5), 0 0 12px rgba(137, 44, 44, 0.3);
+            }
+        }
+
+        .dashboard-aux-grid {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .dashboard-box {
+            padding: 12px 14px;
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.56);
+        }
+
+        .dashboard-box h4 {
+            margin: 0 0 8px;
+            font-size: 0.92rem;
+        }
+
+        .dashboard-box p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 0.84rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
         .empty {
             color: var(--muted);
             font-size: 0.92rem;
@@ -736,6 +1239,14 @@
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
 
+            .dashboard-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .dashboard-aux-grid {
+                grid-template-columns: 1fr;
+            }
+
             .auth-card {
                 grid-template-columns: 1fr;
             }
@@ -745,50 +1256,31 @@
             .summary-grid {
                 grid-template-columns: 1fr;
             }
+
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .dashboard-modal {
+                padding: 10px;
+            }
+
+            .dashboard-modal-panel {
+                max-height: calc(100vh - 22px);
+            }
+
+            .dashboard-graph-stage.small {
+                height: 236px;
+            }
+
+            .dashboard-graph-stage.large {
+                height: 420px;
+            }
         }
     </style>
 </head>
 <body>
-    <div id="auth-shell" class="auth-shell" hidden>
-        <div class="auth-card">
-            <section class="auth-copy">
-                <span class="eyebrow">Secure Research Access</span>
-                <h2>登录科研控制台</h2>
-                <p>进入控制台后，你可以创建研究任务、订阅实时阶段进度、查看结果摘要，并直接导出最终报告与研究产物。</p>
-                <p>当环境启用了控制台账号时，系统会签发独立会话令牌，并自动附带到任务创建、状态查询、SSE 与 WebSocket 连接中。</p>
-                <div class="auth-list">
-                    <div>研究任务创建、状态查询与导出链路统一受保护。</div>
-                    <div>支持临时会话与本机记住登录状态两种进入方式。</div>
-                    <div>登录后仍保留现有研究控制台与实时事件流体验。</div>
-                </div>
-            </section>
-
-            <section class="auth-form-shell">
-                <button id="close-login-button" type="button" class="ghost-button auth-close">稍后配置</button>
-                <h3>控制台会话</h3>
-                <p id="login-mode-note" class="login-note">正在检查当前环境是否启用控制台账号密码认证。</p>
-                <form id="login-form" class="auth-form">
-                    <label>
-                        用户名称
-                        <input id="login-user-input" type="text" placeholder="例如：TCM Researcher">
-                    </label>
-                    <label>
-                        <span id="login-secret-label">登录凭证</span>
-                        <input id="login-token-input" type="password" placeholder="输入 Bearer Token 或管理密钥">
-                    </label>
-                    <label class="remember-row">
-                        <input id="remember-login-input" type="checkbox">
-                        记住本机登录状态
-                    </label>
-                    <div class="actions">
-                        <button id="login-submit-button" type="submit">进入控制台</button>
-                        <button id="guest-enter-button" type="button" class="ghost-button">访客模式进入</button>
-                    </div>
-                </form>
-                <div id="login-status" class="status-banner">请输入身份信息后进入控制台。</div>
-            </section>
-        </div>
-    </div>
+    <!-- auth-shell 已迁移到统一登录页 /login -->
 
     <main id="console-main">
         <section class="hero">
@@ -801,11 +1293,10 @@
 
                 <div class="console-session">
                     <span class="session-kicker">Console Session</span>
-                    <strong id="auth-user">访客模式</strong>
-                    <div id="auth-mode" class="session-meta">正在检查鉴权模式…</div>
+                    <strong id="auth-user">加载中…</strong>
+                    <div id="auth-mode" class="session-meta">JWT 统一认证</div>
                     <div class="session-actions">
-                        <button id="open-login-button" type="button" class="ghost-button">登录 / 切换会话</button>
-                        <button id="logout-button" type="button" class="ghost-button danger-button" hidden>退出登录</button>
+                        <button id="logout-button" type="button" class="ghost-button danger-button">退出登录</button>
                     </div>
                 </div>
             </div>
@@ -822,6 +1313,30 @@
                     <label>
                         备注说明
                         <textarea id="description-input" name="description" rows="4" placeholder="可选：补充研究范围、关注证型或预期输出"></textarea>
+                    </label>
+                    <label>
+                        研究类型（可选）
+                        <select id="study-type-input" name="study_type">
+                            <option value="" selected>自动推断</option>
+                            <option value="rct">RCT（随机对照）</option>
+                            <option value="cohort">队列研究</option>
+                            <option value="case_control">病例对照</option>
+                            <option value="systematic_review">系统综述</option>
+                            <option value="meta_analysis">Meta 分析</option>
+                            <option value="network_pharmacology">网络药理</option>
+                        </select>
+                    </label>
+                    <label>
+                        主要结局（可选）
+                        <input id="primary-outcome-input" name="primary_outcome" type="text" placeholder="例如：收缩压变化" />
+                    </label>
+                    <label>
+                        干预方案（可选）
+                        <input id="intervention-input" name="intervention" type="text" placeholder="例如：黄芪颗粒" />
+                    </label>
+                    <label>
+                        对照方案（可选）
+                        <input id="comparison-input" name="comparison" type="text" placeholder="例如：安慰剂 + 常规治疗" />
                     </label>
                     <label>
                         实时通道
@@ -901,6 +1416,13 @@
         </section>
 
         <section class="panel" style="margin-top: 18px;">
+            <h3>研究看板</h3>
+            <div id="research-dashboard" class="dashboard-shell">
+                <div class="empty">任务启动后将自动展示研究状态可视化看板。</div>
+            </div>
+        </section>
+
+        <section class="panel" style="margin-top: 18px;">
             <h3>事件流</h3>
             <div id="event-log" class="event-log">
                 <div class="empty">实时通道尚未连接。</div>
@@ -908,26 +1430,49 @@
         </section>
     </main>
 
+    <div id="dashboard-phase-modal" class="dashboard-modal hidden" aria-hidden="true">
+        <div id="dashboard-modal-backdrop" class="dashboard-modal-backdrop"></div>
+        <div class="dashboard-modal-panel" role="dialog" aria-modal="true" aria-labelledby="dashboard-modal-title">
+            <button id="dashboard-modal-close" type="button" class="dashboard-modal-close">关闭</button>
+            <h4 id="dashboard-modal-title" class="dashboard-modal-title">阶段详情</h4>
+            <div id="dashboard-modal-meta" class="dashboard-modal-meta">-</div>
+            <section class="dashboard-modal-section">
+                <h5>完整摘要</h5>
+                <pre id="dashboard-modal-summary" class="dashboard-modal-code">-</pre>
+            </section>
+            <section class="dashboard-modal-section">
+                <h5>原始错误字段</h5>
+                <pre id="dashboard-modal-error" class="dashboard-modal-code">-</pre>
+            </section>
+        </div>
+    </div>
+
+    <div id="dashboard-graph-modal" class="dashboard-modal hidden" aria-hidden="true">
+        <div id="dashboard-graph-backdrop" class="dashboard-modal-backdrop"></div>
+        <div class="dashboard-modal-panel dashboard-graph-modal-panel" role="dialog" aria-modal="true" aria-labelledby="dashboard-graph-title">
+            <button id="dashboard-graph-close" type="button" class="dashboard-modal-close">关闭</button>
+            <h4 id="dashboard-graph-title" class="dashboard-modal-title">知识关系放大视图</h4>
+            <div id="dashboard-graph-stats" class="dashboard-modal-meta">-</div>
+            <div id="dashboard-graph-stage" class="dashboard-graph-stage large" aria-label="知识关系放大图"></div>
+            <section class="dashboard-modal-section">
+                <h5>关键关系摘要</h5>
+                <pre id="dashboard-graph-highlights" class="dashboard-graph-highlight-list">-</pre>
+            </section>
+        </div>
+    </div>
+
     <script>
-        const authShell = document.getElementById("auth-shell");
         const consoleMain = document.getElementById("console-main");
-        const loginForm = document.getElementById("login-form");
-        const loginUserInput = document.getElementById("login-user-input");
-        const loginTokenInput = document.getElementById("login-token-input");
-        const rememberLoginInput = document.getElementById("remember-login-input");
-        const loginSubmitButton = document.getElementById("login-submit-button");
-        const guestEnterButton = document.getElementById("guest-enter-button");
-        const closeLoginButton = document.getElementById("close-login-button");
-        const loginStatusNode = document.getElementById("login-status");
-        const loginModeNote = document.getElementById("login-mode-note");
-        const loginSecretLabel = document.getElementById("login-secret-label");
         const authUserNode = document.getElementById("auth-user");
         const authModeNode = document.getElementById("auth-mode");
-        const openLoginButton = document.getElementById("open-login-button");
         const logoutButton = document.getElementById("logout-button");
         const form = document.getElementById("research-form");
         const topicInput = document.getElementById("topic-input");
         const descriptionInput = document.getElementById("description-input");
+        const studyTypeInput = document.getElementById("study-type-input");
+        const primaryOutcomeInput = document.getElementById("primary-outcome-input");
+        const interventionInput = document.getElementById("intervention-input");
+        const comparisonInput = document.getElementById("comparison-input");
         const transportSelect = document.getElementById("transport-select");
         const submitButton = document.getElementById("submit-button");
         const statusBanner = document.getElementById("status-banner");
@@ -941,14 +1486,27 @@
         const phaseListNode = document.getElementById("phase-list");
         const eventLogNode = document.getElementById("event-log");
         const resultSummaryNode = document.getElementById("result-summary");
+        const researchDashboardNode = document.getElementById("research-dashboard");
+        const dashboardPhaseModalNode = document.getElementById("dashboard-phase-modal");
+        const dashboardModalBackdropNode = document.getElementById("dashboard-modal-backdrop");
+        const dashboardModalCloseNode = document.getElementById("dashboard-modal-close");
+        const dashboardModalTitleNode = document.getElementById("dashboard-modal-title");
+        const dashboardModalMetaNode = document.getElementById("dashboard-modal-meta");
+        const dashboardModalSummaryNode = document.getElementById("dashboard-modal-summary");
+        const dashboardModalErrorNode = document.getElementById("dashboard-modal-error");
+        const dashboardGraphModalNode = document.getElementById("dashboard-graph-modal");
+        const dashboardGraphBackdropNode = document.getElementById("dashboard-graph-backdrop");
+        const dashboardGraphCloseNode = document.getElementById("dashboard-graph-close");
+        const dashboardGraphTitleNode = document.getElementById("dashboard-graph-title");
+        const dashboardGraphStatsNode = document.getElementById("dashboard-graph-stats");
+        const dashboardGraphStageNode = document.getElementById("dashboard-graph-stage");
+        const dashboardGraphHighlightsNode = document.getElementById("dashboard-graph-highlights");
         const recentJobListNode = document.getElementById("recent-job-list");
         const refreshRecentJobsButton = document.getElementById("refresh-recent-jobs");
         const pruneLocalRecordsButton = document.getElementById("prune-local-records");
         const clearLocalRecordsButton = document.getElementById("clear-local-records");
         const LAST_JOB_STORAGE_KEY = "tcm-auto-research.lastJobId";
         const RECENT_JOBS_STORAGE_KEY = "tcm-auto-research.recentJobIds";
-        const AUTH_SESSION_STORAGE_KEY = "tcm-auto-research.console-auth.session";
-        const AUTH_PERSIST_STORAGE_KEY = "tcm-auto-research.console-auth.persist";
         const RECENT_JOB_LIMIT = 8;
 
         const phaseLabels = {
@@ -1015,6 +1573,9 @@
         const WEBSOCKET_RECONNECT_BASE_DELAY_MS = 500;
         const WEBSOCKET_RECONNECT_MAX_DELAY_MS = 4000;
         const WEBSOCKET_RECONNECT_MAX_ATTEMPTS = 4;
+        const DASHBOARD_PHASE_FILTER_ALL = "all";
+        const DASHBOARD_PHASE_FILTER_EXCEPTION = "exception";
+        const DASHBOARD_EXCEPTION_STATUSES = new Set(["failed", "partial"]);
 
         let activeConnection = null;
         let activeConnectionKind = "idle";
@@ -1023,131 +1584,35 @@
         let phaseState = new Map();
         let activePhaseKey = "";
         let consoleBootstrapped = false;
-        let currentAuthConfig = {
-            authRequired: false,
-            authMode: "open",
-            tokenLabel: "控制台会话令牌",
-            credentialLabel: "登录凭证",
-            credentialPlaceholder: "输入登录凭证",
-            supportsPasswordLogin: false,
-            supportsApiKeyLogin: false,
-            guestAllowed: true,
-        };
+        let dashboardRefreshTimerId = 0;
+        let dashboardRequestToken = 0;
+        let dashboardPhaseFilter = DASHBOARD_PHASE_FILTER_ALL;
+        let latestDashboardPayload = null;
+        let dashboardModalBound = false;
+        let dashboardGraphModalBound = false;
+
+        // ---- JWT 统一认证 ----
         let currentAuthSession = {
-            token: "",
-            principal: "访客模式",
-            remember: false,
-            authSource: "guest",
+            token: localStorage.getItem("access_token") || "",
+            principal: localStorage.getItem("display_name") || "用户",
         };
 
-        function parseAuthSession(raw) {
-            if (!raw) {
-                return null;
-            }
-            try {
-                const parsed = JSON.parse(raw);
-                if (!parsed || typeof parsed !== "object") {
-                    return null;
-                }
-                return {
-                    token: String(parsed.token || "").trim(),
-                    principal: String(parsed.principal || "").trim(),
-                    remember: Boolean(parsed.remember),
-                    authSource: String(parsed.authSource || "guest"),
-                };
-            } catch (error) {
-                console.warn("解析登录会话失败", error);
-                return null;
-            }
+        function getJwtToken() {
+            return localStorage.getItem("access_token") || "";
         }
 
-        function loadPersistedAuthSession() {
-            const sessionValue = parseAuthSession(window.sessionStorage.getItem(AUTH_SESSION_STORAGE_KEY));
-            if (sessionValue) {
-                return sessionValue;
+        function authenticatedFetch(resource, options = {}) {
+            const headers = new Headers(options.headers || {});
+            const token = getJwtToken();
+            if (token) {
+                headers.set("Authorization", "Bearer " + token);
             }
-            return parseAuthSession(window.localStorage.getItem(AUTH_PERSIST_STORAGE_KEY));
-        }
-
-        function clearPersistedAuthSession() {
-            window.sessionStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
-            window.localStorage.removeItem(AUTH_PERSIST_STORAGE_KEY);
-        }
-
-        function savePersistedAuthSession(session) {
-            clearPersistedAuthSession();
-            const payload = JSON.stringify({
-                token: session.token || "",
-                principal: session.principal || "",
-                remember: Boolean(session.remember),
-                authSource: session.authSource || "guest",
-            });
-            if (session.remember) {
-                window.localStorage.setItem(AUTH_PERSIST_STORAGE_KEY, payload);
-                return;
-            }
-            window.sessionStorage.setItem(AUTH_SESSION_STORAGE_KEY, payload);
-        }
-
-        function setLoginStatus(message, kind = "default") {
-            loginStatusNode.textContent = message;
-            loginStatusNode.classList.toggle("error", kind === "error");
-            loginStatusNode.classList.toggle("success", kind === "success");
-        }
-
-        function syncAuthPresentation() {
-            loginSecretLabel.textContent = currentAuthConfig.credentialLabel || "登录凭证";
-            loginTokenInput.placeholder = currentAuthConfig.credentialPlaceholder || "输入登录凭证";
-            authUserNode.textContent = currentAuthSession.principal || (currentAuthConfig.authRequired ? "待登录" : "访客模式");
-            if (currentAuthConfig.authMode === "password") {
-                authModeNode.textContent = currentAuthSession.token
-                    ? "账号密码模式 / 会话有效"
-                    : "账号密码模式 / 需要登录";
-            } else if (currentAuthConfig.authMode === "management_api_key") {
-                authModeNode.textContent = currentAuthSession.token
-                    ? "API Key 模式 / 会话有效"
-                    : "API Key 模式 / 需要验证";
-            } else {
-                authModeNode.textContent = currentAuthSession.token
-                    ? "开放模式 / 已保存会话"
-                    : "开放模式 / 可直接使用";
-            }
-            openLoginButton.textContent = currentAuthSession.token ? "切换账号" : "登录 / 切换会话";
-            logoutButton.hidden = !currentAuthSession.token;
-            guestEnterButton.hidden = !currentAuthConfig.guestAllowed;
-            closeLoginButton.hidden = currentAuthConfig.authRequired;
-            if (currentAuthConfig.authMode === "password") {
-                loginModeNote.textContent = "当前环境已启用控制台账号密码认证。登录成功后会签发独立会话令牌，用于研究任务、SSE 与 WebSocket 鉴权。";
-            } else if (currentAuthConfig.authMode === "management_api_key") {
-                loginModeNote.textContent = "当前环境仍支持管理 API Key 登录，但页面会在验证后改存短期会话令牌，而不是直接缓存管理密钥。";
-            } else {
-                loginModeNote.textContent = "当前环境未启用强制鉴权。你可以直接进入控制台，也可以预先创建会话以便切换到受保护环境。";
-            }
-        }
-
-        function openAuthShell() {
-            authShell.hidden = false;
-            document.body.classList.add("auth-overlay-open");
-            syncAuthPresentation();
-            window.setTimeout(function() {
-                if (currentAuthConfig.authRequired) {
-                    loginTokenInput.focus();
-                } else {
-                    loginUserInput.focus();
-                }
-            }, 0);
-        }
-
-        function closeAuthShell() {
-            if (currentAuthConfig.authRequired && !currentAuthSession.token) {
-                return;
-            }
-            authShell.hidden = true;
-            document.body.classList.remove("auth-overlay-open");
+            return fetch(resource, { ...options, headers });
         }
 
         function withApiKeyQuery(urlValue) {
-            if (!currentAuthSession.token) {
+            const token = getJwtToken();
+            if (!token) {
                 return urlValue;
             }
             const raw = String(urlValue || "").trim();
@@ -1155,194 +1620,76 @@
                 return raw;
             }
             const resolved = new URL(raw, window.location.origin);
-            resolved.searchParams.set("api_key", currentAuthSession.token);
+            resolved.searchParams.set("api_key", token);
             if (/^https?:/i.test(raw) || /^wss?:/i.test(raw)) {
                 return resolved.toString();
             }
-            return `${resolved.pathname}${resolved.search}`;
-        }
-
-        function authenticatedFetch(resource, options = {}) {
-            const headers = new Headers(options.headers || {});
-            if (currentAuthSession.token) {
-                headers.set("Authorization", `Bearer ${currentAuthSession.token}`);
-            }
-            return fetch(resource, { ...options, headers });
-        }
-
-        async function fetchConsoleAuthStatus() {
-            const response = await fetch("/api/console/auth/status");
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-            return response.json();
-        }
-
-        async function verifyConsoleLogin(payload) {
-            const response = await fetch("/api/console/auth/login", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-            });
-            if (!response.ok) {
-                const errorPayload = await response.json().catch(() => ({}));
-                throw new Error(errorPayload.detail || `HTTP ${response.status}`);
-            }
-            return response.json();
-        }
-
-        async function revokeConsoleSession() {
-            if (!currentAuthSession.token) {
-                return;
-            }
-            try {
-                await authenticatedFetch("/api/console/auth/logout", { method: "POST" });
-            } catch (error) {
-                console.warn("注销控制台会话失败", error);
-            }
+            return resolved.pathname + resolved.search;
         }
 
         function bootConsole() {
             if (!consoleBootstrapped) {
                 consoleBootstrapped = true;
                 setTransportState("idle", transportSelect.value);
+                bindDashboardModalEvents();
+                bindDashboardGraphModalEvents();
                 restoreLastJob();
             }
             refreshRecentJobs();
         }
 
-        async function completeConsoleLogin(options = {}) {
-            const username = String(options.username || loginUserInput.value || "").trim();
-            const secretValue = options.secret ?? options.token ?? loginTokenInput.value ?? "";
-            const secret = String(secretValue).trim();
-            const restoreToken = String(options.restoreToken || "").trim();
-            const remember = Boolean(options.remember ?? rememberLoginInput.checked);
-            const statusMessage = options.statusMessage || "正在验证控制台访问权限...";
-            const loginPayload = { username };
-
-            if (restoreToken) {
-                loginPayload.session_token = restoreToken;
-            } else if (currentAuthConfig.authMode === "password") {
-                loginPayload.password = secret;
-            } else if (currentAuthConfig.authMode === "management_api_key") {
-                loginPayload.api_key = secret;
-            } else if (secret) {
-                loginPayload.api_key = secret;
-            }
-
-            setLoginStatus(statusMessage);
-            loginSubmitButton.disabled = true;
-            guestEnterButton.disabled = true;
+        async function initializeJwtAuth() {
+            // 先检查服务端是否需要认证
             try {
-                const payload = await verifyConsoleLogin(loginPayload);
-                currentAuthSession = {
-                    token: String(payload.session_token || "").trim(),
-                    principal: payload.principal || username || (currentAuthConfig.authRequired ? "研究员" : "访客模式"),
-                    remember,
-                    authSource: String(payload.auth_source || "guest"),
-                };
-                savePersistedAuthSession(currentAuthSession);
-                syncAuthPresentation();
-                closeAuthShell();
-                bootConsole();
-                setLoginStatus(`已登录为 ${currentAuthSession.principal}。`, "success");
-                setBanner(`欢迎进入控制台，当前会话：${currentAuthSession.principal}`, "success");
-            } catch (error) {
-                clearPersistedAuthSession();
-                currentAuthSession = {
-                    token: "",
-                    principal: currentAuthConfig.authRequired ? "待登录" : "访客模式",
-                    remember: false,
-                    authSource: "guest",
-                };
-                syncAuthPresentation();
-                setLoginStatus(`登录失败：${error.message}`, "error");
-                if (currentAuthConfig.authRequired) {
-                    openAuthShell();
+                const statusResp = await fetch("/api/auth/status");
+                if (statusResp.ok) {
+                    const statusData = await statusResp.json();
+                    if (!statusData.auth_required) {
+                        // 无需认证 → 直接进入访客模式
+                        currentAuthSession = { token: null, principal: "访客" };
+                        authUserNode.textContent = currentAuthSession.principal;
+                        authModeNode.textContent = "开放模式 / 无需认证";
+                        setBanner("开放模式，欢迎使用控制台。", "success");
+                        bootConsole();
+                        return;
+                    }
                 }
-            } finally {
-                loginSubmitButton.disabled = false;
-                guestEnterButton.disabled = false;
-            }
-        }
+            } catch (_) { /* 状态接口不可用时继续正常 JWT 流程 */ }
 
-        async function logoutConsoleSession() {
-            closeRealtimeChannel({ preference: transportSelect.value });
-            await revokeConsoleSession();
-            clearPersistedAuthSession();
-            currentAuthSession = {
-                token: "",
-                principal: currentAuthConfig.authRequired ? "待登录" : "访客模式",
-                remember: false,
-                authSource: "guest",
-            };
-            syncAuthPresentation();
-            if (currentAuthConfig.authRequired) {
-                openAuthShell();
-                setBanner("已退出登录，请重新完成控制台鉴权。", "error");
-                setLoginStatus("请输入登录凭证后重新进入控制台。", "default");
+            const token = getJwtToken();
+            if (!token) {
+                // 没有 JWT → 跳转到统一登录页
+                window.location.href = "/login?next=console";
                 return;
             }
-            setBanner("已清除本地登录状态。", "default");
-        }
 
-        async function initializeConsoleAuth() {
+            // 验证 JWT 有效性
             try {
-                const authStatus = await fetchConsoleAuthStatus();
-                currentAuthConfig = {
-                    authRequired: Boolean(authStatus.auth_required),
-                    authMode: String(authStatus.auth_mode || "open"),
-                    tokenLabel: String(authStatus.token_label || "控制台会话令牌"),
-                    credentialLabel: String(authStatus.credential_label || "登录凭证"),
-                    credentialPlaceholder: String(authStatus.credential_placeholder || "输入登录凭证"),
-                    supportsPasswordLogin: Boolean(authStatus.supports_password_login),
-                    supportsApiKeyLogin: Boolean(authStatus.supports_api_key_login),
-                    guestAllowed: Boolean(authStatus.guest_allowed),
+                const resp = await fetch("/api/auth/me", {
+                    headers: { "Authorization": "Bearer " + token },
+                });
+                if (!resp.ok) {
+                    localStorage.removeItem("access_token");
+                    localStorage.removeItem("token_type");
+                    localStorage.removeItem("display_name");
+                    window.location.href = "/login?next=console";
+                    return;
+                }
+                const userData = await resp.json();
+                currentAuthSession = {
+                    token: token,
+                    principal: userData.display_name || userData.username || "用户",
                 };
-                syncAuthPresentation();
-
-                const savedSession = loadPersistedAuthSession();
-                if (savedSession) {
-                    loginUserInput.value = savedSession.principal || "";
-                    loginTokenInput.value = savedSession.token || "";
-                    rememberLoginInput.checked = Boolean(savedSession.remember);
-                    await completeConsoleLogin({
-                        username: savedSession.principal,
-                        restoreToken: savedSession.token,
-                        remember: savedSession.remember,
-                        statusMessage: "正在恢复最近一次控制台会话...",
-                    });
-                    return;
-                }
-
-                if (currentAuthConfig.authRequired) {
-                    currentAuthSession = { token: "", principal: "待登录", remember: false };
-                    syncAuthPresentation();
-                    setLoginStatus("当前环境需要先完成控制台鉴权。", "default");
-                    openAuthShell();
-                    return;
-                }
-
-                currentAuthSession = { token: "", principal: "访客模式", remember: false, authSource: "guest" };
-                syncAuthPresentation();
-                setLoginStatus("当前环境未启用强制鉴权，可直接进入控制台。", "success");
+                authUserNode.textContent = currentAuthSession.principal;
+                authModeNode.textContent = "JWT 统一认证 / 会话有效";
+                setBanner("欢迎进入控制台，当前用户：" + currentAuthSession.principal, "success");
                 bootConsole();
             } catch (error) {
-                currentAuthConfig = {
-                    authRequired: false,
-                    authMode: "unknown",
-                    tokenLabel: "控制台会话令牌",
-                    credentialLabel: "登录凭证",
-                    credentialPlaceholder: "输入登录凭证",
-                    supportsPasswordLogin: false,
-                    supportsApiKeyLogin: false,
-                    guestAllowed: true,
-                };
-                currentAuthSession = { token: "", principal: "访客模式", remember: false, authSource: "guest" };
-                syncAuthPresentation();
-                closeAuthShell();
-                setBanner(`鉴权状态获取失败，已回退为开放模式：${error.message}`, "error");
-                setLoginStatus(`无法确认当前环境鉴权状态：${error.message}。如需访问受保护环境，请手动登录。`, "error");
+                // 网络错误时仍允许进入（可能是离线模式）
+                currentAuthSession.principal = localStorage.getItem("display_name") || "用户";
+                authUserNode.textContent = currentAuthSession.principal;
+                authModeNode.textContent = "JWT 统一认证 / 离线模式";
+                setBanner("无法验证登录状态，使用缓存凭证。", "error");
                 bootConsole();
             }
         }
@@ -1629,6 +1976,10 @@
             return withApiKeyQuery(`/api/research/jobs/${encodeURIComponent(jobId)}/report?format=${encodeURIComponent(format)}`);
         }
 
+        function buildDashboardUrl(jobId) {
+            return `/api/research/jobs/${encodeURIComponent(jobId)}/dashboard`;
+        }
+
         function renderReportActions(jobId) {
             const section = document.createElement("div");
             section.className = "summary-section";
@@ -1781,6 +2132,960 @@
                 resultSummaryNode.appendChild(artifactSection);
             }
             resultSummaryNode.appendChild(phaseSection);
+        }
+
+        function clearPendingDashboardRefresh() {
+            if (dashboardRefreshTimerId) {
+                window.clearTimeout(dashboardRefreshTimerId);
+                dashboardRefreshTimerId = 0;
+            }
+        }
+
+        function renderDashboardPlaceholder(message) {
+            closeDashboardPhaseDetail();
+            closeDashboardKnowledgeGraphModal();
+            researchDashboardNode.innerHTML = "";
+            const empty = document.createElement("div");
+            empty.className = "empty";
+            empty.textContent = message;
+            researchDashboardNode.appendChild(empty);
+        }
+
+        function safeNumber(value, fallback = 0) {
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? numeric : fallback;
+        }
+
+        function formatPercentLike(value, digits = 1) {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric)) {
+                return "-";
+            }
+            const normalized = numeric <= 1 ? numeric * 100 : numeric;
+            const bounded = Math.max(0, Math.min(100, normalized));
+            return `${bounded.toFixed(digits)}%`;
+        }
+
+        function normalizeUnitPercent(value) {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric)) {
+                return 0;
+            }
+            return Math.max(0, Math.min(1, numeric <= 1 ? numeric : numeric / 100));
+        }
+
+        function resolveHealthTier(score, status, failedCount = 0) {
+            const normalizedScore = normalizeUnitPercent(score);
+            const normalizedStatus = String(status || "").toLowerCase();
+            if (normalizedStatus === "failed" || Number(failedCount || 0) > 0) {
+                return "risk";
+            }
+            if (normalizedScore >= 0.8) {
+                return "good";
+            }
+            if (normalizedScore >= 0.55) {
+                return "watch";
+            }
+            return "risk";
+        }
+
+        function healthTierLabel(tier) {
+            if (tier === "good") {
+                return "健康稳定";
+            }
+            if (tier === "watch") {
+                return "需持续关注";
+            }
+            return "风险偏高";
+        }
+
+        function buildPhaseSegmentTitle(item) {
+            const label = item.label || formatPhaseName(item.phase);
+            const statusLabel = item.status_label || formatStatus(item.status);
+            const index = item.index || "-";
+            const durationText = formatDuration(item.duration_sec);
+            const summaryText = summarizeObject(item.summary || {}).replace(/\n/g, "；");
+            const errorText = item.error ? `\n错误：${String(item.error)}` : "";
+            return `${index}. ${label}\n状态：${statusLabel}\n耗时：${durationText}\n摘要：${summaryText}${errorText}`;
+        }
+
+        function isDashboardExceptionalStatus(status) {
+            return DASHBOARD_EXCEPTION_STATUSES.has(String(status || "").toLowerCase());
+        }
+
+        function formatDashboardJson(value, emptyText = "{}") {
+            if (value === undefined || value === null) {
+                return emptyText;
+            }
+            if (typeof value === "string") {
+                return value;
+            }
+            try {
+                return JSON.stringify(value, null, 2);
+            } catch (error) {
+                return String(value);
+            }
+        }
+
+        function isDashboardModalVisible(node) {
+            return !!(node && !node.classList.contains("hidden"));
+        }
+
+        function syncDashboardModalBodyLock() {
+            if (isDashboardModalVisible(dashboardPhaseModalNode) || isDashboardModalVisible(dashboardGraphModalNode)) {
+                document.body.style.overflow = "hidden";
+                return;
+            }
+            document.body.style.overflow = "";
+        }
+
+        function closeDashboardPhaseDetail() {
+            if (!dashboardPhaseModalNode) {
+                return;
+            }
+            dashboardPhaseModalNode.classList.add("hidden");
+            dashboardPhaseModalNode.setAttribute("aria-hidden", "true");
+            syncDashboardModalBodyLock();
+        }
+
+        function openDashboardPhaseDetail(item) {
+            if (!dashboardPhaseModalNode || !item || typeof item !== "object") {
+                return;
+            }
+
+            const label = item.label || formatPhaseName(item.phase);
+            const statusLabel = item.status_label || formatStatus(item.status);
+            const index = item.index || "-";
+            const durationText = formatDuration(item.duration_sec);
+            const summaryText = formatDashboardJson(item.summary || {}, "{}");
+            const errorRaw = item.error;
+
+            dashboardModalTitleNode.textContent = `${index}. ${label}`;
+            dashboardModalMetaNode.textContent = `状态：${statusLabel}\n耗时：${durationText}\n阶段标识：${item.phase || "-"}`;
+            dashboardModalSummaryNode.textContent = summaryText;
+
+            if (errorRaw === undefined || errorRaw === null) {
+                dashboardModalErrorNode.textContent = "(null)";
+            } else if (typeof errorRaw === "string" && !errorRaw.trim()) {
+                dashboardModalErrorNode.textContent = "(空字符串)";
+            } else {
+                dashboardModalErrorNode.textContent = formatDashboardJson(errorRaw, "(空)");
+            }
+
+            dashboardPhaseModalNode.classList.remove("hidden");
+            dashboardPhaseModalNode.setAttribute("aria-hidden", "false");
+            syncDashboardModalBodyLock();
+            dashboardModalCloseNode.focus();
+        }
+
+        function bindDashboardModalEvents() {
+            if (dashboardModalBound) {
+                return;
+            }
+            dashboardModalBound = true;
+
+            dashboardModalCloseNode.addEventListener("click", function() {
+                closeDashboardPhaseDetail();
+            });
+
+            dashboardModalBackdropNode.addEventListener("click", function() {
+                closeDashboardPhaseDetail();
+            });
+
+            window.addEventListener("keydown", function(event) {
+                if (event.key !== "Escape") {
+                    return;
+                }
+                if (isDashboardModalVisible(dashboardPhaseModalNode)) {
+                    closeDashboardPhaseDetail();
+                    return;
+                }
+                if (isDashboardModalVisible(dashboardGraphModalNode)) {
+                    closeDashboardKnowledgeGraphModal();
+                }
+            });
+        }
+
+        function normalizeGraphNodeType(rawType) {
+            const normalized = String(rawType || "").toLowerCase();
+            if (normalized === "formula") {
+                return "formula";
+            }
+            if (normalized === "similar_formula") {
+                return "similar_formula";
+            }
+            return "unknown";
+        }
+
+        function resolveDashboardGraphNodeColor(nodeType) {
+            if (nodeType === "formula") {
+                return "#b35c2e";
+            }
+            if (nodeType === "similar_formula") {
+                return "#2f6a49";
+            }
+            return "#596660";
+        }
+
+        function resolveDashboardGraphEdgeColor(weight) {
+            const bounded = Math.max(0, Math.min(1, safeNumber(weight, 0)));
+            const alpha = 0.28 + 0.44 * bounded;
+            return `rgba(73, 52, 36, ${alpha.toFixed(3)})`;
+        }
+
+        function resolveGraphMetricValue(value, digits = 2) {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric)) {
+                return null;
+            }
+            return Number(numeric.toFixed(digits));
+        }
+
+        function coerceGraphList(value) {
+            if (!Array.isArray(value)) {
+                return [];
+            }
+            return value.filter((item) => item && typeof item === "object");
+        }
+
+        function truncateGraphLabel(value, maxLength = 10) {
+            const text = String(value || "").trim();
+            if (!text) {
+                return "-";
+            }
+            if (text.length <= maxLength) {
+                return text;
+            }
+            return `${text.slice(0, maxLength)}...`;
+        }
+
+        function normalizeKnowledgeGraphBoard(rawBoard) {
+            const board = rawBoard && typeof rawBoard === "object" ? rawBoard : {};
+            const nodeMap = new Map();
+
+            coerceGraphList(board.nodes).forEach((node) => {
+                const nodeId = String(node.id || node.label || "").trim();
+                if (!nodeId || nodeMap.has(nodeId)) {
+                    return;
+                }
+                nodeMap.set(nodeId, {
+                    id: nodeId,
+                    label: String(node.label || nodeId).trim(),
+                    type: normalizeGraphNodeType(node.type),
+                    degree: safeNumber(node.degree, 0),
+                    weight: safeNumber(node.weight, 0),
+                });
+            });
+
+            const edges = [];
+            coerceGraphList(board.edges).forEach((edge) => {
+                const source = String(edge.source || "").trim();
+                const target = String(edge.target || "").trim();
+                if (!source || !target) {
+                    return;
+                }
+                edges.push({
+                    source,
+                    target,
+                    relation: String(edge.relation || "类方关联"),
+                    weight: safeNumber(edge.weight, 0),
+                    similarity_score: resolveGraphMetricValue(edge.similarity_score, 3),
+                    evidence_score: resolveGraphMetricValue(edge.evidence_score, 3),
+                    shared_herbs: Array.isArray(edge.shared_herbs) ? edge.shared_herbs.slice(0, 6).map((item) => String(item)) : [],
+                    shared_syndromes: Array.isArray(edge.shared_syndromes) ? edge.shared_syndromes.slice(0, 6).map((item) => String(item)) : [],
+                });
+                if (!nodeMap.has(source)) {
+                    nodeMap.set(source, { id: source, label: source, type: "formula", degree: 0, weight: 0 });
+                }
+                if (!nodeMap.has(target)) {
+                    nodeMap.set(target, { id: target, label: target, type: "similar_formula", degree: 0, weight: 0 });
+                }
+            });
+
+            const nodes = Array.from(nodeMap.values()).sort((left, right) => {
+                const degreeDiff = safeNumber(right.degree, 0) - safeNumber(left.degree, 0);
+                if (degreeDiff !== 0) {
+                    return degreeDiff;
+                }
+                return String(left.label || "").localeCompare(String(right.label || ""), "zh-CN");
+            });
+
+            const stats = board.stats && typeof board.stats === "object" ? board.stats : {};
+            const normalizedStats = {
+                node_count: safeNumber(stats.node_count, nodes.length),
+                edge_count: safeNumber(stats.edge_count, edges.length),
+                formula_count: safeNumber(stats.formula_count, nodes.filter((node) => node.type === "formula").length),
+                match_count: safeNumber(stats.match_count, edges.length),
+                max_degree: safeNumber(stats.max_degree, nodes.reduce((acc, node) => Math.max(acc, safeNumber(node.degree, 0)), 0)),
+                max_weight: safeNumber(stats.max_weight, edges.reduce((acc, edge) => Math.max(acc, safeNumber(edge.weight, 0)), 0)),
+            };
+            if (stats.analysis_relation_count !== undefined && stats.analysis_relation_count !== null) {
+                normalizedStats.analysis_relation_count = safeNumber(stats.analysis_relation_count, 0);
+            }
+
+            return {
+                source: String(board.source || "unavailable"),
+                stats: normalizedStats,
+                nodes,
+                edges,
+                highlights: coerceGraphList(board.highlights),
+            };
+        }
+
+        function computeKnowledgeGraphLayout(nodes, width, height, large = false) {
+            const sorted = [...nodes];
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const total = sorted.length;
+            const layout = new Map();
+            if (total === 0) {
+                return layout;
+            }
+
+            const baseRingRadius = Math.max(58, Math.min(width, height) * (large ? 0.35 : 0.33));
+            const coreNodeCount = total > 8 ? 2 : 1;
+
+            sorted.forEach((node, index) => {
+                const degree = safeNumber(node.degree, 0);
+                const radius = Math.max(8.5, Math.min(large ? 22 : 17, 9 + degree * (large ? 1.6 : 1.3)));
+                let x = centerX;
+                let y = centerY;
+
+                if (total === 1) {
+                    x = centerX;
+                    y = centerY;
+                } else if (index < coreNodeCount) {
+                    if (coreNodeCount === 2) {
+                        const offset = (index === 0 ? -1 : 1) * Math.min(54, width * 0.08);
+                        x = centerX + offset;
+                        y = centerY;
+                    }
+                } else {
+                    const ringIndex = index - coreNodeCount;
+                    const ringCount = total - coreNodeCount;
+                    const angle = (Math.PI * 2 * ringIndex) / Math.max(1, ringCount) - Math.PI / 2;
+                    const ringRadius = baseRingRadius * (total > 12 ? 1.08 : 1.0);
+                    x = centerX + Math.cos(angle) * ringRadius;
+                    y = centerY + Math.sin(angle) * ringRadius * (large ? 0.82 : 0.72);
+                }
+
+                layout.set(node.id, { x, y, r: radius, node });
+            });
+
+            return layout;
+        }
+
+        function renderKnowledgeGraphStage(stageNode, graphBoard, options = {}) {
+            if (!stageNode) {
+                return;
+            }
+            stageNode.innerHTML = "";
+
+            const normalized = normalizeKnowledgeGraphBoard(graphBoard);
+            const nodes = normalized.nodes;
+            const edges = normalized.edges;
+
+            if (nodes.length === 0 || edges.length === 0) {
+                const empty = document.createElement("div");
+                empty.className = "dashboard-graph-empty";
+                empty.textContent = "当前任务暂无足够关系数据，待图谱证据生成后可放大查看。";
+                stageNode.appendChild(empty);
+                return;
+            }
+
+            const large = options.large === true;
+            const width = Math.max(Number(options.width) || 0, stageNode.clientWidth || 0, large ? 940 : 620);
+            const height = Math.max(Number(options.height) || 0, large ? 520 : 260);
+            const layout = computeKnowledgeGraphLayout(nodes, width, height, large);
+
+            const svgNs = "http://www.w3.org/2000/svg";
+            const svg = document.createElementNS(svgNs, "svg");
+            svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+            svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+            const edgeGroup = document.createElementNS(svgNs, "g");
+            const edgeLabelGroup = document.createElementNS(svgNs, "g");
+            const nodeGroup = document.createElementNS(svgNs, "g");
+            const nodeLabelGroup = document.createElementNS(svgNs, "g");
+
+            edges.forEach((edge) => {
+                const source = layout.get(edge.source);
+                const target = layout.get(edge.target);
+                if (!source || !target) {
+                    return;
+                }
+
+                const dx = target.x - source.x;
+                const dy = target.y - source.y;
+                const distance = Math.max(1, Math.hypot(dx, dy));
+                const startX = source.x + (dx / distance) * source.r;
+                const startY = source.y + (dy / distance) * source.r;
+                const endX = target.x - (dx / distance) * target.r;
+                const endY = target.y - (dy / distance) * target.r;
+                const boundedWeight = Math.max(0, Math.min(1, safeNumber(edge.weight, 0)));
+
+                const line = document.createElementNS(svgNs, "line");
+                line.setAttribute("x1", startX.toFixed(2));
+                line.setAttribute("y1", startY.toFixed(2));
+                line.setAttribute("x2", endX.toFixed(2));
+                line.setAttribute("y2", endY.toFixed(2));
+                line.setAttribute("stroke", resolveDashboardGraphEdgeColor(boundedWeight));
+                line.setAttribute("stroke-width", (1 + boundedWeight * (large ? 4.2 : 3.1)).toFixed(2));
+                line.setAttribute("stroke-linecap", "round");
+
+                const title = document.createElementNS(svgNs, "title");
+                title.textContent = `${edge.source} -> ${edge.target}\n关系：${edge.relation}\n权重：${boundedWeight.toFixed(2)}`;
+                line.appendChild(title);
+                edgeGroup.appendChild(line);
+
+                if (large || edges.length <= 12) {
+                    const label = document.createElementNS(svgNs, "text");
+                    label.setAttribute("x", ((startX + endX) / 2).toFixed(2));
+                    label.setAttribute("y", ((startY + endY) / 2 - 4).toFixed(2));
+                    label.setAttribute("font-size", large ? "11" : "9.5");
+                    label.setAttribute("fill", "rgba(54, 44, 36, 0.82)");
+                    label.setAttribute("text-anchor", "middle");
+                    label.textContent = truncateGraphLabel(edge.relation, large ? 12 : 8);
+                    edgeLabelGroup.appendChild(label);
+                }
+            });
+
+            nodes.forEach((node) => {
+                const position = layout.get(node.id);
+                if (!position) {
+                    return;
+                }
+                const type = normalizeGraphNodeType(node.type);
+
+                const circle = document.createElementNS(svgNs, "circle");
+                circle.setAttribute("cx", position.x.toFixed(2));
+                circle.setAttribute("cy", position.y.toFixed(2));
+                circle.setAttribute("r", position.r.toFixed(2));
+                circle.setAttribute("fill", resolveDashboardGraphNodeColor(type));
+                circle.setAttribute("fill-opacity", "0.88");
+                circle.setAttribute("stroke", "rgba(255, 255, 255, 0.95)");
+                circle.setAttribute("stroke-width", "1.4");
+
+                const nodeTitle = document.createElementNS(svgNs, "title");
+                nodeTitle.textContent = `${node.label}\n类型：${type}\n连接度：${safeNumber(node.degree, 0)}`;
+                circle.appendChild(nodeTitle);
+                nodeGroup.appendChild(circle);
+
+                const label = document.createElementNS(svgNs, "text");
+                label.setAttribute("x", position.x.toFixed(2));
+                label.setAttribute("y", (position.y - position.r - 6).toFixed(2));
+                label.setAttribute("font-size", large ? "12" : "10");
+                label.setAttribute("fill", "rgba(30, 37, 34, 0.92)");
+                label.setAttribute("text-anchor", "middle");
+                label.textContent = truncateGraphLabel(node.label, large ? 14 : 10);
+                nodeLabelGroup.appendChild(label);
+            });
+
+            svg.appendChild(edgeGroup);
+            svg.appendChild(edgeLabelGroup);
+            svg.appendChild(nodeGroup);
+            svg.appendChild(nodeLabelGroup);
+            stageNode.appendChild(svg);
+        }
+
+        function formatKnowledgeGraphHighlights(graphBoard) {
+            const normalized = normalizeKnowledgeGraphBoard(graphBoard);
+            let highlights = normalized.highlights;
+            if (!Array.isArray(highlights) || highlights.length === 0) {
+                highlights = normalized.edges.slice(0, 6).map((edge) => {
+                    return {
+                        title: `${edge.source} -> ${edge.target}`,
+                        relation: edge.relation,
+                        weight: edge.weight,
+                        similarity_score: edge.similarity_score,
+                        evidence_score: edge.evidence_score,
+                        shared_herbs: edge.shared_herbs,
+                        shared_syndromes: edge.shared_syndromes,
+                    };
+                });
+            }
+
+            const lines = highlights.slice(0, 6).map((item, index) => {
+                const title = String(item.title || `${item.source || "-"} -> ${item.target || "-"}`);
+                const relation = String(item.relation || "类方关联");
+                const weight = resolveGraphMetricValue(item.weight, 2);
+                const similarity = resolveGraphMetricValue(item.similarity_score, 2);
+                const evidence = resolveGraphMetricValue(item.evidence_score, 2);
+                const sharedHerbs = Array.isArray(item.shared_herbs) ? item.shared_herbs.slice(0, 4).map((entry) => String(entry)) : [];
+                const sharedSyndromes = Array.isArray(item.shared_syndromes) ? item.shared_syndromes.slice(0, 4).map((entry) => String(entry)) : [];
+                return [
+                    `${index + 1}. ${title}`,
+                    `   关系：${relation} | 权重：${weight === null ? "-" : weight}`,
+                    `   相似度：${similarity === null ? "-" : similarity} | 证据分：${evidence === null ? "-" : evidence}`,
+                    `   共享药物：${sharedHerbs.length > 0 ? sharedHerbs.join("、") : "-"}`,
+                    `   共享证候：${sharedSyndromes.length > 0 ? sharedSyndromes.join("、") : "-"}`,
+                ].join("\n");
+            });
+
+            return lines.length > 0 ? lines.join("\n\n") : "暂无可展示的关键关系。";
+        }
+
+        function openDashboardKnowledgeGraphModal(graphBoard, dashboardTitle) {
+            if (!dashboardGraphModalNode) {
+                return;
+            }
+            const normalized = normalizeKnowledgeGraphBoard(graphBoard);
+            if (normalized.nodes.length === 0 || normalized.edges.length === 0) {
+                return;
+            }
+
+            const stats = normalized.stats || {};
+            dashboardGraphTitleNode.textContent = `${dashboardTitle || "研究任务"} · 知识关系放大视图`;
+            dashboardGraphStatsNode.textContent = `数据源：${normalized.source || "-"}\n节点：${safeNumber(stats.node_count, normalized.nodes.length)} | 边：${safeNumber(stats.edge_count, normalized.edges.length)} | 方剂：${safeNumber(stats.formula_count, 0)} | 匹配：${safeNumber(stats.match_count, 0)}`;
+            dashboardGraphHighlightsNode.textContent = formatKnowledgeGraphHighlights(normalized);
+            renderKnowledgeGraphStage(dashboardGraphStageNode, normalized, {
+                large: true,
+                width: 980,
+                height: 520,
+            });
+
+            dashboardGraphModalNode.classList.remove("hidden");
+            dashboardGraphModalNode.setAttribute("aria-hidden", "false");
+            syncDashboardModalBodyLock();
+            dashboardGraphCloseNode.focus();
+        }
+
+        function closeDashboardKnowledgeGraphModal() {
+            if (!dashboardGraphModalNode) {
+                return;
+            }
+            dashboardGraphModalNode.classList.add("hidden");
+            dashboardGraphModalNode.setAttribute("aria-hidden", "true");
+            if (dashboardGraphStageNode) {
+                dashboardGraphStageNode.innerHTML = "";
+            }
+            if (dashboardGraphHighlightsNode) {
+                dashboardGraphHighlightsNode.textContent = "-";
+            }
+            syncDashboardModalBodyLock();
+        }
+
+        function bindDashboardGraphModalEvents() {
+            if (dashboardGraphModalBound || !dashboardGraphModalNode) {
+                return;
+            }
+            dashboardGraphModalBound = true;
+
+            dashboardGraphCloseNode.addEventListener("click", function() {
+                closeDashboardKnowledgeGraphModal();
+            });
+
+            dashboardGraphBackdropNode.addEventListener("click", function() {
+                closeDashboardKnowledgeGraphModal();
+            });
+        }
+
+        function buildKnowledgeGraphBoardSection(graphBoard, dashboardTitle) {
+            const normalized = normalizeKnowledgeGraphBoard(graphBoard);
+            const stats = normalized.stats || {};
+
+            const section = document.createElement("section");
+            section.className = "dashboard-graph-board";
+
+            const head = document.createElement("div");
+            head.className = "dashboard-graph-head";
+
+            const title = document.createElement("h4");
+            title.textContent = "知识关系图谱";
+
+            const meta = document.createElement("div");
+            meta.className = "dashboard-graph-meta";
+            meta.textContent = `节点 ${safeNumber(stats.node_count, normalized.nodes.length)} · 边 ${safeNumber(stats.edge_count, normalized.edges.length)} · 数据源 ${normalized.source || "-"}`;
+
+            head.appendChild(title);
+            head.appendChild(meta);
+            section.appendChild(head);
+
+            const stage = document.createElement("div");
+            stage.className = "dashboard-graph-stage small";
+            stage.setAttribute("aria-label", "知识关系图预览");
+            renderKnowledgeGraphStage(stage, normalized, { large: false, width: 640, height: 264 });
+            section.appendChild(stage);
+
+            const actions = document.createElement("div");
+            actions.className = "dashboard-graph-actions";
+
+            const legend = document.createElement("div");
+            legend.className = "dashboard-graph-legend";
+            [
+                ["核心方剂", resolveDashboardGraphNodeColor("formula")],
+                ["相似方剂", resolveDashboardGraphNodeColor("similar_formula")],
+                ["关系强度", "rgba(73, 52, 36, 0.55)"],
+            ].forEach(([labelText, color]) => {
+                const chip = document.createElement("span");
+                chip.className = "dashboard-legend-chip";
+
+                const dot = document.createElement("span");
+                dot.className = "dashboard-legend-dot";
+                dot.style.background = color;
+
+                const text = document.createElement("span");
+                text.textContent = labelText;
+
+                chip.appendChild(dot);
+                chip.appendChild(text);
+                legend.appendChild(chip);
+            });
+
+            const expandButton = document.createElement("button");
+            expandButton.type = "button";
+            expandButton.className = "dashboard-filter-button";
+            expandButton.textContent = "放大展示知识关系";
+            expandButton.disabled = normalized.nodes.length === 0 || normalized.edges.length === 0;
+            expandButton.addEventListener("click", function() {
+                openDashboardKnowledgeGraphModal(normalized, dashboardTitle);
+            });
+
+            actions.appendChild(legend);
+            actions.appendChild(expandButton);
+            section.appendChild(actions);
+
+            const hints = document.createElement("div");
+            hints.className = "dashboard-graph-hints";
+            hints.textContent = `图谱摘要：匹配 ${safeNumber(stats.match_count, normalized.edges.length)} 条关系，最大连接度 ${safeNumber(stats.max_degree, 0)}。点击“放大展示知识关系”可查看完整拓扑与关键关系摘要。`;
+            section.appendChild(hints);
+
+            return section;
+        }
+
+        function toggleDashboardPhaseFilter() {
+            dashboardPhaseFilter = dashboardPhaseFilter === DASHBOARD_PHASE_FILTER_EXCEPTION
+                ? DASHBOARD_PHASE_FILTER_ALL
+                : DASHBOARD_PHASE_FILTER_EXCEPTION;
+            if (latestDashboardPayload && typeof latestDashboardPayload === "object") {
+                renderResearchDashboard(latestDashboardPayload);
+            }
+        }
+
+        function buildDashboardBox(titleText, lines) {
+            const box = document.createElement("div");
+            box.className = "dashboard-box";
+
+            const heading = document.createElement("h4");
+            heading.textContent = titleText;
+            box.appendChild(heading);
+
+            const body = document.createElement("p");
+            body.textContent = lines.length > 0 ? lines.join("\n") : "暂无数据";
+            box.appendChild(body);
+
+            return box;
+        }
+
+        function renderResearchDashboard(payload) {
+            if (!payload || typeof payload !== "object") {
+                renderDashboardPlaceholder("任务启动后将自动展示研究状态可视化看板。");
+                return;
+            }
+
+            const overview = payload.overview && typeof payload.overview === "object" ? payload.overview : {};
+            const phaseBoard = payload.phase_board && typeof payload.phase_board === "object" ? payload.phase_board : {};
+            const qualityBoard = payload.quality_board && typeof payload.quality_board === "object" ? payload.quality_board : {};
+            const evidenceBoard = payload.evidence_board && typeof payload.evidence_board === "object" ? payload.evidence_board : {};
+            const knowledgeGraphBoard = payload.knowledge_graph_board && typeof payload.knowledge_graph_board === "object"
+                ? payload.knowledge_graph_board
+                : {};
+            const protocolInputs = payload.protocol_inputs && typeof payload.protocol_inputs === "object" ? payload.protocol_inputs : {};
+            const metadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata : {};
+            const phaseItems = Array.isArray(phaseBoard.items) ? phaseBoard.items : [];
+            latestDashboardPayload = payload;
+
+            const exceptionalPhaseItems = phaseItems.filter((item) => isDashboardExceptionalStatus(item.status));
+            const isExceptionFilterActive = dashboardPhaseFilter === DASHBOARD_PHASE_FILTER_EXCEPTION;
+            const visiblePhaseItems = isExceptionFilterActive ? exceptionalPhaseItems : phaseItems;
+            const failedCount = safeNumber(phaseBoard.failed, exceptionalPhaseItems.length);
+            const healthTier = resolveHealthTier(overview.health_score, overview.status, failedCount);
+            const healthText = healthTierLabel(healthTier);
+
+            const shell = document.createElement("div");
+            shell.className = "dashboard-shell";
+
+            const head = document.createElement("div");
+            head.className = "dashboard-head";
+
+            const headTitleWrap = document.createElement("div");
+            const title = document.createElement("h4");
+            title.className = "dashboard-title";
+            title.textContent = payload.topic || currentTopicNode.textContent || "未命名研究任务";
+            const subtitle = document.createElement("p");
+            subtitle.className = "dashboard-subtitle";
+            const cycleId = payload.cycle_id ? `周期 ${payload.cycle_id}` : "周期待生成";
+            const statusText = overview.status_label || formatStatus(overview.status || "queued");
+            subtitle.textContent = `${cycleId} · ${statusText}`;
+            headTitleWrap.appendChild(title);
+            headTitleWrap.appendChild(subtitle);
+
+            const headStatus = document.createElement("span");
+            headStatus.className = `phase-status ${overview.status || ""} dashboard-health-pill ${healthTier}`.trim();
+            headStatus.textContent = statusText;
+
+            const filterButton = document.createElement("button");
+            filterButton.type = "button";
+            filterButton.className = `dashboard-filter-button ${isExceptionFilterActive ? "active" : ""}`.trim();
+            filterButton.textContent = isExceptionFilterActive ? "查看全部阶段" : "只看异常阶段";
+            filterButton.title = exceptionalPhaseItems.length > 0
+                ? `异常阶段 ${exceptionalPhaseItems.length} 个，点击切换视图`
+                : "当前没有异常阶段";
+            filterButton.disabled = exceptionalPhaseItems.length === 0 && !isExceptionFilterActive;
+            filterButton.addEventListener("click", function() {
+                toggleDashboardPhaseFilter();
+            });
+
+            const headActions = document.createElement("div");
+            headActions.className = "dashboard-head-actions";
+            headActions.appendChild(headStatus);
+            headActions.appendChild(filterButton);
+
+            head.appendChild(headTitleWrap);
+            head.appendChild(headActions);
+            shell.appendChild(head);
+
+            if (failedCount > 0 || String(overview.status || "").toLowerCase() === "failed") {
+                const failedPhaseNames = exceptionalPhaseItems
+                    .map((item) => item.label || formatPhaseName(item.phase))
+                    .slice(0, 3);
+                const failureAlert = document.createElement("div");
+                failureAlert.className = "dashboard-alert failed";
+                if (failedPhaseNames.length > 0) {
+                    failureAlert.textContent = `检测到 ${failedCount} 个异常阶段：${failedPhaseNames.join("、")}。已在阶段列表中高亮并显示错误摘要。`;
+                } else {
+                    failureAlert.textContent = "任务存在异常阶段，请优先检查下方高亮的阶段状态与错误信息。";
+                }
+                shell.appendChild(failureAlert);
+            }
+
+            const kpiGrid = document.createElement("div");
+            kpiGrid.className = "dashboard-grid";
+            [
+                { label: "任务进度", value: formatPercentLike(overview.progress, 1) },
+                { label: "阶段完成率", value: formatPercentLike(phaseBoard.completion_rate, 1) },
+                {
+                    label: "运行健康度",
+                    value: formatPercentLike(overview.health_score, 1),
+                    cardClass: `health ${healthTier}`,
+                    note: healthText,
+                    title: `健康度分级：${healthText}`,
+                },
+                { label: "总耗时", value: formatDuration(overview.total_duration_sec) },
+            ].forEach((item) => {
+                const card = document.createElement("div");
+                card.className = `dashboard-kpi ${item.cardClass || ""}`.trim();
+                if (item.title) {
+                    card.title = item.title;
+                }
+
+                const labelNode = document.createElement("span");
+                labelNode.textContent = item.label;
+
+                const valueNode = document.createElement("strong");
+                valueNode.textContent = item.value;
+
+                card.appendChild(labelNode);
+                card.appendChild(valueNode);
+                if (item.note) {
+                    const noteNode = document.createElement("span");
+                    noteNode.className = "dashboard-kpi-note";
+                    noteNode.textContent = item.note;
+                    card.appendChild(noteNode);
+                }
+                kpiGrid.appendChild(card);
+            });
+            shell.appendChild(kpiGrid);
+
+            const phaseTrack = document.createElement("div");
+            phaseTrack.className = "dashboard-phase-track";
+
+            const phaseBar = document.createElement("div");
+            phaseBar.className = "dashboard-phase-bar";
+            if (visiblePhaseItems.length === 0) {
+                const emptySegment = document.createElement("div");
+                emptySegment.className = "dashboard-phase-segment idle";
+                emptySegment.style.flex = "1";
+                phaseBar.appendChild(emptySegment);
+            } else {
+                visiblePhaseItems.forEach((item) => {
+                    const segment = document.createElement("div");
+                    segment.className = `dashboard-phase-segment ${item.status || ""}`.trim();
+                    if (isDashboardExceptionalStatus(item.status)) {
+                        segment.classList.add("failed-marker");
+                    }
+                    segment.classList.add("interactive");
+                    segment.style.flex = "1";
+                    segment.title = buildPhaseSegmentTitle(item);
+                    segment.setAttribute("role", "button");
+                    segment.setAttribute("aria-label", `${item.label || formatPhaseName(item.phase)} 详情`);
+                    segment.tabIndex = 0;
+                    segment.addEventListener("click", function() {
+                        openDashboardPhaseDetail(item);
+                    });
+                    segment.addEventListener("keydown", function(event) {
+                        if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            openDashboardPhaseDetail(item);
+                        }
+                    });
+                    phaseBar.appendChild(segment);
+                });
+            }
+            phaseTrack.appendChild(phaseBar);
+
+            const phaseGuide = document.createElement("div");
+            phaseGuide.className = "dashboard-phase-guide";
+            phaseGuide.textContent = `阶段分布：完成 ${safeNumber(phaseBoard.completed, 0)} · 运行 ${safeNumber(phaseBoard.running, 0)} · 失败 ${failedCount} · 跳过 ${safeNumber(phaseBoard.skipped, 0)}（点击色条可查看详情${isExceptionFilterActive ? "；当前仅显示异常阶段" : ""}）`;
+            phaseTrack.appendChild(phaseGuide);
+
+            const phaseList = document.createElement("div");
+            phaseList.className = "dashboard-phase-list";
+            if (visiblePhaseItems.length === 0) {
+                const empty = document.createElement("div");
+                empty.className = "empty";
+                empty.textContent = isExceptionFilterActive ? "当前无异常阶段，可切换为全部阶段视图。" : "当前任务尚未返回阶段看板数据。";
+                phaseList.appendChild(empty);
+            } else {
+                visiblePhaseItems.forEach((item) => {
+                    const phaseItem = document.createElement("div");
+                    phaseItem.className = "dashboard-phase-item";
+                    const statusKey = String(item.status || "").toLowerCase();
+                    if (statusKey) {
+                        phaseItem.classList.add(statusKey);
+                    }
+                    phaseItem.classList.add("clickable");
+                    phaseItem.setAttribute("role", "button");
+                    phaseItem.setAttribute("aria-label", `${item.label || formatPhaseName(item.phase)} 详情`);
+                    phaseItem.tabIndex = 0;
+                    phaseItem.addEventListener("click", function() {
+                        openDashboardPhaseDetail(item);
+                    });
+                    phaseItem.addEventListener("keydown", function(event) {
+                        if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            openDashboardPhaseDetail(item);
+                        }
+                    });
+
+                    const left = document.createElement("div");
+                    const name = document.createElement("strong");
+                    name.textContent = `${item.index || "-"}. ${item.label || formatPhaseName(item.phase)}`;
+                    const meta = document.createElement("div");
+                    meta.className = "dashboard-phase-meta";
+                    meta.textContent = `耗时 ${formatDuration(item.duration_sec)}`;
+                    left.appendChild(name);
+                    left.appendChild(meta);
+
+                    if (item.error) {
+                        const errorNode = document.createElement("div");
+                        errorNode.className = "dashboard-phase-error";
+                        errorNode.textContent = `错误：${String(item.error)}`;
+                        left.appendChild(errorNode);
+                    }
+
+                    const status = document.createElement("span");
+                    status.className = `phase-status ${item.status || ""}`.trim();
+                    status.textContent = item.status_label || formatStatus(item.status);
+
+                    phaseItem.appendChild(left);
+                    phaseItem.appendChild(status);
+                    phaseList.appendChild(phaseItem);
+                });
+            }
+            phaseTrack.appendChild(phaseList);
+            shell.appendChild(phaseTrack);
+
+            shell.appendChild(buildKnowledgeGraphBoardSection(knowledgeGraphBoard, title.textContent));
+
+            const auxGrid = document.createElement("div");
+            auxGrid.className = "dashboard-aux-grid";
+
+            auxGrid.appendChild(
+                buildDashboardBox("质量评估", [
+                    `置信分数：${formatPercentLike(qualityBoard.confidence_score, 1)}`,
+                    `完整度：${formatPercentLike(qualityBoard.completeness, 1)}`,
+                    `综合质量：${formatPercentLike(qualityBoard.quality_score, 1)}`,
+                ])
+            );
+
+            auxGrid.appendChild(
+                buildDashboardBox("证据态势", [
+                    `证据记录：${safeNumber(evidenceBoard.evidence_count, 0)}`,
+                    `候选论断：${safeNumber(evidenceBoard.claim_count, 0)}`,
+                    `关联规则：${safeNumber(evidenceBoard.association_rule_count, 0)}`,
+                    `聚类摘要：${safeNumber(evidenceBoard.cluster_count, 0)}`,
+                ])
+            );
+
+            auxGrid.appendChild(
+                buildDashboardBox("协议输入", [
+                    `研究类型：${protocolInputs.study_type || "-"}`,
+                    `主要结局：${protocolInputs.primary_outcome || "-"}`,
+                    `干预方案：${protocolInputs.intervention || "-"}`,
+                    `对照方案：${protocolInputs.comparison || "-"}`,
+                ])
+            );
+
+            auxGrid.appendChild(
+                buildDashboardBox("运行元数据", [
+                    `当前阶段：${overview.current_phase_label || formatPhaseName(overview.current_phase)}`,
+                    `开始时间：${overview.started_at || "-"}`,
+                    `完成时间：${overview.completed_at || "-"}`,
+                    `流程名称：${metadata.pipeline_cycle_name || "-"}`,
+                ])
+            );
+
+            shell.appendChild(auxGrid);
+
+            researchDashboardNode.innerHTML = "";
+            researchDashboardNode.appendChild(shell);
+        }
+
+        async function refreshResearchDashboard(jobId) {
+            const normalizedJobId = String(jobId || "").trim();
+            if (!normalizedJobId || normalizedJobId === "-") {
+                renderDashboardPlaceholder("任务启动后将自动展示研究状态可视化看板。");
+                return;
+            }
+
+            const requestToken = ++dashboardRequestToken;
+            try {
+                const response = await authenticatedFetch(buildDashboardUrl(normalizedJobId));
+                if (requestToken !== dashboardRequestToken) {
+                    return;
+                }
+                if (response.status === 404) {
+                    renderDashboardPlaceholder("当前任务暂无可展示的看板数据。");
+                    return;
+                }
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const payload = await response.json();
+                if (requestToken !== dashboardRequestToken) {
+                    return;
+                }
+                renderResearchDashboard(payload);
+            } catch (error) {
+                if (requestToken !== dashboardRequestToken) {
+                    return;
+                }
+                renderDashboardPlaceholder(`研究看板加载失败：${error.message}`);
+            }
+        }
+
+        function queueResearchDashboardRefresh(jobId, delayMs = 160) {
+            const normalizedJobId = String(jobId || jobIdNode.textContent || "").trim();
+            clearPendingDashboardRefresh();
+            if (!normalizedJobId || normalizedJobId === "-") {
+                renderDashboardPlaceholder("任务启动后将自动展示研究状态可视化看板。");
+                return;
+            }
+            dashboardRefreshTimerId = window.setTimeout(function() {
+                dashboardRefreshTimerId = 0;
+                refreshResearchDashboard(normalizedJobId);
+            }, Math.max(0, Number(delayMs) || 0));
         }
 
         function setProgress(progress) {
@@ -2091,6 +3396,12 @@
 
         function resetView(topic) {
             closeRealtimeChannel();
+            clearPendingDashboardRefresh();
+            dashboardRequestToken += 1;
+            latestDashboardPayload = null;
+            dashboardPhaseFilter = DASHBOARD_PHASE_FILTER_ALL;
+            closeDashboardPhaseDetail();
+            closeDashboardKnowledgeGraphModal();
             phaseState = new Map();
             renderPhaseList();
             eventLogNode.innerHTML = '<div class="empty">实时通道连接后会在这里显示事件。</div>';
@@ -2100,6 +3411,7 @@
             jobIdNode.textContent = "-";
             activePhaseKey = "";
             renderResultSummary(null);
+            renderResearchDashboard(null);
             setProgress(0);
             setTransportState("idle");
         }
@@ -2133,6 +3445,7 @@
                 }
                 renderResultSummary(snapshot.result);
             }
+            queueResearchDashboardRefresh(snapshot.job_id || jobIdNode.textContent.trim(), 0);
             refreshRecentJobs();
         }
 
@@ -2272,6 +3585,10 @@
                 }
                 setProgress(100);
                 closeRealtimeChannel();
+            }
+
+            if (["job_queued", "phase_started", "phase_completed", "phase_skipped", "job_completed"].includes(eventType)) {
+                queueResearchDashboardRefresh(jobIdNode.textContent.trim());
             }
         }
 
@@ -2515,6 +3832,10 @@
                     body: JSON.stringify({
                         topic,
                         description: descriptionInput.value.trim(),
+                        study_type: studyTypeInput.value.trim() || null,
+                        primary_outcome: primaryOutcomeInput.value.trim() || null,
+                        intervention: interventionInput.value.trim() || null,
+                        comparison: comparisonInput.value.trim() || null,
                     }),
                 });
 
@@ -2528,6 +3849,7 @@
                 persistLastJobId(job.job_id);
                 jobStatusNode.textContent = formatStatus(job.status || "queued");
                 setBanner(`任务 ${job.job_id} 已创建，准备连接实时通道。`);
+                queueResearchDashboardRefresh(job.job_id, 0);
                 refreshRecentJobs();
                 openRealtimeChannel({
                     jobId: job.job_id,
@@ -2543,30 +3865,11 @@
             }
         });
 
-        loginForm.addEventListener("submit", async function(event) {
-            event.preventDefault();
-            if (currentAuthConfig.authRequired && !loginTokenInput.value.trim()) {
-                setLoginStatus(`当前环境要求输入${currentAuthConfig.credentialLabel || "登录凭证"}。`, "error");
-                loginTokenInput.focus();
-                return;
-            }
-            await completeConsoleLogin();
-        });
-
-        guestEnterButton.addEventListener("click", async function() {
-            await completeConsoleLogin({ secret: "", statusMessage: "正在进入访客模式..." });
-        });
-
-        openLoginButton.addEventListener("click", function() {
-            openAuthShell();
-        });
-
-        closeLoginButton.addEventListener("click", function() {
-            closeAuthShell();
-        });
-
-        logoutButton.addEventListener("click", async function() {
-            await logoutConsoleSession();
+        logoutButton.addEventListener("click", function() {
+            localStorage.removeItem("access_token");
+            localStorage.removeItem("token_type");
+            localStorage.removeItem("display_name");
+            window.location.href = "/login?next=console";
         });
 
         transportSelect.addEventListener("change", function() {
@@ -2606,7 +3909,7 @@
             }
         }
 
-        initializeConsoleAuth();
+        initializeJwtAuth();
     </script>
 </body>
 </html>
