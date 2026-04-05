@@ -18,14 +18,21 @@
   <body
     class="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 flex items-center justify-center"
   >
-    <div x-data="loginApp()" x-cloak class="w-full max-w-md px-6">
+    <div
+      x-data="loginApp()"
+      x-init="init()"
+      x-cloak
+      class="w-full max-w-md px-6"
+    >
       <!-- Card -->
       <div class="bg-white rounded-2xl shadow-xl p-8 space-y-6">
         <!-- Logo / Title -->
         <div class="text-center space-y-2">
           <span class="text-5xl">🏥</span>
           <h1 class="text-2xl font-bold text-gray-800">中医智慧科研平台</h1>
-          <p class="text-sm text-gray-500">请登录以继续</p>
+          <p class="text-sm text-gray-500" x-text="statusHint">
+            正在检测认证模式…
+          </p>
         </div>
 
         <!-- Error Alert -->
@@ -44,8 +51,35 @@
           <span x-text="errorMsg"></span>
         </div>
 
-        <!-- Form -->
-        <form @submit.prevent="handleLogin" class="space-y-5">
+        <!-- Auth Mode Tabs -->
+        <div
+          x-show="authConfig.supportsPassword && authConfig.supportsApiKey"
+          class="flex border-b border-gray-200"
+        >
+          <button
+            type="button"
+            @click="loginMode = 'password'"
+            :class="loginMode === 'password' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'"
+            class="flex-1 pb-2 text-sm font-medium border-b-2 transition"
+          >
+            账号密码
+          </button>
+          <button
+            type="button"
+            @click="loginMode = 'api_key'"
+            :class="loginMode === 'api_key' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'"
+            class="flex-1 pb-2 text-sm font-medium border-b-2 transition"
+          >
+            API Key
+          </button>
+        </div>
+
+        <!-- Password Login Form -->
+        <form
+          x-show="loginMode === 'password'"
+          @submit.prevent="handlePasswordLogin"
+          class="space-y-5"
+        >
           <!-- Username -->
           <div>
             <label
@@ -127,6 +161,18 @@
             </div>
           </div>
 
+          <!-- Remember -->
+          <label
+            class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer"
+          >
+            <input
+              type="checkbox"
+              x-model="remember"
+              class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            记住登录状态
+          </label>
+
           <!-- Submit -->
           <button
             type="submit"
@@ -156,6 +202,121 @@
             <span x-text="loading ? '登录中…' : '登 录'"></span>
           </button>
         </form>
+
+        <!-- API Key Login Form -->
+        <form
+          x-show="loginMode === 'api_key'"
+          @submit.prevent="handleApiKeyLogin"
+          class="space-y-5"
+        >
+          <div>
+            <label
+              for="apiKeyName"
+              class="block text-sm font-medium text-gray-700 mb-1"
+              >显示名称
+              <span class="text-gray-400 font-normal">(可选)</span></label
+            >
+            <input
+              id="apiKeyName"
+              type="text"
+              x-model="apiKeyName"
+              :disabled="loading"
+              class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition disabled:opacity-50"
+              placeholder="管理员"
+            />
+          </div>
+          <div>
+            <label
+              for="apiKey"
+              class="block text-sm font-medium text-gray-700 mb-1"
+              >管理 API Key</label
+            >
+            <input
+              id="apiKey"
+              type="password"
+              x-model="apiKey"
+              required
+              :disabled="loading"
+              class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition disabled:opacity-50"
+              placeholder="请输入管理 API Key"
+            />
+          </div>
+
+          <label
+            class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer"
+          >
+            <input
+              type="checkbox"
+              x-model="remember"
+              class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            记住登录状态
+          </label>
+
+          <button
+            type="submit"
+            :disabled="loading"
+            class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <svg
+              x-show="loading"
+              class="animate-spin w-5 h-5"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                class="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                stroke-width="4"
+              />
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+              />
+            </svg>
+            <span x-text="loading ? '验证中…' : '验证并登录'"></span>
+          </button>
+        </form>
+
+        <!-- Guest Mode Button (only when guest allowed) -->
+        <button
+          x-show="authConfig.guestAllowed"
+          @click="handleGuestLogin"
+          :disabled="loading"
+          type="button"
+          class="w-full py-2.5 border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition text-sm font-medium disabled:opacity-60"
+        >
+          访客模式进入
+        </button>
+
+        <!-- Destination selector -->
+        <div
+          class="flex items-center justify-center gap-4 text-xs text-gray-400"
+        >
+          <span>登录后前往</span>
+          <label class="flex items-center gap-1 cursor-pointer">
+            <input
+              type="radio"
+              x-model="destination"
+              value="dashboard"
+              class="text-emerald-600 focus:ring-emerald-500"
+            />
+            <span class="text-gray-600">科研主控台</span>
+          </label>
+          <label class="flex items-center gap-1 cursor-pointer">
+            <input
+              type="radio"
+              x-model="destination"
+              value="console"
+              class="text-emerald-600 focus:ring-emerald-500"
+            />
+            <span class="text-gray-600">研究控制台</span>
+          </label>
+        </div>
       </div>
 
       <!-- Footer -->
@@ -167,32 +328,102 @@
     <script>
       function loginApp() {
         return {
+          // state
           username: "",
           password: "",
+          apiKey: "",
+          apiKeyName: "",
           errorMsg: "",
           loading: false,
           showPwd: false,
+          remember: false,
+          loginMode: "password",
+          destination: "dashboard",
+          statusHint: "正在检测认证模式…",
+          authConfig: {
+            authRequired: true,
+            authMode: "password",
+            supportsPassword: true,
+            supportsApiKey: false,
+            guestAllowed: false,
+          },
 
-          async handleLogin() {
-            this.errorMsg = "";
-
-            if (!this.username.trim() || !this.password) {
-              this.errorMsg = "请输入用户名和密码";
-              return;
+          async init() {
+            // 如果已有有效 JWT，直接跳转
+            const existingToken = localStorage.getItem("access_token");
+            if (existingToken) {
+              try {
+                const resp = await fetch("/api/auth/me", {
+                  headers: { Authorization: "Bearer " + existingToken },
+                });
+                if (resp.ok) {
+                  this.redirectAfterLogin();
+                  return;
+                }
+              } catch (e) {
+                // token 无效，继续显示登录
+              }
+              localStorage.removeItem("access_token");
+              localStorage.removeItem("token_type");
             }
 
+            // 获取认证模式
+            try {
+              const resp = await fetch("/api/auth/status");
+              if (resp.ok) {
+                const data = await resp.json();
+                this.authConfig = {
+                  authRequired: data.auth_required,
+                  authMode: data.auth_mode,
+                  supportsPassword: data.supports_password_login,
+                  supportsApiKey: data.supports_api_key_login,
+                  guestAllowed: data.guest_allowed,
+                };
+
+                // 设置默认 tab
+                if (
+                  !this.authConfig.supportsPassword &&
+                  this.authConfig.supportsApiKey
+                ) {
+                  this.loginMode = "api_key";
+                }
+
+                // 提示文字
+                if (this.authConfig.authMode === "password") {
+                  this.statusHint = "请使用账号密码登录";
+                } else if (this.authConfig.authMode === "management_api_key") {
+                  this.statusHint = "请使用管理 API Key 登录";
+                } else {
+                  this.statusHint = "开放模式 — 可直接进入或创建会话";
+                }
+              }
+            } catch (e) {
+              this.statusHint = "请登录以继续";
+            }
+
+            // 从 URL 参数读取目标
+            const params = new URLSearchParams(window.location.search);
+            if (params.get("next") === "console") {
+              this.destination = "console";
+            }
+          },
+
+          redirectAfterLogin() {
+            if (this.destination === "console") {
+              window.location.href = "/console";
+            } else {
+              window.location.href = "/dashboard";
+            }
+          },
+
+          async doLogin(payload) {
+            this.errorMsg = "";
             this.loading = true;
             try {
-              const formData = new URLSearchParams();
-              formData.append("username", this.username.trim());
-              formData.append("password", this.password);
-
               const resp = await fetch("/api/auth/login", {
                 method: "POST",
-                headers: {
-                  "Content-Type": "application/x-www-form-urlencoded",
-                },
-                body: formData,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
               });
 
               const data = await resp.json();
@@ -203,20 +434,49 @@
                 return;
               }
 
-              // 保存 JWT 到 localStorage
               const token = data.access_token || data.token;
               if (token) {
                 localStorage.setItem("access_token", token);
                 localStorage.setItem("token_type", data.token_type || "bearer");
+                if (data.display_name) {
+                  localStorage.setItem("display_name", data.display_name);
+                }
               }
 
-              // 跳转到 dashboard
-              window.location.href = "/dashboard";
+              this.redirectAfterLogin();
             } catch (e) {
               this.errorMsg = "网络错误，请检查连接后重试";
             } finally {
               this.loading = false;
             }
+          },
+
+          handlePasswordLogin() {
+            if (!this.username.trim() || !this.password) {
+              this.errorMsg = "请输入用户名和密码";
+              return;
+            }
+            this.doLogin({
+              username: this.username.trim(),
+              password: this.password,
+            });
+          },
+
+          handleApiKeyLogin() {
+            if (!this.apiKey.trim()) {
+              this.errorMsg = "请输入管理 API Key";
+              return;
+            }
+            this.doLogin({
+              username: this.apiKeyName.trim(),
+              api_key: this.apiKey.trim(),
+            });
+          },
+
+          handleGuestLogin() {
+            // 开放模式直接跳转
+            localStorage.setItem("display_name", "访客");
+            this.redirectAfterLogin();
           },
         };
       }

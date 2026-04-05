@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""认证路由 — 登录端点 + 页面路由（login / dashboard）。"""
+"""认证路由 — 统一登录端点 + 页面路由（login / dashboard）。"""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ import hashlib
 import logging
 import secrets as _secrets
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import yaml
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from src.web.auth import create_access_token, get_current_user, verify_token
+from src.web.auth import create_access_token, get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -93,30 +93,174 @@ def reset_user_cache() -> None:
     _cached_users = None
 
 
+def _has_management_api_key() -> bool:
+    """检查是否配置了管理 API Key。"""
+    try:
+        from src.infrastructure.config_loader import load_settings
+
+        settings = load_settings()
+        from src.api.dependencies import is_management_auth_enabled
+
+        return is_management_auth_enabled(settings)
+    except Exception:
+        return False
+
+
+def _verify_api_key(presented_key: str) -> bool:
+    """验证管理 API Key（常时间比较）。"""
+    try:
+        from src.infrastructure.config_loader import load_settings
+
+        settings = load_settings()
+        from src.api.dependencies import _get_management_api_key
+
+        expected = _get_management_api_key(settings)
+        if not expected:
+            return False
+        return _secrets.compare_digest(presented_key, expected)
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
-# POST /api/auth/login — 登录端点
+# GET /api/auth/status — 认证模式查询（前端用于自适应 UI）
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/auth/status", tags=["auth"])
+async def auth_status(request: Request) -> Dict[str, Any]:
+    """返回当前认证配置，前端据此决定显示哪些登录字段。"""
+    # 优先使用 app.state.settings 判断安全配置是否存在
+    _security_disabled = False
+    try:
+        _settings = request.app.state.settings
+        if hasattr(_settings, "secrets") and "security" not in (_settings.secrets or {}):
+            _security_disabled = True
+    except Exception:
+        pass
+
+    if _security_disabled:
+        users: Dict[str, Dict[str, Any]] = {}
+        supports_api_key = False
+    else:
+        users = _load_users()
+        supports_api_key = _has_management_api_key()
+
+    supports_password = bool(users)
+    auth_required = supports_password or supports_api_key
+
+    if supports_password:
+        auth_mode = "password"
+    elif supports_api_key:
+        auth_mode = "management_api_key"
+    else:
+        auth_mode = "open"
+
+    return {
+        "auth_required": auth_required,
+        "auth_mode": auth_mode,
+        "supports_password_login": supports_password,
+        "supports_api_key_login": supports_api_key,
+        "guest_allowed": not auth_required,
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/login — 登录端点（同时支持 form 和 JSON）
 # ---------------------------------------------------------------------------
 
 
 @router.post("/api/auth/login", tags=["auth"])
 async def login(
-    username: str = Form(...),
-    password: str = Form(...),
+    request: Request,
 ) -> Dict[str, Any]:
-    """验证用户名密码，签发 JWT access token。"""
-    users = _load_users()
+    """统一登录端点：同时支持 form-urlencoded 和 JSON body。
 
-    # 无用户配置时提示
+    - form: ``username`` + ``password``
+    - JSON: ``{"username": "...", "password": "..."}`` 或 ``{"api_key": "..."}``
+    """
+    req_username: Optional[str] = None
+    req_password: Optional[str] = None
+    api_key: Optional[str] = None
+
+    content_type = (request.headers.get("content-type") or "").lower()
+
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                req_username = str(body.get("username") or "").strip()
+                req_password = str(body.get("password") or "")
+                api_key = str(body.get("api_key") or "").strip() or None
+        except Exception:
+            pass
+    elif "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+        try:
+            form_data = await request.form()
+            req_username = str(form_data.get("username") or "").strip()
+            req_password = str(form_data.get("password") or "")
+            api_key = str(form_data.get("api_key") or "").strip() or None
+        except Exception:
+            pass
+    else:
+        # 兼容客户端未携带明确 content-type 的场景，先尝试 JSON，再尝试表单。
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                req_username = str(body.get("username") or "").strip()
+                req_password = str(body.get("password") or "")
+                api_key = str(body.get("api_key") or "").strip() or None
+        except Exception:
+            try:
+                form_data = await request.form()
+                req_username = str(form_data.get("username") or "").strip()
+                req_password = str(form_data.get("password") or "")
+                api_key = str(form_data.get("api_key") or "").strip() or None
+            except Exception:
+                pass
+
+    # ---------- API Key 登录 ----------
+    if api_key:
+        if not _verify_api_key(api_key):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="管理 API Key 无效",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        display_name = (req_username or "").strip() or "管理员"
+        token = create_access_token(
+            user_id="api_key_user",
+            extra_claims={"display_name": display_name, "auth_source": "api_key"},
+        )
+        logger.info("API Key 登录成功 (display_name=%s)", display_name)
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "display_name": display_name,
+            "auth_source": "api_key",
+        }
+
+    # ---------- 用户名 + 密码登录 ----------
+    req_username = (req_username or "").strip()
+    req_password = req_password or ""
+
+    if not req_username or not req_password:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="请提供用户名和密码",
+        )
+
+    users = _load_users()
     if not users:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="系统尚未配置用户，请在 secrets.yml 的 security.console_auth.users 中添加用户",
         )
 
-    normalized = username.strip().lower()
+    normalized = req_username.lower()
     user = users.get(normalized)
 
-    if user is None or not _verify_password(user, password):
+    if user is None or not _verify_password(user, req_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码错误",
@@ -125,7 +269,7 @@ async def login(
 
     token = create_access_token(
         user_id=user["username"],
-        extra_claims={"display_name": user["display_name"]},
+        extra_claims={"display_name": user["display_name"], "auth_source": "password"},
     )
 
     logger.info("用户 %s 登录成功", user["username"])
@@ -133,6 +277,7 @@ async def login(
         "access_token": token,
         "token_type": "bearer",
         "display_name": user["display_name"],
+        "auth_source": "password",
     }
 
 

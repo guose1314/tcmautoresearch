@@ -8,8 +8,14 @@ from __future__ import annotations
 import time
 from unittest.mock import patch
 
-import jwt as pyjwt
 import pytest
+
+try:
+    import jwt as pyjwt
+except ModuleNotFoundError:
+    from src.web import auth as _web_auth
+
+    pyjwt = _web_auth.jwt
 
 # 使用固定密钥避免依赖 secrets.yml
 _TEST_JWT_CONFIG = {

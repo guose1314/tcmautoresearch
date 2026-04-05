@@ -7,7 +7,8 @@ from typing import Any, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 from src.api.app import _probe_response, configure_api_services, include_api_routers
 from src.api.dependencies import (
@@ -21,6 +22,7 @@ from web_console.job_manager import ResearchJobManager
 
 STATIC_DIR = Path(__file__).with_name("static")
 INDEX_FILE = STATIC_DIR / "index.html"
+_WEB_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "src" / "web" / "templates"
 
 
 def create_app(
@@ -57,9 +59,23 @@ def create_app(
     def shutdown_job_manager() -> None:
         manager.close()
 
+    # ---- 控制台 SPA (先于 auth_router 注册，确保 "/" 返回 SPA) ----
+    @app.get("/console", response_class=FileResponse)
+    def console_page() -> FileResponse:
+        return FileResponse(INDEX_FILE)
+
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(INDEX_FILE)
+
+    # ---- 统一 JWT 认证路由 (共享 src/web/routes/auth) ----
+    from src.web.routes.auth import router as auth_router
+
+    app.include_router(auth_router)
+
+    # ---- Jinja2 模板支持 (统一登录页) ----
+    if _WEB_TEMPLATES_DIR.is_dir():
+        app.state.templates = Jinja2Templates(directory=str(_WEB_TEMPLATES_DIR))
 
     @app.get("/api/console/auth/status")
     @app.get("/api/v1/console/auth/status")
