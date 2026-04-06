@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.llm.llm_service import (  # noqa: E402
+from src.infra.llm_service import (  # noqa: E402
     APILLMEngine,
     CachedLLMService,
     LLMService,
@@ -324,7 +324,7 @@ class TestFromGapConfig(unittest.TestCase):
         }
 
         # 用 patch 避免真实 LLMEngine 初始化（llama-cpp-python 不一定已安装）
-        with patch("src.llm.llm_service.CachedLLMService.from_engine_config") as mock_fec:
+        with patch("src.infra.llm_service.CachedLLMService.from_engine_config") as mock_fec:
             mock_fec.return_value = MagicMock(spec=CachedLLMService)
             _ = CachedLLMService.from_gap_config(gap_config, llm_config)
             mock_fec.assert_called_once()
@@ -343,7 +343,7 @@ class TestFromGapConfig(unittest.TestCase):
             "cache_enabled": False,
             "cache_dir": tempfile.mkdtemp(),
         }
-        with patch("src.llm.llm_service.CachedLLMService.from_engine_config") as mock_fec:
+        with patch("src.infra.llm_service.CachedLLMService.from_engine_config") as mock_fec:
             mock_fec.return_value = MagicMock(spec=CachedLLMService)
             CachedLLMService.from_gap_config(gap_config, llm_config)
             call_kwargs = mock_fec.call_args[1]
@@ -364,7 +364,7 @@ class TestFromGapConfig(unittest.TestCase):
             "cache_ttl_seconds": None,
         }
 
-        with patch("src.llm.llm_service.CachedLLMService.from_api_config") as mock_fac:
+        with patch("src.infra.llm_service.CachedLLMService.from_api_config") as mock_fac:
             mock_fac.return_value = MagicMock(spec=CachedLLMService)
             _ = CachedLLMService.from_gap_config(gap_config, llm_config)
             mock_fac.assert_called_once()

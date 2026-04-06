@@ -73,7 +73,7 @@ except Exception:
 LLMEngine = _ImportedLLMEngine
 
 try:
-    from src.llm.llm_service import CachedLLMService as _ImportedCachedLLMService
+    from src.infra.llm_service import CachedLLMService as _ImportedCachedLLMService
 except Exception:
     _ImportedCachedLLMService = None
 

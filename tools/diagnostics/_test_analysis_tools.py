@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Test all three analysis tools + ORM persistence."""
 import json
 import sqlite3
@@ -24,9 +24,9 @@ rel_before = conn.execute("SELECT COUNT(*) FROM entity_relationships").fetchone(
 print(f"[DB BEFORE] docs={doc_before}, entities={ent_before}, relations={rel_before}")
 conn.close()
 
-# ====== 1) 文本处理链 /api/analysis/text ======
-print("\n========== 1) 文本处理链 ==========")
-text1 = "麻黄汤由麻黄、桂枝、杏仁、甘草组成，主治太阳伤寒表实证。麻黄辛温发汗解表，桂枝助麻黄发汗并温经止痛。"
+# ====== 1) 鏂囨湰澶勭悊閾?/api/analysis/text ======
+print("\n========== 1) 鏂囨湰澶勭悊閾?==========")
+text1 = "楹婚粍姹ょ敱楹婚粍銆佹鏋濄€佹潖浠併€佺敇鑽夌粍鎴愶紝涓绘不澶槼浼ゅ瘨琛ㄥ疄璇併€傞夯榛勮緵娓╁彂姹楄В琛紝妗傛灊鍔╅夯榛勫彂姹楀苟娓╃粡姝㈢棝銆?
 t0 = time.time()
 r = s.post(f"{BASE}/api/analysis/text", json={"raw_text": text1}, headers=headers, timeout=30)
 print(f"  Status: {r.status_code}, Time: {time.time()-t0:.1f}s")
@@ -41,13 +41,13 @@ if r.status_code == 200:
 else:
     print(f"  ERROR: {r.text[:300]}")
 
-# ====== 2) 方剂综合分析 /api/analysis/formula ======
-print("\n========== 2) 方剂综合分析 ==========")
+# ====== 2) 鏂瑰墏缁煎悎鍒嗘瀽 /api/analysis/formula ======
+print("\n========== 2) 鏂瑰墏缁煎悎鍒嗘瀽 ==========")
 body2 = {
     "perspective": {
-        "formula_name": "桂枝汤",
-        "herbs": ["桂枝", "芍药", "甘草", "生姜", "大枣"],
-        "description": "调和营卫，解肌发表",
+        "formula_name": "妗傛灊姹?,
+        "herbs": ["妗傛灊", "鑺嶈嵂", "鐢樿崏", "鐢熷", "澶ф灒"],
+        "description": "璋冨拰钀ュ崼锛岃В鑲屽彂琛?,
     }
 }
 t0 = time.time()
@@ -61,9 +61,9 @@ if r.status_code == 200:
 else:
     print(f"  ERROR: {r.text[:300]}")
 
-# ====== 3) 知识图谱生成 (text → graph) ======
-print("\n========== 3) 知识图谱生成 ==========")
-text3 = "桂枝汤主治太阳中风，头痛发热，汗出恶风。桂枝辛温解肌，芍药酸寒敛阴。甘草调和诸药，生姜辛温散寒，大枣甘平补脾。"
+# ====== 3) 鐭ヨ瘑鍥捐氨鐢熸垚 (text 鈫?graph) ======
+print("\n========== 3) 鐭ヨ瘑鍥捐氨鐢熸垚 ==========")
+text3 = "妗傛灊姹や富娌诲お闃充腑椋庯紝澶寸棝鍙戠儹锛屾睏鍑烘伓椋庛€傛鏋濊緵娓╄В鑲岋紝鑺嶈嵂閰稿瘨鏁涢槾銆傜敇鑽夎皟鍜岃鑽紝鐢熷杈涙俯鏁ｅ瘨锛屽ぇ鏋ｇ敇骞宠ˉ鑴俱€?
 t0 = time.time()
 r = s.post(f"{BASE}/api/analysis/text", json={"raw_text": text3}, headers=headers, timeout=30)
 print(f"  Status: {r.status_code}, Time: {time.time()-t0:.1f}s")
@@ -86,13 +86,13 @@ rel_after = conn.execute("SELECT COUNT(*) FROM entity_relationships").fetchone()
 print(f"\n[DB AFTER] docs={doc_after} (+{doc_after-doc_before}), entities={ent_after} (+{ent_after-ent_before}), relations={rel_after} (+{rel_after-rel_before})")
 conn.close()
 
-# ====== 4) 分析工具页面 HTML 检查 ======
-print("\n========== 4) 分析工具页面 ==========")
+# ====== 4) 鍒嗘瀽宸ュ叿椤甸潰 HTML 妫€鏌?======
+print("\n========== 4) 鍒嗘瀽宸ュ叿椤甸潰 ==========")
 r = s.get(f"{BASE}/api/analysis/tools", headers=headers)
 print(f"  Status: {r.status_code}, Content-Length: {len(r.text)}")
 for fn in ["runTextPipeline", "runFormulaAnalysis", "runKgGenerate", "runKgDistill", "openTool"]:
     found = fn in r.text
-    print(f"  JS function '{fn}': {'✓ found' if found else '✗ MISSING'}")
+    print(f"  JS function '{fn}': {'鉁?found' if found else '鉁?MISSING'}")
 for btn_id in ["tool-btn-text", "tool-btn-formula", "tool-btn-kg"]:
     found = btn_id in r.text
-    print(f"  Button '{btn_id}': {'✓ found' if found else '✗ MISSING'}")
+    print(f"  Button '{btn_id}': {'鉁?found' if found else '鉁?MISSING'}")

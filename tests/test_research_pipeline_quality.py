@@ -301,7 +301,7 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertIn("error", result)
 
     def test_run_clinical_gap_analysis_success_and_error(self):
-        from src.llm.llm_service import CachedLLMService
+        from src.infra.llm_service import CachedLLMService
 
         class _GoodService:
             def load(self): return None

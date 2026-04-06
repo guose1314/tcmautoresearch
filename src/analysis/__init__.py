@@ -18,7 +18,7 @@ from src.analysis.data_mining import DataMiningService
 from src.analysis.entity_extractor import AdvancedEntityExtractor
 from src.analysis.formula_comparator import FormulaComparator
 from src.analysis.formula_structure import FormulaStructureAnalyzer
-from src.analysis.gap_analyzer import GapAnalysisRequest, GapAnalyzer
+from src.research.gap_analyzer import GapAnalysisRequest, GapAnalyzer
 from src.analysis.herb_properties import (
     HerbPropertyDatabase,
     HerbTemperature,

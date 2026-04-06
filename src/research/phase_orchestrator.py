@@ -21,7 +21,7 @@ from src.research.study_session_manager import (
 
 # Keep a module-local symbol for lazy loading, mirroring research_pipeline behavior.
 try:
-    from src.llm.llm_service import CachedLLMService as _ImportedCachedLLMService
+    from src.infra.llm_service import CachedLLMService as _ImportedCachedLLMService
 except Exception:
     _ImportedCachedLLMService = None
 
@@ -561,7 +561,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
     ) -> Dict[str, Any]:
         global CachedLLMService
         if CachedLLMService is None:
-            from src.llm.llm_service import CachedLLMService as _CLS
+            from src.infra.llm_service import CachedLLMService as _CLS
 
             CachedLLMService = _CLS
 

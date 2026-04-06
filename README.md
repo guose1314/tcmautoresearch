@@ -353,8 +353,8 @@ python tools/innovation_incentives.py --input docs/templates/innovation-profile.
 系统运行
 # 简单使用示例
 from src.core.architecture import SystemArchitecture
-from src.preprocessor.document_preprocessor import DocumentPreprocessor
-from src.extractors.advanced_entity_extractor import AdvancedEntityExtractor
+from src.analysis.preprocessor import DocumentPreprocessor
+from src.analysis.entity_extractor import AdvancedEntityExtractor
 
 # 创建系统架构
 system = SystemArchitecture()

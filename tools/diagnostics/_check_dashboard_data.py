@@ -1,4 +1,4 @@
-"""Check dashboard data values."""
+﻿"""Check dashboard data values."""
 import re
 
 import requests
@@ -27,7 +27,7 @@ print("\n=== Quality Score ===")
 score = re.findall(r'font-bold.*?">(.*?)</span>', r.text)
 if score:
     print(f"  Overall Score: {score[0]}")
-metrics = re.findall(r'(知识实体覆盖|知识关系密度|论文产出|研究课题完成).*?font-medium">(.*?)</span>', r.text)
+metrics = re.findall(r'(鐭ヨ瘑瀹炰綋瑕嗙洊|鐭ヨ瘑鍏崇郴瀵嗗害|璁烘枃浜у嚭|鐮旂┒璇鹃瀹屾垚).*?font-medium">(.*?)</span>', r.text)
 for label, value in metrics:
     print(f"  {label}: {value}")
 

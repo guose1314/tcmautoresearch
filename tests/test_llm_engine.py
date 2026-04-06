@@ -4,7 +4,7 @@ import types
 import unittest
 from unittest.mock import patch
 
-from src.analysis.gap_analyzer import GapAnalyzer
+from src.research.gap_analyzer import GapAnalyzer
 from src.llm.llm_engine import LLMEngine, setup_cuda_dll_paths
 
 

@@ -141,3 +141,14 @@ secrets/
 !secrets/.gitkeep
 !secrets/*.example.yml
 !secrets/*.example.yaml
+
+# Test/benchmark artifacts
+storage_*.json
+coverage.json
+tmp*/
+
+# LLM cache (runtime generated)
+cache/llm/
+
+# Embedding index cache (runtime generated)
+cache/embedding_indexes/

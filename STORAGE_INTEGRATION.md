@@ -116,11 +116,11 @@ from pathlib import Path
 
 # 导入存储模块
 from src.storage import UnifiedStorageDriver
-from src.extractors.advanced_entity_extractor import AdvancedEntityExtractor
+from src.analysis.entity_extractor import AdvancedEntityExtractor
 from src.output.output_generator import OutputGenerator
-from src.preprocessor.document_preprocessor import DocumentPreprocessor
-from src.reasoning.reasoning_engine import ReasoningEngine
-from src.semantic_modeling.semantic_graph_builder import SemanticGraphBuilder
+from src.analysis.preprocessor import DocumentPreprocessor
+from src.analysis.reasoning_engine import ReasoningEngine
+from src.analysis.semantic_graph import SemanticGraphBuilder
 
 logger = logging.getLogger(__name__)
 
