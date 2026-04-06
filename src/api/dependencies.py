@@ -101,6 +101,28 @@ def get_console_auth_service(request: Request) -> "ConsoleAuthService":
     return get_console_auth_service_from_state(request.app.state, settings)
 
 
+def _try_resolve_jwt_principal(token: str) -> dict[str, Any] | None:
+    """尝试将 token 作为 JWT 解析，成功则返回 principal dict，否则 None。"""
+    try:
+        from src.web.auth import verify_token
+
+        jwt_payload = verify_token(token)
+    except Exception:
+        jwt_payload = None
+
+    if not isinstance(jwt_payload, dict):
+        return None
+
+    user_id = str(jwt_payload.get("sub") or jwt_payload.get("user_id") or "").strip()
+    principal = str(jwt_payload.get("display_name") or user_id or "用户").strip()
+    auth_source = str(jwt_payload.get("auth_source") or "jwt").strip() or "jwt"
+    return {
+        "principal": principal,
+        "auth_source": auth_source,
+        "user_id": user_id,
+    }
+
+
 def resolve_authenticated_console_principal(
     presented_key: str,
     settings: AppSettings,
@@ -120,22 +142,9 @@ def resolve_authenticated_console_principal(
 
     # 统一登录页签发的 JWT 也允许访问 Console API（用于 jobs / dashboard / events）。
     if normalized_key:
-        try:
-            from src.web.auth import verify_token
-
-            jwt_payload = verify_token(normalized_key)
-        except Exception:
-            jwt_payload = None
-
-        if isinstance(jwt_payload, dict):
-            user_id = str(jwt_payload.get("sub") or jwt_payload.get("user_id") or "").strip()
-            principal = str(jwt_payload.get("display_name") or user_id or "用户").strip()
-            auth_source = str(jwt_payload.get("auth_source") or "jwt").strip() or "jwt"
-            return {
-                "principal": principal,
-                "auth_source": auth_source,
-                "user_id": user_id,
-            }
+        jwt_principal = _try_resolve_jwt_principal(normalized_key)
+        if jwt_principal is not None:
+            return jwt_principal
 
     if not expected_key and not console_auth_service.auth_required:
         return {

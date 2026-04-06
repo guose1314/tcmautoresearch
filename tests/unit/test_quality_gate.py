@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tools.quality_gate import (
     GateResult,
@@ -15,6 +16,7 @@ from tools.quality_gate import (
     run_quality_consumer_inventory_gate,
     run_quality_feedback_gate,
     run_quality_improvement_archive_gate,
+    run_real_observe_smoke_gate,
     run_unit_test_gate,
 )
 
@@ -324,6 +326,74 @@ class TestQualityGate(unittest.TestCase):
             self.assertTrue((root / result.details["inventory_report"]).exists())
             report = json.loads((root / result.details["inventory_report"]).read_text(encoding="utf-8"))
             self.assertEqual(report["report_metadata"]["contract_version"], "d62.v1")
+
+    def test_run_real_observe_smoke_gate_reads_smoke_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_dir = root / "output" / "real_observe_smoke"
+            output_dir.mkdir(parents=True)
+            (root / "tools" / "diagnostics").mkdir(parents=True)
+            (root / "tools" / "diagnostics" / "run_real_observe_smoke.py").write_text(
+                "print('stub runner')\n",
+                encoding="utf-8",
+            )
+            (root / "tools" / "diagnostics" / "real_observe_smoke_profile.json").write_text(
+                "{}\n",
+                encoding="utf-8",
+            )
+            (output_dir / "latest.json").write_text(
+                json.dumps(
+                    {
+                        "profile_name": "real_observe_local_formula_20x3000",
+                        "processed_document_count": 20,
+                        "record_count": 16,
+                        "p_value": 0.029345,
+                        "effect_size": 0.5447,
+                        "kg_path_count": 50,
+                        "association_rule_count": 20,
+                        "frequency_signal_count": 15,
+                        "validation_status": "passed",
+                        "violations": [],
+                        "primary_association": {"herb": "贝母", "syndrome": "咳嗽"},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (output_dir / "dossier.md").write_text("# dossier\n", encoding="utf-8")
+            (output_dir / "timeline.jsonl").write_text("{}\n", encoding="utf-8")
+
+            completed = __import__("subprocess").CompletedProcess(
+                args=["python"],
+                returncode=0,
+                stdout='{"validation_status": "passed"}',
+                stderr="",
+            )
+            with patch("tools.quality_gate.subprocess.run", return_value=completed) as run_mock:
+                result = run_real_observe_smoke_gate(
+                    root,
+                    {
+                        "real_observe_smoke_profile": "tools/diagnostics/real_observe_smoke_profile.json",
+                        "real_observe_smoke_output_dir": "output/real_observe_smoke",
+                        "real_observe_smoke_timeout_seconds": 60,
+                    },
+                )
+
+            self.assertTrue(result.success)
+            self.assertEqual(result.metrics["processed_document_count"], 20)
+            self.assertEqual(result.metrics["record_count"], 16)
+            self.assertEqual(result.metrics["association_rule_count"], 20)
+            self.assertEqual(result.details["validation_status"], "passed")
+            self.assertEqual(result.details["primary_association"]["herb"], "贝母")
+            self.assertEqual(
+                result.details["outputs"],
+                {
+                    "latest_json": "output/real_observe_smoke/latest.json",
+                    "dossier_markdown": "output/real_observe_smoke/dossier.md",
+                    "timeline_file": "output/real_observe_smoke/timeline.jsonl",
+                },
+            )
+            self.assertEqual(run_mock.call_args.kwargs["timeout"], 60)
 
 
 if __name__ == "__main__":

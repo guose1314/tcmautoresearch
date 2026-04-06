@@ -71,11 +71,19 @@ probes:
     failureThreshold: 3
 
 secrets:
+  # -- Set to false to disable Secret creation entirely (e.g. secrets managed externally)
   create: true
+  # -- Use a pre-existing Secret instead of creating one; set create=false when using this
   existingSecret: ""
   stringData:
+    # ── Database (PostgreSQL) ──
+    TCM_DB_PASSWORD: "replace-with-postgresql-password"
+    # ── Graph database (Neo4j) ──
+    TCM_NEO4J_PASSWORD: "replace-with-neo4j-password"
+    # ── LLM API keys ──
     TCM_SECRET__MODELS__LLM__API_KEY: "sk-prod-xxx"
     TCM_SECRET__CLINICAL_GAP_ANALYSIS__API_KEY: "sk-gap-prod-xxx"
+    # ── Literature retrieval ──
     TCM_SECRET__LITERATURE_RETRIEVAL__PUBMED_EMAIL: "research@example.com"
     TCM_SECRET__LITERATURE_RETRIEVAL__PUBMED_API_KEY: "pubmed-prod-key"
     TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__SCOPUS__API_KEY: "scopus-prod-key"
@@ -85,5 +93,8 @@ secrets:
     TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__LEXICOMP__API_KEY: "lexicomp-prod-key"
     TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__CLINICALKEY__API_KEY: "clinicalkey-prod-key"
     TCM_SECRET__LITERATURE_RETRIEVAL__SOURCE_CREDENTIALS__GOOGLE_SCHOLAR__API_KEY: "google-scholar-provider-key"
+    # ── Monitoring & alerting ──
     TCM_SECRET__MONITORING__ALERTING__EMAIL__PASSWORD: "smtp-prod-password"
     TCM_SECRET__MONITORING__ALERTING__WEBHOOK_URL: "https://hooks.example.com/prod"
+    # ── Security ──
+    TCM_SECRET__SECURITY__MANAGEMENT_API_KEY: "replace-with-management-api-key"

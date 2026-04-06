@@ -1,17 +1,64 @@
 version: "3.9"
 
 services:
+  # ── PostgreSQL ──
+  postgres:
+    image: postgres:16-alpine
+    container_name: tcmautoresearch-pg
+    environment:
+      POSTGRES_DB: tcmautoresearch
+      POSTGRES_USER: tcm
+      POSTGRES_PASSWORD: ${TCM_DB_PASSWORD:?set TCM_DB_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tcm -d tcmautoresearch"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Neo4j ──
+  neo4j:
+    image: neo4j:5-community
+    container_name: tcmautoresearch-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/${TCM_NEO4J_PASSWORD:?set TCM_NEO4J_PASSWORD}
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4jdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p $TCM_NEO4J_PASSWORD 'RETURN 1' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── Application ──
   tcmautoresearch:
     build:
       context: .
       dockerfile: Dockerfile
     image: tcmautoresearch:local
     container_name: tcmautoresearch-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
     ports:
       - "8000:8000"
     environment:
       TCM_ENV: production
       TCM_LOG_LEVEL: WARNING
+      TCM_DB_PASSWORD: ${TCM_DB_PASSWORD}
+      TCM_NEO4J_PASSWORD: ${TCM_NEO4J_PASSWORD}
     volumes:
       - ./config.yml:/app/config.yml:ro
       - ./config:/app/config:ro
@@ -26,3 +73,7 @@ services:
       retries: 3
       start_period: 20s
     restart: unless-stopped
+
+volumes:
+  pgdata:
+  neo4jdata:

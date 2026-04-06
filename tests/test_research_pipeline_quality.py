@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
+from src.research import research_pipeline
 from src.research.research_pipeline import (
     ResearchCycleStatus,
     ResearchPhase,
@@ -167,6 +168,222 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertTrue(result["metadata"]["evidence_grade_generated"])
         self.assertEqual(result["metadata"]["evidence_study_count"], 2)
 
+    def test_analyze_phase_uses_reasoning_engine_and_real_statistical_signal(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="analyze-real-modules-cycle",
+            description="analyze real modules",
+            objective="connect analyze phase to reasoning engine",
+            scope="src/research",
+            researchers=["tester"],
+        )
+        self.assertTrue(self.pipeline.start_research_cycle(cycle.cycle_id))
+
+        def _build_document(title, formula, syndrome, sovereign_herb, minister_herb, efficacy):
+            return {
+                "urn": title,
+                "title": title,
+                "semantic_relationships": [
+                    {
+                        "source": formula,
+                        "target": sovereign_herb,
+                        "type": "sovereign",
+                        "source_type": "formula",
+                        "target_type": "herb",
+                        "metadata": {"confidence": 0.95, "source": "observe_semantic_graph"},
+                    },
+                    {
+                        "source": formula,
+                        "target": minister_herb,
+                        "type": "minister",
+                        "source_type": "formula",
+                        "target_type": "herb",
+                        "metadata": {"confidence": 0.91, "source": "observe_semantic_graph"},
+                    },
+                    {
+                        "source": formula,
+                        "target": syndrome,
+                        "type": "treats",
+                        "source_type": "formula",
+                        "target_type": "syndrome",
+                        "metadata": {"confidence": 0.89, "source": "observe_semantic_graph"},
+                    },
+                    {
+                        "source": sovereign_herb,
+                        "target": efficacy,
+                        "type": "efficacy",
+                        "source_type": "herb",
+                        "target_type": "efficacy",
+                        "metadata": {"confidence": 0.87, "source": "observe_semantic_graph"},
+                    },
+                ],
+            }
+
+        documents = [
+            _build_document(f"gz-{index}", "桂枝汤", "太阳中风证", "桂枝", "白芍", "解肌发表")
+            for index in range(5)
+        ] + [
+            _build_document(f"hq-{index}", "黄芩汤", "少阳热证", "黄芩", "黄连", "清热燥湿")
+            for index in range(5)
+        ]
+        cycle.phase_executions[ResearchPhase.OBSERVE] = {
+            "result": {
+                "ingestion_pipeline": {
+                    "documents": documents,
+                }
+            }
+        }
+
+        result = self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.ANALYZE, {})
+
+        self.assertEqual(result["phase"], "analyze")
+        self.assertIn("reasoning_results", result)
+        self.assertIn("data_mining_result", result)
+        self.assertIn("reasoning_engine", result["metadata"]["analysis_modules"])
+        self.assertIn("statistical_data_miner", result["metadata"]["analysis_modules"])
+        self.assertIn("frequency_chi_square", result["data_mining_result"]["methods_executed"])
+
+        statistical_analysis = result["results"]["statistical_analysis"]
+        self.assertTrue(statistical_analysis["statistical_significance"])
+        self.assertIsNotNone(statistical_analysis["p_value"])
+        self.assertLess(statistical_analysis["p_value"], 0.05)
+        self.assertNotEqual(statistical_analysis["p_value"], 0.003)
+        self.assertGreater(statistical_analysis["effect_size"], 0.0)
+        self.assertIn("桂枝", statistical_analysis["interpretation"])
+
+        reasoning_payload = result["reasoning_results"]
+        self.assertTrue(reasoning_payload.get("kg_paths"))
+        self.assertGreater(
+            float((reasoning_payload.get("reasoning_results") or {}).get("inference_confidence") or 0.0),
+            0.0,
+        )
+
+    def test_publish_phase_exposes_primary_association_and_data_mining_aliases(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="publish-analysis-alias-cycle",
+            description="publish aliases",
+            objective="expose publish analysis aliases",
+            scope="src/research",
+            researchers=["tester"],
+        )
+        self.assertTrue(self.pipeline.start_research_cycle(cycle.cycle_id))
+
+        def _build_document(title, formula, syndrome, herbs, efficacy):
+            relationships = [
+                {
+                    "source": formula,
+                    "target": syndrome,
+                    "type": "treats",
+                    "source_type": "formula",
+                    "target_type": "syndrome",
+                    "metadata": {"confidence": 0.93, "source": "observe_semantic_graph"},
+                }
+            ]
+            for herb_index, herb in enumerate(herbs):
+                relationships.append(
+                    {
+                        "source": formula,
+                        "target": herb,
+                        "type": "ingredient",
+                        "source_type": "formula",
+                        "target_type": "herb",
+                        "metadata": {
+                            "confidence": 0.9 - herb_index * 0.05,
+                            "source": "observe_semantic_graph",
+                        },
+                    }
+                )
+            relationships.append(
+                {
+                    "source": herbs[0],
+                    "target": efficacy,
+                    "type": "efficacy",
+                    "source_type": "herb",
+                    "target_type": "efficacy",
+                    "metadata": {"confidence": 0.88, "source": "observe_semantic_graph"},
+                }
+            )
+            return {
+                "urn": title,
+                "title": title,
+                "semantic_relationships": relationships,
+            }
+
+        documents = [
+            _build_document(f"gz-{index}", "桂枝汤", "太阳中风证", ["桂枝", "白芍"], "解肌发表")
+            for index in range(6)
+        ] + [
+            _build_document(f"sx-{index}", "四物汤", "血虚证", ["当归", "白芍"], "养血调经")
+            for index in range(4)
+        ]
+        cycle.phase_executions[ResearchPhase.OBSERVE] = {
+            "result": {
+                "ingestion_pipeline": {
+                    "documents": documents,
+                }
+            }
+        }
+
+        analyze_result = self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.ANALYZE, {})
+        self.assertEqual(analyze_result["phase"], "analyze")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            publish_result = self.pipeline.execute_research_phase(
+                cycle.cycle_id,
+                ResearchPhase.PUBLISH,
+                {
+                    "paper_output_dir": temp_dir,
+                    "output_dir": temp_dir,
+                    "paper_output_formats": ["markdown"],
+                    "report_output_formats": ["markdown"],
+                },
+            )
+
+        self.assertEqual(publish_result["phase"], "publish")
+        analysis_results = publish_result["analysis_results"]
+        research_artifact = publish_result["research_artifact"]
+        statistical_analysis = analysis_results["statistical_analysis"]
+
+        self.assertIsInstance(statistical_analysis.get("primary_association"), dict)
+        self.assertEqual(analysis_results["primary_association"], statistical_analysis["primary_association"])
+        self.assertNotIn("statistical_analysis", statistical_analysis)
+
+        self.assertIn("data_mining_result", analysis_results)
+        self.assertIn("data_mining_methods", analysis_results)
+        self.assertIn("data_mining_summary", analysis_results)
+        self.assertIn("frequency_chi_square", analysis_results)
+        self.assertIn("association_rules", analysis_results)
+        self.assertEqual(
+            analysis_results["data_mining_methods"],
+            analysis_results["data_mining_result"]["methods_executed"],
+        )
+        self.assertEqual(
+            analysis_results["data_mining_summary"]["record_count"],
+            analysis_results["data_mining_result"]["record_count"],
+        )
+        self.assertEqual(
+            analysis_results["data_mining_summary"]["association_rule_count"],
+            len(analysis_results["data_mining_result"]["association_rules"]["rules"]),
+        )
+        self.assertEqual(
+            analysis_results["data_mining_summary"]["cluster_count"],
+            len(analysis_results["data_mining_result"].get("clustering", {}).get("cluster_summary", [])),
+        )
+        self.assertEqual(
+            analysis_results["data_mining_summary"]["frequency_signal_count"],
+            len(analysis_results["data_mining_result"]["frequency_chi_square"]["chi_square_top"]),
+        )
+
+        self.assertEqual(research_artifact["primary_association"], statistical_analysis["primary_association"])
+        self.assertIn("data_mining_result", research_artifact)
+        self.assertIn("data_mining_methods", research_artifact)
+        self.assertIn("data_mining_summary", research_artifact)
+        self.assertIn("frequency_chi_square", research_artifact)
+        self.assertIn("association_rules", research_artifact)
+        self.assertEqual(
+            research_artifact["data_mining_summary"]["association_rule_count"],
+            len(research_artifact["data_mining_result"]["association_rules"]["rules"]),
+        )
+
     def test_collect_and_resolve_ctext_config(self):
         pipeline = ResearchPipeline(
             {
@@ -202,6 +419,26 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.get("sources"), ["local"])
         self.assertNotIn("error", result)
+
+    def test_module_factory_recovers_semantic_graph_builder_after_placeholder_import(self):
+        fallback_class = research_pipeline._build_unavailable_module("SemanticGraphBuilder")
+
+        with patch.object(research_pipeline, "SemanticGraphBuilder", fallback_class):
+            pipeline = research_pipeline.ResearchPipeline({})
+            builder = None
+            try:
+                builder = pipeline.create_module("semantic_graph_builder", {})
+
+                self.assertFalse(
+                    bool(getattr(builder.__class__, "_copilot_unavailable_placeholder", False))
+                )
+                self.assertEqual(builder.__class__.__module__, "src.analysis.semantic_graph")
+                self.assertTrue(builder.initialize())
+                self.assertEqual(pipeline.SemanticGraphBuilder.__module__, "src.analysis.semantic_graph")
+            finally:
+                if builder is not None:
+                    builder.cleanup()
+                pipeline.cleanup()
 
     def test_build_observe_metadata_marks_local_bundle_without_ctext(self):
         local_bundle = {

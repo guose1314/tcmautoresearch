@@ -1,8 +1,56 @@
 environment:
   name: "production"
 
+# ── CORS：生产环境收紧，仅允许同源 + 显式白名单 ──
+api:
+  cors_origins:
+    - "http://localhost:8000"
+    - "https://localhost:8000"
+  cors_methods:
+    - "GET"
+    - "POST"
+    - "PUT"
+    - "DELETE"
+    - "OPTIONS"
+  cors_headers:
+    - "Content-Type"
+    - "Authorization"
+    - "X-API-Key"
+    - "X-Request-ID"
+
+web_console:
+  cors_origins:
+    - "http://localhost:8000"
+    - "https://localhost:8000"
+  cors_methods:
+    - "GET"
+    - "POST"
+    - "PUT"
+    - "DELETE"
+    - "OPTIONS"
+  cors_headers:
+    - "Content-Type"
+    - "Authorization"
+    - "X-API-Key"
+    - "X-Request-ID"
+
+# ── 关系型数据库：生产环境使用 PostgreSQL ──
 database:
-  path: "./data/production/tcmautoresearch.db"
+  type: "postgresql"
+  host: "postgres"                       # docker-compose 服务名
+  port: 5432
+  name: "tcmautoresearch"
+  user: "tcm"
+  password_env: "TCM_DB_PASSWORD"        # 从环境变量读取密码
+  connection_pool_size: 20
+  max_overflow: 40
+
+# ── 图数据库：生产环境启用 Neo4j ──
+neo4j:
+  enabled: true
+  uri: "neo4j://neo4j:7687"             # docker-compose 服务名
+  user: "neo4j"
+  password_env: "TCM_NEO4J_PASSWORD"
 
 output:
   directory: "./output/production"

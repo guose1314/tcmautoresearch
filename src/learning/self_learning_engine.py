@@ -25,9 +25,11 @@ class LearningRecord:
     performance: float
     timestamp: str
     feedback: Optional[float] = None
+    phase: Optional[str] = None
+    quality_dimensions: Optional[Dict[str, float]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "task_id": self.task_id,
             "input_data": self.input_data,
             "output_data": self.output_data,
@@ -35,6 +37,11 @@ class LearningRecord:
             "timestamp": self.timestamp,
             "feedback": self.feedback,
         }
+        if self.phase is not None:
+            d["phase"] = self.phase
+        if self.quality_dimensions is not None:
+            d["quality_dimensions"] = self.quality_dimensions
+        return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "LearningRecord":
@@ -45,6 +52,8 @@ class LearningRecord:
             performance=float(data.get("performance", 0.0)),
             timestamp=data.get("timestamp", datetime.now().isoformat()),
             feedback=data.get("feedback"),
+            phase=data.get("phase"),
+            quality_dimensions=data.get("quality_dimensions"),
         )
 
 
@@ -66,6 +75,7 @@ class SelfLearningEngine(BaseModule):
         self._ewma_score: Optional[float] = None
         self._pattern_recognizer = None
         self._adaptive_tuner = None
+        self._dimension_trends: Dict[str, List[float]] = {}
 
     def _do_initialize(self) -> bool:
         try:
@@ -265,6 +275,231 @@ class SelfLearningEngine(BaseModule):
                 return True
         return False
 
+    # ------------------------------------------------------------------
+    # 结构化质量反馈接口 — 接收 QualityAssessor 评估结果
+    # ------------------------------------------------------------------
+
+    def learn_from_quality_assessment(
+        self, phase: str, quality_score: "Any", result: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """从 QualityAssessor.assess_quality() 的 QualityScore 学习。
+
+        Args:
+            phase: 研究阶段名称 (observe/hypothesis/experiment/analyze/publish/reflect)
+            quality_score: QualityScore 对象或包含 overall_score 的 dict
+            result: 原始阶段产出 (可选)
+        Returns:
+            True 表示记录成功
+        """
+        try:
+            if hasattr(quality_score, "overall_score"):
+                overall = float(quality_score.overall_score)
+                dims = {
+                    "completeness": float(quality_score.completeness),
+                    "consistency": float(quality_score.consistency),
+                    "evidence_quality": float(quality_score.evidence_quality),
+                }
+                grade = getattr(quality_score, "grade_level", "unknown")
+            elif isinstance(quality_score, dict):
+                overall = float(quality_score.get("overall_score", 0.0))
+                dims = {
+                    "completeness": float(quality_score.get("completeness", 0.0)),
+                    "consistency": float(quality_score.get("consistency", 0.0)),
+                    "evidence_quality": float(quality_score.get("evidence_quality", 0.0)),
+                }
+                grade = quality_score.get("grade_level", "unknown")
+            else:
+                return False
+
+            task_id = hashlib.md5(
+                f"{phase}:{datetime.now().isoformat()}".encode()
+            ).hexdigest()[:16]
+
+            record = LearningRecord(
+                task_id=task_id,
+                input_data={"phase": phase, "grade": grade},
+                output_data={"result_keys": list((result or {}).keys())[:20]},
+                performance=overall,
+                timestamp=datetime.now().isoformat(),
+                feedback=overall,
+                phase=phase,
+                quality_dimensions=dims,
+            )
+            self.learning_records.append(record)
+            self.performance_history.append(overall)
+
+            if self._ewma_score is None:
+                self._ewma_score = overall
+            else:
+                self._ewma_score = (
+                    self._ewma_alpha * overall + (1 - self._ewma_alpha) * self._ewma_score
+                )
+
+            # 维度趋势追踪
+            self._update_dimension_trends(phase, dims)
+
+            if len(self.learning_records) > 2000:
+                self.learning_records.pop(0)
+            if len(self.performance_history) > 2000:
+                self.performance_history.pop(0)
+
+            self.model_improvement_log.append({
+                "type": "quality_assessment",
+                "phase": phase,
+                "overall_score": overall,
+                "grade": grade,
+                "dimensions": dims,
+                "timestamp": datetime.now().isoformat(),
+            })
+            self._save_learning_data()
+            return True
+        except Exception as exc:
+            self.logger.warning("learn_from_quality_assessment 失败: %s", exc)
+            return False
+
+    def learn_from_cycle_reflection(self, cycle_assessment: Dict[str, Any]) -> Dict[str, Any]:
+        """从 QualityAssessor.assess_cycle_for_reflection() 的完整循环评估学习。
+
+        Args:
+            cycle_assessment: 循环评估字典，包含 phase_assessments, weaknesses, strengths, overall_cycle_score
+        Returns:
+            学习结果摘要: {recorded_phases, weak_phases, improvement_priorities, cycle_trend}
+        """
+        try:
+            overall = float(cycle_assessment.get("overall_cycle_score", 0.0))
+            weaknesses = cycle_assessment.get("weaknesses", [])
+            strengths = cycle_assessment.get("strengths", [])
+            phase_assessments = cycle_assessment.get("phase_assessments", [])
+
+            # 为每个阶段记录质量分
+            recorded_phases = []
+            for pa in phase_assessments:
+                score = pa.get("score")
+                phase_name = pa.get("phase", "unknown")
+                if score is not None:
+                    self.learn_from_quality_assessment(phase_name, score)
+                    recorded_phases.append(phase_name)
+
+            # 分析薄弱阶段并生成学习优先级
+            weak_phases = []
+            for w in weaknesses:
+                weak_phases.append({
+                    "phase": w.get("phase", "unknown"),
+                    "score": w.get("score", 0.0),
+                    "issues": w.get("issues", [])[:5],
+                })
+
+            # 基于薄弱阶段生成改进优先级
+            improvement_priorities = self._derive_improvement_priorities(
+                weaknesses, strengths, overall
+            )
+
+            # 循环级 EWMA 趋势
+            cycle_trend = self._compute_cycle_trend(overall)
+
+            summary = {
+                "recorded_phases": recorded_phases,
+                "weak_phases": weak_phases,
+                "improvement_priorities": improvement_priorities,
+                "cycle_trend": cycle_trend,
+                "overall_score": overall,
+            }
+
+            self.model_improvement_log.append({
+                "type": "cycle_reflection",
+                "overall_score": overall,
+                "recorded_phases": recorded_phases,
+                "weak_phase_count": len(weak_phases),
+                "timestamp": datetime.now().isoformat(),
+            })
+            self._save_learning_data()
+            return summary
+        except Exception as exc:
+            self.logger.warning("learn_from_cycle_reflection 失败: %s", exc)
+            return {"recorded_phases": [], "weak_phases": [], "improvement_priorities": [], "cycle_trend": "unknown"}
+
+    def get_phase_performance(self, phase: str) -> Dict[str, Any]:
+        """获取指定阶段的历史性能摘要。"""
+        phase_records = [r for r in self.learning_records if r.phase == phase]
+        if not phase_records:
+            return {"phase": phase, "record_count": 0}
+        scores = [r.performance for r in phase_records]
+        dim_agg: Dict[str, List[float]] = {}
+        for r in phase_records:
+            if r.quality_dimensions:
+                for k, v in r.quality_dimensions.items():
+                    dim_agg.setdefault(k, []).append(v)
+        return {
+            "phase": phase,
+            "record_count": len(phase_records),
+            "avg_score": sum(scores) / len(scores),
+            "min_score": min(scores),
+            "max_score": max(scores),
+            "latest_score": scores[-1],
+            "avg_dimensions": {k: sum(v) / len(v) for k, v in dim_agg.items()},
+        }
+
+    def get_dimension_trends(self) -> Dict[str, List[float]]:
+        """返回各维度的历史趋势 (保留最近 50 个数据点)。"""
+        return dict(self._dimension_trends)
+
+    # ------------------------------------------------------------------
+    # 内部辅助
+    # ------------------------------------------------------------------
+
+    def _update_dimension_trends(self, phase: str, dims: Dict[str, float]) -> None:
+        """更新维度历史趋势。"""
+        if not hasattr(self, "_dimension_trends"):
+            self._dimension_trends: Dict[str, List[float]] = {}
+        for key, val in dims.items():
+            self._dimension_trends.setdefault(key, []).append(val)
+            if len(self._dimension_trends[key]) > 50:
+                self._dimension_trends[key].pop(0)
+
+    def _derive_improvement_priorities(
+        self,
+        weaknesses: List[Dict[str, Any]],
+        strengths: List[Dict[str, Any]],
+        overall: float,
+    ) -> List[str]:
+        """基于薄弱阶段和整体评分推导改进优先级。"""
+        priorities: List[str] = []
+        for w in sorted(weaknesses, key=lambda x: x.get("score", 1.0)):
+            phase = w.get("phase", "unknown")
+            score = w.get("score", 0.0)
+            if score < 0.4:
+                priorities.append(f"紧急: 重构{phase}阶段输出规范 (评分 {score:.2f})")
+            elif score < 0.6:
+                priorities.append(f"优先: 提升{phase}阶段数据完整性 (评分 {score:.2f})")
+            else:
+                priorities.append(f"建议: 优化{phase}阶段细节 (评分 {score:.2f})")
+        if overall < 0.6 and not priorities:
+            priorities.append("整体评分偏低，建议全局质量基线提升")
+        return priorities
+
+    def _compute_cycle_trend(self, current_overall: float) -> str:
+        """基于近期历史判断循环质量趋势。"""
+        cycle_logs = [
+            entry for entry in self.model_improvement_log
+            if entry.get("type") == "cycle_reflection"
+        ]
+        if len(cycle_logs) < 2:
+            return "insufficient_data"
+        recent_scores = [entry["overall_score"] for entry in cycle_logs[-5:]]
+        recent_scores.append(current_overall)
+        if len(recent_scores) < 2:
+            return "insufficient_data"
+        first_half = recent_scores[: len(recent_scores) // 2]
+        second_half = recent_scores[len(recent_scores) // 2 :]
+        avg_first = sum(first_half) / len(first_half)
+        avg_second = sum(second_half) / len(second_half)
+        diff = avg_second - avg_first
+        if diff > 0.05:
+            return "improving"
+        elif diff < -0.05:
+            return "declining"
+        return "stable"
+
     def _save_learning_data(self) -> None:
         try:
             with open(self.config.get("learning_data_file", "learning_data.pkl"), "wb") as f:
@@ -274,6 +509,7 @@ class SelfLearningEngine(BaseModule):
                         "performance_history": self.performance_history,
                         "model_improvement_log": self.model_improvement_log,
                         "ewma_score": self._ewma_score,
+                        "dimension_trends": dict(self._dimension_trends),
                     },
                     f,
                 )
@@ -291,6 +527,7 @@ class SelfLearningEngine(BaseModule):
             self.performance_history = list(data.get("performance_history", []))
             self.model_improvement_log = list(data.get("model_improvement_log", []))
             self._ewma_score = data.get("ewma_score")
+            self._dimension_trends = data.get("dimension_trends", {})
             self.logger.info("加载了 %d 条学习记录", len(self.learning_records))
         except FileNotFoundError:
             self.logger.info("未找到学习数据文件，将创建新的学习记录")

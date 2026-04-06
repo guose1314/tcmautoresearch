@@ -35,7 +35,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install test dependencies
-        run: pip install pytest pytest-asyncio pytest-mock PyJWT bcrypt fastapi uvicorn Jinja2
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements/dev.txt bcrypt
 
       - name: Run new-module unit tests
         run: |
@@ -52,11 +54,16 @@ jobs:
         run: python tools/quality_gate.py --report output/quality-gate.json
 
       - name: Upload quality gate report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: quality-gate-report
           path: |
             output/quality-gate.json
+            output/real_observe_smoke/latest.json
+            output/real_observe_smoke/dossier.md
+            output/real_observe_smoke/timeline.jsonl
             docs/architecture/dependency-graph.json
             docs/architecture/dependency-graph.mmd
             docs/architecture/dependency-graph.md
+          if-no-files-found: warn

@@ -18,6 +18,9 @@ class _FakeLexicon:
     def get_word_type(self, word):
         return self._word_types.get(word)
 
+    def resolve_synonym(self, word):
+        return word, self._word_types.get(word)
+
     def get_vocab_size(self):
         return len(self._word_types)
 

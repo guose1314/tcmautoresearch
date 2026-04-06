@@ -6,6 +6,9 @@ from src.research.research_pipeline import ResearchPhase, ResearchPipeline
 
 class TestResearchPipelineObserve(unittest.TestCase):
 
+    @patch("src.research.research_pipeline.OutputGenerator.cleanup")
+    @patch("src.research.research_pipeline.OutputGenerator.execute")
+    @patch("src.research.research_pipeline.OutputGenerator.initialize")
     @patch("src.research.research_pipeline.ReasoningEngine.cleanup")
     @patch("src.research.research_pipeline.ReasoningEngine.execute")
     @patch("src.research.research_pipeline.ReasoningEngine.initialize")
@@ -32,6 +35,9 @@ class TestResearchPipelineObserve(unittest.TestCase):
         mock_reason_initialize,
         mock_reason_execute,
         mock_reason_cleanup,
+        mock_out_initialize,
+        mock_out_execute,
+        mock_out_cleanup,
     ):
         mock_pre_initialize.return_value = True
         mock_pre_cleanup.return_value = True
@@ -86,6 +92,17 @@ class TestResearchPipelineObserve(unittest.TestCase):
                     }
                 ]
             }
+        }
+
+        mock_out_initialize.return_value = True
+        mock_out_cleanup.return_value = True
+        mock_out_execute.return_value = {
+            "output_data": {
+                "quality_metrics": {"entities_extracted": 3, "confidence_score": 0.92},
+                "recommendations": ["扩展实体词典"],
+            },
+            "output_format": "structured_json",
+            "generated_at": "2026-04-06T00:00:00",
         }
 
         pipeline = ResearchPipeline({})
@@ -248,6 +265,151 @@ class TestResearchPipelineObserve(unittest.TestCase):
         self.assertTrue(execute_context["use_whitelist"])
         self.assertEqual(execute_context["whitelist_path"], "data/ctext_whitelist.json")
         self.assertEqual(execute_context["whitelist_groups"], ["four_books", "tcm_classics"])
+
+    @patch("src.research.research_pipeline.OutputGenerator.cleanup")
+    @patch("src.research.research_pipeline.OutputGenerator.execute")
+    @patch("src.research.research_pipeline.OutputGenerator.initialize")
+    @patch("src.research.research_pipeline.ReasoningEngine.cleanup")
+    @patch("src.research.research_pipeline.ReasoningEngine.execute")
+    @patch("src.research.research_pipeline.ReasoningEngine.initialize")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.cleanup")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.execute")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.initialize")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.cleanup")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.execute")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.initialize")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.cleanup")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.execute")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.initialize")
+    def test_observe_ingestion_includes_output_generation(
+        self,
+        mock_pre_init, mock_pre_exec, mock_pre_clean,
+        mock_ex_init, mock_ex_exec, mock_ex_clean,
+        mock_sem_init, mock_sem_exec, mock_sem_clean,
+        mock_reason_init, mock_reason_exec, mock_reason_clean,
+        mock_out_init, mock_out_exec, mock_out_clean,
+    ):
+        """OutputGenerator is the 5th module — verify it runs and its output appears in results."""
+        mock_pre_init.return_value = True
+        mock_pre_clean.return_value = True
+        mock_pre_exec.return_value = {"processed_text": "黄芪补中"}
+
+        mock_ex_init.return_value = True
+        mock_ex_clean.return_value = True
+        mock_ex_exec.return_value = {
+            "entities": [{"name": "黄芪", "type": "herb", "confidence": 0.93}],
+            "statistics": {"by_type": {"herb": 1}},
+            "confidence_scores": {"average_confidence": 0.93},
+        }
+
+        mock_sem_init.return_value = True
+        mock_sem_clean.return_value = True
+        mock_sem_exec.return_value = {
+            "semantic_graph": {"nodes": [], "edges": []},
+            "graph_statistics": {"nodes_count": 1, "edges_count": 0, "relationships_by_type": {}},
+        }
+
+        mock_reason_init.return_value = True
+        mock_reason_clean.return_value = True
+        mock_reason_exec.return_value = {"reasoning_results": {}}
+
+        mock_out_init.return_value = True
+        mock_out_clean.return_value = True
+        mock_out_exec.return_value = {
+            "output_data": {
+                "quality_metrics": {"entities_extracted": 1, "confidence_score": 0.93},
+                "recommendations": ["增加方剂语料覆盖"],
+            },
+            "output_format": "structured_json",
+            "generated_at": "2026-04-06T12:00:00",
+        }
+
+        pipeline = ResearchPipeline({})
+        result = pipeline.phase_handlers.run_observe_ingestion_pipeline(
+            {
+                "sources": ["local"],
+                "stats": {"total_documents": 1},
+                "documents": [{"text": "黄芪补中益气", "urn": "doc:test", "title": "test"}],
+            },
+            {"max_texts": 1, "max_chars_per_text": 500},
+        )
+
+        self.assertEqual(result["processed_document_count"], 1)
+        doc = result["documents"][0]
+        self.assertIsNotNone(doc.get("output_generation"))
+        self.assertEqual(doc["output_generation"]["quality_metrics"]["entities_extracted"], 1)
+
+        agg = result["aggregate"]
+        self.assertEqual(len(agg["output_quality_metrics"]), 1)
+        self.assertIn("增加方剂语料覆盖", agg["output_recommendations"])
+
+        mock_out_exec.assert_called_once()
+        out_context = mock_out_exec.call_args.args[0]
+        self.assertIn("entities", out_context)
+        self.assertIn("semantic_graph", out_context)
+
+    @patch("src.research.research_pipeline.OutputGenerator.cleanup")
+    @patch("src.research.research_pipeline.OutputGenerator.initialize")
+    @patch("src.research.research_pipeline.ReasoningEngine.cleanup")
+    @patch("src.research.research_pipeline.ReasoningEngine.initialize")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.cleanup")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.execute")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.initialize")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.cleanup")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.execute")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.initialize")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.cleanup")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.execute")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.initialize")
+    def test_observe_ingestion_degrades_when_output_generator_init_fails(
+        self,
+        mock_pre_init, mock_pre_exec, mock_pre_clean,
+        mock_ex_init, mock_ex_exec, mock_ex_clean,
+        mock_sem_init, mock_sem_exec, mock_sem_clean,
+        mock_reason_init, mock_reason_clean,
+        mock_out_init, mock_out_clean,
+    ):
+        """Pipeline should still succeed if OutputGenerator initialization fails."""
+        mock_pre_init.return_value = True
+        mock_pre_clean.return_value = True
+        mock_pre_exec.return_value = {"processed_text": "test"}
+
+        mock_ex_init.return_value = True
+        mock_ex_clean.return_value = True
+        mock_ex_exec.return_value = {
+            "entities": [{"name": "test", "type": "herb", "confidence": 0.9}],
+            "statistics": {"by_type": {"herb": 1}},
+            "confidence_scores": {"average_confidence": 0.9},
+        }
+
+        mock_sem_init.return_value = True
+        mock_sem_clean.return_value = True
+        mock_sem_exec.return_value = {
+            "semantic_graph": {"nodes": [], "edges": []},
+            "graph_statistics": {"nodes_count": 0, "edges_count": 0, "relationships_by_type": {}},
+        }
+
+        mock_reason_init.return_value = True
+        mock_reason_clean.return_value = True
+
+        mock_out_init.return_value = False  # <-- OutputGenerator fails
+        mock_out_clean.return_value = True
+
+        pipeline = ResearchPipeline({})
+        result = pipeline.phase_handlers.run_observe_ingestion_pipeline(
+            {
+                "sources": ["local"],
+                "stats": {"total_documents": 1},
+                "documents": [{"text": "测试文本", "urn": "doc:fail", "title": "fail"}],
+            },
+            {"max_texts": 1, "max_chars_per_text": 500},
+        )
+
+        self.assertEqual(result["processed_document_count"], 1)
+        self.assertNotIn("error", result)
+        doc = result["documents"][0]
+        self.assertIsNone(doc.get("output_generation"))
+        self.assertEqual(result["aggregate"]["output_quality_metrics"], [])
 
 
 if __name__ == "__main__":

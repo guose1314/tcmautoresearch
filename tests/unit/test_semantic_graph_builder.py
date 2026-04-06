@@ -160,6 +160,48 @@ class TestSemanticGraphBuilderRefactor(unittest.TestCase):
         self.assertEqual(integrated["similar_formula_matches"][0]["graph_evidence"]["source"], "relationship_reasoning")
         self.assertGreater(integrated["similar_formula_matches"][0]["graph_evidence"]["shared_herb_count"], 0)
 
+    def test_build_local_formula_graph_evidence_merges_role_overlaps_and_comparison_herbs(self):
+        with patch(
+            "src.analysis.semantic_graph.FormulaStructureAnalyzer.get_formula_composition",
+            side_effect=[
+                {"sovereign": ["黄芪", "人参"], "minister": ["白术"]},
+                {"sovereign": ["黄芪"], "assistant": ["白术", "甘草"]},
+            ],
+        ), patch(
+            "src.analysis.semantic_graph.FormulaComparator.compare_formulas",
+            return_value={"common_herbs": ["黄芪", "白术", "茯苓"]},
+        ):
+            evidence = self.builder._build_local_formula_graph_evidence("方A", "方B")
+
+        self.assertEqual(evidence["source"], "relationship_reasoning")
+        self.assertEqual(evidence["shared_herb_count"], 3)
+        self.assertEqual(len(evidence["role_overlaps"]), 2)
+        self.assertIn(
+            {
+                "formula_role": "sovereign",
+                "similar_formula_role": "sovereign",
+                "herbs": ["黄芪"],
+            },
+            evidence["role_overlaps"],
+        )
+        self.assertIn(
+            {
+                "formula_role": "minister",
+                "similar_formula_role": "assistant",
+                "herbs": ["白术"],
+            },
+            evidence["role_overlaps"],
+        )
+        self.assertIn(
+            {
+                "herb": "茯苓",
+                "formula_role": "unknown",
+                "similar_formula_role": "unknown",
+            },
+            evidence["shared_herbs"],
+        )
+        self.assertGreater(evidence["evidence_score"], 0.0)
+
     def test_restarting_semantic_graph_builder_reuses_persisted_formula_index(self):
         catalog = [
             {

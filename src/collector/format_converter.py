@@ -42,6 +42,10 @@ _SUPPORTED_IMAGE_EXTENSIONS = {
     ".webp",
 }
 _SUPPORTED_EPUB_ITEM_EXTENSIONS = {".html", ".htm", ".xhtml", ".xml"}
+_HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+_CONTAINER_TAGS = {"p", "div", "section", "article", "chapter", "body"}
+_INLINE_BOLD_TAGS = {"strong", "b"}
+_INLINE_ITALIC_TAGS = {"em", "i"}
 
 
 @dataclass
@@ -244,99 +248,134 @@ class FormatConverter(BaseModule):
             return "scan"
         return "unknown"
 
-    def _convert_pdf(self, file_path: str, context: Dict[str, Any]) -> ConversionResult:
-        try:
-            fitz = importlib.import_module("fitz")
-        except ImportError:
-            return ConversionResult(
-                success=False,
-                format_source="pdf",
-                source_path=file_path,
-                errors=["缺少 PyMuPDF 依赖，请安装 pymupdf"],
-            )
+    def _pdf_import_error_result(self, file_path: str) -> ConversionResult:
+        return ConversionResult(
+            success=False,
+            format_source="pdf",
+            source_path=file_path,
+            errors=["缺少 PyMuPDF 依赖，请安装 pymupdf"],
+        )
 
+    def _resolve_pdf_options(self, context: Dict[str, Any]) -> Dict[str, Any]:
         raw_max_pages = context.get("max_pages", self.max_pages)
         max_pages = int(raw_max_pages) if raw_max_pages not in (None, "") else None
-        include_page_markers = bool(
-            context.get("pdf_include_page_markers", self.pdf_include_page_markers)
-        )
-        force_ocr = bool(context.get("force_ocr", self.force_ocr))
-        ocr_enabled = bool(context.get("ocr_enabled", self.ocr_enabled))
-        page_text_threshold = int(
-            context.get("pdf_text_threshold", self.pdf_text_threshold)
-        )
+        return {
+            "max_pages": max_pages,
+            "include_page_markers": bool(
+                context.get("pdf_include_page_markers", self.pdf_include_page_markers)
+            ),
+            "force_ocr": bool(context.get("force_ocr", self.force_ocr)),
+            "ocr_enabled": bool(context.get("ocr_enabled", self.ocr_enabled)),
+            "page_text_threshold": int(
+                context.get("pdf_text_threshold", self.pdf_text_threshold)
+            ),
+        }
 
+    def _extract_pdf_page_content(
+        self,
+        page: Any,
+        page_number: int,
+        context: Dict[str, Any],
+        pdf_options: Dict[str, Any],
+    ) -> tuple[str, str, Optional[str], bool]:
+        page_text = _normalize_whitespace(page.get_text("text"))
+        if page_text and not pdf_options["force_ocr"] and _has_substantive_text(
+            page_text,
+            pdf_options["page_text_threshold"],
+        ):
+            return page_text, page_text, None, False
+
+        if not pdf_options["ocr_enabled"]:
+            return "", page_text, f"第 {page_number} 页未提取到文本，且 OCR 未启用", False
+
+        try:
+            content = self._ocr_pdf_page(page, context)
+        except Exception as exc:  # pragma: no cover - exercised via failure fallback
+            return "", page_text, f"第 {page_number} 页 OCR 失败: {exc}", False
+
+        return content, page_text, None, bool(content)
+
+    def _append_pdf_page_section(
+        self,
+        page_sections: List[str],
+        content: str,
+        page_number: int,
+        pdf_options: Dict[str, Any],
+        page_limit: int,
+    ) -> None:
+        if not content:
+            return
+
+        if pdf_options["include_page_markers"] and page_limit > 1:
+            page_sections.append(f"## 第 {page_number} 页\n\n{content}")
+            return
+
+        page_sections.append(content)
+
+    def _extract_pdf_body(
+        self,
+        document: Any,
+        file_path: str,
+        context: Dict[str, Any],
+        pdf_options: Dict[str, Any],
+        metadata: Dict[str, Any],
+    ) -> tuple[str, str, List[str], List[int]]:
         page_sections: List[str] = []
         errors: List[str] = []
         used_ocr_pages: List[int] = []
-        title = ""
-        metadata: Dict[str, Any] = {
-            "file_name": os.path.basename(file_path),
-            "file_size": os.path.getsize(file_path),
-            "extractor": "pymupdf",
-        }
+        title = _normalize_whitespace((document.metadata or {}).get("title", ""))
+        page_limit = len(document) if pdf_options["max_pages"] is None else min(len(document), pdf_options["max_pages"])
+        metadata["processed_pages"] = page_limit
 
-        try:
-            with fitz.open(file_path) as document:
-                metadata["page_count"] = len(document)
-                title = _normalize_whitespace((document.metadata or {}).get("title", ""))
-                page_limit = len(document) if max_pages is None else min(len(document), max_pages)
-                metadata["processed_pages"] = page_limit
-
-                for index in range(page_limit):
-                    page = document[index]
-                    page_text = _normalize_whitespace(page.get_text("text"))
-                    content = ""
-
-                    if page_text and not force_ocr and _has_substantive_text(page_text, page_text_threshold):
-                        content = page_text
-                    elif ocr_enabled:
-                        try:
-                            content = self._ocr_pdf_page(page, context)
-                            if content:
-                                used_ocr_pages.append(index + 1)
-                        except Exception as exc:  # pragma: no cover - exercised via failure fallback
-                            errors.append(f"第 {index + 1} 页 OCR 失败: {exc}")
-                    else:
-                        errors.append(f"第 {index + 1} 页未提取到文本，且 OCR 未启用")
-
-                    if not title and page_text:
-                        title = _guess_title_from_text(page_text, file_path)
-
-                    if not content:
-                        continue
-
-                    if include_page_markers and page_limit > 1:
-                        page_sections.append(f"## 第 {index + 1} 页\n\n{content}")
-                    else:
-                        page_sections.append(content)
-        except Exception as exc:
-            return ConversionResult(
-                success=False,
-                format_source="pdf",
-                source_path=file_path,
-                errors=[f"PDF 解析失败: {exc}"],
+        for index in range(page_limit):
+            page_number = index + 1
+            content, page_text, error, used_ocr = self._extract_pdf_page_content(
+                document[index],
+                page_number,
+                context,
+                pdf_options,
             )
+            if error:
+                errors.append(error)
+            if used_ocr:
+                used_ocr_pages.append(page_number)
+            if not title and page_text:
+                title = _guess_title_from_text(page_text, file_path)
+            self._append_pdf_page_section(page_sections, content, page_number, pdf_options, page_limit)
 
         body = "\n\n".join(section for section in page_sections if section).strip()
-        if not body:
-            errors.append("PDF 未提取到有效文本，请检查是否为扫描件并确认 OCR 依赖可用")
-            return ConversionResult(
-                success=False,
-                format_source="pdf",
-                title=title or _infer_title_from_path(file_path),
-                source_path=file_path,
-                metadata={
-                    **metadata,
-                    "used_ocr_pages": used_ocr_pages,
-                    "language": self.default_language,
-                },
-                errors=errors,
-            )
+        return title, body, errors, used_ocr_pages
 
-        metadata["used_ocr_pages"] = used_ocr_pages
-        metadata["used_ocr"] = bool(used_ocr_pages)
-        metadata["language"] = self.default_language
+    def _build_pdf_empty_result(
+        self,
+        file_path: str,
+        title: str,
+        metadata: Dict[str, Any],
+        errors: List[str],
+        used_ocr_pages: List[int],
+    ) -> ConversionResult:
+        errors.append("PDF 未提取到有效文本，请检查是否为扫描件并确认 OCR 依赖可用")
+        return ConversionResult(
+            success=False,
+            format_source="pdf",
+            title=title or _infer_title_from_path(file_path),
+            source_path=file_path,
+            metadata={
+                **metadata,
+                "used_ocr_pages": used_ocr_pages,
+                "language": self.default_language,
+            },
+            errors=errors,
+        )
+
+    def _build_pdf_success_result(
+        self,
+        file_path: str,
+        title: str,
+        body: str,
+        metadata: Dict[str, Any],
+        errors: List[str],
+    ) -> ConversionResult:
         return ConversionResult(
             success=True,
             format_source="pdf",
@@ -350,6 +389,51 @@ class FormatConverter(BaseModule):
             metadata=metadata,
             errors=errors,
         )
+
+    def _convert_pdf(self, file_path: str, context: Dict[str, Any]) -> ConversionResult:
+        try:
+            fitz = importlib.import_module("fitz")
+        except ImportError:
+            return self._pdf_import_error_result(file_path)
+
+        pdf_options = self._resolve_pdf_options(context)
+        metadata: Dict[str, Any] = {
+            "file_name": os.path.basename(file_path),
+            "file_size": os.path.getsize(file_path),
+            "extractor": "pymupdf",
+        }
+
+        try:
+            with fitz.open(file_path) as document:
+                metadata["page_count"] = len(document)
+                title, body, errors, used_ocr_pages = self._extract_pdf_body(
+                    document,
+                    file_path,
+                    context,
+                    pdf_options,
+                    metadata,
+                )
+        except Exception as exc:
+            return ConversionResult(
+                success=False,
+                format_source="pdf",
+                source_path=file_path,
+                errors=[f"PDF 解析失败: {exc}"],
+            )
+
+        if not body:
+            return self._build_pdf_empty_result(
+                file_path,
+                title,
+                metadata,
+                errors,
+                used_ocr_pages,
+            )
+
+        metadata["used_ocr_pages"] = used_ocr_pages
+        metadata["used_ocr"] = bool(used_ocr_pages)
+        metadata["language"] = self.default_language
+        return self._build_pdf_success_result(file_path, title, body, metadata, errors)
 
     def _convert_epub(self, file_path: str) -> ConversionResult:
         chapters: List[str] = []
@@ -541,16 +625,13 @@ class FormatConverter(BaseModule):
                 return _normalize_whitespace("".join(elem.itertext()))
         return ""
 
-    def _resolve_epub_content_members(
+    def _build_epub_manifest_members(
         self,
-        archive: zipfile.ZipFile,
-        opf_path: str,
         package_root: ET.Element,
-    ) -> List[str]:
+        opf_dir: PurePosixPath,
+    ) -> tuple[Dict[str, str], List[str]]:
         manifest: Dict[str, str] = {}
         html_members: List[str] = []
-        opf_dir = PurePosixPath(opf_path).parent
-
         for elem in package_root.iter():
             if not elem.tag.endswith("item"):
                 continue
@@ -561,30 +642,58 @@ class FormatConverter(BaseModule):
                 continue
             member = str((opf_dir / PurePosixPath(href)).as_posix())
             manifest[item_id] = member
-            if media_type in {"application/xhtml+xml", "text/html"} or Path(href).suffix.lower() in _SUPPORTED_EPUB_ITEM_EXTENSIONS:
+            if self._is_epub_html_member(href, media_type):
                 html_members.append(member)
+        return manifest, html_members
 
+    def _is_epub_html_member(self, href: str, media_type: str) -> bool:
+        return media_type in {"application/xhtml+xml", "text/html"} or Path(href).suffix.lower() in _SUPPORTED_EPUB_ITEM_EXTENSIONS
+
+    def _resolve_epub_spine_members(
+        self,
+        package_root: ET.Element,
+        manifest: Dict[str, str],
+        html_members: List[str],
+    ) -> List[str]:
         ordered: List[str] = []
         for elem in package_root.iter():
             if not elem.tag.endswith("itemref"):
                 continue
-            item_id = elem.attrib.get("idref", "")
-            member = manifest.get(item_id)
+            member = manifest.get(elem.attrib.get("idref", ""))
             if member and member in html_members and member not in ordered:
                 ordered.append(member)
+        return ordered
 
+    def _append_missing_epub_members(
+        self,
+        ordered: List[str],
+        html_members: List[str],
+    ) -> None:
         for member in html_members:
             if member not in ordered:
                 ordered.append(member)
 
-        if ordered:
-            return ordered
-
+    def _fallback_epub_members(self, archive: zipfile.ZipFile) -> List[str]:
         fallback: List[str] = []
         for name in archive.namelist():
             if Path(name).suffix.lower() in _SUPPORTED_EPUB_ITEM_EXTENSIONS:
                 fallback.append(name)
         return sorted(fallback)
+
+    def _resolve_epub_content_members(
+        self,
+        archive: zipfile.ZipFile,
+        opf_path: str,
+        package_root: ET.Element,
+    ) -> List[str]:
+        opf_dir = PurePosixPath(opf_path).parent
+        manifest, html_members = self._build_epub_manifest_members(package_root, opf_dir)
+        ordered = self._resolve_epub_spine_members(package_root, manifest, html_members)
+        self._append_missing_epub_members(ordered, html_members)
+
+        if ordered:
+            return ordered
+        return self._fallback_epub_members(archive)
 
     def _read_zip_text(self, archive: zipfile.ZipFile, member: str) -> str:
         raw = archive.read(member)
@@ -611,58 +720,58 @@ class FormatConverter(BaseModule):
         text = "\n\n".join(block for block in blocks if block).strip()
         return re.sub(r"\n{3,}", "\n\n", text)
 
+    def _render_block_node(self, node: Any, list_level: int) -> Any:
+        if getattr(node, "name", None) is None:
+            return _normalize_whitespace(str(node))
+
+        name = node.name.lower()
+        if name in _HEADING_TAGS:
+            return self._render_heading_block(node)
+        if name in {"ul", "ol"}:
+            return self._render_list(node, ordered=(name == "ol"), list_level=list_level + 1)
+        if name == "blockquote":
+            return self._render_blockquote(node)
+        if name == "pre":
+            return self._render_preformatted_block(node)
+        if name == "table":
+            return self._render_table(node)
+        if name in _CONTAINER_TAGS:
+            return self._render_container_block(node, list_level)
+        return self._render_inline_text(node)
+
+    def _render_heading_block(self, node: Any) -> str:
+        heading = self._render_inline_text(node)
+        if not heading:
+            return ""
+        return f"{'#' * int(node.name[1])} {heading}"
+
+    def _render_blockquote(self, node: Any) -> str:
+        quote = self._render_inline_text(node)
+        if not quote:
+            return ""
+        return "\n".join(f"> {line}" for line in quote.splitlines())
+
+    def _render_preformatted_block(self, node: Any) -> str:
+        code = node.get_text("\n", strip=True)
+        if not code:
+            return ""
+        return f"```\n{code}\n```"
+
+    def _render_container_block(self, node: Any, list_level: int) -> Any:
+        nested_blocks = self._render_block_nodes(list(node.children), list_level=list_level)
+        if nested_blocks:
+            return nested_blocks
+        return self._render_inline_text(node)
+
     def _render_block_nodes(self, nodes: Sequence[Any], list_level: int) -> List[str]:
         blocks: List[str] = []
         for node in nodes:
-            if getattr(node, "name", None) is None:
-                text = _normalize_whitespace(str(node))
-                if text:
-                    blocks.append(text)
+            rendered = self._render_block_node(node, list_level)
+            if isinstance(rendered, list):
+                blocks.extend(rendered)
                 continue
-
-            name = node.name.lower()
-            if name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
-                level = int(name[1])
-                heading = self._render_inline_text(node)
-                if heading:
-                    blocks.append(f"{'#' * level} {heading}")
-                continue
-
-            if name in {"ul", "ol"}:
-                blocks.extend(self._render_list(node, ordered=(name == "ol"), list_level=list_level + 1))
-                continue
-
-            if name == "blockquote":
-                quote = self._render_inline_text(node)
-                if quote:
-                    blocks.append("\n".join(f"> {line}" for line in quote.splitlines()))
-                continue
-
-            if name == "pre":
-                code = node.get_text("\n", strip=True)
-                if code:
-                    blocks.append(f"```\n{code}\n```")
-                continue
-
-            if name == "table":
-                table = self._render_table(node)
-                if table:
-                    blocks.append(table)
-                continue
-
-            if name in {"p", "div", "section", "article", "chapter", "body"}:
-                nested_blocks = self._render_block_nodes(list(node.children), list_level=list_level)
-                if nested_blocks:
-                    blocks.extend(nested_blocks)
-                else:
-                    text = self._render_inline_text(node)
-                    if text:
-                        blocks.append(text)
-                continue
-
-            text = self._render_inline_text(node)
-            if text:
-                blocks.append(text)
+            if rendered:
+                blocks.append(rendered)
         return [block for block in blocks if block.strip()]
 
     def _render_list(self, node: Any, ordered: bool, list_level: int) -> List[str]:
@@ -701,41 +810,49 @@ class FormatConverter(BaseModule):
             lines.append(f"| {' | '.join(padded[:len(header)])} |")
         return "\n".join(lines)
 
+    def _render_inline_child(self, child: Any) -> Optional[str]:
+        if getattr(child, "name", None) is None:
+            return str(child)
+
+        name = child.name.lower()
+        if name == "br":
+            return "\n"
+
+        content = self._render_inline_text(child)
+        if not content and name != "img":
+            return None
+
+        if name in _INLINE_BOLD_TAGS:
+            return f"**{content}**"
+        if name in _INLINE_ITALIC_TAGS:
+            return f"*{content}*"
+        if name == "code":
+            return f"`{content}`"
+        if name == "a":
+            return self._render_inline_anchor(child, content)
+        if name == "img":
+            return self._render_inline_image(child)
+        return content
+
+    def _render_inline_anchor(self, child: Any, content: str) -> str:
+        href = child.get("href", "").strip()
+        label = content or href
+        return f"[{label}]({href})" if href else label
+
+    def _render_inline_image(self, child: Any) -> str:
+        alt = child.get("alt", "image").strip() or "image"
+        src = child.get("src", "").strip()
+        return f"![{alt}]({src})" if src else alt
+
     def _render_inline_text(self, node: Any) -> str:
         if getattr(node, "name", None) is None:
             return _normalize_whitespace(str(node))
 
         parts: List[str] = []
         for child in node.children:
-            if getattr(child, "name", None) is None:
-                parts.append(str(child))
-                continue
-
-            name = child.name.lower()
-            if name == "br":
-                parts.append("\n")
-                continue
-
-            content = self._render_inline_text(child)
-            if not content and name != "img":
-                continue
-
-            if name in {"strong", "b"}:
-                parts.append(f"**{content}**")
-            elif name in {"em", "i"}:
-                parts.append(f"*{content}*")
-            elif name == "code":
-                parts.append(f"`{content}`")
-            elif name == "a":
-                href = child.get("href", "").strip()
-                label = content or href
-                parts.append(f"[{label}]({href})" if href else label)
-            elif name == "img":
-                alt = child.get("alt", "image").strip() or "image"
-                src = child.get("src", "").strip()
-                parts.append(f"![{alt}]({src})" if src else alt)
-            else:
-                parts.append(content)
+            rendered = self._render_inline_child(child)
+            if rendered is not None:
+                parts.append(rendered)
 
         return _normalize_whitespace("".join(parts))
 

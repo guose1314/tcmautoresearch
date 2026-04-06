@@ -140,16 +140,19 @@ class AdvancedEntityExtractor(BaseModule):
         return any(pos in matched_positions for pos in range(start_pos, end_pos))
 
     def _build_entity_record(self, word: str, start_pos: int, end_pos: int) -> Dict[str, Any]:
-        """构建单条实体记录。"""
-        word_type = self.lexicon.get_word_type(word)
-        return {
-            "name": word,
+        """构建单条实体记录（同义词自动归一化到标准名）。"""
+        canonical, word_type = self.lexicon.resolve_synonym(word)
+        record: Dict[str, Any] = {
+            "name": canonical,
             "type": word_type or "unknown",
             "confidence": self._calculate_word_confidence(word_type),
             "position": start_pos,
             "end_position": end_pos,
             "length": len(word),
         }
+        if canonical != word:
+            record["original_name"] = word
+        return record
     
     def _calculate_word_confidence(self, word_type: str | None) -> float:
         """根据词汇类型计算置信度"""

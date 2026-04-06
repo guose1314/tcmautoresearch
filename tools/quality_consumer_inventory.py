@@ -203,6 +203,11 @@ OUT_OF_SCOPE_PATHS = {
     "tools/quality_consumer_inventory.py",
 }
 
+IGNORED_CONSUMER_PATHS = {
+    # Manual survey script for ad hoc artifact inspection; not part of the governance contract chain.
+    "tools/diagnostics/_survey_outputs.py",
+}
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -386,6 +391,8 @@ def analyze_quality_consumer(path: Path, repo_root: Path) -> Dict[str, Any] | No
 
     relative_path = path.relative_to(repo_root).as_posix()
     if relative_path == "tools/quality_consumer_inventory.py":
+        return None
+    if relative_path in IGNORED_CONSUMER_PATHS:
         return None
 
     contract_fields = _detect_contract_fields(text)

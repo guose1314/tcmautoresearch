@@ -1,4 +1,4 @@
-﻿"""Test all dashboard endpoints after overhaul."""
+"""Test all dashboard endpoints after overhaul."""
 import requests
 
 BASE = "http://127.0.0.1:18888"
@@ -12,7 +12,7 @@ h = {"Authorization": f"Bearer {token}"}
 r = s.get(f"{BASE}/api/dashboard/stats", headers=h)
 print(f"1. /api/dashboard/stats: {r.status_code}")
 html = r.text
-for kw in ["鍙ょ睄鏂囩尞", "鐮旂┒璇鹃", "宸茬敓鎴愯鏂?, "鐭ヨ瘑瀹炰綋", "KG 鑺傜偣", "IMRD", "鍏ㄩ儴杈撳嚭"]:
+for kw in ["古籍文献", "研究课题", "已生成论文", "知识实体", "KG 节点", "IMRD", "全部输出"]:
     found = kw in html
     print(f"   {'OK' if found else 'MISS'} {kw}")
 
@@ -20,7 +20,7 @@ for kw in ["鍙ょ睄鏂囩尞", "鐮旂┒璇鹃", "宸茬敓鎴愯鏂?, 
 r = s.get(f"{BASE}/api/dashboard/research-workflow", headers=h)
 print(f"\n2. /api/dashboard/research-workflow: {r.status_code}")
 html = r.text
-for kw in ["绉戠爺璁烘枃涔﹀啓娴佺▼", "鏂囩尞瑙傚療", "鍋囪鐢熸垚", "瀹為獙楠岃瘉", "鏁版嵁鍒嗘瀽", "璁烘枃鐢熸垚", "鍙嶆€濇€荤粨", "鏈€杩戠敓鎴愯鏂?, "娴佺▼缁熻"]:
+for kw in ["科研论文写作流程", "文献观察", "假设生成", "实验验证", "数据分析", "论文生成", "反思总结", "最近生成论文", "流程统计"]:
     found = kw in html
     print(f"   {'OK' if found else 'MISS'} {kw}")
 
@@ -28,7 +28,7 @@ for kw in ["绉戠爺璁烘枃涔﹀啓娴佺▼", "鏂囩尞瑙傚療", "鍋囪
 r = s.get(f"{BASE}/api/dashboard/quality", headers=h)
 print(f"\n3. /api/dashboard/quality: {r.status_code}")
 html = r.text
-for kw in ["鐭ヨ瘑瀹炰綋瑕嗙洊", "鐭ヨ瘑鍏崇郴瀵嗗害", "璁烘枃浜у嚭", "鍔ㄦ€佽瘎浼?]:
+for kw in ["知识实体覆盖", "知识关系密度", "论文产出", "动态评估"]:
     found = kw in html
     print(f"   {'OK' if found else 'MISS'} {kw}")
 
@@ -44,7 +44,7 @@ print(f"   {'OK' if has_content else 'MISS'} has content")
 r = s.get(f"{BASE}/api/projects", headers=h)
 print(f"\n5. /api/projects: {r.status_code}")
 html = r.text
-for kw in ["绉戠爺椤圭洰", "鐮旂┒璇鹃", "宸插畬鎴?, "璁烘枃杈撳嚭"]:
+for kw in ["科研项目", "研究课题", "已完成", "论文输出"]:
     found = kw in html
     print(f"   {'OK' if found else 'MISS'} {kw}")
 

@@ -38,10 +38,22 @@ class TestQualityConsumerInventory(unittest.TestCase):
                 "& '{python}' tools/quality_feedback.py --output output/quality-feedback.json\n",
                 encoding="utf-8",
             )
+            diagnostics_dir = tools_dir / "diagnostics"
+            diagnostics_dir.mkdir(parents=True)
+            (diagnostics_dir / "_survey_outputs.py").write_text(
+                "import glob\n"
+                "demo = glob.glob('output/cycle_demo_results_*.json')\n"
+                "print(len(demo))\n",
+                encoding="utf-8",
+            )
             (root / "run_cycle_demo.py").write_text(
                 "from pathlib import Path\n"
                 "import json\n"
+                "metadata = {}\n"
+                "export_contract_version = 'd58.v1'\n"
                 "report_metadata = {'result_schema': 'cycle_demo_report'}\n"
+                "analysis_summary = {}\n"
+                "failed_operations = []\n"
                 "(Path('output') / 'cycle-demo-report.json').write_text(json.dumps({'report_metadata': report_metadata}), encoding='utf-8')\n",
                 encoding="utf-8",
             )
@@ -73,17 +85,18 @@ class TestQualityConsumerInventory(unittest.TestCase):
         self.assertIn("tools/stage2_runner.ps1", inventory)
         self.assertIn("run_cycle_demo.py", inventory)
         self.assertIn("aggregate_autorresearch.py", inventory)
+        self.assertNotIn("tools/diagnostics/_survey_outputs.py", inventory)
         self.assertNotIn("test_inventory_fixture.py", inventory)
         self.assertEqual(inventory["tools/quality_gate.py"]["contract_status"], "governed")
         self.assertEqual(inventory["tools/quality_gate.py"]["target_scope"], "out_of_scope")
         self.assertEqual(inventory["tools/quality_sync.py"]["contract_status"], "missing_contract")
         self.assertEqual(inventory["tools/quality_sync.py"]["consumption_mode"], "direct_artifact_read")
         self.assertEqual(inventory["tools/stage2_runner.ps1"]["consumption_mode"], "command_orchestration")
-        self.assertEqual(inventory["run_cycle_demo.py"]["contract_status"], "missing_contract")
+        self.assertEqual(inventory["run_cycle_demo.py"]["contract_status"], "governed")
         self.assertIn("cycle_demo_report", inventory["run_cycle_demo.py"]["artifact_inputs"])
         self.assertEqual(inventory["aggregate_autorresearch.py"]["consumption_mode"], "direct_artifact_read")
         self.assertIn("autorresearch_report", inventory["aggregate_autorresearch.py"]["artifact_inputs"])
-        self.assertEqual(report["analysis_summary"]["eligible_missing_contract_count"], 4)
+        self.assertEqual(report["analysis_summary"]["eligible_missing_contract_count"], 3)
         self.assertEqual(report["analysis_summary"]["scan_scope"], ["tools", "root_scripts"])
         self.assertEqual(report["analysis_summary"]["root_script_observation_count"], 1)
         self.assertEqual(report["analysis_summary"]["root_script_observation_category_counts"], {"non_governance_domain_script": 1})

@@ -1,61 +1,69 @@
 # cycle/__init__.py
 """
-中医古籍全自动研究系统 - 专业学术迭代循环初始化文件
+中医古籍全自动研究系统 - 专业学术迭代循环（延迟导入优化）
 """
+
+import importlib as _importlib
+from typing import TYPE_CHECKING
 
 __version__ = "2.0.0"
 __author__ = "中医古籍全自动研究团队"
 __description__ = "基于AI的中医古籍智能研究迭代循环系统"
 
-# 导入主要类和函数
-from .fixing_stage import FixingStage, RepairAction
-from .iteration_cycle import (
-    CycleStatus,
-    IterationConfig,
-    IterationCycle,
-    IterationResult,
-)
-from .module_iteration import ModuleIterationCycle, ModuleIterationResult
-from .test_driven_iteration import (
-    TestDrivenIteration,
-    TestDrivenIterationManager,
-    TestResult,
-)
-
-try:
+if TYPE_CHECKING:
+    from .fixing_stage import FixingStage, RepairAction
+    from .iteration_cycle import (
+        CycleStatus,
+        IterationConfig,
+        IterationCycle,
+        IterationResult,
+    )
+    from .module_iteration import ModuleIterationCycle, ModuleIterationResult
     from .system_iteration import SystemIterationCycle, SystemIterationResult
-except Exception:  # pragma: no cover - 仅用于可选依赖降级
-    SystemIterationCycle = None
-    SystemIterationResult = None
+    from .test_driven_iteration import (
+        TestDrivenIteration,
+        TestDrivenIterationManager,
+        TestResult,
+    )
+
+_LAZY_IMPORTS: dict[str, tuple[str, str]] = {
+    "FixingStage": (".fixing_stage", "FixingStage"),
+    "RepairAction": (".fixing_stage", "RepairAction"),
+    "IterationCycle": (".iteration_cycle", "IterationCycle"),
+    "IterationResult": (".iteration_cycle", "IterationResult"),
+    "IterationConfig": (".iteration_cycle", "IterationConfig"),
+    "CycleStatus": (".iteration_cycle", "CycleStatus"),
+    "ModuleIterationCycle": (".module_iteration", "ModuleIterationCycle"),
+    "ModuleIterationResult": (".module_iteration", "ModuleIterationResult"),
+    "TestDrivenIteration": (".test_driven_iteration", "TestDrivenIteration"),
+    "TestDrivenIterationManager": (".test_driven_iteration", "TestDrivenIterationManager"),
+    "TestResult": (".test_driven_iteration", "TestResult"),
+}
 
 # 模块导出
-__all__ = [
-    'IterationCycle',
-    'IterationResult',
-    'IterationConfig',
-    'CycleStatus',
-    'ModuleIterationCycle',
-    'ModuleIterationResult',
-    'TestDrivenIteration',
-    'TestDrivenIterationManager',
-    'TestResult',
-    'FixingStage',
-    'RepairAction'
-]
+__all__ = list(_LAZY_IMPORTS.keys())
 
-if SystemIterationCycle is not None and SystemIterationResult is not None:
-    __all__.extend(['SystemIterationCycle', 'SystemIterationResult'])
+# SystemIterationCycle 可选依赖
+_OPTIONAL_IMPORTS: dict[str, tuple[str, str]] = {
+    "SystemIterationCycle": (".system_iteration", "SystemIterationCycle"),
+    "SystemIterationResult": (".system_iteration", "SystemIterationResult"),
+}
 
-# ──────────────────────────────────────────────────────────────────────
-# 以下静态配置字典已迁移至 config/reference_constants.yml（无消费者引用）。
-# ──────────────────────────────────────────────────────────────────────
 
-import logging
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
-logger = logging.getLogger(__name__)
-logger.info("中医古籍迭代循环模块已初始化")
+def __getattr__(name: str):
+    if name in _LAZY_IMPORTS:
+        module_path, attr = _LAZY_IMPORTS[name]
+        mod = _importlib.import_module(module_path, __name__)
+        val = getattr(mod, attr)
+        globals()[name] = val
+        return val
+    if name in _OPTIONAL_IMPORTS:
+        module_path, attr = _OPTIONAL_IMPORTS[name]
+        try:
+            mod = _importlib.import_module(module_path, __name__)
+            val = getattr(mod, attr)
+        except Exception:
+            val = None
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -49,8 +49,8 @@ def create_app(
         CORSMiddleware,
         allow_origins=cors_origins or _DEFAULT_CORS_ORIGINS,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=extra_config.get("cors_methods", ["*"]) if extra_config else ["*"],
+        allow_headers=extra_config.get("cors_headers", ["*"]) if extra_config else ["*"],
     )
 
     # ---- 静态文件 ----

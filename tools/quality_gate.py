@@ -1,15 +1,17 @@
 """
 Unified quality gate for the repository.
 
-This script consolidates three baseline controls:
+This script consolidates the repository's baseline controls:
 1) Static logic checks
 2) Dependency graph regeneration
 3) Code quality static checks
 4) Focused quality-tool unit tests
-5) Quality assessment scoring
-6) Continuous improvement loop
-7) Quality improvement archive
-8) Quality feedback mechanism
+5) Optional real Observe smoke validation
+6) Quality assessment scoring
+7) Continuous improvement loop
+8) Quality consumer inventory
+9) Quality improvement archive
+10) Quality feedback mechanism
 
 Usage:
     python tools/quality_gate.py
@@ -184,6 +186,10 @@ DEFAULT_GOVERNANCE_CONFIG = {
     "persist_failed_operations": True,
     "minimum_stable_success_rate": 1.0,
     "export_contract_version": "d63.v1",
+    "enable_real_observe_smoke": False,
+    "real_observe_smoke_profile": "tools/diagnostics/real_observe_smoke_profile.json",
+    "real_observe_smoke_output_dir": "output/real_observe_smoke",
+    "real_observe_smoke_timeout_seconds": 600,
 }
 
 
@@ -202,6 +208,8 @@ def _utc_now_iso() -> str:
 def _load_quality_gate_section(config_path: Path | None) -> Dict[str, Any]:
     return load_settings_section(
         "governance.quality_gate",
+        "iteration_cycle.quality_gate",
+        "quality_gate",
         config_path=config_path,
         default={},
     )
@@ -216,6 +224,21 @@ def _load_governance_config(config_path: Path | None) -> Dict[str, Any]:
             section.get("minimum_stable_success_rate", DEFAULT_GOVERNANCE_CONFIG["minimum_stable_success_rate"])
         ),
         "export_contract_version": str(section.get("export_contract_version", DEFAULT_GOVERNANCE_CONFIG["export_contract_version"])),
+        "enable_real_observe_smoke": bool(
+            section.get("enable_real_observe_smoke", DEFAULT_GOVERNANCE_CONFIG["enable_real_observe_smoke"])
+        ),
+        "real_observe_smoke_profile": str(
+            section.get("real_observe_smoke_profile", DEFAULT_GOVERNANCE_CONFIG["real_observe_smoke_profile"])
+        ),
+        "real_observe_smoke_output_dir": str(
+            section.get("real_observe_smoke_output_dir", DEFAULT_GOVERNANCE_CONFIG["real_observe_smoke_output_dir"])
+        ),
+        "real_observe_smoke_timeout_seconds": int(
+            section.get(
+                "real_observe_smoke_timeout_seconds",
+                DEFAULT_GOVERNANCE_CONFIG["real_observe_smoke_timeout_seconds"],
+            )
+        ),
     }
 
 
@@ -559,6 +582,122 @@ def run_unit_test_gate(root: Path, test_modules: List[str]) -> GateResult:
     )
 
 
+def run_real_observe_smoke_gate(root: Path, governance_config: Dict[str, Any]) -> GateResult:
+    runner_path = root / "tools" / "diagnostics" / "run_real_observe_smoke.py"
+    profile_path = root / str(
+        governance_config.get(
+            "real_observe_smoke_profile",
+            DEFAULT_GOVERNANCE_CONFIG["real_observe_smoke_profile"],
+        )
+    )
+    output_dir = root / str(
+        governance_config.get(
+            "real_observe_smoke_output_dir",
+            DEFAULT_GOVERNANCE_CONFIG["real_observe_smoke_output_dir"],
+        )
+    )
+    timeout_seconds = int(
+        governance_config.get(
+            "real_observe_smoke_timeout_seconds",
+            DEFAULT_GOVERNANCE_CONFIG["real_observe_smoke_timeout_seconds"],
+        )
+    )
+
+    if not runner_path.exists():
+        return GateResult(
+            name="real_observe_smoke",
+            success=False,
+            metrics={"return_code": 1},
+            details={"error": f"runner script is missing: {runner_path.relative_to(root)}"},
+        )
+
+    if not profile_path.exists():
+        return GateResult(
+            name="real_observe_smoke",
+            success=False,
+            metrics={"return_code": 1},
+            details={"error": f"profile is missing: {profile_path.relative_to(root)}"},
+        )
+
+    command = [
+        sys.executable,
+        str(runner_path),
+        "--profile",
+        str(profile_path),
+        "--output-dir",
+        str(output_dir),
+    ]
+    latest_path = output_dir / "latest.json"
+    dossier_path = output_dir / "dossier.md"
+    timeline_path = output_dir / "timeline.jsonl"
+
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as error:
+        return GateResult(
+            name="real_observe_smoke",
+            success=False,
+            metrics={"timed_out": 1, "timeout_seconds": timeout_seconds},
+            details={
+                "command": command,
+                "stdout": error.stdout or "",
+                "stderr": error.stderr or "",
+                "error": f"real observe smoke timed out after {timeout_seconds} seconds",
+            },
+        )
+
+    summary: Dict[str, Any] = {}
+    if latest_path.exists():
+        try:
+            summary = json.loads(latest_path.read_text(encoding="utf-8"))
+        except Exception as error:
+            summary = {"validation_status": "failed", "violations": [f"unable to parse latest.json: {error}"]}
+
+    outputs: Dict[str, str] = {}
+    for label, path in (
+        ("latest_json", latest_path),
+        ("dossier_markdown", dossier_path),
+        ("timeline_file", timeline_path),
+    ):
+        if path.exists():
+            outputs[label] = str(path.relative_to(root)).replace("\\", "/")
+
+    validation_status = str(summary.get("validation_status") or ("passed" if completed.returncode == 0 else "failed"))
+    success = completed.returncode == 0 and validation_status == "passed"
+
+    return GateResult(
+        name="real_observe_smoke",
+        success=success,
+        metrics={
+            "return_code": completed.returncode,
+            "processed_document_count": int(summary.get("processed_document_count") or 0),
+            "record_count": int(summary.get("record_count") or 0),
+            "p_value": summary.get("p_value"),
+            "effect_size": summary.get("effect_size"),
+            "kg_path_count": int(summary.get("kg_path_count") or 0),
+            "association_rule_count": int(summary.get("association_rule_count") or 0),
+            "frequency_signal_count": int(summary.get("frequency_signal_count") or 0),
+        },
+        details={
+            "command": command,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "outputs": outputs,
+            "profile_name": summary.get("profile_name"),
+            "validation_status": validation_status,
+            "violations": summary.get("violations") or [],
+            "primary_association": summary.get("primary_association") or {},
+        },
+    )
+
+
 def run_quality_assessment_gate(root: Path, gate_results: List[GateResult]) -> GateResult:
     assessment = assess_from_gate_results([asdict(item) for item in gate_results], root / "config.yml")
     output_path = root / "output" / "quality-assessment.json"
@@ -690,6 +829,28 @@ def run_quality_feedback_gate(root: Path) -> GateResult:
         archive_latest = json.loads(archive_latest_path.read_text(encoding="utf-8"))
         inventory_report = json.loads(inventory_path.read_text(encoding="utf-8"))
         feedback = build_feedback_report(assessment, improvement, archive_latest, root / "config.yml", inventory_report)
+
+        # Inject real_observe_smoke latest.json into feedback report
+        smoke_latest_path = root / "output" / "real_observe_smoke" / "latest.json"
+        if smoke_latest_path.exists():
+            try:
+                smoke_data = json.loads(smoke_latest_path.read_text(encoding="utf-8"))
+                if isinstance(smoke_data, dict):
+                    feedback["smoke_health"] = {
+                        "validation_status": smoke_data.get("validation_status", "unknown"),
+                        "processed_document_count": smoke_data.get("processed_document_count", 0),
+                        "record_count": smoke_data.get("record_count", 0),
+                        "p_value": smoke_data.get("p_value"),
+                        "effect_size": smoke_data.get("effect_size"),
+                        "kg_path_count": smoke_data.get("kg_path_count", 0),
+                        "association_rule_count": smoke_data.get("association_rule_count", 0),
+                        "frequency_signal_count": smoke_data.get("frequency_signal_count", 0),
+                        "violations": smoke_data.get("violations") or [],
+                        "primary_association": smoke_data.get("primary_association") or {},
+                        "generated_at": smoke_data.get("generated_at", ""),
+                    }
+            except Exception:
+                pass
 
         json_path = root / "output" / "quality-feedback.json"
         md_path = root / "output" / "quality-feedback.md"
@@ -896,6 +1057,17 @@ def main() -> int:
             lambda: run_unit_test_gate(root, DEFAULT_TEST_MODULES),
         ),
     ]
+    if governance_config.get("enable_real_observe_smoke", DEFAULT_GOVERNANCE_CONFIG["enable_real_observe_smoke"]):
+        core_results.append(
+            _run_gate_phase(
+                "run_real_observe_smoke_gate",
+                root,
+                runtime_metadata,
+                failed_operations,
+                governance_config,
+                lambda: run_real_observe_smoke_gate(root, governance_config),
+            )
+        )
     assessment_result = _run_gate_phase(
         "run_quality_assessment_gate",
         root,

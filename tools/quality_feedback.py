@@ -1040,6 +1040,40 @@ def _to_markdown(report: Dict[str, object], issue_index_items: List[Dict[str, ob
                 )
 
     lines.append("")
+
+    # Smoke Test Health section
+    smoke = report.get("smoke_health")
+    if smoke:
+        status = smoke.get("validation_status", "unknown")
+        badge = "PASSED ✓" if status == "passed" else "FAILED ✗"
+        lines.extend([
+            "## Smoke Test Health",
+            "",
+            "- Status: {0}".format(badge),
+            "- Generated: {0}".format(smoke.get("generated_at", "—")),
+            "- Documents: {0}".format(smoke.get("processed_document_count", 0)),
+            "- Records: {0}".format(smoke.get("record_count", 0)),
+            "- p-value: {0}".format(smoke.get("p_value") if smoke.get("p_value") is not None else "—"),
+            "- Effect Size: {0}".format(smoke.get("effect_size") if smoke.get("effect_size") is not None else "—"),
+            "- KG Paths: {0}".format(smoke.get("kg_path_count", 0)),
+            "- Association Rules: {0}".format(smoke.get("association_rule_count", 0)),
+            "- Frequency Signals: {0}".format(smoke.get("frequency_signal_count", 0)),
+        ])
+        primary = smoke.get("primary_association") or {}
+        if primary:
+            lines.append("- Primary Association: {herb} → {syndrome} (χ²={chi2}, p={pv})".format(
+                herb=primary.get("herb", "—"),
+                syndrome=primary.get("syndrome", "—"),
+                chi2=primary.get("chi2", 0),
+                pv=primary.get("p_value", 0),
+            ))
+        violations = smoke.get("violations") or []
+        if violations:
+            lines.append("- Violations ({0}):".format(len(violations)))
+            for v in violations[:10]:
+                lines.append("  - {0}".format(v))
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -1129,6 +1163,24 @@ def main() -> int:
     inventory_report = _safe_load_json(Path(args.inventory).resolve())
 
     report = build_feedback_report(assessment, improvement, archive_latest, config_path, inventory_report)
+
+    # Inject real_observe_smoke latest.json into feedback report
+    smoke_latest_path = Path("output/real_observe_smoke/latest.json").resolve()
+    smoke_data = _safe_load_json(smoke_latest_path)
+    if smoke_data:
+        report["smoke_health"] = {
+            "validation_status": smoke_data.get("validation_status", "unknown"),
+            "processed_document_count": smoke_data.get("processed_document_count", 0),
+            "record_count": smoke_data.get("record_count", 0),
+            "p_value": smoke_data.get("p_value"),
+            "effect_size": smoke_data.get("effect_size"),
+            "kg_path_count": smoke_data.get("kg_path_count", 0),
+            "association_rule_count": smoke_data.get("association_rule_count", 0),
+            "frequency_signal_count": smoke_data.get("frequency_signal_count", 0),
+            "violations": smoke_data.get("violations") or [],
+            "primary_association": smoke_data.get("primary_association") or {},
+            "generated_at": smoke_data.get("generated_at", ""),
+        }
 
     output_path = Path(args.output).resolve()
     markdown_path = Path(args.markdown).resolve()

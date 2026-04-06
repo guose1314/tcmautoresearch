@@ -444,52 +444,104 @@ class SemanticGraphBuilder(BaseModule):
             return {}
         return payload if isinstance(payload, dict) else {}
 
-    def _build_local_formula_graph_evidence(self, formula_name: str, similar_formula_name: str) -> Dict[str, Any]:
-        composition_a = FormulaStructureAnalyzer.get_formula_composition(formula_name)
-        composition_b = FormulaStructureAnalyzer.get_formula_composition(similar_formula_name)
+    def _normalize_formula_herb_names(self, herbs: List[Any]) -> set[str]:
+        return {str(item) for item in herbs if item}
+
+    def _build_role_overlap_payload(
+        self,
+        formula_role: str,
+        similar_formula_role: str,
+        herbs: List[str],
+    ) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
+        shared_herbs = [
+            {
+                "herb": herb_name,
+                "formula_role": formula_role,
+                "similar_formula_role": similar_formula_role,
+            }
+            for herb_name in herbs
+        ]
+        role_overlap = {
+            "formula_role": formula_role,
+            "similar_formula_role": similar_formula_role,
+            "herbs": herbs,
+        }
+        return shared_herbs, role_overlap
+
+    def _collect_local_formula_role_overlaps(
+        self,
+        composition_a: Dict[str, Any],
+        composition_b: Dict[str, Any],
+    ) -> Tuple[List[Dict[str, str]], List[Dict[str, Any]]]:
         shared_herbs: List[Dict[str, str]] = []
         role_overlaps: List[Dict[str, Any]] = []
 
         for role_a, herbs_a in composition_a.items():
-            herbs_a_set = {str(item) for item in herbs_a if item}
+            herbs_a_set = self._normalize_formula_herb_names(herbs_a)
             if not herbs_a_set:
                 continue
             for role_b, herbs_b in composition_b.items():
-                common = sorted(herbs_a_set & {str(item) for item in herbs_b if item})
+                common = sorted(herbs_a_set & self._normalize_formula_herb_names(herbs_b))
                 if not common:
                     continue
-                role_overlaps.append(
-                    {
-                        "formula_role": role_a,
-                        "similar_formula_role": role_b,
-                        "herbs": common,
-                    }
+                overlap_shared_herbs, role_overlap = self._build_role_overlap_payload(
+                    role_a,
+                    role_b,
+                    common,
                 )
-                shared_herbs.extend(
-                    {
-                        "herb": herb_name,
-                        "formula_role": role_a,
-                        "similar_formula_role": role_b,
-                    }
-                    for herb_name in common
-                )
+                shared_herbs.extend(overlap_shared_herbs)
+                role_overlaps.append(role_overlap)
 
-        comparison_summary = FormulaComparator.compare_formulas(formula_name, similar_formula_name)
+        return shared_herbs, role_overlaps
+
+    def _append_missing_comparison_herbs(
+        self,
+        shared_herbs: List[Dict[str, str]],
+        comparison_summary: Dict[str, Any],
+    ) -> None:
         comparison_herbs = [str(item) for item in comparison_summary.get("common_herbs", []) if item]
         existing_shared = {item.get("herb") for item in shared_herbs if item.get("herb")}
         for herb_name in comparison_herbs:
-            if herb_name not in existing_shared:
-                shared_herbs.append(
-                    {
-                        "herb": herb_name,
-                        "formula_role": "unknown",
-                        "similar_formula_role": "unknown",
-                    }
-                )
+            if herb_name in existing_shared:
+                continue
+            shared_herbs.append(
+                {
+                    "herb": herb_name,
+                    "formula_role": "unknown",
+                    "similar_formula_role": "unknown",
+                }
+            )
 
-        evidence_score = min(
+    def _calculate_local_formula_evidence_score(
+        self,
+        shared_herbs: List[Dict[str, str]],
+        role_overlaps: List[Dict[str, Any]],
+        comparison_summary: Dict[str, Any],
+    ) -> float:
+        return min(
             1.0,
-            round(len(shared_herbs) * 0.14 + len(role_overlaps) * 0.08 + (0.2 if comparison_summary else 0.0), 3),
+            round(
+                len(shared_herbs) * 0.14
+                + len(role_overlaps) * 0.08
+                + (0.2 if comparison_summary else 0.0),
+                3,
+            ),
+        )
+
+    def _build_local_formula_graph_evidence(self, formula_name: str, similar_formula_name: str) -> Dict[str, Any]:
+        composition_a = FormulaStructureAnalyzer.get_formula_composition(formula_name)
+        composition_b = FormulaStructureAnalyzer.get_formula_composition(similar_formula_name)
+        shared_herbs, role_overlaps = self._collect_local_formula_role_overlaps(
+            composition_a,
+            composition_b,
+        )
+
+        comparison_summary = FormulaComparator.compare_formulas(formula_name, similar_formula_name)
+        self._append_missing_comparison_herbs(shared_herbs, comparison_summary)
+        evidence_score = self._calculate_local_formula_evidence_score(
+            shared_herbs,
+            role_overlaps,
+            comparison_summary,
         )
         return {
             "source": "relationship_reasoning",

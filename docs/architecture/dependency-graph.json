@@ -1,8 +1,8 @@
 {
-  "module_count": 81,
-  "module_edge_count": 119,
-  "package_count": 22,
-  "package_edge_count": 33,
+  "module_count": 205,
+  "module_edge_count": 432,
+  "package_count": 28,
+  "package_edge_count": 66,
   "modules": [
     {
       "module": "src",
@@ -10,13 +10,113 @@
       "package": "src"
     },
     {
+      "module": "src.ai_assistant",
+      "file_path": "src/ai_assistant/__init__.py",
+      "package": "src.ai_assistant"
+    },
+    {
+      "module": "src.ai_assistant.assistant_engine",
+      "file_path": "src/ai_assistant/assistant_engine.py",
+      "package": "src.ai_assistant"
+    },
+    {
+      "module": "src.ai_assistant.engine",
+      "file_path": "src/ai_assistant/engine.py",
+      "package": "src.ai_assistant"
+    },
+    {
+      "module": "src.ai_assistant.research_advisor",
+      "file_path": "src/ai_assistant/research_advisor.py",
+      "package": "src.ai_assistant"
+    },
+    {
+      "module": "src.ai_assistant.writing_helper",
+      "file_path": "src/ai_assistant/writing_helper.py",
+      "package": "src.ai_assistant"
+    },
+    {
       "module": "src.analysis",
       "file_path": "src/analysis/__init__.py",
       "package": "src.analysis"
     },
     {
-      "module": "src.analysis.gap_analyzer",
-      "file_path": "src/analysis/gap_analyzer.py",
+      "module": "src.analysis.complexity_dynamics",
+      "file_path": "src/analysis/complexity_dynamics.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.data_mining",
+      "file_path": "src/analysis/data_mining.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.entity_extractor",
+      "file_path": "src/analysis/entity_extractor.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.formula_comparator",
+      "file_path": "src/analysis/formula_comparator.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.formula_structure",
+      "file_path": "src/analysis/formula_structure.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.herb_properties",
+      "file_path": "src/analysis/herb_properties.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.knowledge_archaeology",
+      "file_path": "src/analysis/knowledge_archaeology.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.multimodal_fusion",
+      "file_path": "src/analysis/multimodal_fusion.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.network_pharmacology",
+      "file_path": "src/analysis/network_pharmacology.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.pharmacology",
+      "file_path": "src/analysis/pharmacology.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.preprocessor",
+      "file_path": "src/analysis/preprocessor.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.reasoning_engine",
+      "file_path": "src/analysis/reasoning_engine.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.research_scoring",
+      "file_path": "src/analysis/research_scoring.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.semantic_graph",
+      "file_path": "src/analysis/semantic_graph.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.summary_analysis",
+      "file_path": "src/analysis/summary_analysis.py",
+      "package": "src.analysis"
+    },
+    {
+      "module": "src.analysis.supramolecular",
+      "file_path": "src/analysis/supramolecular.py",
       "package": "src.analysis"
     },
     {
@@ -30,8 +130,138 @@
       "package": "src.analytics"
     },
     {
+      "module": "src.api",
+      "file_path": "src/api/__init__.py",
+      "package": "src.api"
+    },
+    {
+      "module": "src.api.app",
+      "file_path": "src/api/app.py",
+      "package": "src.api"
+    },
+    {
+      "module": "src.api.dependencies",
+      "file_path": "src/api/dependencies.py",
+      "package": "src.api"
+    },
+    {
+      "module": "src.api.research_utils",
+      "file_path": "src/api/research_utils.py",
+      "package": "src.api"
+    },
+    {
+      "module": "src.api.routes",
+      "file_path": "src/api/routes/__init__.py",
+      "package": "src.api"
+    },
+    {
+      "module": "src.api.routes.analysis",
+      "file_path": "src/api/routes/analysis.py",
+      "package": "src.api"
+    },
+    {
+      "module": "src.api.routes.collection",
+      "file_path": "src/api/routes/collection.py",
+      "package": "src.api"
+    },
+    {
+      "module": "src.api.routes.research",
+      "file_path": "src/api/routes/research.py",
+      "package": "src.api"
+    },
+    {
+      "module": "src.api.routes.system",
+      "file_path": "src/api/routes/system.py",
+      "package": "src.api"
+    },
+    {
+      "module": "src.api.schemas",
+      "file_path": "src/api/schemas.py",
+      "package": "src.api"
+    },
+    {
+      "module": "src.api.websocket",
+      "file_path": "src/api/websocket.py",
+      "package": "src.api"
+    },
+    {
+      "module": "src.collector",
+      "file_path": "src/collector/__init__.py",
+      "package": "src.collector"
+    },
+    {
+      "module": "src.collector.corpus_bundle",
+      "file_path": "src/collector/corpus_bundle.py",
+      "package": "src.collector"
+    },
+    {
+      "module": "src.collector.ctext_corpus_collector",
+      "file_path": "src/collector/ctext_corpus_collector.py",
+      "package": "src.collector"
+    },
+    {
+      "module": "src.collector.ctext_whitelist",
+      "file_path": "src/collector/ctext_whitelist.py",
+      "package": "src.collector"
+    },
+    {
+      "module": "src.collector.format_converter",
+      "file_path": "src/collector/format_converter.py",
+      "package": "src.collector"
+    },
+    {
+      "module": "src.collector.literature_retriever",
+      "file_path": "src/collector/literature_retriever.py",
+      "package": "src.collector"
+    },
+    {
+      "module": "src.collector.local_collector",
+      "file_path": "src/collector/local_collector.py",
+      "package": "src.collector"
+    },
+    {
+      "module": "src.collector.multi_source_corpus",
+      "file_path": "src/collector/multi_source_corpus.py",
+      "package": "src.collector"
+    },
+    {
+      "module": "src.collector.normalizer",
+      "file_path": "src/collector/normalizer.py",
+      "package": "src.collector"
+    },
+    {
+      "module": "src.common",
+      "file_path": "src/common/__init__.py",
+      "package": "src.common"
+    },
+    {
+      "module": "src.common.cache",
+      "file_path": "src/common/cache.py",
+      "package": "src.common"
+    },
+    {
+      "module": "src.common.exceptions",
+      "file_path": "src/common/exceptions.py",
+      "package": "src.common"
+    },
+    {
+      "module": "src.common.http_client",
+      "file_path": "src/common/http_client.py",
+      "package": "src.common"
+    },
+    {
+      "module": "src.common.retry_utils",
+      "file_path": "src/common/retry_utils.py",
+      "package": "src.common"
+    },
+    {
       "module": "src.core",
       "file_path": "src/core/__init__.py",
+      "package": "src.core"
+    },
+    {
+      "module": "src.core.adapters",
+      "file_path": "src/core/adapters.py",
       "package": "src.core"
     },
     {
@@ -45,8 +275,23 @@
       "package": "src.core"
     },
     {
+      "module": "src.core.contracts",
+      "file_path": "src/core/contracts.py",
+      "package": "src.core"
+    },
+    {
+      "module": "src.core.event_bus",
+      "file_path": "src/core/event_bus.py",
+      "package": "src.core"
+    },
+    {
       "module": "src.core.module_base",
       "file_path": "src/core/module_base.py",
+      "package": "src.core"
+    },
+    {
+      "module": "src.core.module_factory",
+      "file_path": "src/core/module_factory.py",
       "package": "src.core"
     },
     {
@@ -60,23 +305,53 @@
       "package": "src.core"
     },
     {
-      "module": "src.corpus",
-      "file_path": "src/corpus/__init__.py",
-      "package": "src.corpus"
-    },
-    {
-      "module": "src.corpus.corpus_bundle",
-      "file_path": "src/corpus/corpus_bundle.py",
-      "package": "src.corpus"
-    },
-    {
-      "module": "src.corpus.local_collector",
-      "file_path": "src/corpus/local_collector.py",
-      "package": "src.corpus"
+      "module": "src.core.ports",
+      "file_path": "src/core/ports.py",
+      "package": "src.core"
     },
     {
       "module": "src.cycle",
       "file_path": "src/cycle/__init__.py",
+      "package": "src.cycle"
+    },
+    {
+      "module": "src.cycle.cycle_cli",
+      "file_path": "src/cycle/cycle_cli.py",
+      "package": "src.cycle"
+    },
+    {
+      "module": "src.cycle.cycle_command_executor",
+      "file_path": "src/cycle/cycle_command_executor.py",
+      "package": "src.cycle"
+    },
+    {
+      "module": "src.cycle.cycle_core_demo_handler",
+      "file_path": "src/cycle/cycle_core_demo_handler.py",
+      "package": "src.cycle"
+    },
+    {
+      "module": "src.cycle.cycle_demo_handler",
+      "file_path": "src/cycle/cycle_demo_handler.py",
+      "package": "src.cycle"
+    },
+    {
+      "module": "src.cycle.cycle_plugin_workflow_handlers",
+      "file_path": "src/cycle/cycle_plugin_workflow_handlers.py",
+      "package": "src.cycle"
+    },
+    {
+      "module": "src.cycle.cycle_reporter",
+      "file_path": "src/cycle/cycle_reporter.py",
+      "package": "src.cycle"
+    },
+    {
+      "module": "src.cycle.cycle_research_handler",
+      "file_path": "src/cycle/cycle_research_handler.py",
+      "package": "src.cycle"
+    },
+    {
+      "module": "src.cycle.cycle_runner",
+      "file_path": "src/cycle/cycle_runner.py",
       "package": "src.cycle"
     },
     {
@@ -110,6 +385,11 @@
       "package": "src.data"
     },
     {
+      "module": "src.data.knowledge_base",
+      "file_path": "src/data/knowledge_base/__init__.py",
+      "package": "src.data"
+    },
+    {
       "module": "src.data.tcm_lexicon",
       "file_path": "src/data/tcm_lexicon.py",
       "package": "src.data"
@@ -135,14 +415,39 @@
       "package": "src.extractors"
     },
     {
-      "module": "src.hypothesis",
-      "file_path": "src/hypothesis/__init__.py",
-      "package": "src.hypothesis"
+      "module": "src.generation",
+      "file_path": "src/generation/__init__.py",
+      "package": "src.generation"
     },
     {
-      "module": "src.hypothesis.hypothesis_engine",
-      "file_path": "src/hypothesis/hypothesis_engine.py",
-      "package": "src.hypothesis"
+      "module": "src.generation.citation_manager",
+      "file_path": "src/generation/citation_manager.py",
+      "package": "src.generation"
+    },
+    {
+      "module": "src.generation.figure_generator",
+      "file_path": "src/generation/figure_generator.py",
+      "package": "src.generation"
+    },
+    {
+      "module": "src.generation.llm_context_adapter",
+      "file_path": "src/generation/llm_context_adapter.py",
+      "package": "src.generation"
+    },
+    {
+      "module": "src.generation.output_formatter",
+      "file_path": "src/generation/output_formatter.py",
+      "package": "src.generation"
+    },
+    {
+      "module": "src.generation.paper_writer",
+      "file_path": "src/generation/paper_writer.py",
+      "package": "src.generation"
+    },
+    {
+      "module": "src.generation.report_generator",
+      "file_path": "src/generation/report_generator.py",
+      "package": "src.generation"
     },
     {
       "module": "src.infra",
@@ -152,6 +457,11 @@
     {
       "module": "src.infra.cache_service",
       "file_path": "src/infra/cache_service.py",
+      "package": "src.infra"
+    },
+    {
+      "module": "src.infra.config_manager",
+      "file_path": "src/infra/config_manager.py",
       "package": "src.infra"
     },
     {
@@ -165,6 +475,31 @@
       "package": "src.infra"
     },
     {
+      "module": "src.infrastructure",
+      "file_path": "src/infrastructure/__init__.py",
+      "package": "src.infrastructure"
+    },
+    {
+      "module": "src.infrastructure.config_loader",
+      "file_path": "src/infrastructure/config_loader.py",
+      "package": "src.infrastructure"
+    },
+    {
+      "module": "src.infrastructure.monitoring",
+      "file_path": "src/infrastructure/monitoring.py",
+      "package": "src.infrastructure"
+    },
+    {
+      "module": "src.infrastructure.persistence",
+      "file_path": "src/infrastructure/persistence.py",
+      "package": "src.infrastructure"
+    },
+    {
+      "module": "src.infrastructure.research_session_repo",
+      "file_path": "src/infrastructure/research_session_repo.py",
+      "package": "src.infrastructure"
+    },
+    {
       "module": "src.knowledge",
       "file_path": "src/knowledge/__init__.py",
       "package": "src.knowledge"
@@ -175,8 +510,23 @@
       "package": "src.knowledge"
     },
     {
+      "module": "src.knowledge.kg_query_engine",
+      "file_path": "src/knowledge/kg_query_engine.py",
+      "package": "src.knowledge"
+    },
+    {
+      "module": "src.knowledge.kg_rag",
+      "file_path": "src/knowledge/kg_rag.py",
+      "package": "src.knowledge"
+    },
+    {
       "module": "src.knowledge.ontology_manager",
       "file_path": "src/knowledge/ontology_manager.py",
+      "package": "src.knowledge"
+    },
+    {
+      "module": "src.knowledge.tcm_knowledge_graph",
+      "file_path": "src/knowledge/tcm_knowledge_graph.py",
       "package": "src.knowledge"
     },
     {
@@ -210,11 +560,6 @@
       "package": "src.llm"
     },
     {
-      "module": "src.llm.llm_service",
-      "file_path": "src/llm/llm_service.py",
-      "package": "src.llm"
-    },
-    {
       "module": "src.orchestration",
       "file_path": "src/orchestration/__init__.py",
       "package": "src.orchestration"
@@ -245,14 +590,24 @@
       "package": "src.output"
     },
     {
-      "module": "src.preprocessor",
-      "file_path": "src/preprocessor/__init__.py",
-      "package": "src.preprocessor"
+      "module": "src.output.report_generator",
+      "file_path": "src/output/report_generator.py",
+      "package": "src.output"
     },
     {
-      "module": "src.preprocessor.document_preprocessor",
-      "file_path": "src/preprocessor/document_preprocessor.py",
-      "package": "src.preprocessor"
+      "module": "src.quality",
+      "file_path": "src/quality/__init__.py",
+      "package": "src.quality"
+    },
+    {
+      "module": "src.quality.evidence_grader",
+      "file_path": "src/quality/evidence_grader.py",
+      "package": "src.quality"
+    },
+    {
+      "module": "src.quality.quality_assessor",
+      "file_path": "src/quality/quality_assessor.py",
+      "package": "src.quality"
     },
     {
       "module": "src.reasoning",
@@ -280,18 +635,18 @@
       "package": "src.research"
     },
     {
-      "module": "src.research.ctext_corpus_collector",
-      "file_path": "src/research/ctext_corpus_collector.py",
-      "package": "src.research"
-    },
-    {
-      "module": "src.research.ctext_whitelist",
-      "file_path": "src/research/ctext_whitelist.py",
+      "module": "src.research.audit_history",
+      "file_path": "src/research/audit_history.py",
       "package": "src.research"
     },
     {
       "module": "src.research.data_miner",
       "file_path": "src/research/data_miner.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.experiment_designer",
+      "file_path": "src/research/experiment_designer.py",
       "package": "src.research"
     },
     {
@@ -310,23 +665,8 @@
       "package": "src.research"
     },
     {
-      "module": "src.research.literature_retriever",
-      "file_path": "src/research/literature_retriever.py",
-      "package": "src.research"
-    },
-    {
       "module": "src.research.markdown_translate",
       "file_path": "src/research/markdown_translate.py",
-      "package": "src.research"
-    },
-    {
-      "module": "src.research.multi_source_corpus",
-      "file_path": "src/research/multi_source_corpus.py",
-      "package": "src.research"
-    },
-    {
-      "module": "src.research.multimodal_fusion",
-      "file_path": "src/research/multimodal_fusion.py",
       "package": "src.research"
     },
     {
@@ -340,8 +680,118 @@
       "package": "src.research"
     },
     {
+      "module": "src.research.phase_handlers",
+      "file_path": "src/research/phase_handlers/__init__.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phase_handlers.analyze_handler",
+      "file_path": "src/research/phase_handlers/analyze_handler.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phase_handlers.base",
+      "file_path": "src/research/phase_handlers/base.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phase_handlers.experiment_handler",
+      "file_path": "src/research/phase_handlers/experiment_handler.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phase_handlers.hypothesis_handler",
+      "file_path": "src/research/phase_handlers/hypothesis_handler.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phase_handlers.observe_handler",
+      "file_path": "src/research/phase_handlers/observe_handler.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phase_handlers.publish_handler",
+      "file_path": "src/research/phase_handlers/publish_handler.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phase_handlers.reflect_handler",
+      "file_path": "src/research/phase_handlers/reflect_handler.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phase_orchestrator",
+      "file_path": "src/research/phase_orchestrator.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phases",
+      "file_path": "src/research/phases/__init__.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phases.analyze_phase",
+      "file_path": "src/research/phases/analyze_phase.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phases.experiment_phase",
+      "file_path": "src/research/phases/experiment_phase.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phases.hypothesis_phase",
+      "file_path": "src/research/phases/hypothesis_phase.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phases.observe_phase",
+      "file_path": "src/research/phases/observe_phase.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phases.publish_phase",
+      "file_path": "src/research/phases/publish_phase.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phases.reflect_phase",
+      "file_path": "src/research/phases/reflect_phase.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.pipeline_context",
+      "file_path": "src/research/pipeline_context.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.pipeline_events",
+      "file_path": "src/research/pipeline_events.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.pipeline_orchestrator",
+      "file_path": "src/research/pipeline_orchestrator.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.pipeline_phase_handlers",
+      "file_path": "src/research/pipeline_phase_handlers.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.real_observe_smoke",
+      "file_path": "src/research/real_observe_smoke.py",
+      "package": "src.research"
+    },
+    {
       "module": "src.research.research_pipeline",
       "file_path": "src/research/research_pipeline.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.study_session_manager",
+      "file_path": "src/research/study_session_manager.py",
       "package": "src.research"
     },
     {
@@ -435,6 +885,11 @@
       "package": "src.storage"
     },
     {
+      "module": "src.storage.backend_factory",
+      "file_path": "src/storage/backend_factory.py",
+      "package": "src.storage"
+    },
+    {
       "module": "src.storage.database_schema",
       "file_path": "src/storage/database_schema.py",
       "package": "src.storage"
@@ -445,13 +900,33 @@
       "package": "src.storage"
     },
     {
+      "module": "src.storage.graph_interface",
+      "file_path": "src/storage/graph_interface.py",
+      "package": "src.storage"
+    },
+    {
       "module": "src.storage.neo4j_driver",
       "file_path": "src/storage/neo4j_driver.py",
       "package": "src.storage"
     },
     {
+      "module": "src.storage.output_catalog",
+      "file_path": "src/storage/output_catalog.py",
+      "package": "src.storage"
+    },
+    {
+      "module": "src.storage.retention",
+      "file_path": "src/storage/retention.py",
+      "package": "src.storage"
+    },
+    {
       "module": "src.storage.storage_driver",
       "file_path": "src/storage/storage_driver.py",
+      "package": "src.storage"
+    },
+    {
+      "module": "src.storage.transaction",
+      "file_path": "src/storage/transaction.py",
       "package": "src.storage"
     },
     {
@@ -468,20 +943,509 @@
       "module": "src.test.integration_tester",
       "file_path": "src/test/integration_tester.py",
       "package": "src.test"
+    },
+    {
+      "module": "src.visualization",
+      "file_path": "src/visualization/__init__.py",
+      "package": "src.visualization"
+    },
+    {
+      "module": "src.visualization.graph_renderer",
+      "file_path": "src/visualization/graph_renderer.py",
+      "package": "src.visualization"
+    },
+    {
+      "module": "src.web",
+      "file_path": "src/web/__init__.py",
+      "package": "src.web"
+    },
+    {
+      "module": "src.web.app",
+      "file_path": "src/web/app.py",
+      "package": "src.web"
+    },
+    {
+      "module": "src.web.auth",
+      "file_path": "src/web/auth.py",
+      "package": "src.web"
+    },
+    {
+      "module": "src.web.main",
+      "file_path": "src/web/main.py",
+      "package": "src.web"
+    },
+    {
+      "module": "src.web.ops",
+      "file_path": "src/web/ops/__init__.py",
+      "package": "src.web"
+    },
+    {
+      "module": "src.web.ops.console_auth",
+      "file_path": "src/web/ops/console_auth.py",
+      "package": "src.web"
+    },
+    {
+      "module": "src.web.ops.job_manager",
+      "file_path": "src/web/ops/job_manager.py",
+      "package": "src.web"
+    },
+    {
+      "module": "src.web.ops.job_store",
+      "file_path": "src/web/ops/job_store.py",
+      "package": "src.web"
+    },
+    {
+      "module": "src.web.routes",
+      "file_path": "src/web/routes/__init__.py",
+      "package": "src.web"
+    },
+    {
+      "module": "src.web.routes.analysis",
+      "file_path": "src/web/routes/analysis.py",
+      "package": "src.web"
+    },
+    {
+      "module": "src.web.routes.assistant",
+      "file_path": "src/web/routes/assistant.py",
+      "package": "src.web"
+    },
+    {
+      "module": "src.web.routes.auth",
+      "file_path": "src/web/routes/auth.py",
+      "package": "src.web"
+    },
+    {
+      "module": "src.web.routes.dashboard",
+      "file_path": "src/web/routes/dashboard.py",
+      "package": "src.web"
+    },
+    {
+      "module": "src.web.routes.research",
+      "file_path": "src/web/routes/research.py",
+      "package": "src.web"
+    },
+    {
+      "module": "src.web.ws_manager",
+      "file_path": "src/web/ws_manager.py",
+      "package": "src.web"
     }
   ],
   "module_edges": [
     {
-      "source": "src.analysis",
-      "target": "src.analysis.gap_analyzer"
+      "source": "src.ai_assistant",
+      "target": "src.ai_assistant.assistant_engine"
     },
     {
-      "source": "src.analysis.gap_analyzer",
-      "target": "src.research"
+      "source": "src.ai_assistant.assistant_engine",
+      "target": "src.llm.llm_engine"
+    },
+    {
+      "source": "src.ai_assistant.research_advisor",
+      "target": "src.llm.llm_engine"
+    },
+    {
+      "source": "src.ai_assistant.writing_helper",
+      "target": "src.llm.llm_engine"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.complexity_dynamics"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.data_mining"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.entity_extractor"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.formula_comparator"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.formula_structure"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.herb_properties"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.knowledge_archaeology"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.multimodal_fusion"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.network_pharmacology"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.pharmacology"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.preprocessor"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.reasoning_engine"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.research_scoring"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.semantic_graph"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.summary_analysis"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.analysis.supramolecular"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.research.gap_analyzer"
+    },
+    {
+      "source": "src.analysis.complexity_dynamics",
+      "target": "src.semantic_modeling.methods.complexity_science"
+    },
+    {
+      "source": "src.analysis.data_mining",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.analysis.data_mining",
+      "target": "src.research.data_miner"
+    },
+    {
+      "source": "src.analysis.entity_extractor",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.analysis.entity_extractor",
+      "target": "src.data.tcm_lexicon"
+    },
+    {
+      "source": "src.analysis.formula_comparator",
+      "target": "src.semantic_modeling.methods.formula_comparator"
+    },
+    {
+      "source": "src.analysis.formula_structure",
+      "target": "src.semantic_modeling.methods.formula_structure"
+    },
+    {
+      "source": "src.analysis.herb_properties",
+      "target": "src.semantic_modeling.methods.formula_structure"
+    },
+    {
+      "source": "src.analysis.knowledge_archaeology",
+      "target": "src.semantic_modeling.methods.classical_literature"
+    },
+    {
+      "source": "src.analysis.network_pharmacology",
+      "target": "src.semantic_modeling.methods.network_pharmacology"
+    },
+    {
+      "source": "src.analysis.pharmacology",
+      "target": "src.semantic_modeling.methods.pharmacology"
+    },
+    {
+      "source": "src.analysis.preprocessor",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.analysis.reasoning_engine",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.analysis.reasoning_engine",
+      "target": "src.semantic_modeling.tcm_relationships"
+    },
+    {
+      "source": "src.analysis.research_scoring",
+      "target": "src.semantic_modeling.methods.integrated_analyzer"
+    },
+    {
+      "source": "src.analysis.semantic_graph",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.analysis.semantic_graph",
+      "target": "src.extraction.relation_extractor"
+    },
+    {
+      "source": "src.analysis.semantic_graph",
+      "target": "src.knowledge.embedding_service"
+    },
+    {
+      "source": "src.analysis.semantic_graph",
+      "target": "src.knowledge.ontology_manager"
+    },
+    {
+      "source": "src.analysis.semantic_graph",
+      "target": "src.semantic_modeling.methods"
+    },
+    {
+      "source": "src.analysis.summary_analysis",
+      "target": "src.semantic_modeling.methods.summary_engine"
+    },
+    {
+      "source": "src.analysis.supramolecular",
+      "target": "src.semantic_modeling.methods.supramolecular"
     },
     {
       "source": "src.analytics",
       "target": "src.analytics.data_miner"
+    },
+    {
+      "source": "src.api.app",
+      "target": "src.api.dependencies"
+    },
+    {
+      "source": "src.api.app",
+      "target": "src.api.routes"
+    },
+    {
+      "source": "src.api.app",
+      "target": "src.core.architecture"
+    },
+    {
+      "source": "src.api.app",
+      "target": "src.infrastructure.config_loader"
+    },
+    {
+      "source": "src.api.app",
+      "target": "src.infrastructure.monitoring"
+    },
+    {
+      "source": "src.api.dependencies",
+      "target": "src.analysis.entity_extractor"
+    },
+    {
+      "source": "src.api.dependencies",
+      "target": "src.analysis.preprocessor"
+    },
+    {
+      "source": "src.api.dependencies",
+      "target": "src.collector.normalizer"
+    },
+    {
+      "source": "src.api.dependencies",
+      "target": "src.core.architecture"
+    },
+    {
+      "source": "src.api.dependencies",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.api.dependencies",
+      "target": "src.extraction.relation_extractor"
+    },
+    {
+      "source": "src.api.dependencies",
+      "target": "src.infrastructure.config_loader"
+    },
+    {
+      "source": "src.api.dependencies",
+      "target": "src.infrastructure.monitoring"
+    },
+    {
+      "source": "src.api.dependencies",
+      "target": "src.web.auth"
+    },
+    {
+      "source": "src.api.routes",
+      "target": "src.api.routes.analysis"
+    },
+    {
+      "source": "src.api.routes",
+      "target": "src.api.routes.collection"
+    },
+    {
+      "source": "src.api.routes",
+      "target": "src.api.routes.research"
+    },
+    {
+      "source": "src.api.routes",
+      "target": "src.api.routes.system"
+    },
+    {
+      "source": "src.api.routes.analysis",
+      "target": "src.analysis.entity_extractor"
+    },
+    {
+      "source": "src.api.routes.analysis",
+      "target": "src.analysis.preprocessor"
+    },
+    {
+      "source": "src.api.routes.analysis",
+      "target": "src.api.dependencies"
+    },
+    {
+      "source": "src.api.routes.analysis",
+      "target": "src.api.schemas"
+    },
+    {
+      "source": "src.api.routes.analysis",
+      "target": "src.extraction.relation_extractor"
+    },
+    {
+      "source": "src.api.routes.collection",
+      "target": "src.api.dependencies"
+    },
+    {
+      "source": "src.api.routes.collection",
+      "target": "src.api.schemas"
+    },
+    {
+      "source": "src.api.routes.collection",
+      "target": "src.collector.normalizer"
+    },
+    {
+      "source": "src.api.routes.research",
+      "target": "src.api"
+    },
+    {
+      "source": "src.api.routes.research",
+      "target": "src.api.dependencies"
+    },
+    {
+      "source": "src.api.routes.research",
+      "target": "src.api.research_utils"
+    },
+    {
+      "source": "src.api.routes.research",
+      "target": "src.api.schemas"
+    },
+    {
+      "source": "src.api.routes.system",
+      "target": "src.api.dependencies"
+    },
+    {
+      "source": "src.api.routes.system",
+      "target": "src.api.schemas"
+    },
+    {
+      "source": "src.api.routes.system",
+      "target": "src.core.architecture"
+    },
+    {
+      "source": "src.api.routes.system",
+      "target": "src.infrastructure.config_loader"
+    },
+    {
+      "source": "src.api.routes.system",
+      "target": "src.infrastructure.monitoring"
+    },
+    {
+      "source": "src.api.websocket",
+      "target": "src.api.dependencies"
+    },
+    {
+      "source": "src.collector",
+      "target": "src.collector.corpus_bundle"
+    },
+    {
+      "source": "src.collector",
+      "target": "src.collector.ctext_corpus_collector"
+    },
+    {
+      "source": "src.collector",
+      "target": "src.collector.ctext_whitelist"
+    },
+    {
+      "source": "src.collector",
+      "target": "src.collector.format_converter"
+    },
+    {
+      "source": "src.collector",
+      "target": "src.collector.literature_retriever"
+    },
+    {
+      "source": "src.collector",
+      "target": "src.collector.local_collector"
+    },
+    {
+      "source": "src.collector",
+      "target": "src.collector.multi_source_corpus"
+    },
+    {
+      "source": "src.collector",
+      "target": "src.collector.normalizer"
+    },
+    {
+      "source": "src.collector.ctext_corpus_collector",
+      "target": "src.collector.ctext_whitelist"
+    },
+    {
+      "source": "src.collector.ctext_corpus_collector",
+      "target": "src.common.http_client"
+    },
+    {
+      "source": "src.collector.ctext_corpus_collector",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.collector.format_converter",
+      "target": "src.collector.corpus_bundle"
+    },
+    {
+      "source": "src.collector.format_converter",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.collector.literature_retriever",
+      "target": "src.common.retry_utils"
+    },
+    {
+      "source": "src.collector.local_collector",
+      "target": "src.collector.corpus_bundle"
+    },
+    {
+      "source": "src.collector.local_collector",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.collector.normalizer",
+      "target": "src.collector.corpus_bundle"
+    },
+    {
+      "source": "src.collector.normalizer",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.collector.normalizer",
+      "target": "src.knowledge.ontology_manager"
+    },
+    {
+      "source": "src.common",
+      "target": "src.common.cache"
+    },
+    {
+      "source": "src.common",
+      "target": "src.common.exceptions"
+    },
+    {
+      "source": "src.common",
+      "target": "src.common.http_client"
+    },
+    {
+      "source": "src.common",
+      "target": "src.common.retry_utils"
+    },
+    {
+      "source": "src.common.http_client",
+      "target": "src.common.retry_utils"
     },
     {
       "source": "src.core",
@@ -493,11 +1457,31 @@
     },
     {
       "source": "src.core",
+      "target": "src.core.contracts"
+    },
+    {
+      "source": "src.core",
+      "target": "src.core.event_bus"
+    },
+    {
+      "source": "src.core",
       "target": "src.core.module_base"
     },
     {
       "source": "src.core",
+      "target": "src.core.module_factory"
+    },
+    {
+      "source": "src.core",
       "target": "src.core.module_interface"
+    },
+    {
+      "source": "src.core.adapters",
+      "target": "src.core.ports"
+    },
+    {
+      "source": "src.core.adapters",
+      "target": "src.generation.llm_context_adapter"
     },
     {
       "source": "src.core.algorithm_optimizer",
@@ -505,7 +1489,7 @@
     },
     {
       "source": "src.core.architecture",
-      "target": "src.core.module_interface"
+      "target": "src.core.module_base"
     },
     {
       "source": "src.core.architecture",
@@ -513,27 +1497,15 @@
     },
     {
       "source": "src.core.module_base",
+      "target": "src.core.architecture"
+    },
+    {
+      "source": "src.core.module_base",
       "target": "src.core.phase_tracker"
     },
     {
       "source": "src.core.module_interface",
-      "target": "src.core.phase_tracker"
-    },
-    {
-      "source": "src.corpus",
-      "target": "src.corpus.corpus_bundle"
-    },
-    {
-      "source": "src.corpus",
-      "target": "src.corpus.local_collector"
-    },
-    {
-      "source": "src.corpus.local_collector",
       "target": "src.core.module_base"
-    },
-    {
-      "source": "src.corpus.local_collector",
-      "target": "src.corpus.corpus_bundle"
     },
     {
       "source": "src.cycle",
@@ -556,8 +1528,64 @@
       "target": "src.cycle.test_driven_iteration"
     },
     {
+      "source": "src.cycle.cycle_command_executor",
+      "target": "src.cycle.cycle_demo_handler"
+    },
+    {
+      "source": "src.cycle.cycle_command_executor",
+      "target": "src.cycle.cycle_research_handler"
+    },
+    {
+      "source": "src.cycle.cycle_demo_handler",
+      "target": "src.cycle"
+    },
+    {
+      "source": "src.cycle.cycle_demo_handler",
+      "target": "src.cycle.cycle_plugin_workflow_handlers"
+    },
+    {
+      "source": "src.cycle.cycle_reporter",
+      "target": "src.generation.report_generator"
+    },
+    {
+      "source": "src.cycle.cycle_reporter",
+      "target": "src.infrastructure.config_loader"
+    },
+    {
+      "source": "src.cycle.cycle_runner",
+      "target": "src.analysis.entity_extractor"
+    },
+    {
+      "source": "src.cycle.cycle_runner",
+      "target": "src.analysis.preprocessor"
+    },
+    {
+      "source": "src.cycle.cycle_runner",
+      "target": "src.analysis.reasoning_engine"
+    },
+    {
+      "source": "src.cycle.cycle_runner",
+      "target": "src.analysis.semantic_graph"
+    },
+    {
+      "source": "src.cycle.cycle_runner",
+      "target": "src.cycle.cycle_reporter"
+    },
+    {
+      "source": "src.cycle.cycle_runner",
+      "target": "src.generation.output_formatter"
+    },
+    {
       "source": "src.cycle.fixing_stage",
       "target": "src.core.phase_tracker"
+    },
+    {
+      "source": "src.cycle.iteration_cycle",
+      "target": "src.analysis.entity_extractor"
+    },
+    {
+      "source": "src.cycle.iteration_cycle",
+      "target": "src.analysis.preprocessor"
     },
     {
       "source": "src.cycle.iteration_cycle",
@@ -568,12 +1596,28 @@
       "target": "src.core.phase_tracker"
     },
     {
+      "source": "src.cycle.iteration_cycle",
+      "target": "src.cycle.fixing_stage"
+    },
+    {
+      "source": "src.cycle.iteration_cycle",
+      "target": "src.test.automated_tester"
+    },
+    {
       "source": "src.cycle.module_iteration",
       "target": "src.core.phase_tracker"
     },
     {
+      "source": "src.cycle.module_iteration",
+      "target": "src.cycle.iteration_cycle"
+    },
+    {
       "source": "src.cycle.system_iteration",
       "target": "src.core.phase_tracker"
+    },
+    {
+      "source": "src.cycle.system_iteration",
+      "target": "src.cycle.iteration_cycle"
     },
     {
       "source": "src.cycle.system_iteration",
@@ -582,6 +1626,10 @@
     {
       "source": "src.cycle.test_driven_iteration",
       "target": "src.core.phase_tracker"
+    },
+    {
+      "source": "src.data",
+      "target": "src.data.tcm_lexicon"
     },
     {
       "source": "src.data.tcm_lexicon",
@@ -600,19 +1648,59 @@
       "target": "src.semantic_modeling.tcm_relationships"
     },
     {
+      "source": "src.extractors",
+      "target": "src.analysis.entity_extractor"
+    },
+    {
       "source": "src.extractors.advanced_entity_extractor",
+      "target": "src.analysis.entity_extractor"
+    },
+    {
+      "source": "src.generation",
+      "target": "src.generation.citation_manager"
+    },
+    {
+      "source": "src.generation",
+      "target": "src.generation.figure_generator"
+    },
+    {
+      "source": "src.generation",
+      "target": "src.generation.llm_context_adapter"
+    },
+    {
+      "source": "src.generation",
+      "target": "src.generation.output_formatter"
+    },
+    {
+      "source": "src.generation",
+      "target": "src.generation.paper_writer"
+    },
+    {
+      "source": "src.generation",
+      "target": "src.generation.report_generator"
+    },
+    {
+      "source": "src.generation.citation_manager",
       "target": "src.core.module_base"
     },
     {
-      "source": "src.extractors.advanced_entity_extractor",
-      "target": "src.data.tcm_lexicon"
+      "source": "src.generation.figure_generator",
+      "target": "src.core.module_base"
     },
     {
-      "source": "src.hypothesis",
-      "target": "src.hypothesis.hypothesis_engine"
+      "source": "src.generation.output_formatter",
+      "target": "src.core.module_base"
     },
     {
-      "source": "src.hypothesis.hypothesis_engine",
+      "source": "src.generation.paper_writer",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.generation.paper_writer",
+      "target": "src.generation.citation_manager"
+    },
+    {
+      "source": "src.generation.report_generator",
       "target": "src.core.module_base"
     },
     {
@@ -628,6 +1716,10 @@
       "target": "src.infra.llm_service"
     },
     {
+      "source": "src.infra.config_manager",
+      "target": "src.infrastructure.config_loader"
+    },
+    {
       "source": "src.infra.llm_service",
       "target": "src.infra.cache_service"
     },
@@ -636,20 +1728,84 @@
       "target": "src.llm.llm_engine"
     },
     {
+      "source": "src.infrastructure",
+      "target": "src.infrastructure.config_loader"
+    },
+    {
+      "source": "src.infrastructure",
+      "target": "src.infrastructure.monitoring"
+    },
+    {
+      "source": "src.infrastructure",
+      "target": "src.infrastructure.persistence"
+    },
+    {
+      "source": "src.infrastructure.monitoring",
+      "target": "src.core.architecture"
+    },
+    {
+      "source": "src.infrastructure.monitoring",
+      "target": "src.infrastructure.config_loader"
+    },
+    {
+      "source": "src.infrastructure.persistence",
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.infrastructure.research_session_repo",
+      "target": "src.infrastructure.persistence"
+    },
+    {
       "source": "src.knowledge",
       "target": "src.knowledge.embedding_service"
     },
     {
       "source": "src.knowledge",
+      "target": "src.knowledge.kg_query_engine"
+    },
+    {
+      "source": "src.knowledge",
+      "target": "src.knowledge.kg_rag"
+    },
+    {
+      "source": "src.knowledge",
       "target": "src.knowledge.ontology_manager"
+    },
+    {
+      "source": "src.knowledge",
+      "target": "src.knowledge.tcm_knowledge_graph"
+    },
+    {
+      "source": "src.knowledge",
+      "target": "src.storage.graph_interface"
     },
     {
       "source": "src.knowledge.embedding_service",
       "target": "src.knowledge.ontology_manager"
     },
     {
+      "source": "src.knowledge.kg_query_engine",
+      "target": "src.semantic_modeling.tcm_relationships"
+    },
+    {
+      "source": "src.knowledge.kg_rag",
+      "target": "src.semantic_modeling.tcm_relationships"
+    },
+    {
+      "source": "src.knowledge.kg_rag",
+      "target": "src.storage.graph_interface"
+    },
+    {
       "source": "src.knowledge.ontology_manager",
       "target": "src.semantic_modeling.tcm_relationships"
+    },
+    {
+      "source": "src.knowledge.tcm_knowledge_graph",
+      "target": "src.semantic_modeling.tcm_relationships"
+    },
+    {
+      "source": "src.knowledge.tcm_knowledge_graph",
+      "target": "src.storage.graph_interface"
     },
     {
       "source": "src.learning",
@@ -677,19 +1833,15 @@
     },
     {
       "source": "src.llm",
-      "target": "src.llm.llm_engine"
+      "target": "src.infra.llm_service"
     },
     {
       "source": "src.llm",
-      "target": "src.llm.llm_service"
+      "target": "src.llm.llm_engine"
     },
     {
       "source": "src.llm.llm_engine",
       "target": "src.research.gap_analyzer"
-    },
-    {
-      "source": "src.llm.llm_service",
-      "target": "src.infra"
     },
     {
       "source": "src.orchestration",
@@ -705,31 +1857,67 @@
     },
     {
       "source": "src.output",
-      "target": "src.output.citation_manager"
-    },
-    {
-      "source": "src.output",
       "target": "src.output.output_generator"
     },
     {
       "source": "src.output.citation_manager",
-      "target": "src.core.module_base"
+      "target": "src.generation.citation_manager"
     },
     {
       "source": "src.output.output_generator",
       "target": "src.core.module_base"
     },
     {
-      "source": "src.preprocessor.document_preprocessor",
-      "target": "src.core.module_base"
+      "source": "src.output.report_generator",
+      "target": "src.generation.report_generator"
+    },
+    {
+      "source": "src.quality",
+      "target": "src.quality.quality_assessor"
+    },
+    {
+      "source": "src.quality.evidence_grader",
+      "target": "src.collector.literature_retriever"
+    },
+    {
+      "source": "src.quality.evidence_grader",
+      "target": "src.quality.quality_assessor"
+    },
+    {
+      "source": "src.quality.quality_assessor",
+      "target": "src.core.phase_tracker"
+    },
+    {
+      "source": "src.quality.quality_assessor",
+      "target": "src.research.study_session_manager"
+    },
+    {
+      "source": "src.reasoning",
+      "target": "src.analysis.reasoning_engine"
     },
     {
       "source": "src.reasoning.reasoning_engine",
-      "target": "src.core.module_base"
+      "target": "src.analysis.reasoning_engine"
     },
     {
-      "source": "src.reasoning.reasoning_engine",
-      "target": "src.semantic_modeling.tcm_relationships"
+      "source": "src.research",
+      "target": "src.analysis.multimodal_fusion"
+    },
+    {
+      "source": "src.research",
+      "target": "src.collector.ctext_corpus_collector"
+    },
+    {
+      "source": "src.research",
+      "target": "src.collector.ctext_whitelist"
+    },
+    {
+      "source": "src.research",
+      "target": "src.collector.literature_retriever"
+    },
+    {
+      "source": "src.research",
+      "target": "src.collector.multi_source_corpus"
     },
     {
       "source": "src.research",
@@ -741,11 +1929,7 @@
     },
     {
       "source": "src.research",
-      "target": "src.research.ctext_corpus_collector"
-    },
-    {
-      "source": "src.research",
-      "target": "src.research.ctext_whitelist"
+      "target": "src.research.audit_history"
     },
     {
       "source": "src.research",
@@ -761,7 +1945,7 @@
     },
     {
       "source": "src.research",
-      "target": "src.research.literature_retriever"
+      "target": "src.research.hypothesis_engine"
     },
     {
       "source": "src.research",
@@ -769,15 +1953,11 @@
     },
     {
       "source": "src.research",
-      "target": "src.research.multi_source_corpus"
-    },
-    {
-      "source": "src.research",
-      "target": "src.research.multimodal_fusion"
-    },
-    {
-      "source": "src.research",
       "target": "src.research.pdf_translation"
+    },
+    {
+      "source": "src.research",
+      "target": "src.research.pipeline_events"
     },
     {
       "source": "src.research",
@@ -785,23 +1965,27 @@
     },
     {
       "source": "src.research",
+      "target": "src.research.study_session_manager"
+    },
+    {
+      "source": "src.research",
       "target": "src.research.theoretical_framework"
     },
     {
-      "source": "src.research.ctext_corpus_collector",
-      "target": "src.common.http_client"
-    },
-    {
-      "source": "src.research.ctext_corpus_collector",
-      "target": "src.core.module_base"
-    },
-    {
-      "source": "src.research.ctext_corpus_collector",
-      "target": "src.research.ctext_whitelist"
+      "source": "src.research.audit_history",
+      "target": "src.research.pipeline_events"
     },
     {
       "source": "src.research.data_miner",
       "target": "src.analytics.data_miner"
+    },
+    {
+      "source": "src.research.data_miner",
+      "target": "src.semantic_modeling.methods.network_pharmacology"
+    },
+    {
+      "source": "src.research.experiment_designer",
+      "target": "src.core.module_base"
     },
     {
       "source": "src.research.gap_analyzer",
@@ -809,7 +1993,15 @@
     },
     {
       "source": "src.research.hypothesis_engine",
-      "target": "src.hypothesis"
+      "target": "src.core.module_base"
+    },
+    {
+      "source": "src.research.hypothesis_engine",
+      "target": "src.storage.graph_interface"
+    },
+    {
+      "source": "src.research.hypothesis_engine",
+      "target": "src.storage.neo4j_driver"
     },
     {
       "source": "src.research.markdown_translate",
@@ -824,28 +2016,352 @@
       "target": "src.llm.llm_engine"
     },
     {
+      "source": "src.research.phase_handlers",
+      "target": "src.research.phase_handlers.analyze_handler"
+    },
+    {
+      "source": "src.research.phase_handlers",
+      "target": "src.research.phase_handlers.experiment_handler"
+    },
+    {
+      "source": "src.research.phase_handlers",
+      "target": "src.research.phase_handlers.hypothesis_handler"
+    },
+    {
+      "source": "src.research.phase_handlers",
+      "target": "src.research.phase_handlers.observe_handler"
+    },
+    {
+      "source": "src.research.phase_handlers",
+      "target": "src.research.phase_handlers.publish_handler"
+    },
+    {
+      "source": "src.research.phase_handlers",
+      "target": "src.research.phase_handlers.reflect_handler"
+    },
+    {
+      "source": "src.research.phase_handlers.analyze_handler",
+      "target": "src.quality"
+    },
+    {
+      "source": "src.research.phase_handlers.analyze_handler",
+      "target": "src.research.phase_handlers.base"
+    },
+    {
+      "source": "src.research.phase_handlers.analyze_handler",
+      "target": "src.research.phases.analyze_phase"
+    },
+    {
+      "source": "src.research.phase_handlers.analyze_handler",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.phase_handlers.base",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.phase_handlers.experiment_handler",
+      "target": "src.research.phase_handlers.base"
+    },
+    {
+      "source": "src.research.phase_handlers.experiment_handler",
+      "target": "src.research.phases.experiment_phase"
+    },
+    {
+      "source": "src.research.phase_handlers.experiment_handler",
+      "target": "src.research.phases.hypothesis_phase"
+    },
+    {
+      "source": "src.research.phase_handlers.experiment_handler",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.phase_handlers.hypothesis_handler",
+      "target": "src.research.phase_handlers.base"
+    },
+    {
+      "source": "src.research.phase_handlers.hypothesis_handler",
+      "target": "src.research.phases.hypothesis_phase"
+    },
+    {
+      "source": "src.research.phase_handlers.hypothesis_handler",
+      "target": "src.research.phases.observe_phase"
+    },
+    {
+      "source": "src.research.phase_handlers.hypothesis_handler",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.phase_handlers.observe_handler",
+      "target": "src.research.phase_handlers.base"
+    },
+    {
+      "source": "src.research.phase_handlers.observe_handler",
+      "target": "src.research.phases.observe_phase"
+    },
+    {
+      "source": "src.research.phase_handlers.observe_handler",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.phase_handlers.publish_handler",
+      "target": "src.research.phase_handlers.base"
+    },
+    {
+      "source": "src.research.phase_handlers.publish_handler",
+      "target": "src.research.phases.analyze_phase"
+    },
+    {
+      "source": "src.research.phase_handlers.publish_handler",
+      "target": "src.research.phases.experiment_phase"
+    },
+    {
+      "source": "src.research.phase_handlers.publish_handler",
+      "target": "src.research.phases.hypothesis_phase"
+    },
+    {
+      "source": "src.research.phase_handlers.publish_handler",
+      "target": "src.research.phases.observe_phase"
+    },
+    {
+      "source": "src.research.phase_handlers.publish_handler",
+      "target": "src.research.phases.publish_phase"
+    },
+    {
+      "source": "src.research.phase_handlers.publish_handler",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.phase_handlers.reflect_handler",
+      "target": "src.research.phase_handlers.base"
+    },
+    {
+      "source": "src.research.phase_handlers.reflect_handler",
+      "target": "src.research.phases.reflect_phase"
+    },
+    {
+      "source": "src.research.phase_handlers.reflect_handler",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.phase_orchestrator",
+      "target": "src.collector.corpus_bundle"
+    },
+    {
+      "source": "src.research.phase_orchestrator",
+      "target": "src.core.phase_tracker"
+    },
+    {
+      "source": "src.research.phase_orchestrator",
+      "target": "src.infra.llm_service"
+    },
+    {
+      "source": "src.research.phase_orchestrator",
+      "target": "src.research.audit_history"
+    },
+    {
+      "source": "src.research.phase_orchestrator",
+      "target": "src.research.gap_analyzer"
+    },
+    {
+      "source": "src.research.phase_orchestrator",
+      "target": "src.research.pipeline_events"
+    },
+    {
+      "source": "src.research.phase_orchestrator",
+      "target": "src.research.study_session_manager"
+    },
+    {
+      "source": "src.research.phases",
+      "target": "src.research.analyze_phase"
+    },
+    {
+      "source": "src.research.phases",
+      "target": "src.research.experiment_phase"
+    },
+    {
+      "source": "src.research.phases",
+      "target": "src.research.hypothesis_phase"
+    },
+    {
+      "source": "src.research.phases",
+      "target": "src.research.observe_phase"
+    },
+    {
+      "source": "src.research.phases",
+      "target": "src.research.publish_phase"
+    },
+    {
+      "source": "src.research.phases",
+      "target": "src.research.reflect_phase"
+    },
+    {
+      "source": "src.research.phases.analyze_phase",
+      "target": "src.quality"
+    },
+    {
+      "source": "src.research.phases.analyze_phase",
+      "target": "src.research.data_miner"
+    },
+    {
+      "source": "src.research.phases.analyze_phase",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.phases.experiment_phase",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.phases.experiment_phase",
+      "target": "src.research.theoretical_framework"
+    },
+    {
+      "source": "src.research.phases.hypothesis_phase",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.phases.hypothesis_phase",
+      "target": "src.research.theoretical_framework"
+    },
+    {
+      "source": "src.research.phases.hypothesis_phase",
+      "target": "src.storage.graph_interface"
+    },
+    {
+      "source": "src.research.phases.hypothesis_phase",
+      "target": "src.storage.neo4j_driver"
+    },
+    {
+      "source": "src.research.phases.observe_phase",
+      "target": "src.collector.corpus_bundle"
+    },
+    {
+      "source": "src.research.phases.observe_phase",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.phases.publish_phase",
+      "target": "src.generation.citation_manager"
+    },
+    {
+      "source": "src.research.phases.publish_phase",
+      "target": "src.generation.llm_context_adapter"
+    },
+    {
+      "source": "src.research.phases.publish_phase",
+      "target": "src.generation.output_formatter"
+    },
+    {
+      "source": "src.research.phases.publish_phase",
+      "target": "src.generation.paper_writer"
+    },
+    {
+      "source": "src.research.phases.publish_phase",
+      "target": "src.generation.report_generator"
+    },
+    {
+      "source": "src.research.phases.publish_phase",
+      "target": "src.quality"
+    },
+    {
+      "source": "src.research.phases.publish_phase",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.phases.reflect_phase",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.pipeline_orchestrator",
+      "target": "src.research.audit_history"
+    },
+    {
+      "source": "src.research.pipeline_orchestrator",
+      "target": "src.research.pipeline_phase_handlers"
+    },
+    {
+      "source": "src.research.pipeline_orchestrator",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.pipeline_orchestrator",
+      "target": "src.research.study_session_manager"
+    },
+    {
+      "source": "src.research.pipeline_phase_handlers",
+      "target": "src.research.phase_handlers"
+    },
+    {
+      "source": "src.research.pipeline_phase_handlers",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.real_observe_smoke",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.analysis.entity_extractor"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.analysis.preprocessor"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.analysis.reasoning_engine"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.analysis.semantic_graph"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.collector.ctext_corpus_collector"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.collector.literature_retriever"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.collector.local_collector"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.core.adapters"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.core.event_bus"
+    },
+    {
       "source": "src.research.research_pipeline",
       "target": "src.core.module_base"
     },
     {
       "source": "src.research.research_pipeline",
-      "target": "src.core.phase_tracker"
+      "target": "src.core.module_factory"
     },
     {
       "source": "src.research.research_pipeline",
-      "target": "src.corpus.corpus_bundle"
+      "target": "src.generation.citation_manager"
     },
     {
       "source": "src.research.research_pipeline",
-      "target": "src.corpus.local_collector"
+      "target": "src.generation.output_formatter"
     },
     {
       "source": "src.research.research_pipeline",
-      "target": "src.extractors.advanced_entity_extractor"
+      "target": "src.generation.paper_writer"
     },
     {
       "source": "src.research.research_pipeline",
-      "target": "src.hypothesis"
+      "target": "src.generation.report_generator"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.infra.llm_service"
     },
     {
       "source": "src.research.research_pipeline",
@@ -853,19 +2369,11 @@
     },
     {
       "source": "src.research.research_pipeline",
-      "target": "src.llm.llm_service"
+      "target": "src.quality.quality_assessor"
     },
     {
       "source": "src.research.research_pipeline",
-      "target": "src.output.citation_manager"
-    },
-    {
-      "source": "src.research.research_pipeline",
-      "target": "src.preprocessor.document_preprocessor"
-    },
-    {
-      "source": "src.research.research_pipeline",
-      "target": "src.research.ctext_corpus_collector"
+      "target": "src.research.audit_history"
     },
     {
       "source": "src.research.research_pipeline",
@@ -873,35 +2381,143 @@
     },
     {
       "source": "src.research.research_pipeline",
-      "target": "src.research.literature_retriever"
+      "target": "src.research.hypothesis_engine"
     },
     {
       "source": "src.research.research_pipeline",
-      "target": "src.semantic_modeling.semantic_graph_builder"
+      "target": "src.research.phase_orchestrator"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.research.pipeline_orchestrator"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.research.pipeline_phase_handlers"
+    },
+    {
+      "source": "src.research.research_pipeline",
+      "target": "src.research.study_session_manager"
+    },
+    {
+      "source": "src.research.study_session_manager",
+      "target": "src.core.phase_tracker"
     },
     {
       "source": "src.research.theoretical_framework",
       "target": "src.core.phase_tracker"
     },
     {
+      "source": "src.research.theoretical_framework",
+      "target": "src.research.experiment_designer"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.methods.classical_literature"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.methods.complexity_science"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.methods.formula_comparator"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.methods.formula_structure"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.methods.integrated_analyzer"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.methods.network_pharmacology"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.methods.pharmacology"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.methods.scoring_panel"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.methods.summary_engine"
+    },
+    {
+      "source": "src.semantic_modeling.methods",
+      "target": "src.semantic_modeling.methods.supramolecular"
+    },
+    {
+      "source": "src.semantic_modeling.methods.classical_literature",
+      "target": "src.data.knowledge_base"
+    },
+    {
+      "source": "src.semantic_modeling.methods.formula_structure",
+      "target": "src.data.knowledge_base"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.classical_literature"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.complexity_science"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.formula_comparator"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.formula_structure"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.network_pharmacology"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.pharmacology"
+    },
+    {
+      "source": "src.semantic_modeling.methods.integrated_analyzer",
+      "target": "src.semantic_modeling.methods.supramolecular"
+    },
+    {
+      "source": "src.semantic_modeling.methods.network_pharmacology",
+      "target": "src.data.knowledge_base"
+    },
+    {
+      "source": "src.semantic_modeling.methods.summary_engine",
+      "target": "src.semantic_modeling.methods.formula_structure"
+    },
+    {
+      "source": "src.semantic_modeling.methods.summary_engine",
+      "target": "src.semantic_modeling.methods.pharmacology"
+    },
+    {
       "source": "src.semantic_modeling.research_methods",
       "target": "src.research.data_miner"
     },
     {
-      "source": "src.semantic_modeling.semantic_graph_builder",
-      "target": "src.core.module_base"
+      "source": "src.semantic_modeling.research_methods",
+      "target": "src.semantic_modeling"
+    },
+    {
+      "source": "src.semantic_modeling.research_methods",
+      "target": "src.semantic_modeling.methods.integrated_analyzer"
     },
     {
       "source": "src.semantic_modeling.semantic_graph_builder",
-      "target": "src.extraction.relation_extractor"
+      "target": "src.analysis.semantic_graph"
     },
     {
-      "source": "src.semantic_modeling.semantic_graph_builder",
-      "target": "src.knowledge.ontology_manager"
-    },
-    {
-      "source": "src.semantic_modeling.semantic_graph_builder",
-      "target": "src.semantic_modeling.research_methods"
+      "source": "src.storage",
+      "target": "src.storage.backend_factory"
     },
     {
       "source": "src.storage",
@@ -913,11 +2529,59 @@
     },
     {
       "source": "src.storage",
+      "target": "src.storage.graph_interface"
+    },
+    {
+      "source": "src.storage",
       "target": "src.storage.neo4j_driver"
     },
     {
       "source": "src.storage",
+      "target": "src.storage.output_catalog"
+    },
+    {
+      "source": "src.storage",
+      "target": "src.storage.retention"
+    },
+    {
+      "source": "src.storage",
       "target": "src.storage.storage_driver"
+    },
+    {
+      "source": "src.storage",
+      "target": "src.storage.transaction"
+    },
+    {
+      "source": "src.storage.backend_factory",
+      "target": "src.infrastructure.persistence"
+    },
+    {
+      "source": "src.storage.backend_factory",
+      "target": "src.storage.neo4j_driver"
+    },
+    {
+      "source": "src.storage.backend_factory",
+      "target": "src.storage.transaction"
+    },
+    {
+      "source": "src.storage.db_models",
+      "target": "src.infrastructure"
+    },
+    {
+      "source": "src.storage.neo4j_driver",
+      "target": "src.infrastructure.persistence"
+    },
+    {
+      "source": "src.storage.neo4j_driver",
+      "target": "src.knowledge.tcm_knowledge_graph"
+    },
+    {
+      "source": "src.storage.neo4j_driver",
+      "target": "src.semantic_modeling.tcm_relationships"
+    },
+    {
+      "source": "src.storage.neo4j_driver",
+      "target": "src.storage.graph_interface"
     },
     {
       "source": "src.storage.storage_driver",
@@ -950,6 +2614,150 @@
     {
       "source": "src.test.integration_tester",
       "target": "src.core.phase_tracker"
+    },
+    {
+      "source": "src.visualization",
+      "target": "src.visualization.graph_renderer"
+    },
+    {
+      "source": "src.web.app",
+      "target": "src.web.routes.analysis"
+    },
+    {
+      "source": "src.web.app",
+      "target": "src.web.routes.assistant"
+    },
+    {
+      "source": "src.web.app",
+      "target": "src.web.routes.auth"
+    },
+    {
+      "source": "src.web.app",
+      "target": "src.web.routes.dashboard"
+    },
+    {
+      "source": "src.web.app",
+      "target": "src.web.routes.research"
+    },
+    {
+      "source": "src.web.auth",
+      "target": "src.infrastructure.config_loader"
+    },
+    {
+      "source": "src.web.main",
+      "target": "src.web.app"
+    },
+    {
+      "source": "src.web.ops.console_auth",
+      "target": "src.infrastructure.config_loader"
+    },
+    {
+      "source": "src.web.ops.job_manager",
+      "target": "src.orchestration.research_orchestrator"
+    },
+    {
+      "source": "src.web.ops.job_manager",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.web.ops.job_manager",
+      "target": "src.web.ops.job_store"
+    },
+    {
+      "source": "src.web.routes.analysis",
+      "target": "src.analysis.entity_extractor"
+    },
+    {
+      "source": "src.web.routes.analysis",
+      "target": "src.analysis.preprocessor"
+    },
+    {
+      "source": "src.web.routes.analysis",
+      "target": "src.analysis.research_scoring"
+    },
+    {
+      "source": "src.web.routes.analysis",
+      "target": "src.analysis.semantic_graph"
+    },
+    {
+      "source": "src.web.routes.analysis",
+      "target": "src.infrastructure.persistence"
+    },
+    {
+      "source": "src.web.routes.analysis",
+      "target": "src.knowledge.tcm_knowledge_graph"
+    },
+    {
+      "source": "src.web.routes.analysis",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.web.routes.analysis",
+      "target": "src.research.study_session_manager"
+    },
+    {
+      "source": "src.web.routes.analysis",
+      "target": "src.web.auth"
+    },
+    {
+      "source": "src.web.routes.analysis",
+      "target": "src.web.routes.assistant"
+    },
+    {
+      "source": "src.web.routes.assistant",
+      "target": "src.ai_assistant"
+    },
+    {
+      "source": "src.web.routes.assistant",
+      "target": "src.web.auth"
+    },
+    {
+      "source": "src.web.routes.assistant",
+      "target": "src.web.ws_manager"
+    },
+    {
+      "source": "src.web.routes.auth",
+      "target": "src.api.dependencies"
+    },
+    {
+      "source": "src.web.routes.auth",
+      "target": "src.infrastructure.config_loader"
+    },
+    {
+      "source": "src.web.routes.auth",
+      "target": "src.web.auth"
+    },
+    {
+      "source": "src.web.routes.dashboard",
+      "target": "src.infrastructure.config_loader"
+    },
+    {
+      "source": "src.web.routes.dashboard",
+      "target": "src.infrastructure.persistence"
+    },
+    {
+      "source": "src.web.routes.dashboard",
+      "target": "src.knowledge.tcm_knowledge_graph"
+    },
+    {
+      "source": "src.web.routes.dashboard",
+      "target": "src.web.auth"
+    },
+    {
+      "source": "src.web.routes.research",
+      "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.web.routes.research",
+      "target": "src.research.study_session_manager"
+    },
+    {
+      "source": "src.web.routes.research",
+      "target": "src.web.auth"
+    },
+    {
+      "source": "src.web.routes.research",
+      "target": "src.web.ws_manager"
     }
   ],
   "packages": [
@@ -959,9 +2767,14 @@
       "out_degree": 0
     },
     {
-      "package": "src.analysis",
-      "in_degree": 0,
+      "package": "src.ai_assistant",
+      "in_degree": 1,
       "out_degree": 1
+    },
+    {
+      "package": "src.analysis",
+      "in_degree": 7,
+      "out_degree": 6
     },
     {
       "package": "src.analytics",
@@ -969,49 +2782,64 @@
       "out_degree": 0
     },
     {
-      "package": "src.core",
-      "in_degree": 11,
+      "package": "src.api",
+      "in_degree": 1,
+      "out_degree": 6
+    },
+    {
+      "package": "src.collector",
+      "in_degree": 3,
+      "out_degree": 3
+    },
+    {
+      "package": "src.common",
+      "in_degree": 1,
       "out_degree": 0
     },
     {
-      "package": "src.corpus",
-      "in_degree": 1,
+      "package": "src.core",
+      "in_degree": 11,
       "out_degree": 1
     },
     {
       "package": "src.cycle",
       "in_degree": 0,
-      "out_degree": 1
+      "out_degree": 5
     },
     {
       "package": "src.data",
-      "in_degree": 1,
+      "in_degree": 2,
       "out_degree": 1
     },
     {
       "package": "src.extraction",
-      "in_degree": 1,
+      "in_degree": 2,
       "out_degree": 2
     },
     {
       "package": "src.extractors",
-      "in_degree": 1,
-      "out_degree": 2
+      "in_degree": 0,
+      "out_degree": 1
     },
     {
-      "package": "src.hypothesis",
-      "in_degree": 1,
+      "package": "src.generation",
+      "in_degree": 4,
       "out_degree": 1
     },
     {
       "package": "src.infra",
-      "in_degree": 2,
+      "in_degree": 3,
+      "out_degree": 2
+    },
+    {
+      "package": "src.infrastructure",
+      "in_degree": 5,
       "out_degree": 1
     },
     {
       "package": "src.knowledge",
-      "in_degree": 2,
-      "out_degree": 1
+      "in_degree": 5,
+      "out_degree": 2
     },
     {
       "package": "src.learning",
@@ -1020,62 +2848,148 @@
     },
     {
       "package": "src.llm",
-      "in_degree": 2,
+      "in_degree": 3,
       "out_degree": 2
     },
     {
       "package": "src.orchestration",
-      "in_degree": 0,
+      "in_degree": 1,
       "out_degree": 1
     },
     {
       "package": "src.output",
-      "in_degree": 1,
-      "out_degree": 1
-    },
-    {
-      "package": "src.preprocessor",
-      "in_degree": 1,
-      "out_degree": 1
-    },
-    {
-      "package": "src.reasoning",
       "in_degree": 0,
       "out_degree": 2
     },
     {
+      "package": "src.quality",
+      "in_degree": 1,
+      "out_degree": 3
+    },
+    {
+      "package": "src.reasoning",
+      "in_degree": 0,
+      "out_degree": 1
+    },
+    {
       "package": "src.research",
-      "in_degree": 4,
-      "out_degree": 9
+      "in_degree": 6,
+      "out_degree": 10
     },
     {
       "package": "src.semantic_modeling",
-      "in_degree": 4,
-      "out_degree": 4
+      "in_degree": 5,
+      "out_degree": 3
     },
     {
       "package": "src.storage",
+      "in_degree": 2,
+      "out_degree": 3
+    },
+    {
+      "package": "src.test",
+      "in_degree": 1,
+      "out_degree": 1
+    },
+    {
+      "package": "src.visualization",
       "in_degree": 0,
       "out_degree": 0
     },
     {
-      "package": "src.test",
-      "in_degree": 0,
-      "out_degree": 1
+      "package": "src.web",
+      "in_degree": 1,
+      "out_degree": 7
     }
   ],
   "package_edges": [
+    {
+      "source": "src.ai_assistant",
+      "target": "src.llm"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.core"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.data"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.extraction"
+    },
+    {
+      "source": "src.analysis",
+      "target": "src.knowledge"
+    },
     {
       "source": "src.analysis",
       "target": "src.research"
     },
     {
-      "source": "src.corpus",
+      "source": "src.analysis",
+      "target": "src.semantic_modeling"
+    },
+    {
+      "source": "src.api",
+      "target": "src.analysis"
+    },
+    {
+      "source": "src.api",
+      "target": "src.collector"
+    },
+    {
+      "source": "src.api",
       "target": "src.core"
+    },
+    {
+      "source": "src.api",
+      "target": "src.extraction"
+    },
+    {
+      "source": "src.api",
+      "target": "src.infrastructure"
+    },
+    {
+      "source": "src.api",
+      "target": "src.web"
+    },
+    {
+      "source": "src.collector",
+      "target": "src.common"
+    },
+    {
+      "source": "src.collector",
+      "target": "src.core"
+    },
+    {
+      "source": "src.collector",
+      "target": "src.knowledge"
+    },
+    {
+      "source": "src.core",
+      "target": "src.generation"
+    },
+    {
+      "source": "src.cycle",
+      "target": "src.analysis"
     },
     {
       "source": "src.cycle",
       "target": "src.core"
+    },
+    {
+      "source": "src.cycle",
+      "target": "src.generation"
+    },
+    {
+      "source": "src.cycle",
+      "target": "src.infrastructure"
+    },
+    {
+      "source": "src.cycle",
+      "target": "src.test"
     },
     {
       "source": "src.data",
@@ -1091,23 +3005,31 @@
     },
     {
       "source": "src.extractors",
+      "target": "src.analysis"
+    },
+    {
+      "source": "src.generation",
       "target": "src.core"
     },
     {
-      "source": "src.extractors",
-      "target": "src.data"
-    },
-    {
-      "source": "src.hypothesis",
-      "target": "src.core"
+      "source": "src.infra",
+      "target": "src.infrastructure"
     },
     {
       "source": "src.infra",
       "target": "src.llm"
     },
     {
+      "source": "src.infrastructure",
+      "target": "src.core"
+    },
+    {
       "source": "src.knowledge",
       "target": "src.semantic_modeling"
+    },
+    {
+      "source": "src.knowledge",
+      "target": "src.storage"
     },
     {
       "source": "src.learning",
@@ -1130,16 +3052,28 @@
       "target": "src.core"
     },
     {
-      "source": "src.preprocessor",
+      "source": "src.output",
+      "target": "src.generation"
+    },
+    {
+      "source": "src.quality",
+      "target": "src.collector"
+    },
+    {
+      "source": "src.quality",
       "target": "src.core"
     },
     {
-      "source": "src.reasoning",
-      "target": "src.core"
+      "source": "src.quality",
+      "target": "src.research"
     },
     {
       "source": "src.reasoning",
-      "target": "src.semantic_modeling"
+      "target": "src.analysis"
+    },
+    {
+      "source": "src.research",
+      "target": "src.analysis"
     },
     {
       "source": "src.research",
@@ -1147,7 +3081,7 @@
     },
     {
       "source": "src.research",
-      "target": "src.common"
+      "target": "src.collector"
     },
     {
       "source": "src.research",
@@ -1155,15 +3089,11 @@
     },
     {
       "source": "src.research",
-      "target": "src.corpus"
+      "target": "src.generation"
     },
     {
       "source": "src.research",
-      "target": "src.extractors"
-    },
-    {
-      "source": "src.research",
-      "target": "src.hypothesis"
+      "target": "src.infra"
     },
     {
       "source": "src.research",
@@ -1171,35 +3101,71 @@
     },
     {
       "source": "src.research",
-      "target": "src.output"
-    },
-    {
-      "source": "src.research",
-      "target": "src.preprocessor"
+      "target": "src.quality"
     },
     {
       "source": "src.research",
       "target": "src.semantic_modeling"
     },
     {
-      "source": "src.semantic_modeling",
-      "target": "src.core"
+      "source": "src.research",
+      "target": "src.storage"
     },
     {
       "source": "src.semantic_modeling",
-      "target": "src.extraction"
+      "target": "src.analysis"
     },
     {
       "source": "src.semantic_modeling",
-      "target": "src.knowledge"
+      "target": "src.data"
     },
     {
       "source": "src.semantic_modeling",
       "target": "src.research"
     },
     {
+      "source": "src.storage",
+      "target": "src.infrastructure"
+    },
+    {
+      "source": "src.storage",
+      "target": "src.knowledge"
+    },
+    {
+      "source": "src.storage",
+      "target": "src.semantic_modeling"
+    },
+    {
       "source": "src.test",
       "target": "src.core"
+    },
+    {
+      "source": "src.web",
+      "target": "src.ai_assistant"
+    },
+    {
+      "source": "src.web",
+      "target": "src.analysis"
+    },
+    {
+      "source": "src.web",
+      "target": "src.api"
+    },
+    {
+      "source": "src.web",
+      "target": "src.infrastructure"
+    },
+    {
+      "source": "src.web",
+      "target": "src.knowledge"
+    },
+    {
+      "source": "src.web",
+      "target": "src.orchestration"
+    },
+    {
+      "source": "src.web",
+      "target": "src.research"
     }
   ]
 }

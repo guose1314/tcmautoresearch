@@ -45,9 +45,11 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+          {{- if or .Values.secrets.create .Values.secrets.existingSecret }}
           envFrom:
             - secretRef:
                 name: {{ include "tcmautoresearch.secretName" . }}
+          {{- end }}
           readinessProbe:
             httpGet:
               path: {{ .Values.probes.readiness.path }}

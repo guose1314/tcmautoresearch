@@ -48,12 +48,16 @@ DEFAULT_CONFIG = {
         "title": "TCM Auto Research API",
         "version": "3.0.0",
         "cors_origins": ["*"],
+        "cors_methods": ["*"],
+        "cors_headers": ["*"],
     },
     "web_console": {
         "title": "TCM Auto Research Web Console",
         "version": "0.2.0",
         "job_storage_dir": f"./output/{DEFAULT_ENVIRONMENT}/web_console_jobs",
         "cors_origins": ["*"],
+        "cors_methods": ["*"],
+        "cors_headers": ["*"],
     },
 }
 PATH_KEYS = (
@@ -294,6 +298,20 @@ class AppSettings:
         return ["*"]
 
     @property
+    def api_cors_methods(self) -> list[str]:
+        methods = self.get("api.cors_methods", ["*"])
+        if isinstance(methods, Iterable) and not isinstance(methods, (str, bytes, dict)):
+            return [str(m) for m in methods]
+        return ["*"]
+
+    @property
+    def api_cors_headers(self) -> list[str]:
+        headers = self.get("api.cors_headers", ["*"])
+        if isinstance(headers, Iterable) and not isinstance(headers, (str, bytes, dict)):
+            return [str(h) for h in headers]
+        return ["*"]
+
+    @property
     def web_console_title(self) -> str:
         return str(self.get("web_console.title", DEFAULT_CONFIG["web_console"]["title"]))
 
@@ -307,6 +325,20 @@ class AppSettings:
         if isinstance(origins, Iterable) and not isinstance(origins, (str, bytes, dict)):
             return [str(origin) for origin in origins]
         return list(self.api_cors_origins)
+
+    @property
+    def web_console_cors_methods(self) -> list[str]:
+        methods = self.get("web_console.cors_methods", self.api_cors_methods)
+        if isinstance(methods, Iterable) and not isinstance(methods, (str, bytes, dict)):
+            return [str(m) for m in methods]
+        return list(self.api_cors_methods)
+
+    @property
+    def web_console_cors_headers(self) -> list[str]:
+        headers = self.get("web_console.cors_headers", self.api_cors_headers)
+        if isinstance(headers, Iterable) and not isinstance(headers, (str, bytes, dict)):
+            return [str(h) for h in headers]
+        return list(self.api_cors_headers)
 
     @property
     def job_storage_dir(self) -> str:

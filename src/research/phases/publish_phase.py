@@ -458,6 +458,7 @@ class PublishPhaseMixin:
         )
         analyze_results_raw = analyze_result.get("results") if isinstance(analyze_result, dict) else None
         analyze_results = analyze_results_raw if isinstance(analyze_results_raw, dict) else {}
+        statistical_analysis = self._resolve_publish_statistical_analysis(context, analyze_result, analyze_results)
         observe_entities = self._extract_publish_entities(observe_result, context)
         reasoning_results = self._build_publish_reasoning_results(
             context,
@@ -467,6 +468,7 @@ class PublishPhaseMixin:
             analyze_results,
         )
         data_mining_result = self._resolve_publish_data_mining_result(context, analyze_result, analyze_results)
+        data_mining_aliases = self._build_publish_data_mining_aliases(data_mining_result)
         research_perspectives = self._resolve_publish_research_perspectives(context, analyze_result, analyze_results)
         publish_output_context = self._build_publish_output_context(
             cycle,
@@ -510,6 +512,13 @@ class PublishPhaseMixin:
             }
         elif evidence_grade_summary and not isinstance(research_artifact.get("evidence_grade_summary"), dict):
             research_artifact["evidence_grade_summary"] = evidence_grade_summary
+        research_artifact = self._enrich_publish_research_artifact(
+            research_artifact,
+            statistical_analysis,
+            data_mining_result,
+            data_mining_aliases,
+            similar_formula_graph_evidence_summary,
+        )
         llm_analysis_context = self._build_publish_llm_analysis_context(
             context,
             analyze_result,
@@ -521,10 +530,11 @@ class PublishPhaseMixin:
         analysis_results_payload = self._compose_publish_analysis_results(
             structured_payload,
             analyze_result,
-            analyze_results,
+            statistical_analysis,
             experiment_result,
             reasoning_results,
             data_mining_result,
+            data_mining_aliases,
             research_perspectives,
             similar_formula_graph_evidence_summary,
             llm_analysis_context,
@@ -901,10 +911,11 @@ class PublishPhaseMixin:
         self,
         structured_payload: Dict[str, Any],
         analyze_result: Dict[str, Any],
-        analyze_results: Dict[str, Any],
+        statistical_analysis: Dict[str, Any],
         experiment_result: Dict[str, Any],
         reasoning_results: Dict[str, Any],
         data_mining_result: Dict[str, Any],
+        data_mining_aliases: Dict[str, Any],
         research_perspectives: Dict[str, Any],
         similar_formula_graph_evidence_summary: Dict[str, Any],
         llm_analysis_context: Dict[str, Any],
@@ -918,23 +929,28 @@ class PublishPhaseMixin:
             composed["reasoning_results"] = reasoning_results
         if data_mining_result:
             composed["data_mining_result"] = data_mining_result
+        for alias_key, alias_value in data_mining_aliases.items():
+            if alias_key not in composed:
+                composed[alias_key] = copy.deepcopy(alias_value)
         if research_perspectives:
             composed["research_perspectives"] = research_perspectives
         if similar_formula_graph_evidence_summary:
             composed["similar_formula_graph_evidence_summary"] = similar_formula_graph_evidence_summary
-        if analyze_results:
-            composed["statistical_analysis"] = analyze_results
+        if statistical_analysis:
+            composed["statistical_analysis"] = copy.deepcopy(statistical_analysis)
             for key in (
                 "statistical_significance",
                 "confidence_level",
                 "effect_size",
                 "p_value",
                 "interpretation",
+                "limitations",
+                "primary_association",
                 "evidence_grade",
                 "evidence_grade_summary",
             ):
-                if key in analyze_results and key not in composed:
-                    composed[key] = analyze_results.get(key)
+                if key in statistical_analysis and key not in composed:
+                    composed[key] = copy.deepcopy(statistical_analysis.get(key))
         experiment_payload = experiment_result.get("results") if isinstance(experiment_result, dict) else None
         if isinstance(experiment_payload, dict) and experiment_payload:
             composed["experiment_results"] = experiment_payload
@@ -1075,6 +1091,109 @@ class PublishPhaseMixin:
             if isinstance(nested, dict):
                 return dict(nested)
         return {}
+
+    def _resolve_publish_statistical_analysis(
+        self,
+        context: Dict[str, Any],
+        analyze_result: Dict[str, Any],
+        analyze_results: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        containers = [context, analyze_result, analyze_results]
+        direct = self._resolve_publish_dict_field(containers, ("statistical_analysis",))
+        if direct:
+            return direct
+
+        resolved: Dict[str, Any] = {}
+        for field_name in (
+            "statistical_significance",
+            "confidence_level",
+            "effect_size",
+            "p_value",
+            "interpretation",
+            "limitations",
+            "primary_association",
+            "evidence_grade",
+            "evidence_grade_summary",
+        ):
+            value = self._resolve_publish_field(containers, (field_name,))
+            if value is not None:
+                resolved[field_name] = value
+        return resolved
+
+    def _build_publish_data_mining_aliases(self, data_mining_result: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(data_mining_result, dict) or not data_mining_result:
+            return {}
+
+        aliases: Dict[str, Any] = {}
+        methods_executed = data_mining_result.get("methods_executed")
+        if isinstance(methods_executed, list) and methods_executed:
+            aliases["data_mining_methods"] = list(methods_executed)
+
+        summary: Dict[str, Any] = {}
+        for field_name in ("record_count", "transaction_count", "item_count"):
+            if data_mining_result.get(field_name) is not None:
+                summary[field_name] = data_mining_result.get(field_name)
+        if isinstance(methods_executed, list) and methods_executed:
+            summary["methods_executed"] = list(methods_executed)
+            summary["method_count"] = len(methods_executed)
+
+        association_rules = data_mining_result.get("association_rules") or {}
+        if isinstance(association_rules, dict):
+            summary["association_rule_count"] = len(association_rules.get("rules") or [])
+
+        clustering = data_mining_result.get("clustering") or {}
+        if isinstance(clustering, dict):
+            summary["cluster_count"] = len(clustering.get("cluster_summary") or [])
+
+        frequency_chi_square = data_mining_result.get("frequency_chi_square") or {}
+        if isinstance(frequency_chi_square, dict):
+            summary["frequency_signal_count"] = len(frequency_chi_square.get("chi_square_top") or [])
+            summary["high_frequency_herb_count"] = len(frequency_chi_square.get("herb_frequency") or [])
+
+        if summary:
+            aliases["data_mining_summary"] = summary
+
+        for field_name, value in data_mining_result.items():
+            if field_name in {"record_count", "transaction_count", "item_count", "methods_executed"}:
+                continue
+            if isinstance(value, dict) and value:
+                aliases[field_name] = copy.deepcopy(value)
+            elif isinstance(value, list) and value:
+                aliases[field_name] = copy.deepcopy(value)
+        return aliases
+
+    def _enrich_publish_research_artifact(
+        self,
+        research_artifact: Dict[str, Any],
+        statistical_analysis: Dict[str, Any],
+        data_mining_result: Dict[str, Any],
+        data_mining_aliases: Dict[str, Any],
+        similar_formula_graph_evidence_summary: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        enriched = dict(research_artifact) if isinstance(research_artifact, dict) else {}
+        if data_mining_result and not isinstance(enriched.get("data_mining_result"), dict):
+            enriched["data_mining_result"] = copy.deepcopy(data_mining_result)
+        if statistical_analysis and not isinstance(enriched.get("statistical_analysis"), dict):
+            enriched["statistical_analysis"] = copy.deepcopy(statistical_analysis)
+        if similar_formula_graph_evidence_summary and not isinstance(
+            enriched.get("similar_formula_graph_evidence_summary"),
+            dict,
+        ):
+            enriched["similar_formula_graph_evidence_summary"] = copy.deepcopy(
+                similar_formula_graph_evidence_summary
+            )
+
+        primary_association = statistical_analysis.get("primary_association") if isinstance(statistical_analysis, dict) else None
+        if isinstance(primary_association, dict) and primary_association and not isinstance(
+            enriched.get("primary_association"),
+            dict,
+        ):
+            enriched["primary_association"] = copy.deepcopy(primary_association)
+
+        for alias_key, alias_value in data_mining_aliases.items():
+            if alias_key not in enriched:
+                enriched[alias_key] = copy.deepcopy(alias_value)
+        return enriched
 
     def _resolve_publish_research_perspectives(
         self,

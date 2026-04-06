@@ -272,6 +272,30 @@
             </div>
             <!-- close grid-cols-2 for projects + quality -->
 
+            <!-- Smoke Test Health -->
+            <section
+              class="bg-white rounded-xl shadow-sm border border-gray-100"
+              hx-get="/api/dashboard/smoke-health"
+              hx-trigger="load"
+              hx-target="#smoke-content"
+              hx-indicator="#smoke-loading"
+            >
+              <div class="px-5 py-4 border-b border-gray-100">
+                <h2 class="font-semibold text-gray-800">🔬 Smoke 测试健康度</h2>
+              </div>
+              <div id="smoke-content" class="px-5 py-6">
+                <p class="text-sm text-gray-400 text-center">
+                  加载 Smoke 测试结果…
+                </p>
+              </div>
+              <div
+                id="smoke-loading"
+                class="htmx-indicator text-center text-sm text-gray-400 py-2"
+              >
+                加载中…
+              </div>
+            </section>
+
             <!-- Quick Access -->
             <section>
               <h2 class="font-semibold text-gray-800 mb-3">快捷入口</h2>

@@ -1,5 +1,77 @@
 # 阶段性推进摘要
 
+## 架构审计 Roadmap 推进（2026-04-06）
+
+### 本轮目标
+按 `ARCHITECTURE_AUDIT_2026_04_06.md` Roadmap，系统性消除 code_quality 复杂度告警，
+目标文件按 warning 密度降序逐一击破。
+
+### 量化成果
+
+| 指标 | 改前基线 | 改后 | 变化 |
+|---|---|---|---|
+| warning_count | 155 | **144** | **−11** |
+| tests (unit) | 278 pass | 278 pass | 0 |
+| grade / score | A / 95.0 | A / 95.0 | stable |
+
+### 文件级改动明细
+
+#### 1. `src/api/websocket.py`（1 warning → 0）
+- `stream_job_events_over_websocket` (complexity 13→~7)
+- 提取 `_authenticate_and_get_job()`：认证 + job 查找，3 个 early-return 分支
+- 提取 `_drain_pending_events()`：带锁的事件拉取
+
+#### 2. `src/api/dependencies.py`（1 warning → 0）
+- `resolve_authenticated_console_principal` (complexity 13→~9)
+- 提取 `_try_resolve_jwt_principal(token)`：JWT 解析 + 字段提取（sub/display_name/auth_source）
+
+#### 3. `src/generation/paper_writer.py`（14 warnings → 0，+402 / −273 行）
+
+| 原函数 | 原复杂度 | 提取 helper | 策略 |
+|---|---|---|---|
+| `_revise_draft` | 41 | `_revise_expand_short_sections`, `_revise_add_missing_sections`, `_revise_abstract`, `_revise_references`, `_revise_keywords`, `_revise_enhance_fallback` | coordinator + 6 子步骤 |
+| `_review_draft` | 23 | `_collect_review_issues` | 5 条件对→单函数返回 (issues, suggestions) |
+| `_resolve_keywords` | 23 | `_deduplicate_keyword_candidates`, `_derive_keywords_from_entities`, `_derive_keywords_from_mining` | 3 来源回退链 |
+| `_export_docx` | 21 | `_write_docx_front_matter`, `_write_docx_figures` | 首页 + 图表嵌入独立 |
+| `_build_similar_formula_graph_evidence_section` | 20 | `_format_formula_graph_match` | 单条匹配格式化提取 |
+| `_build_analysis_result_note` | 17 | `_format_statistical_metric_bits` | 双语 metric-bits 共享 |
+| `_build_evidence_grade_result_note` | 17 | `_format_bias_distribution_bits`, `_assemble_evidence_grade_sentence` | 偏倚分布 + 组句分拆 |
+| `_build_quality_discussion_text` | 15 | `_format_quality_metric_bits`, `_assemble_quality_discussion` | 同上模式 |
+| `_build_methods` | 15 | `_build_evidence_protocol_text` | 证据协议双语文本 |
+| `_export_markdown` | 15 | `_build_markdown_front_matter` | 作者/单位行提取 |
+| `_build_results` | 13 | `_build_top_cluster_text`, `_assemble_results_text` | 聚类高亮 + 文本组装 |
+| `_resolve_evidence` | 13 | `_iter_evidence_sources` | 生成器链替代嵌套 if |
+| `_resolve_section_overrides` | 13 | `_parse_sections_payload` | payload 归一化独立 |
+| `_run_iterative_refinement` | 13 | `_make_disabled_refinement_summary` | 禁用路径固定返回 |
+
+### 验证记录
+- `from src.generation.paper_writer import PaperWriter` → OK（每批次后 import check）
+- `tests/test_paper_writer.py` + `tests/test_generation_coverage.py` → **72 passed**
+- `tests/unit/` 全量 → **278 passed**
+- `tools/quality_gate.py` → **overall_success=True, A/95.0, 144 warnings**
+
+### 关键改动文件
+- `src/api/websocket.py`
+- `src/api/dependencies.py`
+- `src/generation/paper_writer.py`
+
+### 任意日期续接指引
+1. 切到本提交，激活环境 `.\venv310\Scripts\activate`
+2. 运行 `python -m pytest tests/unit/ -x -q --tb=short` → 预期 278 passed
+3. 运行 `python tools/quality_gate.py --report output/quality-gate.json` → A/95.0, 144 warnings
+4. 剩余 warning 热点按 `quality-gate.json` 中 `code_quality.details` 排序，逐文件击破
+5. 每个函数拆分后先做 import check，再跑对应 test 文件，最后全量回归
+
+### 下一接力方向
+- **继续降 warning**：剩余 144 条，按文件聚集度选下一个簇（如 `research_utils.py`, `cycle_runner.py`, `data_mining.py` 等）
+- **Phase 2 打通**：AnalyzePhase 真实实现、System A/B 融合（见审计报告 §七）
+- **Phase 3 新功能**：Meta-Analysis 引擎、Research Compendium 归档（见下方"未开始"章节）
+
+> 分支 `stage2-s2_1-preprocessor-opt` · 基线 `881b5c7` (refactor: decompose run_cycle_demo)
+> 截止 2026-04-06 · 测试基线 **278 passed** (unit) · **144 warnings** · **A / 95.0**
+
+---
+
 ## 增量收口（2026-04-05）
 
 ### 收口范围

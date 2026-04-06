@@ -1,0 +1,13 @@
+[tool.pytest.ini_options]
+filterwarnings = [
+    # ── 第三方库噪音 ──
+    # jieba 内部使用已弃用的 pkg_resources
+    "ignore:pkg_resources is deprecated:UserWarning",
+    # setuptools / sphinxcontrib 命名空间弃用
+    "ignore:Deprecated call to `pkg_resources.declare_namespace:DeprecationWarning",
+    # ── 项目内部迁移提示（已知，不影响功能）──
+    "ignore:src\\.semantic_modeling\\.semantic_graph_builder 已迁移:DeprecationWarning",
+    # ── Enum 类名以 Test 开头导致 pytest 误收集 ──
+    "ignore:cannot collect test class 'TestPriority':pytest.PytestCollectionWarning",
+    "ignore:cannot collect test class 'TestType':pytest.PytestCollectionWarning",
+]

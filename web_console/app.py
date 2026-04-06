@@ -39,8 +39,8 @@ def create_app(
         CORSMiddleware,
         allow_origins=resolved_settings.web_console_cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=resolved_settings.web_console_cors_methods,
+        allow_headers=resolved_settings.web_console_cors_headers,
     )
 
     # ---- 主数据库初始化 ----

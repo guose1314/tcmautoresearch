@@ -70,13 +70,73 @@ class FakeRunner:
                         "p_value": 0.003,
                         "confidence_level": 0.95,
                         "effect_size": 0.76,
+                        "primary_association": {
+                            "herb": "桂枝",
+                            "syndrome": "营卫不和",
+                            "p_value": 0.003,
+                            "effect_size": 0.76,
+                            "chi2": 8.42,
+                            "sample_size": 24,
+                            "contingency_table": {"a": 8, "b": 2, "c": 1, "d": 13},
+                        },
+                    },
+                    "primary_association": {
+                        "herb": "桂枝",
+                        "syndrome": "营卫不和",
+                        "p_value": 0.003,
+                        "effect_size": 0.76,
+                        "chi2": 8.42,
+                        "sample_size": 24,
+                        "contingency_table": {"a": 8, "b": 2, "c": 1, "d": 13},
                     },
                     "evidence_protocol": {
                         "evidence_records": [{"evidence_id": "ev-1"}],
                         "claims": [{"claim_id": "claim-1"}],
                     },
+                    "data_mining_summary": {
+                        "record_count": 24,
+                        "transaction_count": 24,
+                        "item_count": 8,
+                        "methods_executed": ["association_rules", "clustering"],
+                        "method_count": 2,
+                        "association_rule_count": 1,
+                        "cluster_count": 1,
+                        "frequency_signal_count": 2,
+                    },
+                    "data_mining_methods": ["association_rules", "clustering"],
+                    "frequency_chi_square": {
+                        "chi_square_top": [
+                            {
+                                "herb": "桂枝",
+                                "syndrome": "营卫不和",
+                                "chi2": 8.42,
+                                "p_value": 0.003,
+                                "effect_size": 0.76,
+                            }
+                        ],
+                        "herb_frequency": [
+                            {"herb": "桂枝", "count": 10},
+                            {"herb": "白芍", "count": 9},
+                        ],
+                    },
+                    "association_rules": {"rules": [{"rule_id": "r-1"}]},
                     "data_mining_result": {
                         "methods_executed": ["association_rules", "clustering"],
+                        "frequency_chi_square": {
+                            "chi_square_top": [
+                                {
+                                    "herb": "桂枝",
+                                    "syndrome": "营卫不和",
+                                    "chi2": 8.42,
+                                    "p_value": 0.003,
+                                    "effect_size": 0.76,
+                                }
+                            ],
+                            "herb_frequency": [
+                                {"herb": "桂枝", "count": 10},
+                                {"herb": "白芍", "count": 9},
+                            ],
+                        },
                         "association_rules": {"rules": [{"rule_id": "r-1"}]},
                         "clustering": {"cluster_summary": [{"cluster": 0}]},
                     },
@@ -86,7 +146,59 @@ class FakeRunner:
                 "research_artifact": {
                     "hypothesis": [{"title": "桂枝汤调和营卫假设"}],
                     "evidence": [{"evidence_id": "ev-1"}],
+                    "primary_association": {
+                        "herb": "桂枝",
+                        "syndrome": "营卫不和",
+                        "p_value": 0.003,
+                        "effect_size": 0.76,
+                        "chi2": 8.42,
+                        "sample_size": 24,
+                        "contingency_table": {"a": 8, "b": 2, "c": 1, "d": 13},
+                    },
+                    "data_mining_summary": {
+                        "record_count": 24,
+                        "transaction_count": 24,
+                        "item_count": 8,
+                        "methods_executed": ["association_rules", "clustering"],
+                        "method_count": 2,
+                        "association_rule_count": 1,
+                        "cluster_count": 1,
+                        "frequency_signal_count": 2,
+                    },
+                    "data_mining_methods": ["association_rules", "clustering"],
+                    "frequency_chi_square": {
+                        "chi_square_top": [
+                            {
+                                "herb": "桂枝",
+                                "syndrome": "营卫不和",
+                                "chi2": 8.42,
+                                "p_value": 0.003,
+                                "effect_size": 0.76,
+                            }
+                        ],
+                        "herb_frequency": [
+                            {"herb": "桂枝", "count": 10},
+                            {"herb": "白芍", "count": 9},
+                        ],
+                    },
+                    "association_rules": {"rules": [{"rule_id": "r-1"}]},
                     "data_mining_result": {
+                        "methods_executed": ["association_rules", "clustering"],
+                        "frequency_chi_square": {
+                            "chi_square_top": [
+                                {
+                                    "herb": "桂枝",
+                                    "syndrome": "营卫不和",
+                                    "chi2": 8.42,
+                                    "p_value": 0.003,
+                                    "effect_size": 0.76,
+                                }
+                            ],
+                            "herb_frequency": [
+                                {"herb": "桂枝", "count": 10},
+                                {"herb": "白芍", "count": 9},
+                            ],
+                        },
                         "association_rules": {"rules": [{"rule_id": "r-1"}]},
                         "clustering": {"cluster_summary": [{"cluster": 0}]},
                     },
@@ -227,8 +339,15 @@ class TestWebConsoleApi(unittest.TestCase):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.headers["content-type"])
+        self.assertIn("登录", response.text)
+        self.assertIn("中医智慧科研平台", response.text)
+        self.assertIn("/api/auth/login", response.text)
+
+    def test_console_page_served(self):
+        response = self.client.get("/console")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.headers["content-type"])
         self.assertIn("中医自动科研控制台", response.text)
-        # 统一 JWT 认证（auth-shell 已迁移到 /login）
         self.assertIn("initializeJwtAuth", response.text)
         self.assertIn("authenticatedFetch", response.text)
         self.assertIn("getJwtToken", response.text)
@@ -250,9 +369,19 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertIn("dashboard-alert", response.text)
         self.assertIn("dashboard-phase-error", response.text)
         self.assertIn('id="dashboard-phase-modal"', response.text)
+        self.assertIn('id="dashboard-modal-association-section"', response.text)
+        self.assertIn('id="dashboard-modal-association-summary"', response.text)
+        self.assertIn('id="dashboard-modal-association-visual"', response.text)
         self.assertIn('id="dashboard-graph-modal"', response.text)
         self.assertIn("toggleDashboardPhaseFilter", response.text)
         self.assertIn("openDashboardPhaseDetail", response.text)
+        self.assertIn("buildPrimaryAssociationSummarySection", response.text)
+        self.assertIn("buildDashboardPrimaryAssociationBox", response.text)
+        self.assertIn("renderPrimaryAssociationVisual", response.text)
+        self.assertIn("primary-association-matrix", response.text)
+        self.assertIn("buildDashboardPrimaryAssociationDetail", response.text)
+        self.assertIn("列联表 (a/b/c/d)", response.text)
+        self.assertIn("chi2", response.text)
         self.assertIn("bindDashboardModalEvents", response.text)
         self.assertIn("buildKnowledgeGraphBoardSection", response.text)
         self.assertIn("openDashboardKnowledgeGraphModal", response.text)
@@ -484,7 +613,52 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertEqual(payload["progress"], 100.0)
         self.assertEqual(payload["result"]["cycle_id"], "cycle-1")
         self.assertEqual(payload["result"]["analysis_results"]["statistical_analysis"]["p_value"], 0.003)
+        self.assertEqual(payload["result"]["analysis_results"]["primary_association"]["herb"], "桂枝")
+        self.assertEqual(payload["result"]["analysis_results"]["data_mining_summary"]["association_rule_count"], 1)
         self.assertEqual(payload["result"]["research_artifact"]["similar_formula_graph_evidence_summary"]["match_count"], 1)
+
+    def test_job_status_preserves_publish_direct_analysis_alias_fields(self):
+        create_response = self.client.post("/api/research/jobs", json={"topic": "桂枝汤 publish 契约"})
+        self.assertEqual(create_response.status_code, 202)
+        job_id = create_response.json()["job_id"]
+
+        for _ in range(20):
+            status_response = self.client.get(f"/api/research/jobs/{job_id}")
+            payload = status_response.json()
+            if payload["status"] in {"completed", "partial", "failed"}:
+                break
+            time.sleep(0.01)
+
+        self.assertEqual(status_response.status_code, 200)
+        self.assertEqual(payload["status"], "completed")
+
+        analysis_results = payload["result"]["analysis_results"]
+        research_artifact = payload["result"]["research_artifact"]
+
+        self.assertEqual(analysis_results["data_mining_methods"], ["association_rules", "clustering"])
+        self.assertEqual(
+            analysis_results["frequency_chi_square"],
+            analysis_results["data_mining_result"]["frequency_chi_square"],
+        )
+        self.assertEqual(
+            analysis_results["association_rules"],
+            analysis_results["data_mining_result"]["association_rules"],
+        )
+        self.assertEqual(analysis_results["frequency_chi_square"]["chi_square_top"][0]["herb"], "桂枝")
+        self.assertEqual(analysis_results["frequency_chi_square"]["chi_square_top"][0]["syndrome"], "营卫不和")
+        self.assertEqual(analysis_results["association_rules"]["rules"][0]["rule_id"], "r-1")
+
+        self.assertEqual(research_artifact["data_mining_methods"], ["association_rules", "clustering"])
+        self.assertEqual(
+            research_artifact["frequency_chi_square"],
+            research_artifact["data_mining_result"]["frequency_chi_square"],
+        )
+        self.assertEqual(
+            research_artifact["association_rules"],
+            research_artifact["data_mining_result"]["association_rules"],
+        )
+        self.assertEqual(research_artifact["frequency_chi_square"]["chi_square_top"][0]["herb"], "桂枝")
+        self.assertEqual(research_artifact["association_rules"]["rules"][0]["rule_id"], "r-1")
 
     def test_dashboard_endpoint_returns_visualization_payload(self):
         create_response = self.client.post(
@@ -531,6 +705,14 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertEqual(payload["evidence_board"]["claim_count"], 1)
         self.assertEqual(payload["evidence_board"]["association_rule_count"], 1)
         self.assertEqual(payload["evidence_board"]["cluster_count"], 1)
+        self.assertEqual(payload["evidence_board"]["primary_association"]["herb"], "桂枝")
+        self.assertEqual(payload["evidence_board"]["primary_association"]["syndrome"], "营卫不和")
+        self.assertEqual(payload["evidence_board"]["primary_association"]["chi2"], 8.42)
+        self.assertEqual(payload["evidence_board"]["primary_association"]["contingency_table"]["a"], 8)
+        self.assertEqual(payload["evidence_board"]["data_mining_summary"]["record_count"], 24)
+        self.assertEqual(payload["evidence_board"]["data_mining_summary"]["association_rule_count"], 1)
+        self.assertEqual(payload["evidence_board"]["data_mining_summary"]["cluster_count"], 1)
+        self.assertEqual(payload["evidence_board"]["data_mining_methods"], ["association_rules", "clustering"])
 
         self.assertEqual(payload["knowledge_graph_board"]["source"], "research_artifact.similar_formula_graph_evidence_summary")
         self.assertEqual(payload["knowledge_graph_board"]["stats"]["node_count"], 2)

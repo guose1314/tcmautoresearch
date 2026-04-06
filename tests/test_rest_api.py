@@ -15,6 +15,105 @@ class FakeRunner:
     def __init__(self, _config=None):
         self._config = _config or {}
 
+    def _build_publish_contract_payload(self):
+        analysis_results = {
+            "statistical_analysis": {
+                "interpretation": "桂枝汤核心配伍与营卫调和证据之间存在稳定关联",
+                "p_value": 0.004,
+                "confidence_level": 0.95,
+                "effect_size": 0.74,
+                "primary_association": {
+                    "herb": "桂枝",
+                    "syndrome": "营卫不和",
+                    "p_value": 0.004,
+                    "effect_size": 0.74,
+                    "chi2": 8.17,
+                    "sample_size": 24,
+                    "contingency_table": {"a": 8, "b": 2, "c": 1, "d": 13},
+                },
+            },
+            "primary_association": {
+                "herb": "桂枝",
+                "syndrome": "营卫不和",
+                "p_value": 0.004,
+                "effect_size": 0.74,
+                "chi2": 8.17,
+                "sample_size": 24,
+                "contingency_table": {"a": 8, "b": 2, "c": 1, "d": 13},
+            },
+            "data_mining_summary": {
+                "record_count": 24,
+                "transaction_count": 24,
+                "item_count": 8,
+                "methods_executed": ["frequency_chi_square", "association_rules"],
+                "method_count": 2,
+                "association_rule_count": 1,
+                "cluster_count": 0,
+                "frequency_signal_count": 1,
+            },
+            "data_mining_methods": ["frequency_chi_square", "association_rules"],
+            "frequency_chi_square": {
+                "chi_square_top": [
+                    {
+                        "herb": "桂枝",
+                        "syndrome": "营卫不和",
+                        "chi2": 8.17,
+                        "p_value": 0.004,
+                        "effect_size": 0.74,
+                    }
+                ],
+                "herb_frequency": [{"herb": "桂枝", "count": 10}],
+            },
+            "association_rules": {"rules": [{"rule_id": "r-1", "support": 0.42, "confidence": 0.8}]},
+            "data_mining_result": {
+                "record_count": 24,
+                "transaction_count": 24,
+                "item_count": 8,
+                "methods_executed": ["frequency_chi_square", "association_rules"],
+                "frequency_chi_square": {
+                    "chi_square_top": [
+                        {
+                            "herb": "桂枝",
+                            "syndrome": "营卫不和",
+                            "chi2": 8.17,
+                            "p_value": 0.004,
+                            "effect_size": 0.74,
+                        }
+                    ],
+                    "herb_frequency": [{"herb": "桂枝", "count": 10}],
+                },
+                "association_rules": {"rules": [{"rule_id": "r-1", "support": 0.42, "confidence": 0.8}]},
+            },
+        }
+        research_artifact = {
+            "hypothesis": [{"title": "桂枝汤调和营卫假设"}],
+            "primary_association": dict(analysis_results["primary_association"]),
+            "data_mining_summary": dict(analysis_results["data_mining_summary"]),
+            "data_mining_methods": list(analysis_results["data_mining_methods"]),
+            "frequency_chi_square": dict(analysis_results["frequency_chi_square"]),
+            "association_rules": dict(analysis_results["association_rules"]),
+            "data_mining_result": {
+                "record_count": 24,
+                "transaction_count": 24,
+                "item_count": 8,
+                "methods_executed": ["frequency_chi_square", "association_rules"],
+                "frequency_chi_square": {
+                    "chi_square_top": [
+                        {
+                            "herb": "桂枝",
+                            "syndrome": "营卫不和",
+                            "chi2": 8.17,
+                            "p_value": 0.004,
+                            "effect_size": 0.74,
+                        }
+                    ],
+                    "herb_frequency": [{"herb": "桂枝", "count": 10}],
+                },
+                "association_rules": {"rules": [{"rule_id": "r-1", "support": 0.42, "confidence": 0.8}]},
+            },
+        }
+        return analysis_results, research_artifact
+
     def run(self, payload, emit=None):
         topic = payload["topic"]
         protocol_inputs = {
@@ -23,6 +122,7 @@ class FakeRunner:
             "intervention": payload.get("intervention"),
             "comparison": payload.get("comparison"),
         }
+        analysis_results, research_artifact = self._build_publish_contract_payload()
         if emit is not None:
             emit("cycle_created", {"topic": topic, "cycle_id": "cycle-rest", "cycle_name": "demo", "scope": "test"})
             emit("phase_started", {"phase": "observe", "index": 1, "total": 1, "progress": 0.0})
@@ -50,6 +150,8 @@ class FakeRunner:
                     {"phase": "observe", "status": "completed", "duration_sec": 0.01, "error": "", "summary": {"observation_count": 1}},
                 ],
                 "pipeline_metadata": {"cycle_name": "demo", "scope": "test", "protocol_inputs": protocol_inputs},
+                "analysis_results": analysis_results,
+                "research_artifact": research_artifact,
             }
             emit("job_completed", {"status": "completed", "result": result})
             return _ResultWrapper(result)
@@ -64,6 +166,8 @@ class FakeRunner:
                 "total_duration_sec": 1.0,
                 "phases": [],
                 "pipeline_metadata": {"cycle_name": "sync-demo", "scope": "test", "protocol_inputs": protocol_inputs},
+                "analysis_results": analysis_results,
+                "research_artifact": research_artifact,
             }
         )
 
@@ -221,6 +325,58 @@ class TestRestApi(unittest.TestCase):
         self.assertEqual(protocol_inputs["primary_outcome"], "疲劳量表评分变化")
         self.assertEqual(protocol_inputs["intervention"], "黄芪颗粒")
         self.assertEqual(protocol_inputs["comparison"], "安慰剂")
+
+    def test_versioned_run_preserves_publish_direct_analysis_alias_fields(self):
+        response = self.client.post(
+            "/api/v1/research/run",
+            json={"topic": "桂枝汤 publish 直达字段契约"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        analysis_results = payload["analysis_results"]
+        research_artifact = payload["research_artifact"]
+
+        self.assertEqual(
+            analysis_results["primary_association"],
+            analysis_results["statistical_analysis"]["primary_association"],
+        )
+        self.assertEqual(
+            analysis_results["data_mining_methods"],
+            analysis_results["data_mining_result"]["methods_executed"],
+        )
+        self.assertEqual(
+            analysis_results["frequency_chi_square"],
+            analysis_results["data_mining_result"]["frequency_chi_square"],
+        )
+        self.assertEqual(
+            analysis_results["association_rules"],
+            analysis_results["data_mining_result"]["association_rules"],
+        )
+        self.assertEqual(analysis_results["data_mining_summary"]["record_count"], 24)
+        self.assertEqual(analysis_results["data_mining_summary"]["association_rule_count"], 1)
+        self.assertEqual(analysis_results["data_mining_summary"]["frequency_signal_count"], 1)
+        self.assertEqual(analysis_results["primary_association"]["herb"], "桂枝")
+        self.assertEqual(analysis_results["primary_association"]["syndrome"], "营卫不和")
+
+        self.assertEqual(
+            research_artifact["primary_association"],
+            analysis_results["primary_association"],
+        )
+        self.assertEqual(
+            research_artifact["data_mining_methods"],
+            research_artifact["data_mining_result"]["methods_executed"],
+        )
+        self.assertEqual(
+            research_artifact["frequency_chi_square"],
+            research_artifact["data_mining_result"]["frequency_chi_square"],
+        )
+        self.assertEqual(
+            research_artifact["association_rules"],
+            research_artifact["data_mining_result"]["association_rules"],
+        )
+        self.assertEqual(research_artifact["data_mining_summary"]["record_count"], 24)
+        self.assertEqual(research_artifact["data_mining_summary"]["association_rule_count"], 1)
 
     def test_websocket_progress_stream_coexists_with_sse(self):
         create_response = self.client.post("/api/v1/research/jobs", json={"topic": "WebSocket 研究"})

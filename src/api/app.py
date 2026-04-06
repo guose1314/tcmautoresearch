@@ -79,8 +79,8 @@ def create_app(
         CORSMiddleware,
         allow_origins=resolved_settings.api_cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=resolved_settings.api_cors_methods,
+        allow_headers=resolved_settings.api_cors_headers,
     )
 
     @app.get("/health")

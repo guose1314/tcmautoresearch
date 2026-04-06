@@ -61,6 +61,19 @@ class TestDataMiningService(unittest.TestCase):
             self.assertGreaterEqual(rule["confidence"], 0.8)
             self.assertGreaterEqual(rule["lift"], 1.0)
 
+    def test_methods_executed_preserve_canonical_order(self):
+        result = self.service.execute(
+            {
+                "records": RECORDS,
+                "methods": ["predictive_modeling", "association_rules", "frequency_chi_square"],
+            }
+        )
+
+        self.assertEqual(
+            result["methods_executed"],
+            ["association_rules", "frequency_chi_square", "predictive_modeling"],
+        )
+
     def test_predictive_modeling_uses_time_series_payload(self):
         result = self.service.execute(
             {

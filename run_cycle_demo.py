@@ -62,6 +62,7 @@ from src.cycle.cycle_reporter import (
 from src.cycle.cycle_reporter import (
     summarize_module_quality as _summarize_module_quality_impl,
 )
+from src.cycle.cycle_runner import ModuleLifecycle as _ModuleLifecycle
 from src.cycle.cycle_runner import (
     build_real_modules as _build_real_modules_impl,
 )
@@ -105,6 +106,20 @@ logger = logging.getLogger(__name__)
 DEFAULT_CYCLE_DEMO_GOVERNANCE = dict(_DEFAULT_CYCLE_DEMO_GOVERNANCE)
 
 _ORIGINAL_SUBPROCESS_RUN = subprocess.run
+
+
+def _ensure_cycle_demo_governance_contract(governance_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    normalized_config = dict(DEFAULT_CYCLE_DEMO_GOVERNANCE)
+    if governance_config:
+        normalized_config.update(governance_config)
+
+    normalized_config["export_contract_version"] = str(
+        normalized_config.get(
+            "export_contract_version",
+            DEFAULT_CYCLE_DEMO_GOVERNANCE.get("export_contract_version", "d58.v1"),
+        )
+    )
+    return normalized_config
 
 
 def _safe_subprocess_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -228,11 +243,18 @@ def _build_cycle_demo_report_metadata(
     failed_operations: List[Dict[str, Any]],
     output_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    return _build_cycle_demo_report_metadata_impl(governance_config, metadata, failed_operations, output_path)
+    normalized_governance_config = _ensure_cycle_demo_governance_contract(governance_config)
+    return _build_cycle_demo_report_metadata_impl(
+        normalized_governance_config,
+        metadata,
+        failed_operations,
+        output_path,
+    )
 
 
 def export_cycle_demo_report(cycle_results: Dict[str, Any], output_path: Path, governance_config: Dict[str, Any]) -> Dict[str, Any]:
-    return _export_cycle_demo_report_impl(cycle_results, output_path, governance_config)
+    normalized_governance_config = _ensure_cycle_demo_governance_contract(governance_config)
+    return _export_cycle_demo_report_impl(cycle_results, output_path, normalized_governance_config)
 
 
 def setup_signal_handlers():
@@ -295,6 +317,142 @@ def run_iteration_cycle(
     )
 
 
+_ALL_PIPELINE_PHASES = ["observe", "hypothesis", "experiment", "analyze", "publish", "reflect"]
+
+
+def _run_pipeline_iteration(
+    iteration_number: int,
+    input_data: Dict[str, Any],
+    max_iterations: int = 5,
+    shared_modules: Optional[List[tuple[str, Any]]] = None,
+    governance_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """通过 6 阶段 ResearchPipeline 执行单次迭代。
+
+    与 ``run_iteration_cycle`` 保持相同的调用签名与返回契约，
+    使 ``_run_full_cycle_demo_impl`` 无需修改即可切换后端。
+    """
+    from datetime import datetime as _dt
+
+    start_time = time.time()
+    question = input_data.get("objective", "")
+    if not question:
+        raw = input_data.get("raw_text", "")
+        question = (raw[:80] + "…") if len(raw) > 80 else raw
+    question = question or "中医方剂组成规律分析"
+
+    try:
+        # ---- 构建 pipeline 配置，传递迭代间反馈 ----
+        pipeline_config: Dict[str, Any] = {}
+        previous_feedback = input_data.get("previous_feedback")
+        if previous_feedback:
+            pipeline_config["previous_iteration_feedback"] = previous_feedback
+
+        session_result = run_research_session(
+            question=question,
+            config=pipeline_config,
+            phase_names=list(_ALL_PIPELINE_PHASES),
+        )
+    except Exception as exc:
+        logger.error("Pipeline iteration %d failed: %s", iteration_number, exc)
+        return {
+            "iteration_id": f"iter_{iteration_number}",
+            "iteration_number": iteration_number,
+            "status": "failed",
+            "error": str(exc),
+            "start_time": _dt.now().isoformat(),
+            "end_time": _dt.now().isoformat(),
+            "duration": time.time() - start_time,
+            "modules": [],
+            "quality_metrics": {},
+            "confidence_scores": {},
+            "academic_insights": [],
+            "recommendations": [],
+            "metadata": {"max_iterations": max_iterations, "input_data": input_data, "pipeline_mode": True},
+            "failed_operations": [],
+            "analysis_summary": {"module_count": 0, "failed_operation_count": 1},
+        }
+
+    duration = time.time() - start_time
+    phase_results = session_result.get("phase_results", {})
+
+    modules: List[Dict[str, Any]] = []
+    for pname, presult in phase_results.items():
+        modules.append({
+            "module": pname,
+            "status": "completed" if not (isinstance(presult, dict) and presult.get("error")) else "failed",
+            "execution_time": 0.0,
+            "timestamp": _dt.now().isoformat(),
+            "input_data": {},
+            "output_data": presult if isinstance(presult, dict) else {},
+            "quality_metrics": _summarize_module_quality_impl(pname, presult if isinstance(presult, dict) else {}),
+        })
+
+    # 从 reflect 阶段提取真实质量评估作为 academic insights
+    reflect_result = phase_results.get("reflect", {})
+    quality_assessment = reflect_result.get("quality_assessment", {}) if isinstance(reflect_result, dict) else {}
+    reflections = reflect_result.get("reflections", []) if isinstance(reflect_result, dict) else []
+
+    academic_insights = [
+        {
+            "type": "quality_assessment",
+            "title": f"第{iteration_number}次管道循环质量评估",
+            "description": f"整体评分 {quality_assessment.get('overall_cycle_score', 0.0):.2f}",
+            "confidence": quality_assessment.get("overall_cycle_score", 0.0),
+            "timestamp": _dt.now().isoformat(),
+        },
+    ]
+    for ref in reflections[:3]:
+        if isinstance(ref, dict):
+            academic_insights.append({
+                "type": "reflection",
+                "title": ref.get("topic", ""),
+                "description": ref.get("reflection", ""),
+                "confidence": 0.85,
+                "timestamp": _dt.now().isoformat(),
+            })
+
+    improvement_plan = reflect_result.get("improvement_plan", []) if isinstance(reflect_result, dict) else []
+    recommendations = [
+        {
+            "type": "improvement",
+            "title": item,
+            "description": item,
+            "priority": "medium",
+            "confidence": 0.80,
+            "timestamp": _dt.now().isoformat(),
+        }
+        for item in improvement_plan[:5]
+    ]
+
+    return {
+        "iteration_id": f"iter_{iteration_number}",
+        "iteration_number": iteration_number,
+        "status": session_result.get("status", "completed"),
+        "start_time": _dt.now().isoformat(),
+        "end_time": _dt.now().isoformat(),
+        "duration": duration,
+        "modules": modules,
+        "quality_metrics": {},
+        "confidence_scores": {},
+        "academic_insights": academic_insights,
+        "recommendations": recommendations,
+        "metadata": {
+            "max_iterations": max_iterations,
+            "input_data": input_data,
+            "pipeline_mode": True,
+            "session_id": session_result.get("session_id", ""),
+            "executed_phases": session_result.get("executed_phases", []),
+            "last_completed_phase": "reflect" if "reflect" in phase_results else None,
+        },
+        "failed_operations": [],
+        "analysis_summary": {
+            "module_count": len(modules),
+            "failed_operation_count": 0,
+        },
+    }
+
+
 def run_full_cycle_demo(
     max_iterations: int = 3,
     sample_data: Optional[List[str]] = None,
@@ -307,10 +465,12 @@ def run_full_cycle_demo(
         config_path=config_path,
         output_path=output_path,
         governance_config_loader=_load_cycle_demo_governance_config,
-        build_modules=build_real_modules,
-        initialize_modules=initialize_real_modules,
-        cleanup_modules=cleanup_real_modules,
-        run_iteration=run_iteration_cycle,
+        module_lifecycle=_ModuleLifecycle(
+            build=lambda: [],
+            initialize=lambda _modules: None,
+            cleanup=lambda _modules: None,
+        ),
+        run_iteration=_run_pipeline_iteration,
     )
 
 

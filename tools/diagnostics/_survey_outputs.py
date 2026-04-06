@@ -1,4 +1,4 @@
-﻿"""Survey research output files."""
+"""Survey research output files."""
 import glob
 import json
 import os

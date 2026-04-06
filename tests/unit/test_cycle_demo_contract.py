@@ -42,29 +42,17 @@ class TestCycleDemoContract(unittest.TestCase):
             run_cycle_demo.execute_real_module_pipeline = original_execute
 
     def test_run_full_cycle_demo_exports_governed_report(self):
-        original_build = run_cycle_demo.build_real_modules
-        original_init = run_cycle_demo.initialize_real_modules
-        original_cleanup = run_cycle_demo.cleanup_real_modules
-        original_iteration = run_cycle_demo.run_iteration_cycle
+        original_run_research_session = run_cycle_demo.run_research_session
         try:
-            run_cycle_demo.build_real_modules = lambda: []
-            run_cycle_demo.initialize_real_modules = lambda modules: None
-            run_cycle_demo.cleanup_real_modules = lambda modules: None
-            run_cycle_demo.run_iteration_cycle = lambda iteration_number, input_data, max_iterations=5, shared_modules=None, governance_config=None: {
-                "iteration_id": f"iter_{iteration_number}",
-                "iteration_number": iteration_number,
+            run_cycle_demo.run_research_session = lambda question, config, phase_names=None, export_report_formats=None, report_output_dir=None: {
                 "status": "completed",
-                "start_time": "2026-03-29T00:00:00",
-                "end_time": "2026-03-29T00:00:01",
-                "duration": 0.1,
-                "modules": [],
-                "quality_metrics": {"avg_completeness": 0.91},
-                "confidence_scores": {},
-                "academic_insights": [],
-                "recommendations": [],
-                "metadata": {"last_completed_phase": "assemble_iteration_cycle_summary"},
-                "failed_operations": [],
-                "analysis_summary": {"module_count": 0, "failed_operation_count": 0},
+                "session_id": "fake_session_1",
+                "cycle_id": "fake_session_1",
+                "question": question,
+                "executed_phases": phase_names or ["observe"],
+                "phase_results": {p: {"phase": p} for p in (phase_names or ["observe"])},
+                "metadata": {},
+                "cycle_snapshot": {},
             }
 
             with TemporaryDirectory() as tmp:
@@ -95,10 +83,7 @@ class TestCycleDemoContract(unittest.TestCase):
                 self.assertIn("failed_operations", payload)
                 self.assertEqual(payload["analysis_summary"]["iteration_count"], 2)
         finally:
-            run_cycle_demo.build_real_modules = original_build
-            run_cycle_demo.initialize_real_modules = original_init
-            run_cycle_demo.cleanup_real_modules = original_cleanup
-            run_cycle_demo.run_iteration_cycle = original_iteration
+            run_cycle_demo.run_research_session = original_run_research_session
 
     def test_run_research_session_can_export_markdown_report(self):
         class FakeCycle:
@@ -218,6 +203,62 @@ class TestCycleDemoContract(unittest.TestCase):
             self.assertEqual(captured["question"], "测试问题")
             self.assertEqual(captured["export_report_formats"], ["markdown", "docx"])
             self.assertEqual(captured["report_output_dir"], tmp)
+        finally:
+            run_cycle_demo.run_research_session = original_run_research_session
+
+
+    def test_pipeline_iteration_returns_iteration_contract(self):
+        """_run_pipeline_iteration 桥接函数返回与 run_iteration_cycle 兼容的契约。"""
+        original_run_research_session = run_cycle_demo.run_research_session
+        try:
+            run_cycle_demo.run_research_session = lambda question, config, phase_names=None, **kw: {
+                "status": "completed",
+                "session_id": "bridge_test",
+                "executed_phases": phase_names or [],
+                "phase_results": {
+                    "observe": {"phase": "observe", "status": "completed"},
+                    "reflect": {
+                        "phase": "reflect",
+                        "reflections": [{"topic": "t", "reflection": "r", "action": "a", "source": "quality_assessor"}],
+                        "quality_assessment": {"overall_cycle_score": 0.85},
+                        "improvement_plan": ["计划一"],
+                    },
+                },
+            }
+
+            result = run_cycle_demo._run_pipeline_iteration(
+                1,
+                {"raw_text": "test", "objective": "小柴胡汤分析"},
+                max_iterations=2,
+            )
+
+            # 返回契约: 必须包含 run_iteration_cycle 合同字段
+            self.assertEqual(result["iteration_id"], "iter_1")
+            self.assertEqual(result["iteration_number"], 1)
+            self.assertEqual(result["status"], "completed")
+            self.assertIn("duration", result)
+            self.assertIn("modules", result)
+            self.assertIn("academic_insights", result)
+            self.assertIn("recommendations", result)
+            self.assertIn("metadata", result)
+            self.assertTrue(result["metadata"]["pipeline_mode"])
+            self.assertIn("analysis_summary", result)
+            self.assertEqual(result["analysis_summary"]["module_count"], 2)
+        finally:
+            run_cycle_demo.run_research_session = original_run_research_session
+
+    def test_pipeline_iteration_handles_session_failure(self):
+        """run_research_session 抛异常时 _run_pipeline_iteration 返回 failed。"""
+        original_run_research_session = run_cycle_demo.run_research_session
+        try:
+            run_cycle_demo.run_research_session = lambda **kw: (_ for _ in ()).throw(RuntimeError("boom"))
+
+            result = run_cycle_demo._run_pipeline_iteration(
+                1, {"raw_text": "test"}, max_iterations=1,
+            )
+
+            self.assertEqual(result["status"], "failed")
+            self.assertIn("boom", result["error"])
         finally:
             run_cycle_demo.run_research_session = original_run_research_session
 

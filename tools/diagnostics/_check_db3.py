@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import sqlite3
 
 conn = sqlite3.connect("data/development/tcmautoresearch.db")

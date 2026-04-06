@@ -1,6 +1,6 @@
 # Quality Control System
 
-This repository uses a practical quality control baseline composed of eight gates:
+This repository uses a practical quality control baseline composed of ten gates:
 
 ## Gates
 
@@ -22,21 +22,30 @@ This repository uses a practical quality control baseline composed of eight gate
    - Tool: `tools/code_quality_checks.py`
    - Purpose: detect syntax errors and maintainability risks (oversized functions, excessive parameters, high branching complexity, bare except).
 
-5. Quality assessment scoring
+5. Real Observe smoke validation
+   - Tool: `tools/diagnostics/run_real_observe_smoke.py`
+   - Purpose: validate the fixed 20-file local-corpus Observe -> Analyze -> Publish path against real metrics, significance thresholds, reasoning support, and publish alias contracts.
+   - Activation: enabled in the main repository via the quality-gate section in `config.yml`; disabled by default in minimal replay harnesses unless explicitly configured.
+
+6. Quality assessment scoring
    - Tool: `tools/quality_assessment.py`
    - Purpose: transform gate results into multi-dimension scores, grade, and recommendations for continuous quality governance.
 
-6. Continuous improvement loop
+7. Continuous improvement loop
    - Tool: `tools/continuous_improvement_loop.py`
    - Purpose: persist quality history, calculate trends, and generate next-cycle action backlog for continuous improvement.
 
-7. Quality improvement archive
+8. Quality consumer inventory
+   - Tool: `tools/quality_consumer_inventory.py`
+   - Purpose: verify governance contract coverage for downstream quality consumers and surface missing-contract / root-script drift.
+
+9. Quality improvement archive
    - Tool: `tools/quality_improvement_archive.py`
    - Purpose: archive each quality cycle into a machine-readable timeline and a human-readable dossier.
 
-8. Quality feedback mechanism
-   - Tool: `tools/quality_feedback.py`
-   - Purpose: produce graded quality feedback and prioritized actions for teams and module owners.
+10. Quality feedback mechanism
+    - Tool: `tools/quality_feedback.py`
+    - Purpose: produce graded quality feedback and prioritized actions for teams and module owners.
 
 ## Unified Entry Point
 
@@ -79,6 +88,9 @@ python tools/quality_feedback.py
 Outputs:
 
 - JSON report: `output/quality-gate.json`
+- Real Observe smoke latest summary: `output/real_observe_smoke/latest.json`
+- Real Observe smoke dossier: `output/real_observe_smoke/dossier.md`
+- Real Observe smoke timeline: `output/real_observe_smoke/timeline.jsonl`
 - Quality assessment report: `output/quality-assessment.json`
 - Continuous improvement report: `output/continuous-improvement.json`
 - Quality history timeline: `output/quality-history.jsonl`
@@ -96,6 +108,7 @@ Outputs:
 
 The CI workflow runs the unified quality gate on pull requests and pushes to `main`.
 If the gate fails, the workflow fails.
+The uploaded workflow artifacts now also include the real Observe smoke outputs so failed regressions can be inspected without rerunning locally.
 
 ## Extension Rules
 

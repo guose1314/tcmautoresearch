@@ -1,4 +1,4 @@
-﻿"""Quick survey of research data in main DB."""
+"""Quick survey of research data in main DB."""
 import json
 import sqlite3
 

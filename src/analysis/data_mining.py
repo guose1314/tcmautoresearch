@@ -15,6 +15,15 @@ from src.research.data_miner import StatisticalDataMiner
 
 logger = logging.getLogger(__name__)
 
+_METHOD_EXECUTION_ORDER = (
+    "frequent_itemsets",
+    "association_rules",
+    "clustering",
+    "latent_topics",
+    "frequency_chi_square",
+    "predictive_modeling",
+)
+
 
 class DataMiningService(BaseModule):
     """3.0 分析域数据挖掘服务。"""
@@ -42,6 +51,21 @@ class DataMiningService(BaseModule):
 
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         methods = self._resolve_methods(context)
+        records, transactions = self._resolve_execution_inputs(context)
+        items = self._resolve_items(context, records, transactions)
+        result = self._build_base_result(records, transactions, items)
+        pattern_payload = self._prepare_pattern_mining_payload(context, methods, transactions)
+        self._apply_method_results(result, methods, records, items, context, pattern_payload)
+        result["summary"] = self._build_summary(result)
+        return result
+
+    def _do_cleanup(self) -> bool:
+        return True
+
+    def _resolve_execution_inputs(
+        self,
+        context: Dict[str, Any],
+    ) -> Tuple[List[Dict[str, Any]], List[List[str]]]:
         records = self._resolve_records(context)
         transactions = self._resolve_transactions(context, records)
 
@@ -52,21 +76,34 @@ class DataMiningService(BaseModule):
         if not records and not transactions:
             raise ValueError("DataMiningService 需要 records 或 transactions 输入")
 
-        items = self._resolve_items(context, records, transactions)
-        result: Dict[str, Any] = {
+        return records, transactions
+
+    def _build_base_result(
+        self,
+        records: Sequence[Dict[str, Any]],
+        transactions: Sequence[Sequence[str]],
+        items: Sequence[str],
+    ) -> Dict[str, Any]:
+        return {
             "record_count": len(records),
             "transaction_count": len(transactions),
             "item_count": len(items),
-            "items": items,
+            "items": list(items),
             "methods_executed": [],
         }
 
-        frequent_payload: Optional[Dict[str, Any]] = None
+    def _prepare_pattern_mining_payload(
+        self,
+        context: Dict[str, Any],
+        methods: Sequence[str],
+        transactions: Sequence[Sequence[str]],
+    ) -> Dict[str, Any]:
+        transaction_sets = [frozenset(tx) for tx in transactions if tx]
         support_map: Dict[FrozenSet[str], float] = {}
         count_map: Dict[FrozenSet[str], int] = {}
-        transaction_sets = [frozenset(tx) for tx in transactions if tx]
+        frequent_payload: Optional[Dict[str, Any]] = None
 
-        if "frequent_itemsets" in methods or "association_rules" in methods:
+        if self._requires_pattern_mining(methods):
             support_map, count_map = self._mine_frequent_itemsets(
                 transaction_sets,
                 float(context.get("min_support", self.min_support)),
@@ -78,45 +115,79 @@ class DataMiningService(BaseModule):
                 len(transaction_sets),
             )
 
-        if "frequent_itemsets" in methods:
-            result["frequent_itemsets"] = frequent_payload or {
-                "itemsets": [],
-                "transaction_count": len(transaction_sets),
-                "max_itemset_size": 0,
-            }
-            result["methods_executed"].append("frequent_itemsets")
+        return {
+            "transaction_sets": transaction_sets,
+            "support_map": support_map,
+            "count_map": count_map,
+            "frequent_payload": frequent_payload,
+        }
 
-        if "association_rules" in methods:
-            result["association_rules"] = self._build_association_rules(
-                support_map,
-                len(transaction_sets),
+    def _requires_pattern_mining(self, methods: Sequence[str]) -> bool:
+        return "frequent_itemsets" in methods or "association_rules" in methods
+
+    def _apply_method_results(
+        self,
+        result: Dict[str, Any],
+        methods: Sequence[str],
+        records: Sequence[Dict[str, Any]],
+        items: Sequence[str],
+        context: Dict[str, Any],
+        pattern_payload: Dict[str, Any],
+    ) -> None:
+        for method in _METHOD_EXECUTION_ORDER:
+            if method not in methods:
+                continue
+
+            payload = self._build_method_payload(
+                method,
+                records,
+                items,
+                context,
+                pattern_payload,
+            )
+            if payload is None:
+                continue
+
+            result[method] = payload
+            result["methods_executed"].append(method)
+
+    def _build_method_payload(
+        self,
+        method: str,
+        records: Sequence[Dict[str, Any]],
+        items: Sequence[str],
+        context: Dict[str, Any],
+        pattern_payload: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        transaction_count = len(pattern_payload["transaction_sets"])
+        if method == "frequent_itemsets":
+            return pattern_payload["frequent_payload"] or self._build_empty_frequent_itemsets_payload(
+                transaction_count
+            )
+        if method == "association_rules":
+            return self._build_association_rules(
+                pattern_payload["support_map"],
+                transaction_count,
                 float(context.get("min_confidence", self.min_confidence)),
                 float(context.get("min_lift", self.min_lift)),
                 int(context.get("max_rules", self.max_rules)),
             )
-            result["methods_executed"].append("association_rules")
+        if method == "clustering":
+            return self._run_clustering(records, items)
+        if method == "latent_topics":
+            return self._base_miner.latent_topics(records, items)
+        if method == "frequency_chi_square":
+            return StatisticalDataMiner.frequency_and_chi_square(list(records), list(items))
+        if method == "predictive_modeling":
+            return self._run_predictive_modeling(records, context)
+        return None
 
-        if "clustering" in methods:
-            result["clustering"] = self._run_clustering(records, items)
-            result["methods_executed"].append("clustering")
-
-        if "latent_topics" in methods:
-            result["latent_topics"] = self._base_miner.latent_topics(records, items)
-            result["methods_executed"].append("latent_topics")
-
-        if "frequency_chi_square" in methods:
-            result["frequency_chi_square"] = StatisticalDataMiner.frequency_and_chi_square(records, items)
-            result["methods_executed"].append("frequency_chi_square")
-
-        if "predictive_modeling" in methods:
-            result["predictive_modeling"] = self._run_predictive_modeling(records, context)
-            result["methods_executed"].append("predictive_modeling")
-
-        result["summary"] = self._build_summary(result)
-        return result
-
-    def _do_cleanup(self) -> bool:
-        return True
+    def _build_empty_frequent_itemsets_payload(self, transaction_count: int) -> Dict[str, Any]:
+        return {
+            "itemsets": [],
+            "transaction_count": transaction_count,
+            "max_itemset_size": 0,
+        }
 
     def _resolve_methods(self, context: Dict[str, Any]) -> List[str]:
         if "methods" not in context:
@@ -345,6 +416,110 @@ class DataMiningService(BaseModule):
             "max_itemset_size": max((entry["size"] for entry in itemsets), default=0),
         }
 
+    def _iter_association_rule_partitions(
+        self,
+        itemset: FrozenSet[str],
+    ) -> Iterable[Tuple[FrozenSet[str], FrozenSet[str]]]:
+        ordered_items = sorted(itemset)
+        for subset_size in range(1, len(ordered_items)):
+            for antecedent_tuple in combinations(ordered_items, subset_size):
+                antecedent = frozenset(antecedent_tuple)
+                consequent = frozenset(itemset.difference(antecedent))
+                yield antecedent, consequent
+
+    def _build_association_rule_entry(
+        self,
+        antecedent: FrozenSet[str],
+        consequent: FrozenSet[str],
+        support: float,
+        support_map: Dict[FrozenSet[str], float],
+        min_confidence: float,
+        min_lift: float,
+    ) -> Optional[Dict[str, Any]]:
+        antecedent_support = support_map.get(antecedent)
+        consequent_support = support_map.get(consequent)
+        if not antecedent_support or not consequent_support:
+            return None
+
+        confidence = support / antecedent_support
+        if confidence < min_confidence:
+            return None
+
+        lift = self._resolve_rule_lift(confidence, consequent_support)
+        if lift < min_lift:
+            return None
+
+        leverage = support - antecedent_support * consequent_support
+        conviction = self._resolve_rule_conviction(confidence, consequent_support)
+        return {
+            "antecedent": sorted(antecedent),
+            "consequent": sorted(consequent),
+            "support": round(float(support), 4),
+            "confidence": round(float(confidence), 4),
+            "lift": round(float(lift), 4),
+            "leverage": round(float(leverage), 4),
+            "conviction": round(float(conviction), 4) if conviction is not None else None,
+        }
+
+    def _resolve_rule_lift(self, confidence: float, consequent_support: float) -> float:
+        if consequent_support <= 0:
+            return 0.0
+        return confidence / consequent_support
+
+    def _resolve_rule_conviction(
+        self,
+        confidence: float,
+        consequent_support: float,
+    ) -> Optional[float]:
+        if confidence >= 1.0:
+            return None
+        denominator = 1.0 - confidence
+        if denominator <= 0:
+            return None
+        return (1.0 - consequent_support) / denominator
+
+    def _collect_association_rules_for_itemset(
+        self,
+        itemset: FrozenSet[str],
+        support: float,
+        support_map: Dict[FrozenSet[str], float],
+        min_confidence: float,
+        min_lift: float,
+    ) -> List[Dict[str, Any]]:
+        if len(itemset) < 2:
+            return []
+
+        rules: List[Dict[str, Any]] = []
+        for antecedent, consequent in self._iter_association_rule_partitions(itemset):
+            rule = self._build_association_rule_entry(
+                antecedent,
+                consequent,
+                support,
+                support_map,
+                min_confidence,
+                min_lift,
+            )
+            if rule is not None:
+                rules.append(rule)
+        return rules
+
+    def _sort_and_limit_association_rules(
+        self,
+        rules: List[Dict[str, Any]],
+        max_rules: int,
+    ) -> Dict[str, Any]:
+        rules.sort(
+            key=lambda entry: (
+                entry["lift"],
+                entry["confidence"],
+                entry["support"],
+                len(entry["antecedent"]),
+            ),
+            reverse=True,
+        )
+        limited_rules = rules[:max_rules]
+        return {"rules": limited_rules, "rule_count": len(limited_rules)}
+
     def _build_association_rules(
         self,
         support_map: Dict[FrozenSet[str], float],
@@ -358,46 +533,16 @@ class DataMiningService(BaseModule):
 
         rules: List[Dict[str, Any]] = []
         for itemset, support in support_map.items():
-            if len(itemset) < 2:
-                continue
-            ordered_items = sorted(itemset)
-            for subset_size in range(1, len(ordered_items)):
-                for antecedent_tuple in combinations(ordered_items, subset_size):
-                    antecedent = frozenset(antecedent_tuple)
-                    consequent = frozenset(itemset.difference(antecedent))
-                    antecedent_support = support_map.get(antecedent)
-                    consequent_support = support_map.get(consequent)
-                    if not antecedent_support or not consequent_support:
-                        continue
-                    confidence = support / antecedent_support
-                    if confidence < min_confidence:
-                        continue
-                    lift = confidence / consequent_support if consequent_support > 0 else 0.0
-                    if lift < min_lift:
-                        continue
-                    leverage = support - antecedent_support * consequent_support
-                    conviction = None
-                    if confidence < 1.0:
-                        denominator = 1.0 - confidence
-                        if denominator > 0:
-                            conviction = (1.0 - consequent_support) / denominator
-                    rules.append(
-                        {
-                            "antecedent": sorted(antecedent),
-                            "consequent": sorted(consequent),
-                            "support": round(float(support), 4),
-                            "confidence": round(float(confidence), 4),
-                            "lift": round(float(lift), 4),
-                            "leverage": round(float(leverage), 4),
-                            "conviction": round(float(conviction), 4) if conviction is not None else None,
-                        }
-                    )
-        rules.sort(
-            key=lambda entry: (entry["lift"], entry["confidence"], entry["support"], len(entry["antecedent"])),
-            reverse=True,
-        )
-        limited_rules = rules[:max_rules]
-        return {"rules": limited_rules, "rule_count": len(limited_rules)}
+            rules.extend(
+                self._collect_association_rules_for_itemset(
+                    itemset,
+                    support,
+                    support_map,
+                    min_confidence,
+                    min_lift,
+                )
+            )
+        return self._sort_and_limit_association_rules(rules, max_rules)
 
     def _run_clustering(
         self,

@@ -340,17 +340,17 @@ graph TD
 | 任务 | 理由 | 代价 |
 |---|---|---|
 | QualityAssessor 升级为 LLM 驱动 | 质量门有效 | LLM prompt 设计 |
-| SelfLearningEngine 接入分析反馈 | 学习闭环 | 算法设计 |
+| SelfLearningEngine 接入分析反馈 | SelfLearningEngine 接入分析反馈 | 算法设计 |
 | IterationCycle 接入真实循环 | 多轮迭代改进 | 依赖 Phase 2 |
 
 ### Phase 4: 生产化 (持续)
 
 | 任务 | 理由 | 代价 |
 |---|---|---|
-| `__init__.py` 延迟导入优化 | 减少启动时间 | 逐模块改造 |
-| PostgreSQL + Neo4j 默认启用 | 生产存储 | 配置调整 |
-| CORS 收紧 | 安全加固 | 配置调整 |
-| Helm Chart Secret 条件化 | 部署灵活性 | 模板修改 |
+| `__init__.py` 延迟导入优化 | 减少启动时间 | 逐模块改造 | ✅ 已完成 (8400→96ms, -98.9%) |
+| PostgreSQL + Neo4j 默认启用 | 生产存储 | 配置调整 | ✅ 已完成 (production.yml + docker-compose) |
+| CORS 收紧 | 安全加固 | 配置调整 | ✅ 已完成 (生产环境白名单 + 方法/头限制) |
+| Helm Chart Secret 条件化 | 部署灵活性 | 模板修改 | ✅ 已完成 (envFrom 条件化 + 空值跳过 + DB/Neo4j 密钥) |
 
 ---
 

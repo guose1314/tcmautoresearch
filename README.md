@@ -219,6 +219,18 @@ Kubernetes 探针示例
 
 部署到 Kubernetes、Ingress 或反向代理时，优先使用根路径探针，避免把探测配置绑定到 API 版本前缀。
 
+真实 Observe Smoke
+
+仓库已固化一套 20 篇本地方剂语料、3000 字截断的真实 Observe smoke profile，用于回归验证 Observe -> Analyze -> Publish 主链路是否仍能在真实语料下维持显著统计结果、推理支撑和 publish 直达字段契约。
+
+```powershell
+c:/Users/hgk/tcmautoresearch/venv310/Scripts/python.exe tools/diagnostics/run_real_observe_smoke.py
+```
+
+运行后会在 `output/real_observe_smoke/` 下生成 `latest.json`、`dossier.md` 和 `timeline.jsonl`。更完整的说明见 `docs/real_observe_smoke.md`。
+
+主仓库的 `python tools/quality_gate.py`、CI `quality-control` workflow，以及调用 `tools/quality_gate.py` 的 stage runner 现已默认包含这条真实 smoke 回归门。
+
 ```yaml
 apiVersion: apps/v1
 kind: Deployment

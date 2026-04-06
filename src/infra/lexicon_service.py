@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 # 默认 JSONL 路径（相对于项目根目录；可被环境变量 TCM_LEXICON_PATH 覆盖）
 _DEFAULT_JSONL = Path(__file__).resolve().parents[2] / "data" / "tcm_lexicon.jsonl"
+_DEFAULT_SYNONYMS_JSONL = Path(__file__).resolve().parents[2] / "data" / "tcm_synonyms.jsonl"
 
 # 合法分类 → TCMLexicon 属性名映射
 _CATEGORY_TO_ATTR: dict[str, str] = {
@@ -58,6 +59,8 @@ class LexiconService:
     def __init__(self, jsonl_path: Optional[str | Path] = None):
         path_str = os.environ.get("TCM_LEXICON_PATH") or jsonl_path
         self._jsonl_path: Path = Path(path_str) if path_str else _DEFAULT_JSONL
+        synonyms_str = os.environ.get("TCM_SYNONYMS_PATH")
+        self._synonyms_path: Path = Path(synonyms_str) if synonyms_str else _DEFAULT_SYNONYMS_JSONL
 
         # 分类词集（与旧 TCMLexicon 属性名完全一致）
         self.herbs: Set[str] = set()
@@ -66,6 +69,9 @@ class LexiconService:
         self.theory: Set[str] = set()
         self.efficacy: Set[str] = set()
         self.common_words: Set[str] = set()
+
+        # 同义词映射: alias → (canonical, category)
+        self._synonym_map: Dict[str, Tuple[str, str]] = {}
 
         self._all_words: Optional[Set[str]] = None  # 延迟聚合缓存
         self._source_signature: Optional[Tuple[int, int, str]] = None  # (mtime_ns, file_size, sha1)
@@ -134,6 +140,35 @@ class LexiconService:
             "TCM 词典加载完成: %d 词条（跳过 %d），来源 %s",
             loaded, skipped, self._jsonl_path,
         )
+        self._load_synonyms()
+
+    def _load_synonyms(self) -> None:
+        """加载同义词映射文件 (tcm_synonyms.jsonl)。"""
+        self._synonym_map.clear()
+        if not self._synonyms_path.exists():
+            return
+        loaded = 0
+        try:
+            with open(self._synonyms_path, encoding="utf-8") as fh:
+                for lineno, raw in enumerate(fh, 1):
+                    raw = raw.strip()
+                    if not raw or raw.startswith("#"):
+                        continue
+                    try:
+                        obj = json.loads(raw)
+                        alias = str(obj.get("alias", "")).strip()
+                        canonical = str(obj.get("canonical", "")).strip()
+                        category = str(obj.get("category", "")).strip()
+                        if alias and canonical and category in _CATEGORY_TO_ATTR:
+                            self._synonym_map[alias] = (canonical, category)
+                            loaded += 1
+                    except json.JSONDecodeError:
+                        pass
+        except Exception as exc:
+            logger.warning("同义词文件加载失败 (%s): %s", self._synonyms_path, exc)
+        if loaded:
+            self._all_words = None
+            logger.info("同义词映射加载完成: %d 条，来源 %s", loaded, self._synonyms_path)
 
     def _clear_all_collections(self) -> None:
         self.herbs.clear()
@@ -185,7 +220,7 @@ class LexiconService:
         )
 
     def get_all_words(self) -> Set[str]:
-        """返回所有词汇的并集（结果被缓存，首次调用后不再重新计算）。"""
+        """返回所有词汇的并集（含同义词别名，结果被缓存）。"""
         self.refresh_if_needed()
         if self._all_words is None:
             self._all_words = (
@@ -195,6 +230,7 @@ class LexiconService:
                 | self.theory
                 | self.efficacy
                 | self.common_words
+                | set(self._synonym_map.keys())
             )
         return self._all_words
 
@@ -203,12 +239,23 @@ class LexiconService:
         return word in self.get_all_words()
 
     def get_word_type(self, word: str) -> Optional[str]:
-        """返回词的分类名，未找到时返回 ``None``。"""
+        """返回词的分类名（同义词自动解析到标准词），未找到时返回 ``None``。"""
         self.refresh_if_needed()
         for category, attr in _CATEGORY_TO_ATTR.items():
             if word in getattr(self, attr):
                 return category
+        # 同义词回退
+        entry = self._synonym_map.get(word)
+        if entry is not None:
+            return entry[1]  # category
         return None
+
+    def resolve_synonym(self, word: str) -> Tuple[str, Optional[str]]:
+        """将别名解析为标准名 + 分类。若非同义词则返回原词 + 分类（可能为 None）。"""
+        entry = self._synonym_map.get(word)
+        if entry is not None:
+            return entry  # (canonical, category)
+        return word, self.get_word_type(word)
 
     def lookup(self, word: str) -> Optional[Dict[str, str]]:
         """查询词汇，返回类型与属性字典；未找到时返回 ``None``。

@@ -1,0 +1,92 @@
+{
+  "profile_name": "real_observe_local_formula_20x3000",
+  "description": "Validated local-corpus real Observe smoke profile using 20 formula-oriented texts with 3000-char excerpts.",
+  "cycle_name": "real-observe-smoke",
+  "objective": "Validate real Observe -> Analyze -> Publish stability on a fixed 20-file local corpus subset.",
+  "scope": "real-observe-smoke",
+  "researchers": [
+    "copilot"
+  ],
+  "pipeline_config": {
+    "local_corpus": {
+      "enabled": true,
+      "data_dir": "data"
+    },
+    "ctext_corpus": {
+      "enabled": false,
+      "whitelist": {
+        "enabled": false
+      }
+    },
+    "literature_retrieval": {
+      "enabled": false
+    },
+    "clinical_gap_analysis": {
+      "enabled": false
+    }
+  },
+  "phase_context": {
+    "data_source": "local",
+    "use_local_corpus": true,
+    "collect_local_corpus": true,
+    "local_data_dir": "data",
+    "max_texts": 20,
+    "max_chars_per_text": 3000,
+    "run_literature_retrieval": false,
+    "use_llm_generation": false,
+    "use_llm_protocol_generation": false,
+    "paper_output_formats": [
+      "markdown"
+    ],
+    "report_output_formats": [
+      "markdown"
+    ]
+  },
+  "include_paths": [
+    "data/伤寒论方剂(113种).txt",
+    "data/伤寒方(282种).txt",
+    "data/084-汤头歌诀-清-汪昂.txt",
+    "data/095-金匮方歌括-清-陈念祖.txt",
+    "data/096-医方证治汇编歌诀-清-王泰林.txt",
+    "data/118-增订医方歌诀-清-王泰林.txt",
+    "data/100-伤寒杂病论桂林古本-汉-张仲景.txt",
+    "data/457-伤寒论-汉-张仲景.txt",
+    "data/金匮玉函要略.txt",
+    "data/金匮要略论注.txt",
+    "data/《金匮要略》湿病证治探析.txt",
+    "data/伤寒类方.txt",
+    "data/方剂歌诀(含组成药物及其克数).txt",
+    "data/方剂趣记大典(379种).txt",
+    "data/059-太平惠民和剂局方-宋-陈承.txt",
+    "data/082-古今名医方论-清-罗美.txt",
+    "data/087-医方集解-清-汪昂.txt",
+    "data/091-成方切用-清-吴仪洛.txt",
+    "data/094-长沙方歌括-清-陈念祖.txt",
+    "data/502-金匮玉函要略述义-清-佚名.txt"
+  ],
+  "thresholds": {
+    "processed_document_count": 20,
+    "min_total_entities": 2000,
+    "min_semantic_graph_nodes": 500,
+    "min_semantic_graph_edges": 2000,
+    "min_semantic_relationship_count": 150,
+    "min_record_count": 10,
+    "max_p_value": 0.05,
+    "min_effect_size": 0.4,
+    "min_kg_path_count": 10,
+    "min_association_rule_count": 10,
+    "min_frequency_signal_count": 10,
+    "min_observe_reasoning_confidence": 0.45,
+    "min_reasoning_confidence": 0.45,
+    "require_statistical_significance": true,
+    "expect_llm_generation_disabled": true,
+    "expected_protocol_source": "template",
+    "require_publish_aliases": [
+      "primary_association",
+      "data_mining_summary",
+      "data_mining_methods",
+      "frequency_chi_square",
+      "association_rules"
+    ]
+  }
+}

@@ -1,4 +1,4 @@
-﻿"""兼容层 — reasoning 已迁移至 src.analysis.reasoning_engine
+"""兼容层 - reasoning 已迁移至 src.analysis.reasoning_engine
 
 .. deprecated:: 2.0
     请改用 ``from src.analysis.reasoning_engine import ReasoningEngine``

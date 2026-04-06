@@ -1057,6 +1057,187 @@
             color: var(--ink);
         }
 
+        .primary-association-visual {
+            display: grid;
+            gap: 10px;
+        }
+
+        .primary-association-visual.compact {
+            gap: 8px;
+        }
+
+        .primary-association-summary {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .primary-association-heading {
+            display: grid;
+            gap: 4px;
+        }
+
+        .primary-association-heading strong {
+            font-size: 0.94rem;
+            color: var(--ink);
+        }
+
+        .primary-association-heading span {
+            font-size: 0.79rem;
+            color: var(--muted);
+            line-height: 1.45;
+        }
+
+        .primary-association-chip-row {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .primary-association-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            border: 1px solid rgba(37, 49, 45, 0.12);
+            background: rgba(255, 255, 255, 0.78);
+            color: var(--ink);
+            font-size: 0.77rem;
+        }
+
+        .primary-association-chip.good {
+            border-color: rgba(43, 102, 76, 0.26);
+            background: rgba(234, 247, 238, 0.92);
+            color: #2f6a49;
+        }
+
+        .primary-association-chip.watch {
+            border-color: rgba(179, 138, 46, 0.28);
+            background: rgba(252, 246, 224, 0.92);
+            color: #8a6a1f;
+        }
+
+        .primary-association-chip.risk {
+            border-color: rgba(137, 44, 44, 0.26);
+            background: rgba(251, 236, 236, 0.92);
+            color: #8a2c2c;
+        }
+
+        .primary-association-matrix-wrap {
+            border-radius: 12px;
+            border: 1px solid rgba(37, 49, 45, 0.12);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(246, 239, 228, 0.9));
+            overflow: hidden;
+        }
+
+        .primary-association-matrix {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            table-layout: fixed;
+        }
+
+        .primary-association-matrix th,
+        .primary-association-matrix td {
+            padding: 8px 10px;
+            border-right: 1px solid rgba(37, 49, 45, 0.1);
+            border-bottom: 1px solid rgba(37, 49, 45, 0.1);
+            text-align: center;
+            vertical-align: middle;
+        }
+
+        .primary-association-matrix th:last-child,
+        .primary-association-matrix td:last-child {
+            border-right: none;
+        }
+
+        .primary-association-matrix tbody tr:last-child td,
+        .primary-association-matrix tbody tr:last-child th {
+            border-bottom: none;
+        }
+
+        .primary-association-matrix th {
+            background: rgba(245, 241, 233, 0.92);
+            color: var(--muted);
+            font-size: 0.77rem;
+            font-weight: 600;
+            line-height: 1.4;
+        }
+
+        .primary-association-row-header {
+            text-align: left;
+            min-width: 112px;
+        }
+
+        .primary-association-cell {
+            display: grid;
+            gap: 2px;
+            justify-items: center;
+            min-height: 56px;
+            padding: 6px;
+            border-radius: 10px;
+        }
+
+        .primary-association-cell strong {
+            font-size: 1rem;
+            color: var(--ink);
+        }
+
+        .primary-association-cell span {
+            font-size: 0.72rem;
+            color: rgba(37, 49, 45, 0.72);
+        }
+
+        .primary-association-cell.focus {
+            box-shadow: inset 0 0 0 2px rgba(179, 92, 46, 0.24);
+        }
+
+        .primary-association-footer {
+            margin: 0;
+            color: var(--muted);
+            font-size: 0.77rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .dashboard-association-box {
+            background: linear-gradient(165deg, rgba(255, 248, 241, 0.82), rgba(244, 238, 228, 0.78));
+        }
+
+        .summary-primary-association-section .primary-association-matrix-wrap {
+            margin-top: 2px;
+        }
+
+        .primary-association-visual.compact .primary-association-heading strong {
+            font-size: 0.9rem;
+        }
+
+        .primary-association-visual.compact .primary-association-heading span,
+        .primary-association-visual.compact .primary-association-footer {
+            font-size: 0.75rem;
+        }
+
+        .primary-association-visual.compact .primary-association-matrix th,
+        .primary-association-visual.compact .primary-association-matrix td {
+            padding: 7px 8px;
+        }
+
+        .primary-association-visual.compact .primary-association-cell {
+            min-height: 48px;
+            padding: 5px;
+        }
+
+        .primary-association-visual.compact .primary-association-cell strong {
+            font-size: 0.92rem;
+        }
+
+        .primary-association-visual.compact .primary-association-cell span {
+            font-size: 0.68rem;
+        }
+
         .dashboard-graph-board {
             margin-top: 12px;
             padding: 12px;
@@ -1436,6 +1617,11 @@
             <button id="dashboard-modal-close" type="button" class="dashboard-modal-close">关闭</button>
             <h4 id="dashboard-modal-title" class="dashboard-modal-title">阶段详情</h4>
             <div id="dashboard-modal-meta" class="dashboard-modal-meta">-</div>
+            <section id="dashboard-modal-association-section" class="dashboard-modal-section" hidden>
+                <h5>主统计关联</h5>
+                <div id="dashboard-modal-association-summary" class="dashboard-modal-meta">-</div>
+                <div id="dashboard-modal-association-visual"></div>
+            </section>
             <section class="dashboard-modal-section">
                 <h5>完整摘要</h5>
                 <pre id="dashboard-modal-summary" class="dashboard-modal-code">-</pre>
@@ -1492,6 +1678,9 @@
         const dashboardModalCloseNode = document.getElementById("dashboard-modal-close");
         const dashboardModalTitleNode = document.getElementById("dashboard-modal-title");
         const dashboardModalMetaNode = document.getElementById("dashboard-modal-meta");
+        const dashboardModalAssociationSectionNode = document.getElementById("dashboard-modal-association-section");
+        const dashboardModalAssociationSummaryNode = document.getElementById("dashboard-modal-association-summary");
+        const dashboardModalAssociationVisualNode = document.getElementById("dashboard-modal-association-visual");
         const dashboardModalSummaryNode = document.getElementById("dashboard-modal-summary");
         const dashboardModalErrorNode = document.getElementById("dashboard-modal-error");
         const dashboardGraphModalNode = document.getElementById("dashboard-graph-modal");
@@ -1813,6 +2002,350 @@
             return section;
         }
 
+        function normalizePrimaryAssociation(primaryAssociation) {
+            if (!primaryAssociation || typeof primaryAssociation !== "object" || Array.isArray(primaryAssociation)) {
+                return {};
+            }
+
+            const contingencyTable = primaryAssociation.contingency_table && typeof primaryAssociation.contingency_table === "object"
+                ? primaryAssociation.contingency_table
+                : {};
+
+            return {
+                herb: String(primaryAssociation.herb || "").trim(),
+                syndrome: String(primaryAssociation.syndrome || "").trim(),
+                chi2: Number.isFinite(Number(primaryAssociation.chi2)) ? Number(primaryAssociation.chi2) : null,
+                p_value: Number.isFinite(Number(primaryAssociation.p_value)) ? Number(primaryAssociation.p_value) : null,
+                effect_size: Number.isFinite(Number(primaryAssociation.effect_size)) ? Number(primaryAssociation.effect_size) : null,
+                sample_size: Number.isFinite(Number(primaryAssociation.sample_size)) ? Number(primaryAssociation.sample_size) : null,
+                contingency_table: {
+                    a: safeNumber(contingencyTable.a, 0),
+                    b: safeNumber(contingencyTable.b, 0),
+                    c: safeNumber(contingencyTable.c, 0),
+                    d: safeNumber(contingencyTable.d, 0),
+                },
+            };
+        }
+
+        function hasPrimaryAssociation(primaryAssociation) {
+            const normalized = normalizePrimaryAssociation(primaryAssociation);
+            if (normalized.herb || normalized.syndrome) {
+                return true;
+            }
+            const table = normalized.contingency_table || {};
+            return [table.a, table.b, table.c, table.d].some((value) => safeNumber(value, 0) > 0);
+        }
+
+        function resolvePrimaryAssociationSignalTier(primaryAssociation) {
+            const normalized = normalizePrimaryAssociation(primaryAssociation);
+            if (normalized.p_value !== null) {
+                if (normalized.p_value <= 0.05) {
+                    return "good";
+                }
+                if (normalized.p_value <= 0.1) {
+                    return "watch";
+                }
+                return "risk";
+            }
+            if (normalized.chi2 !== null && normalized.chi2 > 0) {
+                return "watch";
+            }
+            return "risk";
+        }
+
+        function resolvePrimaryAssociationSignalLabel(primaryAssociation) {
+            const tier = resolvePrimaryAssociationSignalTier(primaryAssociation);
+            if (tier === "good") {
+                return "显著信号";
+            }
+            if (tier === "watch") {
+                return "边界信号";
+            }
+            return "弱信号";
+        }
+
+        function createPrimaryAssociationChip(labelText, valueText, tone = "neutral") {
+            const chip = document.createElement("span");
+            chip.className = `primary-association-chip ${tone}`.trim();
+
+            const label = document.createElement("strong");
+            label.textContent = labelText;
+
+            const value = document.createElement("span");
+            value.textContent = valueText;
+
+            chip.appendChild(label);
+            chip.appendChild(value);
+            return chip;
+        }
+
+        function resolvePrimaryAssociationCellBackground(value, maxValue, isFocus) {
+            const normalizedValue = safeNumber(value, 0);
+            const bounded = maxValue > 0 ? Math.max(0, Math.min(1, normalizedValue / maxValue)) : 0;
+            const alpha = (isFocus ? 0.16 : 0.08) + bounded * (isFocus ? 0.34 : 0.22);
+            if (isFocus) {
+                return `rgba(179, 92, 46, ${alpha.toFixed(3)})`;
+            }
+            return `rgba(49, 106, 73, ${alpha.toFixed(3)})`;
+        }
+
+        function buildPrimaryAssociationHeadline(primaryAssociation, options = {}) {
+            const normalized = normalizePrimaryAssociation(primaryAssociation);
+            const headingText = normalized.herb && normalized.syndrome
+                ? `${normalized.herb} -> ${normalized.syndrome}`
+                : "主统计关联待生成";
+            const subtitleText = options.subtitleText
+                || (normalized.herb && normalized.syndrome
+                    ? "当前最强统计信号，已从 Publish / Dashboard 主结果直接映射到前端可视化层。"
+                    : "等待 Analyze / Publish 输出主统计关联。"
+                );
+
+            const wrapper = document.createElement("div");
+            wrapper.className = "primary-association-heading";
+
+            const title = document.createElement("strong");
+            title.textContent = headingText;
+
+            const subtitle = document.createElement("span");
+            subtitle.textContent = subtitleText;
+
+            wrapper.appendChild(title);
+            wrapper.appendChild(subtitle);
+            return wrapper;
+        }
+
+        function buildPrimaryAssociationMatrix(primaryAssociation) {
+            const normalized = normalizePrimaryAssociation(primaryAssociation);
+            const tableData = normalized.contingency_table || {};
+            const values = [tableData.a, tableData.b, tableData.c, tableData.d].map((value) => safeNumber(value, 0));
+            const maxValue = Math.max(1, ...values);
+            const herbText = normalized.herb || "目标药物";
+            const syndromeText = normalized.syndrome || "目标证候";
+
+            const wrap = document.createElement("div");
+            wrap.className = "primary-association-matrix-wrap";
+
+            const table = document.createElement("table");
+            table.className = "primary-association-matrix";
+
+            const thead = document.createElement("thead");
+            const headRow = document.createElement("tr");
+            ["列联表", syndromeText, `非${syndromeText}`].forEach((text, index) => {
+                const th = document.createElement("th");
+                th.textContent = text;
+                if (index === 0) {
+                    th.className = "primary-association-row-header";
+                }
+                headRow.appendChild(th);
+            });
+            thead.appendChild(headRow);
+
+            const tbody = document.createElement("tbody");
+            [
+                {
+                    label: `含${herbText}`,
+                    cells: [
+                        { value: tableData.a, caption: "a", focus: true },
+                        { value: tableData.b, caption: "b", focus: false },
+                    ],
+                },
+                {
+                    label: `不含${herbText}`,
+                    cells: [
+                        { value: tableData.c, caption: "c", focus: false },
+                        { value: tableData.d, caption: "d", focus: false },
+                    ],
+                },
+            ].forEach((row) => {
+                const tr = document.createElement("tr");
+                const rowHeader = document.createElement("th");
+                rowHeader.className = "primary-association-row-header";
+                rowHeader.textContent = row.label;
+                tr.appendChild(rowHeader);
+
+                row.cells.forEach((cell) => {
+                    const td = document.createElement("td");
+                    const cellBody = document.createElement("div");
+                    cellBody.className = `primary-association-cell ${cell.focus ? "focus" : ""}`.trim();
+                    cellBody.style.background = resolvePrimaryAssociationCellBackground(cell.value, maxValue, cell.focus);
+
+                    const valueNode = document.createElement("strong");
+                    valueNode.textContent = String(safeNumber(cell.value, 0));
+
+                    const captionNode = document.createElement("span");
+                    captionNode.textContent = cell.caption;
+
+                    cellBody.appendChild(valueNode);
+                    cellBody.appendChild(captionNode);
+                    td.appendChild(cellBody);
+                    tr.appendChild(td);
+                });
+
+                tbody.appendChild(tr);
+            });
+
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            wrap.appendChild(table);
+            return wrap;
+        }
+
+        function renderPrimaryAssociationVisual(hostNode, primaryAssociation, options = {}) {
+            if (!hostNode) {
+                return false;
+            }
+            hostNode.innerHTML = "";
+
+            if (!hasPrimaryAssociation(primaryAssociation)) {
+                return false;
+            }
+
+            const normalized = normalizePrimaryAssociation(primaryAssociation);
+            const root = document.createElement("div");
+            root.className = `primary-association-visual ${options.compact ? "compact" : ""}`.trim();
+
+            const summary = document.createElement("div");
+            summary.className = "primary-association-summary";
+            summary.appendChild(buildPrimaryAssociationHeadline(normalized, options));
+            root.appendChild(summary);
+
+            const chipRow = document.createElement("div");
+            chipRow.className = "primary-association-chip-row";
+            chipRow.appendChild(
+                createPrimaryAssociationChip(
+                    "信号",
+                    resolvePrimaryAssociationSignalLabel(normalized),
+                    resolvePrimaryAssociationSignalTier(normalized)
+                )
+            );
+            if (normalized.chi2 !== null) {
+                chipRow.appendChild(createPrimaryAssociationChip("chi2", formatMetricValue(normalized.chi2, 2), "neutral"));
+            }
+            if (normalized.p_value !== null) {
+                chipRow.appendChild(createPrimaryAssociationChip("P", formatMetricValue(normalized.p_value, 3), resolvePrimaryAssociationSignalTier(normalized)));
+            }
+            if (normalized.effect_size !== null) {
+                chipRow.appendChild(createPrimaryAssociationChip("效应量", formatMetricValue(normalized.effect_size, 2), "neutral"));
+            }
+            if (normalized.sample_size !== null) {
+                chipRow.appendChild(createPrimaryAssociationChip("样本量", String(normalized.sample_size), "neutral"));
+            }
+            root.appendChild(chipRow);
+            root.appendChild(buildPrimaryAssociationMatrix(normalized));
+
+            if (options.footerText) {
+                const footer = document.createElement("p");
+                footer.className = "primary-association-footer";
+                footer.textContent = options.footerText;
+                root.appendChild(footer);
+            }
+
+            hostNode.appendChild(root);
+            return true;
+        }
+
+        function buildPrimaryAssociationSummarySection(titleText, primaryAssociation, options = {}) {
+            if (!hasPrimaryAssociation(primaryAssociation)) {
+                return null;
+            }
+
+            const section = document.createElement("div");
+            section.className = "summary-section summary-primary-association-section";
+
+            const heading = document.createElement("h4");
+            heading.textContent = titleText;
+            section.appendChild(heading);
+
+            const host = document.createElement("div");
+            renderPrimaryAssociationVisual(host, primaryAssociation, options);
+            section.appendChild(host);
+            return section;
+        }
+
+        function resolvePrimaryAssociation(container, statistical = null) {
+            const direct = container?.primary_association;
+            if (direct && typeof direct === "object" && !Array.isArray(direct)) {
+                return direct;
+            }
+            const nested = statistical?.primary_association;
+            if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+                return nested;
+            }
+            return {};
+        }
+
+        function resolveDataMiningSummary(container) {
+            const summary = container?.data_mining_summary;
+            if (summary && typeof summary === "object" && !Array.isArray(summary)) {
+                return summary;
+            }
+            return {};
+        }
+
+        function resolveDataMiningMethods(container, summary = {}) {
+            if (Array.isArray(container?.data_mining_methods) && container.data_mining_methods.length > 0) {
+                return container.data_mining_methods;
+            }
+            if (Array.isArray(summary?.methods_executed) && summary.methods_executed.length > 0) {
+                return summary.methods_executed;
+            }
+            return [];
+        }
+
+        function buildPrimaryAssociationLines(primaryAssociation) {
+            if (!primaryAssociation || typeof primaryAssociation !== "object") {
+                return [];
+            }
+
+            const lines = [];
+            if (primaryAssociation.herb && primaryAssociation.syndrome) {
+                lines.push(`主统计关联：${primaryAssociation.herb} -> ${primaryAssociation.syndrome}`);
+            }
+            if (primaryAssociation.p_value !== undefined && primaryAssociation.p_value !== null) {
+                lines.push(`P 值：${formatMetricValue(primaryAssociation.p_value, 3)}`);
+            }
+            if (primaryAssociation.effect_size !== undefined && primaryAssociation.effect_size !== null) {
+                lines.push(`效应量：${formatMetricValue(primaryAssociation.effect_size, 2)}`);
+            }
+            if (primaryAssociation.chi2 !== undefined && primaryAssociation.chi2 !== null) {
+                lines.push(`卡方值：${formatMetricValue(primaryAssociation.chi2, 2)}`);
+            }
+            if (primaryAssociation.sample_size !== undefined && primaryAssociation.sample_size !== null) {
+                lines.push(`样本量：${primaryAssociation.sample_size}`);
+            }
+            return lines;
+        }
+
+        function buildDataMiningSummaryLines(summary, methods = []) {
+            if (!summary || typeof summary !== "object") {
+                return [];
+            }
+
+            const lines = [];
+            if (summary.record_count !== undefined && summary.record_count !== null) {
+                lines.push(`记录数：${summary.record_count}`);
+            }
+            if (summary.transaction_count !== undefined && summary.transaction_count !== null) {
+                lines.push(`事务数：${summary.transaction_count}`);
+            }
+            if (summary.item_count !== undefined && summary.item_count !== null) {
+                lines.push(`项目数：${summary.item_count}`);
+            }
+            if (summary.association_rule_count !== undefined && summary.association_rule_count !== null) {
+                lines.push(`关联规则：${summary.association_rule_count}`);
+            }
+            if (summary.cluster_count !== undefined && summary.cluster_count !== null) {
+                lines.push(`聚类摘要：${summary.cluster_count}`);
+            }
+            if (summary.frequency_signal_count !== undefined && summary.frequency_signal_count !== null) {
+                lines.push(`卡方信号：${summary.frequency_signal_count}`);
+            }
+            if (methods.length > 0) {
+                lines.push(`执行方法：${methods.slice(0, 3).join("、")}`);
+            }
+            return lines;
+        }
+
         function buildAnalysisBlocks(result) {
             const analysis = result?.analysis_results;
             if (!analysis || typeof analysis !== "object") {
@@ -1823,6 +2356,7 @@
             const statistical = analysis.statistical_analysis && typeof analysis.statistical_analysis === "object"
                 ? analysis.statistical_analysis
                 : analysis;
+            const primaryAssociation = resolvePrimaryAssociation(analysis, statistical);
             const statisticalLines = [];
             if (statistical.interpretation) {
                 statisticalLines.push(`结果解释：${statistical.interpretation}`);
@@ -1838,6 +2372,11 @@
             }
             if (statisticalLines.length > 0) {
                 blocks.push({ title: "统计分析", lines: statisticalLines });
+            }
+
+            const primaryAssociationLines = buildPrimaryAssociationLines(primaryAssociation);
+            if (primaryAssociationLines.length > 0) {
+                blocks.push({ title: "主统计关联", lines: primaryAssociationLines });
             }
 
             const protocol = analysis.evidence_protocol;
@@ -1862,23 +2401,11 @@
                 }
             }
 
-            const mining = analysis.data_mining_result;
-            if (mining && typeof mining === "object") {
-                const ruleCount = Array.isArray(mining.association_rules?.rules) ? mining.association_rules.rules.length : 0;
-                const clusterCount = Array.isArray(mining.clustering?.cluster_summary) ? mining.clustering.cluster_summary.length : 0;
-                const miningLines = [];
-                if (ruleCount > 0) {
-                    miningLines.push(`关联规则：${ruleCount}`);
-                }
-                if (clusterCount > 0) {
-                    miningLines.push(`聚类摘要：${clusterCount}`);
-                }
-                if (Array.isArray(mining.methods_executed) && mining.methods_executed.length > 0) {
-                    miningLines.push(`执行方法：${mining.methods_executed.slice(0, 3).join("、")}`);
-                }
-                if (miningLines.length > 0) {
-                    blocks.push({ title: "数据挖掘", lines: miningLines });
-                }
+            const miningSummary = resolveDataMiningSummary(analysis);
+            const miningMethods = resolveDataMiningMethods(analysis, miningSummary);
+            const miningLines = buildDataMiningSummaryLines(miningSummary, miningMethods);
+            if (miningLines.length > 0) {
+                blocks.push({ title: "数据挖掘", lines: miningLines });
             }
 
             const quality = analysis.quality_metrics && typeof analysis.quality_metrics === "object"
@@ -1910,6 +2437,9 @@
 
             const blocks = [];
             const hypotheses = Array.isArray(artifact.hypothesis) ? artifact.hypothesis : [];
+            const primaryAssociation = resolvePrimaryAssociation(artifact);
+            const miningSummary = resolveDataMiningSummary(artifact);
+            const miningMethods = resolveDataMiningMethods(artifact, miningSummary);
             const hypothesisLines = [];
             if (hypotheses.length > 0) {
                 const firstHypothesis = hypotheses[0];
@@ -1925,22 +2455,17 @@
                 blocks.push({ title: "假设产物", lines: hypothesisLines });
             }
 
+            const primaryAssociationLines = buildPrimaryAssociationLines(primaryAssociation);
+            if (primaryAssociationLines.length > 0) {
+                blocks.push({ title: "主统计关联", lines: primaryAssociationLines });
+            }
+
             const evidence = Array.isArray(artifact.evidence) ? artifact.evidence : [];
-            const mining = artifact.data_mining_result && typeof artifact.data_mining_result === "object"
-                ? artifact.data_mining_result
-                : {};
             const evidenceLines = [];
             if (evidence.length > 0) {
                 evidenceLines.push(`证据条目：${evidence.length}`);
             }
-            const artifactRuleCount = Array.isArray(mining.association_rules?.rules) ? mining.association_rules.rules.length : 0;
-            const artifactClusterCount = Array.isArray(mining.clustering?.cluster_summary) ? mining.clustering.cluster_summary.length : 0;
-            if (artifactRuleCount > 0) {
-                evidenceLines.push(`关联规则：${artifactRuleCount}`);
-            }
-            if (artifactClusterCount > 0) {
-                evidenceLines.push(`聚类摘要：${artifactClusterCount}`);
-            }
+            evidenceLines.push(...buildDataMiningSummaryLines(miningSummary, miningMethods));
             if (evidenceLines.length > 0) {
                 blocks.push({ title: "证据与挖掘产物", lines: evidenceLines });
             }
@@ -2127,6 +2652,24 @@
             if (analysisSection) {
                 resultSummaryNode.appendChild(analysisSection);
             }
+            const publishAssociation = resolvePrimaryAssociation(
+                result?.analysis_results,
+                result?.analysis_results?.statistical_analysis && typeof result.analysis_results.statistical_analysis === "object"
+                    ? result.analysis_results.statistical_analysis
+                    : null
+            );
+            const artifactAssociation = resolvePrimaryAssociation(result?.research_artifact);
+            const associationSection = buildPrimaryAssociationSummarySection(
+                "主统计关联可视化",
+                hasPrimaryAssociation(publishAssociation) ? publishAssociation : artifactAssociation,
+                {
+                    subtitleText: "Publish 阶段主统计关联已直接接入前端图表层。",
+                    footerText: "2x2 列联表中的 a 单元格代表“含目标药物且命中目标证候”的联合观测。",
+                }
+            );
+            if (associationSection) {
+                resultSummaryNode.appendChild(associationSection);
+            }
             const artifactSection = buildSummarySection("研究产物摘要", buildResearchArtifactBlocks(result));
             if (artifactSection) {
                 resultSummaryNode.appendChild(artifactSection);
@@ -2245,7 +2788,62 @@
             }
             dashboardPhaseModalNode.classList.add("hidden");
             dashboardPhaseModalNode.setAttribute("aria-hidden", "true");
+            if (dashboardModalAssociationSectionNode) {
+                dashboardModalAssociationSectionNode.hidden = true;
+            }
+            if (dashboardModalAssociationSummaryNode) {
+                dashboardModalAssociationSummaryNode.textContent = "-";
+            }
+            if (dashboardModalAssociationVisualNode) {
+                dashboardModalAssociationVisualNode.innerHTML = "";
+            }
             syncDashboardModalBodyLock();
+        }
+
+        function resolveDashboardPrimaryAssociationForPhase(item) {
+            const phaseName = String(item?.phase || "").toLowerCase();
+            if (phaseName !== "analyze" && phaseName !== "publish") {
+                return {};
+            }
+            const evidenceBoard = latestDashboardPayload?.evidence_board;
+            const primaryAssociation = evidenceBoard?.primary_association;
+            if (!primaryAssociation || typeof primaryAssociation !== "object" || Array.isArray(primaryAssociation)) {
+                return {};
+            }
+            return primaryAssociation;
+        }
+
+        function buildDashboardPrimaryAssociationDetail(item) {
+            const primaryAssociation = resolveDashboardPrimaryAssociationForPhase(item);
+            if (!primaryAssociation || typeof primaryAssociation !== "object") {
+                return "";
+            }
+
+            const lines = [];
+            if (primaryAssociation.herb && primaryAssociation.syndrome) {
+                lines.push(`主统计关联：${primaryAssociation.herb} -> ${primaryAssociation.syndrome}`);
+            }
+            if (primaryAssociation.chi2 !== undefined && primaryAssociation.chi2 !== null) {
+                lines.push(`chi2：${formatMetricValue(primaryAssociation.chi2, 2)}`);
+            }
+            if (primaryAssociation.p_value !== undefined && primaryAssociation.p_value !== null) {
+                lines.push(`P 值：${formatMetricValue(primaryAssociation.p_value, 3)}`);
+            }
+            if (primaryAssociation.effect_size !== undefined && primaryAssociation.effect_size !== null) {
+                lines.push(`效应量：${formatMetricValue(primaryAssociation.effect_size, 2)}`);
+            }
+            if (primaryAssociation.sample_size !== undefined && primaryAssociation.sample_size !== null) {
+                lines.push(`样本量：${primaryAssociation.sample_size}`);
+            }
+
+            const contingencyTable = primaryAssociation.contingency_table;
+            if (contingencyTable && typeof contingencyTable === "object" && !Array.isArray(contingencyTable)) {
+                lines.push("列联表 (a/b/c/d)：");
+                lines.push(
+                    `a=${safeNumber(contingencyTable.a, 0)}, b=${safeNumber(contingencyTable.b, 0)}, c=${safeNumber(contingencyTable.c, 0)}, d=${safeNumber(contingencyTable.d, 0)}`
+                );
+            }
+            return lines.join("\n");
         }
 
         function openDashboardPhaseDetail(item) {
@@ -2258,11 +2856,25 @@
             const index = item.index || "-";
             const durationText = formatDuration(item.duration_sec);
             const summaryText = formatDashboardJson(item.summary || {}, "{}");
+            const primaryAssociation = resolveDashboardPrimaryAssociationForPhase(item);
+            const primaryAssociationDetail = buildDashboardPrimaryAssociationDetail(item);
             const errorRaw = item.error;
 
             dashboardModalTitleNode.textContent = `${index}. ${label}`;
             dashboardModalMetaNode.textContent = `状态：${statusLabel}\n耗时：${durationText}\n阶段标识：${item.phase || "-"}`;
             dashboardModalSummaryNode.textContent = summaryText;
+
+            if (dashboardModalAssociationSectionNode && dashboardModalAssociationSummaryNode && dashboardModalAssociationVisualNode) {
+                const hasAssociation = renderPrimaryAssociationVisual(
+                    dashboardModalAssociationVisualNode,
+                    primaryAssociation,
+                    {
+                        subtitleText: "Analyze / Publish 阶段主统计关联的前端直连高亮。",
+                    }
+                );
+                dashboardModalAssociationSectionNode.hidden = !hasAssociation;
+                dashboardModalAssociationSummaryNode.textContent = hasAssociation ? primaryAssociationDetail : "-";
+            }
 
             if (errorRaw === undefined || errorRaw === null) {
                 dashboardModalErrorNode.textContent = "(null)";
@@ -2777,6 +3389,49 @@
             return box;
         }
 
+        function buildDashboardPrimaryAssociationBox(evidenceBoard) {
+            const primaryAssociation = evidenceBoard?.primary_association;
+            const miningSummary = evidenceBoard?.data_mining_summary && typeof evidenceBoard.data_mining_summary === "object"
+                ? evidenceBoard.data_mining_summary
+                : {};
+            const miningMethods = Array.isArray(evidenceBoard?.data_mining_methods)
+                ? evidenceBoard.data_mining_methods
+                : [];
+
+            const box = document.createElement("div");
+            box.className = "dashboard-box dashboard-association-box";
+
+            const heading = document.createElement("h4");
+            heading.textContent = "主统计关联高亮";
+            box.appendChild(heading);
+
+            if (!hasPrimaryAssociation(primaryAssociation)) {
+                const body = document.createElement("p");
+                body.textContent = "当前任务尚未返回可视化主统计关联。";
+                box.appendChild(body);
+                return box;
+            }
+
+            const host = document.createElement("div");
+            const footerLines = [];
+            if (miningSummary.frequency_signal_count !== undefined && miningSummary.frequency_signal_count !== null) {
+                footerLines.push(`卡方信号 ${miningSummary.frequency_signal_count}`);
+            }
+            if (miningSummary.association_rule_count !== undefined && miningSummary.association_rule_count !== null) {
+                footerLines.push(`关联规则 ${miningSummary.association_rule_count}`);
+            }
+            if (miningMethods.length > 0) {
+                footerLines.push(`方法 ${miningMethods.slice(0, 3).join("、")}`);
+            }
+            renderPrimaryAssociationVisual(host, primaryAssociation, {
+                compact: true,
+                subtitleText: "Dashboard 直接消费 primary_association 字段，不再依赖嵌套统计结构展开。",
+                footerText: footerLines.join(" · "),
+            });
+            box.appendChild(host);
+            return box;
+        }
+
         function renderResearchDashboard(payload) {
             if (!payload || typeof payload !== "object") {
                 renderDashboardPlaceholder("任务启动后将自动展示研究状态可视化看板。");
@@ -3001,6 +3656,8 @@
             const auxGrid = document.createElement("div");
             auxGrid.className = "dashboard-aux-grid";
 
+            auxGrid.appendChild(buildDashboardPrimaryAssociationBox(evidenceBoard));
+
             auxGrid.appendChild(
                 buildDashboardBox("质量评估", [
                     `置信分数：${formatPercentLike(qualityBoard.confidence_score, 1)}`,
@@ -3010,12 +3667,28 @@
             );
 
             auxGrid.appendChild(
-                buildDashboardBox("证据态势", [
-                    `证据记录：${safeNumber(evidenceBoard.evidence_count, 0)}`,
-                    `候选论断：${safeNumber(evidenceBoard.claim_count, 0)}`,
-                    `关联规则：${safeNumber(evidenceBoard.association_rule_count, 0)}`,
-                    `聚类摘要：${safeNumber(evidenceBoard.cluster_count, 0)}`,
-                ])
+                buildDashboardBox(
+                    "证据态势",
+                    (() => {
+                        const lines = [
+                            `证据记录：${safeNumber(evidenceBoard.evidence_count, 0)}`,
+                            `候选论断：${safeNumber(evidenceBoard.claim_count, 0)}`,
+                        ];
+                        const primaryAssociation = evidenceBoard.primary_association && typeof evidenceBoard.primary_association === "object"
+                            ? evidenceBoard.primary_association
+                            : {};
+                        const miningSummary = evidenceBoard.data_mining_summary && typeof evidenceBoard.data_mining_summary === "object"
+                            ? evidenceBoard.data_mining_summary
+                            : {};
+                        const miningMethods = Array.isArray(evidenceBoard.data_mining_methods)
+                            ? evidenceBoard.data_mining_methods
+                            : [];
+
+                        lines.push(...buildPrimaryAssociationLines(primaryAssociation));
+                        lines.push(...buildDataMiningSummaryLines(miningSummary, miningMethods));
+                        return lines;
+                    })()
+                )
             );
 
             auxGrid.appendChild(

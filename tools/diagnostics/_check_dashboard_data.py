@@ -1,4 +1,4 @@
-﻿"""Check dashboard data values."""
+"""Check dashboard data values."""
 import re
 
 import requests

@@ -6,6 +6,7 @@
 
 import logging
 from datetime import datetime
+from importlib import import_module
 from typing import Any, Dict, List, Optional
 
 from src.collector.ctext_corpus_collector import CTextCorpusCollector
@@ -38,6 +39,17 @@ from src.research.study_session_manager import (
 # 配置日志
 logger = logging.getLogger(__name__)
 
+_OPTIONAL_RUNTIME_IMPORTS = {
+    "CitationManager": ("src.generation.citation_manager", "CitationManager"),
+    "PaperWriter": ("src.generation.paper_writer", "PaperWriter"),
+    "OutputGenerator": ("src.generation.output_formatter", "OutputGenerator"),
+    "ReportGenerator": ("src.generation.report_generator", "ReportGenerator"),
+    "AdvancedEntityExtractor": ("src.analysis.entity_extractor", "AdvancedEntityExtractor"),
+    "DocumentPreprocessor": ("src.analysis.preprocessor", "DocumentPreprocessor"),
+    "SemanticGraphBuilder": ("src.analysis.semantic_graph", "SemanticGraphBuilder"),
+    "ReasoningEngine": ("src.analysis.reasoning_engine", "ReasoningEngine"),
+}
+
 
 def _build_unavailable_module(symbol_name: str):
     """构造可 patch 的缺省模块占位类，避免可选依赖缺失时测试导入失败。"""
@@ -62,6 +74,7 @@ def _build_unavailable_module(symbol_name: str):
             return None
 
     _UnavailableModule.__name__ = symbol_name
+    _UnavailableModule._copilot_unavailable_placeholder = True
     return _UnavailableModule
 
 # 供单测 patch 的符号；导入失败时在运行时再惰性加载。
@@ -294,12 +307,36 @@ class ResearchPipeline:
                 continue
 
             def _provider(cfg: Dict[str, Any], _symbol=symbol_name):
-                cls = globals().get(_symbol)
+                cls = self._resolve_default_module_class(_symbol)
                 if cls is None:
                     raise RuntimeError(f"模块工厂默认依赖不可用: {_symbol}")
                 return cls(cfg)
 
             self.module_factory.register(key, _provider)
+
+    @staticmethod
+    def _is_unavailable_default_module_class(candidate: Any) -> bool:
+        return candidate is None or bool(getattr(candidate, "_copilot_unavailable_placeholder", False))
+
+    def _resolve_default_module_class(self, symbol_name: str) -> Any:
+        cls = globals().get(symbol_name)
+        if not self._is_unavailable_default_module_class(cls):
+            return cls
+
+        import_target = _OPTIONAL_RUNTIME_IMPORTS.get(symbol_name)
+        if not import_target:
+            return cls
+
+        module_name, attribute_name = import_target
+        try:
+            module = import_module(module_name)
+            resolved_class = getattr(module, attribute_name)
+        except Exception:
+            return cls
+
+        globals()[symbol_name] = resolved_class
+        setattr(self.__class__, symbol_name, resolved_class)
+        return resolved_class
 
     def create_module(self, key: str, config: Optional[Dict[str, Any]] = None) -> Any:
         return self.module_factory.create(key, config or {})

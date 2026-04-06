@@ -24,6 +24,7 @@ from src.quality.quality_assessor import (
     ComplianceReport,
     QualityAssessor,
     QualityScore,
+    _extract_json_from_llm_output,
 )
 
 # ---------------------------------------------------------------------------
@@ -470,6 +471,253 @@ class TestPipelineIntegration(unittest.TestCase):
         result = {"status": "completed", "phase": "analyze", "results": {}}
         cr = self.pipeline.quality_assessor.validate_compliance(result)
         self.assertIsInstance(cr, ComplianceReport)
+
+
+# ---------------------------------------------------------------------------
+# 10. assess_cycle_for_reflection
+# ---------------------------------------------------------------------------
+
+class TestAssessCycleForReflection(unittest.TestCase):
+
+    def test_empty_outcomes_returns_zero_score(self):
+        a = _assessor()
+        result = a.assess_cycle_for_reflection([])
+        self.assertEqual(result["overall_cycle_score"], 0.0)
+        self.assertEqual(result["phase_assessments"], [])
+        self.assertEqual(result["weaknesses"], [])
+        self.assertEqual(result["strengths"], [])
+
+    def test_full_result_classified_as_strength(self):
+        a = _assessor()
+        outcomes = [{"phase": "observe", "result": _full_result()}]
+        result = a.assess_cycle_for_reflection(outcomes)
+        self.assertEqual(len(result["phase_assessments"]), 1)
+        self.assertGreaterEqual(result["overall_cycle_score"], 0.8)
+        self.assertTrue(len(result["strengths"]) >= 1)
+
+    def test_weak_result_classified_as_weakness(self):
+        a = _assessor()
+        outcomes = [{"phase": "analyze", "result": {"status": "pending"}}]
+        result = a.assess_cycle_for_reflection(outcomes)
+        self.assertTrue(len(result["weaknesses"]) >= 1)
+        self.assertLess(result["weaknesses"][0]["score"], 0.6)
+
+    def test_mixed_outcomes_both_strengths_and_weaknesses(self):
+        a = _assessor()
+        outcomes = [
+            {"phase": "observe", "result": _full_result()},
+            {"phase": "analyze", "result": {}},
+        ]
+        result = a.assess_cycle_for_reflection(outcomes)
+        self.assertEqual(len(result["phase_assessments"]), 2)
+        self.assertTrue(result["strengths"] or result["weaknesses"])
+
+    def test_overall_score_is_average(self):
+        a = _assessor()
+        outcomes = [
+            {"phase": "observe", "result": _full_result()},
+            {"phase": "hypothesis", "result": _full_result()},
+        ]
+        result = a.assess_cycle_for_reflection(outcomes)
+        scores = [pa["score"].overall_score for pa in result["phase_assessments"]]
+        expected = round(sum(scores) / len(scores), 4)
+        self.assertAlmostEqual(result["overall_cycle_score"], expected, places=3)
+
+    def test_missing_result_key_treated_as_empty(self):
+        a = _assessor()
+        outcomes = [{"phase": "reflect"}]  # no "result" key
+        result = a.assess_cycle_for_reflection(outcomes)
+        self.assertEqual(len(result["phase_assessments"]), 1)
+
+
+# ---------------------------------------------------------------------------
+# 10. _extract_json_from_llm_output 工具函数
+# ---------------------------------------------------------------------------
+
+class TestExtractJsonFromLlmOutput(unittest.TestCase):
+    def test_plain_json(self):
+        raw = '{"methodological_rigor": 0.8, "evidence_coherence": 0.7}'
+        result = _extract_json_from_llm_output(raw)
+        self.assertEqual(result["methodological_rigor"], 0.8)
+
+    def test_json_fenced(self):
+        raw = '好的，以下是评估：\n```json\n{"score": 0.9}\n```\n完成。'
+        result = _extract_json_from_llm_output(raw)
+        self.assertEqual(result["score"], 0.9)
+
+    def test_json_embedded_in_text(self):
+        raw = '评估如下 {"a": 1, "b": 2} 以上。'
+        result = _extract_json_from_llm_output(raw)
+        self.assertEqual(result["a"], 1)
+
+    def test_empty_string_returns_none(self):
+        self.assertIsNone(_extract_json_from_llm_output(""))
+
+    def test_none_input_returns_none(self):
+        self.assertIsNone(_extract_json_from_llm_output(None))
+
+    def test_invalid_json_returns_none(self):
+        self.assertIsNone(_extract_json_from_llm_output("不是JSON内容"))
+
+    def test_json_array_returns_none(self):
+        self.assertIsNone(_extract_json_from_llm_output('[1, 2, 3]'))
+
+
+# ---------------------------------------------------------------------------
+# 11. assess_quality_with_llm
+# ---------------------------------------------------------------------------
+
+class TestAssessQualityWithLlm(unittest.TestCase):
+    def _make_llm(self, response: str) -> MagicMock:
+        llm = MagicMock()
+        llm.generate.return_value = response
+        return llm
+
+    def test_blends_rule_and_llm_scores(self):
+        a = _assessor()
+        llm = self._make_llm(
+            '{"methodological_rigor": 0.9, "evidence_coherence": 0.8, '
+            '"domain_relevance": 0.85, "reproducibility": 0.75, '
+            '"rationale": "方法学严谨"}'
+        )
+        result = a.assess_quality_with_llm(_full_result(), llm)
+        self.assertTrue(result.details.get("llm_enhanced"))
+        self.assertAlmostEqual(result.details["llm_dimensions"]["methodological_rigor"], 0.9)
+        self.assertIn("blend_weights", result.details)
+        # blended = 0.4 * rule + 0.6 * llm_overall
+        rule_score = a.assess_quality(_full_result()).overall_score
+        llm_overall = (0.9 + 0.8 + 0.85 + 0.75) / 4
+        expected = round(0.4 * rule_score + 0.6 * llm_overall, 4)
+        self.assertAlmostEqual(result.overall_score, expected, places=3)
+
+    def test_falls_back_without_llm(self):
+        a = _assessor()
+        result = a.assess_quality_with_llm(_full_result(), None)
+        self.assertNotIn("llm_enhanced", result.details)
+        self.assertEqual(result.overall_score, a.assess_quality(_full_result()).overall_score)
+
+    def test_falls_back_on_llm_error(self):
+        a = _assessor()
+        llm = MagicMock()
+        llm.generate.side_effect = RuntimeError("model not loaded")
+        result = a.assess_quality_with_llm(_full_result(), llm)
+        self.assertNotIn("llm_enhanced", result.details)
+
+    def test_falls_back_on_invalid_llm_json(self):
+        a = _assessor()
+        llm = self._make_llm("这不是JSON")
+        result = a.assess_quality_with_llm(_full_result(), llm)
+        self.assertNotIn("llm_enhanced", result.details)
+
+    def test_falls_back_on_missing_dimensions(self):
+        a = _assessor()
+        llm = self._make_llm('{"methodological_rigor": 0.9}')  # missing 3 keys
+        result = a.assess_quality_with_llm(_full_result(), llm)
+        self.assertNotIn("llm_enhanced", result.details)
+
+    def test_clamps_score_to_0_1(self):
+        a = _assessor()
+        llm = self._make_llm(
+            '{"methodological_rigor": 1.5, "evidence_coherence": -0.2, '
+            '"domain_relevance": 0.8, "reproducibility": 0.7}'
+        )
+        result = a.assess_quality_with_llm(_full_result(), llm)
+        dims = result.details["llm_dimensions"]
+        self.assertEqual(dims["methodological_rigor"], 1.0)
+        self.assertEqual(dims["evidence_coherence"], 0.0)
+
+    def test_grade_level_reflects_blended(self):
+        a = _assessor()
+        llm = self._make_llm(
+            '{"methodological_rigor": 0.95, "evidence_coherence": 0.95, '
+            '"domain_relevance": 0.95, "reproducibility": 0.95}'
+        )
+        result = a.assess_quality_with_llm(_full_result(), llm)
+        self.assertEqual(result.grade_level, GRADE_HIGH)
+
+    def test_llm_without_generate_attr_falls_back(self):
+        a = _assessor()
+        llm = object()  # no generate method
+        result = a.assess_quality_with_llm(_full_result(), llm)
+        self.assertNotIn("llm_enhanced", result.details)
+
+
+# ---------------------------------------------------------------------------
+# 12. assess_cycle_for_reflection_with_llm
+# ---------------------------------------------------------------------------
+
+class TestAssessCycleForReflectionWithLlm(unittest.TestCase):
+    def _make_llm(self, response: str) -> MagicMock:
+        llm = MagicMock()
+        llm.generate.return_value = response
+        return llm
+
+    def test_adds_llm_diagnosis_when_available(self):
+        a = _assessor()
+        outcomes = [
+            {"phase": "observe", "result": _full_result()},
+            {"phase": "analyze", "result": {"status": "failed", "phase": "analyze"}},
+        ]
+        llm = self._make_llm(
+            '{"diagnosis": "分析阶段方法学不足", '
+            '"root_causes": ["缺少统计检验"], '
+            '"priority_improvements": ["接入 p 值计算"], '
+            '"confidence": 0.85}'
+        )
+        result = a.assess_cycle_for_reflection_with_llm(outcomes, llm)
+        self.assertIn("llm_diagnosis", result)
+        self.assertEqual(result["llm_diagnosis"]["diagnosis"], "分析阶段方法学不足")
+        self.assertEqual(result["llm_diagnosis"]["confidence"], 0.85)
+        self.assertEqual(len(result["llm_diagnosis"]["root_causes"]), 1)
+
+    def test_no_llm_diagnosis_without_engine(self):
+        a = _assessor()
+        outcomes = [{"phase": "observe", "result": _full_result()}]
+        result = a.assess_cycle_for_reflection_with_llm(outcomes, None)
+        self.assertNotIn("llm_diagnosis", result)
+        self.assertIn("phase_assessments", result)
+
+    def test_llm_failure_still_returns_base(self):
+        a = _assessor()
+        outcomes = [{"phase": "observe", "result": _full_result()}]
+        llm = MagicMock()
+        llm.generate.side_effect = RuntimeError("crash")
+        result = a.assess_cycle_for_reflection_with_llm(outcomes, llm)
+        self.assertNotIn("llm_diagnosis", result)
+        self.assertIn("phase_assessments", result)
+
+    def test_invalid_llm_output_no_diagnosis(self):
+        a = _assessor()
+        outcomes = [{"phase": "observe", "result": _full_result()}]
+        llm = self._make_llm("无法解析")
+        result = a.assess_cycle_for_reflection_with_llm(outcomes, llm)
+        self.assertNotIn("llm_diagnosis", result)
+
+
+# ---------------------------------------------------------------------------
+# 13. _build_result_summary_for_llm
+# ---------------------------------------------------------------------------
+
+class TestBuildResultSummaryForLlm(unittest.TestCase):
+    def test_includes_phase_and_status(self):
+        summary = QualityAssessor._build_result_summary_for_llm(
+            {"phase": "analyze", "status": "completed"}
+        )
+        self.assertIn("phase: analyze", summary)
+        self.assertIn("status: completed", summary)
+
+    def test_truncates_long_values(self):
+        long_val = "x" * 500
+        summary = QualityAssessor._build_result_summary_for_llm(
+            {"phase": "test", "status": "ok", "results": {"data": long_val}}
+        )
+        self.assertLess(len(summary), 600)
+
+    def test_handles_list_results(self):
+        summary = QualityAssessor._build_result_summary_for_llm(
+            {"phase": "test", "status": "ok", "results": [1, 2, 3]}
+        )
+        self.assertIn("list[3 items]", summary)
 
 
 if __name__ == "__main__":

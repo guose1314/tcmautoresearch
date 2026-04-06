@@ -8,7 +8,7 @@ from src.analysis.multimodal_fusion import FusionStrategy, MultimodalFusionEngin
 from src.core.algorithm_optimizer import AlgorithmOptimizer
 from src.learning.adaptive_tuner import AdaptiveTuner
 from src.learning.pattern_recognizer import PatternRecognizer
-from src.learning.self_learning_engine import SelfLearningEngine
+from src.learning.self_learning_engine import LearningRecord, SelfLearningEngine
 
 
 class TestOptimizationAndLearningFeatures(unittest.TestCase):
@@ -174,6 +174,244 @@ class TestOptimizationAndLearningFeatures(unittest.TestCase):
         self.assertIn("discovered_patterns", output)
         self.assertIn("tuned_parameters", output)
         self.assertIn("ewma_performance", output)
+
+
+# ---------------------------------------------------------------------------
+# LearningRecord: phase + quality_dimensions 字段
+# ---------------------------------------------------------------------------
+
+
+class TestLearningRecordExtendedFields(unittest.TestCase):
+
+    def test_to_dict_includes_phase_and_dimensions(self):
+        rec = LearningRecord(
+            task_id="abc",
+            input_data={},
+            output_data={},
+            performance=0.75,
+            timestamp="2026-01-01T00:00:00",
+            phase="observe",
+            quality_dimensions={"completeness": 0.8, "consistency": 0.7},
+        )
+        d = rec.to_dict()
+        self.assertEqual(d["phase"], "observe")
+        self.assertEqual(d["quality_dimensions"]["completeness"], 0.8)
+
+    def test_from_dict_restores_phase_and_dimensions(self):
+        data = {
+            "task_id": "xyz",
+            "performance": 0.6,
+            "phase": "analyze",
+            "quality_dimensions": {"evidence_quality": 0.9},
+        }
+        rec = LearningRecord.from_dict(data)
+        self.assertEqual(rec.phase, "analyze")
+        self.assertEqual(rec.quality_dimensions["evidence_quality"], 0.9)
+
+    def test_to_dict_omits_none_fields(self):
+        rec = LearningRecord(
+            task_id="t1", input_data={}, output_data={},
+            performance=0.5, timestamp="now",
+        )
+        d = rec.to_dict()
+        self.assertNotIn("phase", d)
+        self.assertNotIn("quality_dimensions", d)
+
+
+# ---------------------------------------------------------------------------
+# SelfLearningEngine: learn_from_quality_assessment
+# ---------------------------------------------------------------------------
+
+
+class TestLearnFromQualityAssessment(unittest.TestCase):
+
+    def _make_engine(self, tmp_dir):
+        data_file = str(Path(tmp_dir) / "test_learn.pkl")
+        engine = SelfLearningEngine({"learning_data_file": data_file})
+        engine.initialize({})
+        return engine
+
+    def test_accepts_quality_score_object(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = self._make_engine(tmp)
+
+            class FakeQS:
+                overall_score = 0.85
+                completeness = 0.9
+                consistency = 0.8
+                evidence_quality = 0.75
+                grade_level = "high"
+
+            ok = engine.learn_from_quality_assessment("observe", FakeQS())
+            self.assertTrue(ok)
+            self.assertEqual(len(engine.learning_records), 1)
+            self.assertEqual(engine.learning_records[0].phase, "observe")
+            self.assertAlmostEqual(engine.learning_records[0].performance, 0.85)
+            self.assertIn("completeness", engine.learning_records[0].quality_dimensions)
+
+    def test_accepts_dict_quality_score(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = self._make_engine(tmp)
+            qs = {
+                "overall_score": 0.6,
+                "completeness": 0.5,
+                "consistency": 0.7,
+                "evidence_quality": 0.6,
+                "grade_level": "moderate",
+            }
+            ok = engine.learn_from_quality_assessment("hypothesis", qs)
+            self.assertTrue(ok)
+            rec = engine.learning_records[-1]
+            self.assertEqual(rec.phase, "hypothesis")
+
+    def test_rejects_invalid_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = self._make_engine(tmp)
+            self.assertFalse(engine.learn_from_quality_assessment("x", "bad"))
+
+    def test_updates_ewma_score(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = self._make_engine(tmp)
+
+            class FakeQS:
+                overall_score = 0.7
+                completeness = 0.7
+                consistency = 0.7
+                evidence_quality = 0.7
+                grade_level = "moderate"
+
+            engine.learn_from_quality_assessment("observe", FakeQS())
+            self.assertIsNotNone(engine._ewma_score)
+            self.assertAlmostEqual(engine._ewma_score, 0.7)
+
+    def test_updates_dimension_trends(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = self._make_engine(tmp)
+            qs = {"overall_score": 0.5, "completeness": 0.9, "consistency": 0.3, "evidence_quality": 0.4}
+            engine.learn_from_quality_assessment("analyze", qs)
+            engine.learn_from_quality_assessment("analyze", qs)
+            trends = engine.get_dimension_trends()
+            self.assertEqual(len(trends["completeness"]), 2)
+
+    def test_logs_to_improvement_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = self._make_engine(tmp)
+            qs = {"overall_score": 0.5, "completeness": 0.5, "consistency": 0.5, "evidence_quality": 0.5}
+            engine.learn_from_quality_assessment("publish", qs)
+            entry = engine.model_improvement_log[-1]
+            self.assertEqual(entry["type"], "quality_assessment")
+            self.assertEqual(entry["phase"], "publish")
+
+
+# ---------------------------------------------------------------------------
+# SelfLearningEngine: learn_from_cycle_reflection
+# ---------------------------------------------------------------------------
+
+
+class TestLearnFromCycleReflection(unittest.TestCase):
+
+    def _make_engine(self, tmp_dir):
+        data_file = str(Path(tmp_dir) / "test_cycle.pkl")
+        engine = SelfLearningEngine({"learning_data_file": data_file})
+        engine.initialize({})
+        return engine
+
+    def _make_assessment(self, overall=0.65, weak_score=0.35, strong_score=0.9):
+        from src.quality.quality_assessor import QualityScore
+        return {
+            "phase_assessments": [
+                {"phase": "observe", "score": QualityScore(overall_score=strong_score, completeness=0.9, consistency=0.8, evidence_quality=0.85, grade_level="high")},
+                {"phase": "analyze", "score": QualityScore(overall_score=weak_score, completeness=0.3, consistency=0.4, evidence_quality=0.2, grade_level="very_low")},
+            ],
+            "weaknesses": [{"phase": "analyze", "score": weak_score, "grade": "very_low", "issues": ["missing required: status"]}],
+            "strengths": [{"phase": "observe", "score": strong_score, "grade": "high"}],
+            "overall_cycle_score": overall,
+        }
+
+    def test_records_all_phases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = self._make_engine(tmp)
+            summary = engine.learn_from_cycle_reflection(self._make_assessment())
+            self.assertIn("observe", summary["recorded_phases"])
+            self.assertIn("analyze", summary["recorded_phases"])
+            self.assertEqual(len(engine.learning_records), 2)
+
+    def test_identifies_weak_phases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = self._make_engine(tmp)
+            summary = engine.learn_from_cycle_reflection(self._make_assessment())
+            self.assertEqual(len(summary["weak_phases"]), 1)
+            self.assertEqual(summary["weak_phases"][0]["phase"], "analyze")
+
+    def test_generates_improvement_priorities(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = self._make_engine(tmp)
+            summary = engine.learn_from_cycle_reflection(self._make_assessment())
+            self.assertGreaterEqual(len(summary["improvement_priorities"]), 1)
+            self.assertTrue(any("紧急" in p for p in summary["improvement_priorities"]))
+
+    def test_cycle_trend_insufficient_data_initially(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = self._make_engine(tmp)
+            summary = engine.learn_from_cycle_reflection(self._make_assessment())
+            self.assertEqual(summary["cycle_trend"], "insufficient_data")
+
+    def test_cycle_trend_after_multiple_cycles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = self._make_engine(tmp)
+            # 注入历史循环日志
+            for score in [0.4, 0.45, 0.5]:
+                engine.model_improvement_log.append({
+                    "type": "cycle_reflection",
+                    "overall_score": score,
+                })
+            summary = engine.learn_from_cycle_reflection(self._make_assessment(overall=0.7))
+            self.assertIn(summary["cycle_trend"], ("improving", "stable", "declining"))
+            self.assertNotEqual(summary["cycle_trend"], "insufficient_data")
+
+    def test_empty_assessment_returns_safe_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = self._make_engine(tmp)
+            summary = engine.learn_from_cycle_reflection({})
+            self.assertEqual(summary["recorded_phases"], [])
+            self.assertEqual(summary["weak_phases"], [])
+
+    def test_logs_cycle_reflection_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = self._make_engine(tmp)
+            engine.learn_from_cycle_reflection(self._make_assessment())
+            entries = [e for e in engine.model_improvement_log if e.get("type") == "cycle_reflection"]
+            self.assertGreaterEqual(len(entries), 1)
+
+
+# ---------------------------------------------------------------------------
+# SelfLearningEngine: get_phase_performance
+# ---------------------------------------------------------------------------
+
+
+class TestGetPhasePerformance(unittest.TestCase):
+
+    def test_no_records_returns_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_file = str(Path(tmp) / "p.pkl")
+            engine = SelfLearningEngine({"learning_data_file": data_file})
+            engine.initialize({})
+            result = engine.get_phase_performance("observe")
+            self.assertEqual(result["record_count"], 0)
+
+    def test_aggregates_phase_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_file = str(Path(tmp) / "p.pkl")
+            engine = SelfLearningEngine({"learning_data_file": data_file})
+            engine.initialize({})
+            qs = {"overall_score": 0.8, "completeness": 0.9, "consistency": 0.7, "evidence_quality": 0.6}
+            engine.learn_from_quality_assessment("observe", qs)
+            qs2 = {"overall_score": 0.6, "completeness": 0.5, "consistency": 0.5, "evidence_quality": 0.5}
+            engine.learn_from_quality_assessment("observe", qs2)
+            result = engine.get_phase_performance("observe")
+            self.assertEqual(result["record_count"], 2)
+            self.assertAlmostEqual(result["avg_score"], 0.7)
+            self.assertIn("completeness", result["avg_dimensions"])
 
 
 if __name__ == "__main__":

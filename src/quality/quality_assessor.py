@@ -15,10 +15,14 @@ QualityAssessor — 研究成果质量评估器
   通过字典引用共享给 ResearchPipeline，使 pipeline.quality_metrics 等属性始终指向同一对象。
 """
 
+import json
+import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from src.core.phase_tracker import PhaseTrackerMixin
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # GRADE 等级常量
@@ -297,6 +301,67 @@ class QualityAssessor(PhaseTrackerMixin):
         }
 
     # ------------------------------------------------------------------
+    # Reflect 阶段支撑
+    # ------------------------------------------------------------------
+
+    def assess_cycle_for_reflection(
+        self, outcomes: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """评估循环中各阶段产出，汇总质量强弱项供 ReflectPhase 使用。
+
+        Args:
+            outcomes: ``cycle.outcomes`` — 每项形如 ``{phase: str, result: dict}``。
+
+        Returns:
+            包含 ``phase_assessments``, ``weaknesses``, ``strengths``,
+            ``overall_cycle_score`` 的字典。
+        """
+        phase_assessments: List[Dict[str, Any]] = []
+        weaknesses: List[Dict[str, Any]] = []
+        strengths: List[Dict[str, Any]] = []
+
+        for outcome in outcomes:
+            phase_name = outcome.get("phase", "unknown")
+            result = outcome.get("result") or {}
+            score = self.assess_quality(result)
+            compliance = self.validate_compliance(result)
+
+            phase_assessments.append(
+                {"phase": phase_name, "score": score, "compliance": compliance}
+            )
+
+            if score.overall_score < 0.6:
+                weaknesses.append(
+                    {
+                        "phase": phase_name,
+                        "score": score.overall_score,
+                        "grade": score.grade_level,
+                        "issues": compliance.violations + compliance.warnings,
+                    }
+                )
+            elif score.overall_score >= 0.8:
+                strengths.append(
+                    {
+                        "phase": phase_name,
+                        "score": score.overall_score,
+                        "grade": score.grade_level,
+                    }
+                )
+
+        total = len(phase_assessments)
+        overall = (
+            round(sum(a["score"].overall_score for a in phase_assessments) / total, 4)
+            if total
+            else 0.0
+        )
+        return {
+            "phase_assessments": phase_assessments,
+            "weaknesses": weaknesses,
+            "strengths": strengths,
+            "overall_cycle_score": overall,
+        }
+
+    # ------------------------------------------------------------------
     # 工具方法
     # ------------------------------------------------------------------
 
@@ -331,3 +396,302 @@ class QualityAssessor(PhaseTrackerMixin):
             if score >= threshold:
                 return level
         return GRADE_VERY_LOW
+
+    # ------------------------------------------------------------------
+    # LLM 驱动质量评估
+    # ------------------------------------------------------------------
+
+    def assess_quality_with_llm(
+        self,
+        result: Dict[str, Any],
+        llm_engine: Any,
+    ) -> QualityScore:
+        """结合规则评分与 LLM 深度评估，返回增强版 QualityScore。
+
+        LLM 评估四个维度（0.0–1.0）：
+          - methodological_rigor : 方法学严谨性
+          - evidence_coherence   : 证据链连贯性
+          - domain_relevance     : 中医领域相关性
+          - reproducibility      : 可复现性
+
+        最终分 = 0.4 × rule_score + 0.6 × llm_score（LLM 可用时）。
+        LLM 不可用或解析失败时回退到纯规则评分。
+        """
+        rule_score = self.assess_quality(result)
+
+        llm_assessment = self._invoke_llm_quality_assessment(result, llm_engine)
+        if llm_assessment is None:
+            return rule_score
+
+        llm_overall = self._compute_llm_overall(llm_assessment)
+        blended = round(0.4 * rule_score.overall_score + 0.6 * llm_overall, 4)
+        grade_level = self._score_to_grade(blended)
+
+        return QualityScore(
+            overall_score=blended,
+            completeness=rule_score.completeness,
+            consistency=rule_score.consistency,
+            evidence_quality=rule_score.evidence_quality,
+            grade_level=grade_level,
+            details={
+                **rule_score.details,
+                "llm_enhanced": True,
+                "rule_score": rule_score.overall_score,
+                "llm_score": llm_overall,
+                "llm_dimensions": llm_assessment,
+                "blend_weights": {"rule": 0.4, "llm": 0.6},
+            },
+        )
+
+    def assess_cycle_for_reflection_with_llm(
+        self,
+        outcomes: List[Dict[str, Any]],
+        llm_engine: Any,
+    ) -> Dict[str, Any]:
+        """LLM 增强版循环评估 — 在规则评估基础上追加 LLM 综合诊断。
+
+        若 LLM 不可用则回退到 :meth:`assess_cycle_for_reflection`。
+        """
+        base = self.assess_cycle_for_reflection(outcomes)
+
+        llm_diagnosis = self._invoke_llm_cycle_diagnosis(base, llm_engine)
+        if llm_diagnosis is not None:
+            base["llm_diagnosis"] = llm_diagnosis
+
+        return base
+
+    # ------------------------------------------------------------------
+    # LLM 内部辅助
+    # ------------------------------------------------------------------
+
+    def _invoke_llm_quality_assessment(
+        self,
+        result: Dict[str, Any],
+        llm_engine: Optional[Any],
+    ) -> Optional[Dict[str, float]]:
+        """调用 LLM 评估单个结果，返回四维分数字典或 None。"""
+        if llm_engine is None or not hasattr(llm_engine, "generate"):
+            return None
+
+        result_summary = self._build_result_summary_for_llm(result)
+        user_prompt = (
+            "请评估以下中医研究阶段产出的质量。\n\n"
+            f"## 待评估结果摘要\n{result_summary}\n\n"
+            "请从以下四个维度评分（0.0–1.0），并给出简要理由：\n"
+            "1. methodological_rigor — 方法学严谨性（数据来源、分析流程、统计检验）\n"
+            "2. evidence_coherence — 证据链连贯性（假设→实验→结论的逻辑链完整度）\n"
+            "3. domain_relevance — 中医领域相关性（术语准确、辨证论治逻辑）\n"
+            "4. reproducibility — 可复现性（数据可获取、流程可重复、参数有记录）\n\n"
+            "请以 JSON 格式输出：\n"
+            "```json\n"
+            "{\n"
+            '  "methodological_rigor": 0.0,\n'
+            '  "evidence_coherence": 0.0,\n'
+            '  "domain_relevance": 0.0,\n'
+            '  "reproducibility": 0.0,\n'
+            '  "rationale": "简要综合理由"\n'
+            "}\n"
+            "```"
+        )
+
+        try:
+            raw = llm_engine.generate(user_prompt, _QUALITY_SYSTEM_PROMPT)
+            return self._parse_llm_quality_response(raw)
+        except Exception as exc:
+            logger.warning("LLM 质量评估调用失败，回退规则评分: %s", exc)
+            return None
+
+    def _invoke_llm_cycle_diagnosis(
+        self,
+        base_assessment: Dict[str, Any],
+        llm_engine: Optional[Any],
+    ) -> Optional[Dict[str, Any]]:
+        """调用 LLM 对整个循环做综合诊断，返回诊断字典或 None。"""
+        if llm_engine is None or not hasattr(llm_engine, "generate"):
+            return None
+
+        weaknesses = base_assessment.get("weaknesses", [])
+        strengths = base_assessment.get("strengths", [])
+        overall = base_assessment.get("overall_cycle_score", 0.0)
+
+        weakness_text = "\n".join(
+            f"- {w['phase']}: score={w['score']}, issues={w.get('issues', [])}"
+            for w in weaknesses
+        ) or "无明显弱项"
+        strength_text = "\n".join(
+            f"- {s['phase']}: score={s['score']}"
+            for s in strengths
+        ) or "无突出强项"
+
+        user_prompt = (
+            "请对以下中医研究循环做综合质量诊断，并给出改进建议。\n\n"
+            f"## 循环总分: {overall}\n\n"
+            f"## 弱项阶段\n{weakness_text}\n\n"
+            f"## 强项阶段\n{strength_text}\n\n"
+            "请以 JSON 格式输出：\n"
+            "```json\n"
+            "{\n"
+            '  "diagnosis": "整体质量诊断（1-2句话）",\n'
+            '  "root_causes": ["根因1", "根因2"],\n'
+            '  "priority_improvements": ["最高优先改进1", "改进2"],\n'
+            '  "confidence": 0.0\n'
+            "}\n"
+            "```"
+        )
+
+        try:
+            raw = llm_engine.generate(user_prompt, _QUALITY_SYSTEM_PROMPT)
+            return self._parse_llm_cycle_diagnosis(raw)
+        except Exception as exc:
+            logger.warning("LLM 循环诊断调用失败: %s", exc)
+            return None
+
+    @staticmethod
+    def _build_result_summary_for_llm(result: Dict[str, Any]) -> str:
+        """将结果字典精简为适合 LLM 上下文窗口的文本摘要。"""
+        lines = []
+        lines.append(f"phase: {result.get('phase', 'unknown')}")
+        lines.append(f"status: {result.get('status', 'unknown')}")
+
+        if result.get("metadata"):
+            meta = result["metadata"]
+            if isinstance(meta, dict):
+                for k in list(meta.keys())[:8]:
+                    lines.append(f"metadata.{k}: {meta[k]}")
+
+        results_data = result.get("results") or result.get("outcomes") or {}
+        if isinstance(results_data, dict):
+            for k in list(results_data.keys())[:6]:
+                val = results_data[k]
+                val_str = str(val)[:200] if not isinstance(val, (int, float, bool)) else str(val)
+                lines.append(f"results.{k}: {val_str}")
+        elif isinstance(results_data, list):
+            lines.append(f"results: list[{len(results_data)} items]")
+
+        artifacts = result.get("artifacts") or []
+        if artifacts:
+            lines.append(f"artifacts: {len(artifacts)} items")
+
+        if result.get("error"):
+            lines.append(f"error: {str(result['error'])[:200]}")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _parse_llm_quality_response(raw: str) -> Optional[Dict[str, float]]:
+        """从 LLM 原始输出中提取四维分数。"""
+        required_keys = {"methodological_rigor", "evidence_coherence", "domain_relevance", "reproducibility"}
+        parsed = _extract_json_from_llm_output(raw)
+        if parsed is None:
+            return None
+        if not required_keys.issubset(parsed.keys()):
+            logger.warning("LLM 质量评分缺少必需维度: %s", required_keys - parsed.keys())
+            return None
+
+        scores: Dict[str, float] = {}
+        for key in required_keys:
+            try:
+                val = float(parsed[key])
+                scores[key] = max(0.0, min(1.0, val))
+            except (TypeError, ValueError):
+                logger.warning("LLM 质量维度 '%s' 值无效: %s", key, parsed[key])
+                return None
+
+        rationale = parsed.get("rationale")
+        if isinstance(rationale, str) and rationale.strip():
+            scores["rationale"] = rationale.strip()
+        return scores
+
+    @staticmethod
+    def _parse_llm_cycle_diagnosis(raw: str) -> Optional[Dict[str, Any]]:
+        """从 LLM 原始输出中提取循环诊断。"""
+        parsed = _extract_json_from_llm_output(raw)
+        if parsed is None:
+            return None
+        if "diagnosis" not in parsed:
+            return None
+
+        diagnosis: Dict[str, Any] = {
+            "diagnosis": str(parsed.get("diagnosis", "")),
+            "root_causes": [],
+            "priority_improvements": [],
+            "confidence": 0.0,
+        }
+        for key in ("root_causes", "priority_improvements"):
+            items = parsed.get(key)
+            if isinstance(items, list):
+                diagnosis[key] = [str(item).strip() for item in items if str(item).strip()]
+        try:
+            diagnosis["confidence"] = max(0.0, min(1.0, float(parsed.get("confidence", 0.0))))
+        except (TypeError, ValueError):
+            pass
+        return diagnosis
+
+    @staticmethod
+    def _compute_llm_overall(llm_assessment: Dict[str, Any]) -> float:
+        """从四维 LLM 分数计算加权综合分（等权）。"""
+        dimension_keys = ["methodological_rigor", "evidence_coherence", "domain_relevance", "reproducibility"]
+        values = []
+        for key in dimension_keys:
+            val = llm_assessment.get(key)
+            if isinstance(val, (int, float)):
+                values.append(float(val))
+        if not values:
+            return 0.0
+        return round(sum(values) / len(values), 4)
+
+
+# ---------------------------------------------------------------------------
+# LLM Prompt 常量
+# ---------------------------------------------------------------------------
+
+_QUALITY_SYSTEM_PROMPT = (
+    "你是一位中医药研究方法学专家和质量评审员，熟悉 GRADE 证据等级框架、"
+    "循证中医药研究 (T/C IATCM 098-2023) 标准。\n"
+    "评估时请关注：数据来源可靠性、分析方法合理性、证据链完整性、"
+    "中医术语规范性、结论可复现性。\n"
+    "请务必以纯 JSON 格式回答，不带多余文字。"
+)
+
+
+# ---------------------------------------------------------------------------
+# 工具函数
+# ---------------------------------------------------------------------------
+
+def _extract_json_from_llm_output(raw: str) -> Optional[Dict[str, Any]]:
+    """从 LLM 输出中提取 JSON 对象，支持 ```json``` 围栏。"""
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    text = raw.strip()
+
+    # 尝试提取 ```json ... ``` 围栏
+    if "```" in text:
+        parts = text.split("```")
+        for part in parts:
+            cleaned = part.strip()
+            if cleaned.startswith("json"):
+                cleaned = cleaned[4:].strip()
+            if cleaned.startswith("{"):
+                try:
+                    return json.loads(cleaned)
+                except json.JSONDecodeError:
+                    continue
+
+    # 直接尝试解析
+    try:
+        result = json.loads(text)
+        if isinstance(result, dict):
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # 尝试提取第一个 { ... } 块
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    return None

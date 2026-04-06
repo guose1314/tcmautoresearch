@@ -158,11 +158,13 @@ def build_report_stem(job_id: str, result: Dict[str, Any]) -> str:
     return cleaned or job_id
 
 
-def build_markdown_report(job_id: str, result: Dict[str, Any]) -> str:
-    topic = str(result.get("topic") or "未命名研究主题")
-    phases = result.get("phases") or []
-    pipeline_metadata = result.get("pipeline_metadata") or {}
-    lines = [
+def _build_markdown_overview_lines(
+    job_id: str,
+    result: Dict[str, Any],
+    pipeline_metadata: Dict[str, Any],
+    topic: str,
+) -> list[str]:
+    return [
         "# 研究任务报告",
         "",
         f"- 研究主题：{topic}",
@@ -178,46 +180,75 @@ def build_markdown_report(job_id: str, result: Dict[str, Any]) -> str:
         "",
     ]
 
-    if not phases:
-        lines.append("当前结果未返回阶段详情。")
-    else:
-        for phase in phases:
-            phase_name = format_phase_name(str(phase.get("phase") or ""))
-            lines.extend(
-                [
-                    f"### {phase_name}",
-                    f"- 状态：{format_status(str(phase.get('status') or ''))}",
-                    f"- 耗时：{phase.get('duration_sec') or '-'} 秒",
-                ]
-            )
-            error = str(phase.get("error") or "").strip()
-            if error:
-                lines.append(f"- 错误：{error}")
-            lines.extend(format_summary_lines(phase.get("summary") or {}))
-            lines.append("")
+
+def _build_markdown_phase_block(phase: Dict[str, Any]) -> list[str]:
+    phase_name = format_phase_name(str(phase.get("phase") or ""))
+    lines = [
+        f"### {phase_name}",
+        f"- 状态：{format_status(str(phase.get('status') or ''))}",
+        f"- 耗时：{phase.get('duration_sec') or '-'} 秒",
+    ]
+    error = str(phase.get("error") or "").strip()
+    if error:
+        lines.append(f"- 错误：{error}")
+    lines.extend(format_summary_lines(_as_dict(phase.get("summary"))))
+    lines.append("")
+    return lines
+
+
+def _build_markdown_phase_lines(phases: list[Any]) -> list[str]:
+    normalized_phases = [phase for phase in phases if isinstance(phase, dict)]
+    if not normalized_phases:
+        return ["当前结果未返回阶段详情。"]
+
+    lines: list[str] = []
+    for phase in normalized_phases:
+        lines.extend(_build_markdown_phase_block(phase))
+    return lines
+
+
+def build_markdown_report(job_id: str, result: Dict[str, Any]) -> str:
+    topic = str(result.get("topic") or "未命名研究主题")
+    phases = _as_list(result.get("phases"))
+    pipeline_metadata = _as_dict(result.get("pipeline_metadata"))
+    lines = _build_markdown_overview_lines(job_id, result, pipeline_metadata, topic)
+    lines.extend(_build_markdown_phase_lines(phases))
 
     return "\n".join(lines).strip() + "\n"
 
 
+def _iter_output_container_candidates(value: Dict[str, Any]) -> Iterable[tuple[str, str]]:
+    for nested_key, nested_value in value.items():
+        if isinstance(nested_value, str):
+            yield (str(nested_key), nested_value)
+
+
+def _is_output_file_value_candidate(key_lower: str, value: Any) -> bool:
+    return isinstance(value, str) and (
+        key_lower in OUTPUT_FILE_VALUE_KEYS or key_lower.endswith("_path")
+    )
+
+
+def _iter_output_dict_candidates(value: Dict[str, Any]) -> Iterable[tuple[str, str]]:
+    for key, nested in value.items():
+        key_text = str(key)
+        key_lower = key_text.lower()
+        if key_lower in OUTPUT_FILE_CONTAINER_KEYS and isinstance(nested, dict):
+            yield from _iter_output_container_candidates(nested)
+            continue
+        if _is_output_file_value_candidate(key_lower, nested):
+            yield (key_text, nested)
+            continue
+        if isinstance(nested, (dict, list)):
+            yield from iter_output_file_candidates(nested)
+
+
 def iter_output_file_candidates(value: Any) -> Iterable[tuple[str, str]]:
     if isinstance(value, dict):
-        for key, nested in value.items():
-            key_text = str(key)
-            key_lower = key_text.lower()
-            if key_lower in OUTPUT_FILE_CONTAINER_KEYS and isinstance(nested, dict):
-                for nested_key, nested_value in nested.items():
-                    if isinstance(nested_value, str):
-                        yield (str(nested_key), nested_value)
-                continue
-            if key_lower in OUTPUT_FILE_VALUE_KEYS and isinstance(nested, str):
-                yield (key_text, nested)
-                continue
-            if key_lower.endswith("_path") and isinstance(nested, str):
-                yield (key_text, nested)
-                continue
-            if isinstance(nested, (dict, list)):
-                yield from iter_output_file_candidates(nested)
-    elif isinstance(value, list):
+        yield from _iter_output_dict_candidates(value)
+        return
+
+    if isinstance(value, list):
         for item in value:
             yield from iter_output_file_candidates(item)
 
@@ -284,8 +315,15 @@ def resolve_preferred_report_artifact(result: Dict[str, Any], requested_format: 
 
 
 def build_artifact_file_response(path: Path) -> FileResponse:
-    media_type, _ = mimetypes.guess_type(str(path))
-    return FileResponse(path, media_type=media_type or "application/octet-stream", filename=path.name)
+    suffix = path.suffix.lower()
+    if suffix in {".md", ".markdown"}:
+        media_type = "text/markdown; charset=utf-8"
+    elif suffix == ".json":
+        media_type = "application/json"
+    else:
+        guessed_media_type, _ = mimetypes.guess_type(str(path))
+        media_type = guessed_media_type or "application/octet-stream"
+    return FileResponse(path, media_type=media_type, filename=path.name)
 
 
 def _safe_float(value: Any, default: float=0.0) -> float:
@@ -304,6 +342,68 @@ def _as_dict(value: Any) -> Dict[str, Any]:
 
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _resolve_primary_association(
+    analysis_results: Dict[str, Any],
+    research_artifact: Dict[str, Any],
+) -> Dict[str, Any]:
+    direct = _as_dict(analysis_results.get("primary_association"))
+    if direct:
+        return direct
+
+    statistical_analysis = _as_dict(analysis_results.get("statistical_analysis"))
+    nested = _as_dict(statistical_analysis.get("primary_association"))
+    if nested:
+        return nested
+
+    return _as_dict(research_artifact.get("primary_association"))
+
+
+def _resolve_data_mining_summary(
+    analysis_results: Dict[str, Any],
+    research_artifact: Dict[str, Any],
+) -> Dict[str, Any]:
+    direct = _as_dict(analysis_results.get("data_mining_summary"))
+    if direct:
+        return direct
+
+    nested = _as_dict(research_artifact.get("data_mining_summary"))
+    if nested:
+        return nested
+
+    data_mining_result = _as_dict(analysis_results.get("data_mining_result"))
+    if not data_mining_result:
+        data_mining_result = _as_dict(research_artifact.get("data_mining_result"))
+    if not data_mining_result:
+        return {}
+
+    summary: Dict[str, Any] = {}
+    for field_name in ("record_count", "transaction_count", "item_count"):
+        value = data_mining_result.get(field_name)
+        if value not in (None, ""):
+            summary[field_name] = value
+
+    methods_executed = [
+        str(item).strip()
+        for item in _as_list(data_mining_result.get("methods_executed"))
+        if str(item).strip()
+    ]
+    if methods_executed:
+        summary["methods_executed"] = methods_executed
+        summary["method_count"] = len(methods_executed)
+
+    association_rules = _as_list(_as_dict(data_mining_result.get("association_rules")).get("rules"))
+    cluster_summary = _as_list(_as_dict(data_mining_result.get("clustering")).get("cluster_summary"))
+    frequency_chi_square = _as_dict(data_mining_result.get("frequency_chi_square"))
+    chi_square_top = _as_list(frequency_chi_square.get("chi_square_top"))
+    herb_frequency = _as_list(frequency_chi_square.get("herb_frequency"))
+
+    summary["association_rule_count"] = len(association_rules)
+    summary["cluster_count"] = len(cluster_summary)
+    summary["frequency_signal_count"] = len(chi_square_top)
+    summary["high_frequency_herb_count"] = len(herb_frequency)
+    return summary
 
 
 def _count_phase_statuses(phases: list[Dict[str, Any]]) -> Dict[str, int]:
@@ -365,80 +465,107 @@ def _resolve_graph_weight(similarity_score: Any, evidence_score: Any) -> float:
     return sum(values) / len(values)
 
 
-def _build_knowledge_graph_board(result: Dict[str, Any]) -> Dict[str, Any]:
-    research_artifact = _as_dict(result.get("research_artifact"))
-    analysis_results = _as_dict(result.get("analysis_results"))
-    graph_summary = _as_dict(research_artifact.get("similar_formula_graph_evidence_summary"))
-    matches = [item for item in _as_list(graph_summary.get("matches")) if isinstance(item, dict)]
+def _ensure_graph_node(
+    node_map: Dict[str, Dict[str, Any]],
+    node_id: str,
+    node_type: str,
+) -> None:
+    if not node_id:
+        return
 
-    node_map: Dict[str, Dict[str, Any]] = {}
-    edge_items: list[Dict[str, Any]] = []
+    existing = node_map.get(node_id)
+    if existing is None:
+        node_map[node_id] = {
+            "id": node_id,
+            "label": node_id,
+            "type": node_type,
+            "degree": 0,
+            "weight": 0.0,
+        }
+        return
 
-    def ensure_node(node_id: str, node_type: str) -> None:
-        if not node_id:
-            return
-        existing = node_map.get(node_id)
-        if existing is None:
-            node_map[node_id] = {
-                "id": node_id,
-                "label": node_id,
-                "type": node_type,
-                "degree": 0,
-                "weight": 0.0,
-            }
-            return
-        if node_type == "formula":
-            existing["type"] = "formula"
+    if node_type == "formula":
+        existing["type"] = "formula"
 
-    for match in matches:
-        formula_name = str(match.get("formula_name") or "").strip()
-        similar_formula_name = str(match.get("similar_formula_name") or match.get("formula_id") or "").strip()
-        if not formula_name or not similar_formula_name:
-            continue
 
-        ensure_node(formula_name, "formula")
-        ensure_node(similar_formula_name, "similar_formula")
+def _resolve_graph_match_names(match: Dict[str, Any]) -> tuple[str, str]:
+    formula_name = str(match.get("formula_name") or "").strip()
+    similar_formula_name = str(
+        match.get("similar_formula_name") or match.get("formula_id") or ""
+    ).strip()
+    return formula_name, similar_formula_name
 
-        similarity_score = _safe_float(match.get("similarity_score"), -1.0)
-        evidence_score = _safe_float(match.get("evidence_score"), -1.0)
-        weight = _resolve_graph_weight(similarity_score, evidence_score)
-        shared_herbs = _extract_graph_terms(match.get("shared_herbs"))
-        shared_syndromes = _extract_graph_terms(match.get("shared_syndromes"))
-        retrieval_sources = [
-            str(item).strip() for item in _as_list(match.get("retrieval_sources")) if str(item).strip()
-        ]
 
-        edge_items.append(
-            {
-                "source": formula_name,
-                "target": similar_formula_name,
-                "relation": "类方关联",
-                "weight": round(weight, 3),
-                "similarity_score": round(similarity_score, 3) if similarity_score >= 0 else None,
-                "evidence_score": round(evidence_score, 3) if evidence_score >= 0 else None,
-                "shared_herb_count": len(shared_herbs),
-                "shared_syndrome_count": len(shared_syndromes),
-                "shared_herbs": shared_herbs,
-                "shared_syndromes": shared_syndromes,
-                "graph_evidence_source": str(match.get("graph_evidence_source") or "").strip(),
-                "retrieval_sources": retrieval_sources,
-            }
-        )
+def _build_graph_edge_item(
+    match: Dict[str, Any],
+    formula_name: str,
+    similar_formula_name: str,
+) -> tuple[Dict[str, Any], float]:
+    similarity_score = _safe_float(match.get("similarity_score"), -1.0)
+    evidence_score = _safe_float(match.get("evidence_score"), -1.0)
+    weight = _resolve_graph_weight(similarity_score, evidence_score)
+    shared_herbs = _extract_graph_terms(match.get("shared_herbs"))
+    shared_syndromes = _extract_graph_terms(match.get("shared_syndromes"))
+    retrieval_sources = [
+        str(item).strip()
+        for item in _as_list(match.get("retrieval_sources"))
+        if str(item).strip()
+    ]
+    edge_item = {
+        "source": formula_name,
+        "target": similar_formula_name,
+        "relation": "类方关联",
+        "weight": round(weight, 3),
+        "similarity_score": round(similarity_score, 3) if similarity_score >= 0 else None,
+        "evidence_score": round(evidence_score, 3) if evidence_score >= 0 else None,
+        "shared_herb_count": len(shared_herbs),
+        "shared_syndrome_count": len(shared_syndromes),
+        "shared_herbs": shared_herbs,
+        "shared_syndromes": shared_syndromes,
+        "graph_evidence_source": str(match.get("graph_evidence_source") or "").strip(),
+        "retrieval_sources": retrieval_sources,
+    }
+    return edge_item, weight
 
-        source_node = node_map.get(formula_name)
-        target_node = node_map.get(similar_formula_name)
-        if source_node is not None:
-            source_node["degree"] = int(_safe_float(source_node.get("degree"), 0.0)) + 1
-            source_node["weight"] = max(_safe_float(source_node.get("weight"), 0.0), weight)
-        if target_node is not None:
-            target_node["degree"] = int(_safe_float(target_node.get("degree"), 0.0)) + 1
-            target_node["weight"] = max(_safe_float(target_node.get("weight"), 0.0), weight)
 
+def _update_graph_node_metrics(
+    node_map: Dict[str, Dict[str, Any]],
+    node_id: str,
+    weight: float,
+) -> None:
+    node = node_map.get(node_id)
+    if node is None:
+        return
+    node["degree"] = int(_safe_float(node.get("degree"), 0.0)) + 1
+    node["weight"] = max(_safe_float(node.get("weight"), 0.0), weight)
+
+
+def _append_graph_match(
+    node_map: Dict[str, Dict[str, Any]],
+    edge_items: list[Dict[str, Any]],
+    match: Dict[str, Any],
+) -> None:
+    formula_name, similar_formula_name = _resolve_graph_match_names(match)
+    if not formula_name or not similar_formula_name:
+        return
+
+    _ensure_graph_node(node_map, formula_name, "formula")
+    _ensure_graph_node(node_map, similar_formula_name, "similar_formula")
+    edge_item, weight = _build_graph_edge_item(match, formula_name, similar_formula_name)
+    edge_items.append(edge_item)
+    _update_graph_node_metrics(node_map, formula_name, weight)
+    _update_graph_node_metrics(node_map, similar_formula_name, weight)
+
+
+def _normalize_graph_nodes(node_map: Dict[str, Dict[str, Any]]) -> list[Dict[str, Any]]:
     nodes = list(node_map.values())
     nodes.sort(key=lambda item: (-_safe_float(item.get("degree"), 0.0), str(item.get("label") or "")))
     for node in nodes:
         node["weight"] = round(max(0.0, min(1.0, _safe_float(node.get("weight"), 0.0))), 3)
+    return nodes
 
+
+def _sort_graph_edges(edge_items: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
     edge_items.sort(
         key=lambda item: (
             -_safe_float(item.get("weight"), 0.0),
@@ -446,35 +573,63 @@ def _build_knowledge_graph_board(result: Dict[str, Any]) -> Dict[str, Any]:
             str(item.get("target") or ""),
         )
     )
+    return edge_items
 
+
+def _resolve_analysis_relation_count(analysis_results: Dict[str, Any]) -> Optional[int]:
     relation_statistics = _as_dict(analysis_results.get("relation_statistics"))
     statistics = _as_dict(analysis_results.get("statistics"))
-    analysis_relation_count = relation_statistics.get("total_relations")
-    if analysis_relation_count in (None, ""):
-        analysis_relation_count = statistics.get("relation_count")
-    if analysis_relation_count in (None, ""):
-        analysis_relation_count = analysis_results.get("relation_count")
+    for candidate in (
+        relation_statistics.get("total_relations"),
+        statistics.get("relation_count"),
+        analysis_results.get("relation_count"),
+    ):
+        if candidate not in (None, ""):
+            return int(_safe_float(candidate, 0.0))
+    return None
 
-    node_count = len(nodes)
-    edge_count = len(edge_items)
+
+def _resolve_graph_formula_count(
+    graph_summary: Dict[str, Any],
+    nodes: list[Dict[str, Any]],
+) -> int:
     formula_count = int(_safe_float(graph_summary.get("formula_count"), -1.0))
-    if formula_count < 0:
-        formula_count = len({node.get("id") for node in nodes if node.get("type") == "formula"})
-    match_count = int(_safe_float(graph_summary.get("match_count"), -1.0))
-    if match_count < 0:
-        match_count = edge_count
+    if formula_count >= 0:
+        return formula_count
+    return len({node.get("id") for node in nodes if node.get("type") == "formula"})
 
+
+def _resolve_graph_match_count(
+    graph_summary: Dict[str, Any],
+    edge_items: list[Dict[str, Any]],
+) -> int:
+    match_count = int(_safe_float(graph_summary.get("match_count"), -1.0))
+    if match_count >= 0:
+        return match_count
+    return len(edge_items)
+
+
+def _build_graph_stats(
+    graph_summary: Dict[str, Any],
+    analysis_results: Dict[str, Any],
+    nodes: list[Dict[str, Any]],
+    edge_items: list[Dict[str, Any]],
+) -> Dict[str, Any]:
     stats = {
-        "node_count": node_count,
-        "edge_count": edge_count,
-        "formula_count": formula_count,
-        "match_count": match_count,
+        "node_count": len(nodes),
+        "edge_count": len(edge_items),
+        "formula_count": _resolve_graph_formula_count(graph_summary, nodes),
+        "match_count": _resolve_graph_match_count(graph_summary, edge_items),
         "max_degree": max((int(_safe_float(node.get("degree"), 0.0)) for node in nodes), default=0),
         "max_weight": round(max((_safe_float(edge.get("weight"), 0.0) for edge in edge_items), default=0.0), 3),
     }
-    if analysis_relation_count not in (None, ""):
-        stats["analysis_relation_count"] = int(_safe_float(analysis_relation_count, 0.0))
+    analysis_relation_count = _resolve_analysis_relation_count(analysis_results)
+    if analysis_relation_count is not None:
+        stats["analysis_relation_count"] = analysis_relation_count
+    return stats
 
+
+def _build_graph_highlights(edge_items: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
     highlights = []
     for edge in edge_items[:6]:
         highlights.append(
@@ -488,17 +643,144 @@ def _build_knowledge_graph_board(result: Dict[str, Any]) -> Dict[str, Any]:
                 "shared_syndromes": edge.get("shared_syndromes") or [],
             }
         )
+    return highlights
 
-    source = "research_artifact.similar_formula_graph_evidence_summary"
-    if not graph_summary:
-        source = "unavailable"
+
+def _build_knowledge_graph_board(result: Dict[str, Any]) -> Dict[str, Any]:
+    research_artifact = _as_dict(result.get("research_artifact"))
+    analysis_results = _as_dict(result.get("analysis_results"))
+    graph_summary = _as_dict(research_artifact.get("similar_formula_graph_evidence_summary"))
+    matches = [item for item in _as_list(graph_summary.get("matches")) if isinstance(item, dict)]
+
+    node_map: Dict[str, Dict[str, Any]] = {}
+    edge_items: list[Dict[str, Any]] = []
+
+    for match in matches:
+        _append_graph_match(node_map, edge_items, match)
+
+    nodes = _normalize_graph_nodes(node_map)
+    sorted_edges = _sort_graph_edges(edge_items)
+    source = "research_artifact.similar_formula_graph_evidence_summary" if graph_summary else "unavailable"
 
     return {
         "source": source,
-        "stats": stats,
+        "stats": _build_graph_stats(graph_summary, analysis_results, nodes, sorted_edges),
         "nodes": nodes,
-        "edges": edge_items,
-        "highlights": highlights,
+        "edges": sorted_edges,
+        "highlights": _build_graph_highlights(sorted_edges),
+    }
+
+
+def _resolve_dashboard_total_duration_sec(
+    result: Dict[str, Any],
+    phases: list[Dict[str, Any]],
+) -> float:
+    total_duration_sec = _safe_float(result.get("total_duration_sec"), 0.0)
+    if total_duration_sec > 0:
+        return total_duration_sec
+    return sum(_safe_float(phase.get("duration_sec"), 0.0) for phase in phases)
+
+
+def _resolve_dashboard_data_mining_methods(
+    analysis_results: Dict[str, Any],
+    data_mining_summary: Dict[str, Any],
+) -> list[str]:
+    raw_methods = analysis_results.get("data_mining_methods")
+    if not raw_methods:
+        raw_methods = data_mining_summary.get("methods_executed")
+    return [
+        str(item).strip()
+        for item in _as_list(raw_methods)
+        if str(item).strip()
+    ]
+
+
+def _build_dashboard_phase_items(phases: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    phase_items = []
+    for index, phase in enumerate(phases, start=1):
+        phase_name = str(phase.get("phase") or f"phase_{index}")
+        phase_status = str(phase.get("status") or "pending")
+        phase_items.append(
+            {
+                "index": index,
+                "phase": phase_name,
+                "label": format_phase_name(phase_name),
+                "status": phase_status,
+                "status_label": format_status(phase_status),
+                "duration_sec": _safe_float(phase.get("duration_sec"), 0.0),
+                "summary": _as_dict(phase.get("summary")),
+                "error": str(phase.get("error") or ""),
+            }
+        )
+    return phase_items
+
+
+def _build_dashboard_overview(
+    snapshot: Dict[str, Any],
+    result: Dict[str, Any],
+    status: str,
+    progress: float,
+    current_phase: str,
+    total_duration_sec: float,
+    health_score: float,
+) -> Dict[str, Any]:
+    return {
+        "status": status,
+        "status_label": format_status(status),
+        "progress": round(progress, 3),
+        "current_phase": current_phase,
+        "current_phase_label": format_phase_name(current_phase),
+        "total_duration_sec": round(total_duration_sec, 3),
+        "started_at": result.get("started_at") or snapshot.get("started_at") or "",
+        "completed_at": result.get("completed_at") or snapshot.get("completed_at") or "",
+        "health_score": round(health_score, 3),
+    }
+
+
+def _build_dashboard_phase_board(
+    phase_status_counts: Dict[str, int],
+    total_phase_count: int,
+    completed_phase_count: int,
+    phase_completion_rate: float,
+    phase_items: list[Dict[str, Any]],
+) -> Dict[str, Any]:
+    return {
+        "total": total_phase_count,
+        "completed": completed_phase_count,
+        "failed": phase_status_counts.get("failed", 0),
+        "partial": phase_status_counts.get("partial", 0),
+        "skipped": phase_status_counts.get("skipped", 0),
+        "running": phase_status_counts.get("running", 0),
+        "completion_rate": round(phase_completion_rate, 3),
+        "items": phase_items,
+    }
+
+
+def _build_dashboard_evidence_board(
+    evidence_protocol: Dict[str, Any],
+    primary_association: Dict[str, Any],
+    data_mining_summary: Dict[str, Any],
+    data_mining_methods: list[str],
+) -> Dict[str, Any]:
+    evidence_records = _as_list(evidence_protocol.get("evidence_records"))
+    claims = _as_list(evidence_protocol.get("claims"))
+    return {
+        "evidence_count": len(evidence_records),
+        "claim_count": len(claims),
+        "association_rule_count": int(_safe_float(data_mining_summary.get("association_rule_count"), 0.0)),
+        "cluster_count": int(_safe_float(data_mining_summary.get("cluster_count"), 0.0)),
+        "primary_association": primary_association,
+        "data_mining_summary": data_mining_summary,
+        "data_mining_methods": data_mining_methods,
+    }
+
+
+def _build_dashboard_protocol_inputs(protocol_inputs: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "study_type": protocol_inputs.get("study_type"),
+        "primary_outcome": protocol_inputs.get("primary_outcome"),
+        "intervention": protocol_inputs.get("intervention"),
+        "comparison": protocol_inputs.get("comparison"),
     }
 
 
@@ -519,40 +801,20 @@ def build_research_dashboard_payload(snapshot: Dict[str, Any]) -> Dict[str, Any]
     completed_phase_count = phase_status_counts.get("completed", 0)
     phase_completion_rate = (completed_phase_count / total_phase_count) if total_phase_count > 0 else 0.0
 
-    total_duration_sec = _safe_float(result.get("total_duration_sec"), 0.0)
-    if total_duration_sec <= 0:
-        total_duration_sec = sum(_safe_float(phase.get("duration_sec"), 0.0) for phase in phases)
+    total_duration_sec = _resolve_dashboard_total_duration_sec(result, phases)
 
     pipeline_metadata = _as_dict(result.get("pipeline_metadata"))
     protocol_inputs = _as_dict(pipeline_metadata.get("protocol_inputs"))
 
     analysis_results = _as_dict(result.get("analysis_results"))
+    research_artifact = _as_dict(result.get("research_artifact"))
     quality_metrics = _as_dict(analysis_results.get("quality_metrics"))
     evidence_protocol = _as_dict(analysis_results.get("evidence_protocol"))
-    data_mining_result = _as_dict(analysis_results.get("data_mining_result"))
+    primary_association = _resolve_primary_association(analysis_results, research_artifact)
+    data_mining_summary = _resolve_data_mining_summary(analysis_results, research_artifact)
+    data_mining_methods = _resolve_dashboard_data_mining_methods(analysis_results, data_mining_summary)
     knowledge_graph_board = _build_knowledge_graph_board(result)
-
-    evidence_records = _as_list(evidence_protocol.get("evidence_records"))
-    claims = _as_list(evidence_protocol.get("claims"))
-    association_rules = _as_list(_as_dict(data_mining_result.get("association_rules")).get("rules"))
-    cluster_summary = _as_list(_as_dict(data_mining_result.get("clustering")).get("cluster_summary"))
-
-    phase_items = []
-    for index, phase in enumerate(phases, start=1):
-        phase_name = str(phase.get("phase") or f"phase_{index}")
-        phase_status = str(phase.get("status") or "pending")
-        phase_items.append(
-            {
-                "index": index,
-                "phase": phase_name,
-                "label": format_phase_name(phase_name),
-                "status": phase_status,
-                "status_label": format_status(phase_status),
-                "duration_sec": _safe_float(phase.get("duration_sec"), 0.0),
-                "summary": _as_dict(phase.get("summary")),
-                "error": str(phase.get("error") or ""),
-            }
-        )
+    phase_items = _build_dashboard_phase_items(phases)
 
     quality_score = _quality_score(quality_metrics)
     health_score = max(
@@ -564,45 +826,35 @@ def build_research_dashboard_payload(snapshot: Dict[str, Any]) -> Dict[str, Any]
         "job_id": job_id,
         "topic": topic,
         "cycle_id": str(result.get("cycle_id") or "").strip(),
-        "overview": {
-            "status": status,
-            "status_label": format_status(status),
-            "progress": round(progress, 3),
-            "current_phase": current_phase,
-            "current_phase_label": format_phase_name(current_phase),
-            "total_duration_sec": round(total_duration_sec, 3),
-            "started_at": result.get("started_at") or snapshot.get("started_at") or "",
-            "completed_at": result.get("completed_at") or snapshot.get("completed_at") or "",
-            "health_score": round(health_score, 3),
-        },
-        "phase_board": {
-            "total": total_phase_count,
-            "completed": completed_phase_count,
-            "failed": phase_status_counts.get("failed", 0),
-            "partial": phase_status_counts.get("partial", 0),
-            "skipped": phase_status_counts.get("skipped", 0),
-            "running": phase_status_counts.get("running", 0),
-            "completion_rate": round(phase_completion_rate, 3),
-            "items": phase_items,
-        },
+        "overview": _build_dashboard_overview(
+            snapshot,
+            result,
+            status,
+            progress,
+            current_phase,
+            total_duration_sec,
+            health_score,
+        ),
+        "phase_board": _build_dashboard_phase_board(
+            phase_status_counts,
+            total_phase_count,
+            completed_phase_count,
+            phase_completion_rate,
+            phase_items,
+        ),
         "quality_board": {
             "confidence_score": _safe_float(quality_metrics.get("confidence_score"), 0.0),
             "completeness": _safe_float(quality_metrics.get("completeness"), 0.0),
             "quality_score": round(quality_score, 3),
         },
-        "evidence_board": {
-            "evidence_count": len(evidence_records),
-            "claim_count": len(claims),
-            "association_rule_count": len(association_rules),
-            "cluster_count": len(cluster_summary),
-        },
+        "evidence_board": _build_dashboard_evidence_board(
+            evidence_protocol,
+            primary_association,
+            data_mining_summary,
+            data_mining_methods,
+        ),
         "knowledge_graph_board": knowledge_graph_board,
-        "protocol_inputs": {
-            "study_type": protocol_inputs.get("study_type"),
-            "primary_outcome": protocol_inputs.get("primary_outcome"),
-            "intervention": protocol_inputs.get("intervention"),
-            "comparison": protocol_inputs.get("comparison"),
-        },
+        "protocol_inputs": _build_dashboard_protocol_inputs(protocol_inputs),
         "metadata": {
             "pipeline_cycle_name": pipeline_metadata.get("cycle_name"),
             "summary_generated": True,

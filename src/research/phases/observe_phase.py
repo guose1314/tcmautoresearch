@@ -242,6 +242,7 @@ class ObservePhaseMixin:
             "ctext_groups": self._resolve_whitelist_groups(context),
             "downstream_processing": downstream_processing,
             "semantic_modeling": semantic_modeling,
+            "output_generation": self._has_observe_output_generation(ingestion_result, ingestion_ok),
             "literature_retrieval": literature_ok,
             "evidence_matrix": self._has_observe_evidence_matrix(literature_result, literature_ok),
             "clinical_gap_analysis": bool(literature_ok and clinical_gap.get("report")),
@@ -274,6 +275,16 @@ class ObservePhaseMixin:
         if not literature_ok or not literature_result:
             return False
         return bool(literature_result.get("evidence_matrix", {}).get("record_count", 0) > 0)
+
+    def _has_observe_output_generation(
+        self,
+        ingestion_result: Dict[str, Any] | None,
+        ingestion_ok: bool,
+    ) -> bool:
+        if not ingestion_ok or not ingestion_result:
+            return False
+        aggregate = ingestion_result.get("aggregate") or {}
+        return bool(aggregate.get("output_quality_metrics"))
 
     def _resolve_observe_data_source(self, context: Dict[str, Any]) -> str:
         if self.pipeline._should_collect_ctext_corpus(context) and self.pipeline._should_collect_local_corpus(context):
@@ -479,6 +490,7 @@ class ObservePhaseMixin:
         extractor = self.pipeline.analysis_port.create_extractor(context.get("extractor_config") or {})
         semantic_builder = self.pipeline.analysis_port.create_semantic_builder(context.get("semantic_builder_config") or {})
         reasoning_engine = self.pipeline.analysis_port.create_reasoning_engine(context.get("reasoning_engine_config") or {})
+        output_generator = self.pipeline.output_port.create_output_generator(context.get("output_generator_config") or {})
 
         if not preprocessor.initialize():
             return {"error": "文档预处理器初始化失败"}
@@ -493,6 +505,10 @@ class ObservePhaseMixin:
         if reasoning_enabled and not reasoning_engine.initialize():
             reasoning_enabled = False
             self.pipeline.logger.warning("推理引擎初始化失败，继续使用语义图关系")
+        output_generation_enabled = bool(context.get("run_output_generation", True))
+        if output_generation_enabled and not output_generator.initialize():
+            output_generation_enabled = False
+            self.pipeline.logger.warning("输出生成器初始化失败，跳过结构化输出生成")
 
         document_results: List[Dict[str, Any]] = []
         entity_type_counts: Dict[str, int] = {}
@@ -502,6 +518,8 @@ class ObservePhaseMixin:
         total_semantic_edges = 0
         total_semantic_relationships: List[Dict[str, Any]] = []
         reasoning_summaries: List[Dict[str, Any]] = []
+        output_quality_metrics: List[Dict[str, Any]] = []
+        output_recommendations: List[str] = []
 
         try:
             for entry in selected_entries:
@@ -525,6 +543,13 @@ class ObservePhaseMixin:
                     extraction_result,
                     semantic_result,
                 )
+                output_result = self._run_observe_output_generation_if_enabled(
+                    output_generator,
+                    output_generation_enabled,
+                    extraction_result,
+                    semantic_result,
+                    reasoning_result,
+                )
 
                 entities = extraction_result.get("entities", [])
                 total_entities += len(entities)
@@ -540,6 +565,16 @@ class ObservePhaseMixin:
                 total_semantic_relationships.extend(semantic_relationships)
                 if reasoning_summary:
                     reasoning_summaries.append(reasoning_summary)
+                if output_result:
+                    quality_metrics = (output_result.get("output_data") or {}).get("quality_metrics")
+                    if isinstance(quality_metrics, dict):
+                        output_quality_metrics.append(quality_metrics)
+                    recommendations = (output_result.get("output_data") or {}).get("recommendations")
+                    if isinstance(recommendations, list):
+                        for rec in recommendations:
+                            rec_str = str(rec).strip() if rec else ""
+                            if rec_str and rec_str not in output_recommendations:
+                                output_recommendations.append(rec_str)
 
                 for entity_type, count in extraction_result.get("statistics", {}).get("by_type", {}).items():
                     entity_type_counts[entity_type] = entity_type_counts.get(entity_type, 0) + count
@@ -559,6 +594,7 @@ class ObservePhaseMixin:
                         "semantic_relationships": semantic_relationships,
                         "reasoning_results": (reasoning_result or {}).get("reasoning_results", {}),
                         "reasoning_summary": reasoning_summary,
+                        "output_generation": (output_result or {}).get("output_data"),
                     }
                 )
 
@@ -574,12 +610,15 @@ class ObservePhaseMixin:
                     "semantic_graph_edges": total_semantic_edges,
                     "semantic_relationships": self._deduplicate_relationships(total_semantic_relationships),
                     "reasoning_summary": self._merge_reasoning_summaries(reasoning_summaries),
+                    "output_quality_metrics": output_quality_metrics,
+                    "output_recommendations": output_recommendations,
                 },
             }
         except Exception as e:
-            self.pipeline.logger.error(f"观察阶段预处理/抽取/建模链路失败: {e}")
+            self.pipeline.logger.error("观察阶段预处理/抽取/建模链路失败: %s", e)
             return {"error": str(e)}
         finally:
+            output_generator.cleanup()
             reasoning_engine.cleanup()
             semantic_builder.cleanup()
             extractor.cleanup()
@@ -662,6 +701,28 @@ class ObservePhaseMixin:
             )
         except Exception as exc:
             self.pipeline.logger.warning("观察阶段推理链路失败，忽略 reasoning 结果: %s", exc)
+            return {}
+
+    def _run_observe_output_generation_if_enabled(
+        self,
+        output_generator: Any,
+        output_generation_enabled: bool,
+        extraction_result: Dict[str, Any],
+        semantic_result: Dict[str, Any],
+        reasoning_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not output_generation_enabled:
+            return {}
+        try:
+            context_for_output: Dict[str, Any] = {}
+            context_for_output.update(extraction_result)
+            context_for_output["semantic_graph"] = semantic_result.get("semantic_graph", {})
+            context_for_output["graph_statistics"] = semantic_result.get("graph_statistics", {})
+            context_for_output["research_perspectives"] = semantic_result.get("research_perspectives", {})
+            context_for_output.update(reasoning_result)
+            return output_generator.execute(context_for_output)
+        except Exception as exc:
+            self.pipeline.logger.warning("观察阶段输出生成链路失败，跳过结构化输出: %s", exc)
             return {}
 
     def _extract_reasoning_relationships(

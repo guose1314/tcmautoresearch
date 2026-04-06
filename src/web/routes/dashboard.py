@@ -279,6 +279,104 @@ async def dashboard_quality(
 
 
 # ---------------------------------------------------------------------------
+# Dashboard: Smoke Test Health — real_observe_smoke 即时摘要
+# ---------------------------------------------------------------------------
+
+_SMOKE_LATEST = _OUTPUT_DIR / "real_observe_smoke" / "latest.json"
+
+
+def _load_smoke_latest() -> Dict[str, Any] | None:
+    """Load the latest real_observe_smoke result; return *None* if absent."""
+    try:
+        if _SMOKE_LATEST.is_file():
+            with open(_SMOKE_LATEST, encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return None
+
+
+def _smoke_metric(label: str, value: str, ok: bool) -> str:
+    color = "emerald" if ok else "red"
+    icon = "✓" if ok else "✗"
+    return (
+        f'<div class="flex justify-between items-center py-1">'
+        f'<span class="text-sm text-gray-500">{label}</span>'
+        f'<span class="text-sm font-medium text-{color}-600">{icon} {value}</span>'
+        f'</div>'
+    )
+
+
+@router.get("/api/dashboard/smoke-health", response_class=HTMLResponse)
+async def dashboard_smoke_health(
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> HTMLResponse:
+    data = _load_smoke_latest()
+    if data is None:
+        html = _empty_state("🔬", "暂无 Smoke 测试数据", "运行质量门后自动生成")
+        return HTMLResponse(html)
+
+    status = data.get("validation_status", "unknown")
+    passed = status == "passed"
+    violations = data.get("violations") or []
+    p_val = data.get("p_value")
+    es = data.get("effect_size")
+    docs = data.get("processed_document_count", 0)
+    records = data.get("record_count", 0)
+    kg = data.get("kg_path_count", 0)
+    assoc = data.get("association_rule_count", 0)
+    freq = data.get("frequency_signal_count", 0)
+    primary = data.get("primary_association") or {}
+
+    # status badge
+    badge_color = "emerald" if passed else "red"
+    badge_text = "PASSED" if passed else "FAILED"
+
+    # primary association summary
+    primary_html = ""
+    if primary:
+        herb = primary.get("herb", "—")
+        synd = primary.get("syndrome", "—")
+        primary_html = (
+            f'<div class="mt-3 p-3 bg-indigo-50 rounded-lg text-sm">'
+            f'<p class="text-indigo-700 font-medium mb-1">🏷️ 主关联</p>'
+            f'<p class="text-indigo-600">{herb} → {synd}'
+            f' <span class="text-xs text-indigo-400">(χ²={primary.get("chi2", 0):.2f}, p={primary.get("p_value", 0):.4f})</span></p>'
+            f'</div>'
+        )
+
+    # violation list
+    violation_html = ""
+    if violations:
+        items = "".join(f'<li class="text-red-600 text-xs">{v}</li>' for v in violations[:5])
+        violation_html = (
+            f'<div class="mt-3 p-3 bg-red-50 rounded-lg">'
+            f'<p class="text-red-700 font-medium text-sm mb-1">⚠ 违规项 ({len(violations)})</p>'
+            f'<ul class="list-disc list-inside space-y-0.5">{items}</ul>'
+            f'</div>'
+        )
+
+    html = f"""
+    <div class="flex items-center justify-between mb-3">
+        <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-{badge_color}-100 text-{badge_color}-700">{badge_text}</span>
+        <span class="text-xs text-gray-400">{data.get("generated_at", "")[:19]}</span>
+    </div>
+    <div class="space-y-0.5">
+        {_smoke_metric("文档处理", str(docs), docs > 0)}
+        {_smoke_metric("分析记录", str(records), records > 0)}
+        {_smoke_metric("p 值", f"{p_val:.4f}" if p_val is not None else "—", p_val is not None and p_val < 0.05)}
+        {_smoke_metric("效应量", f"{es:.4f}" if es is not None else "—", es is not None and es >= 0.3)}
+        {_smoke_metric("KG 路径", str(kg), kg > 0)}
+        {_smoke_metric("关联规则", str(assoc), assoc > 0)}
+        {_smoke_metric("频次信号", str(freq), freq > 0)}
+    </div>
+    {primary_html}
+    {violation_html}
+    """
+    return HTMLResponse(html)
+
+
+# ---------------------------------------------------------------------------
 # Dashboard: Research Workflow — 科研论文书写流程
 # ---------------------------------------------------------------------------
 

@@ -1,4 +1,4 @@
-﻿"""兼容层 — extractors 已迁移至 src.analysis.entity_extractor
+"""兼容层 - extractors 已迁移至 src.analysis.entity_extractor
 
 .. deprecated:: 2.0
     请改用 ``from src.analysis.entity_extractor import AdvancedEntityExtractor``
