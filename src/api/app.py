@@ -14,6 +14,7 @@ from src.api.dependencies import (
 from src.api.routes import (
     analysis_router,
     collection_router,
+    extraction_router,
     research_router,
     system_router,
 )
@@ -53,6 +54,7 @@ def include_api_routers(app: FastAPI, *, base_prefix: str) -> None:
     app.include_router(research_router, prefix=f"{prefix}/research")
     app.include_router(collection_router, prefix=f"{prefix}/collection")
     app.include_router(analysis_router, prefix=f"{prefix}/analysis")
+    app.include_router(extraction_router, prefix=f"{prefix}/extraction")
 
 
 def _probe_response(response: Response, payload: Dict[str, Any]) -> Dict[str, Any]:

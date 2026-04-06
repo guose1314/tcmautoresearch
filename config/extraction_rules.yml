@@ -1,0 +1,128 @@
+# 文献提取规则配置 — 可扩展 YAML 接口
+# 用户可在此自定义提取规则，系统启动时自动加载
+
+# ============================================================================
+# 元数据提取规则
+# ============================================================================
+metadata_rules:
+  - rule_id: custom_meta_source
+    name: "出处标签"
+    entity_type: book_title
+    rule_type: regex
+    pattern: '(?:出处|出自|见于|载于)[:：]\s*《(.+?)》'
+    priority: 88
+    confidence_base: 0.90
+    group_index: 1
+    enabled: true
+
+  - rule_id: custom_meta_category
+    name: "古籍分类"
+    entity_type: generic
+    rule_type: regex
+    pattern: '(?:类别|分类|属于)[:：]\s*(.+?)(?:[。\n]|$)'
+    priority: 60
+    confidence_base: 0.75
+    group_index: 1
+    enabled: true
+
+# ============================================================================
+# 医学内容提取规则
+# ============================================================================
+medical_content_rules:
+  - rule_id: custom_med_property
+    name: "性味归经"
+    entity_type: property
+    rule_type: regex
+    pattern: '(?:性味|气味)[:：]\s*(.+?)(?:[。\n，,]|$)'
+    priority: 85
+    confidence_base: 0.88
+    group_index: 1
+    enabled: true
+
+  - rule_id: custom_med_meridian
+    name: "归经"
+    entity_type: meridian
+    rule_type: regex
+    pattern: '(?:归经|入经)[:：]\s*(.+?)(?:[。\n]|$)'
+    priority: 83
+    confidence_base: 0.85
+    group_index: 1
+    enabled: true
+
+  - rule_id: custom_med_toxicity
+    name: "毒性"
+    entity_type: property
+    rule_type: regex
+    pattern: '(?:毒性|有毒|无毒|小毒|大毒|剧毒)[:：]?\s*(.+?)(?:[。\n]|$)'
+    priority: 80
+    confidence_base: 0.85
+    group_index: 0
+    enabled: true
+
+# ============================================================================
+# 临床信息提取规则
+# ============================================================================
+clinical_rules:
+  - rule_id: custom_clin_course
+    name: "疗程"
+    entity_type: generic
+    rule_type: regex
+    pattern: '(?:疗程|连服|连用)\s*(\d+)\s*([日天剂次周月])'
+    priority: 75
+    confidence_base: 0.80
+    group_index: 0
+    enabled: true
+
+  - rule_id: custom_clin_external
+    name: "外治法"
+    entity_type: administration
+    rule_type: regex
+    pattern: '(?:外敷|外洗|熏蒸|贴敷|热熨|灸)[:：]?\s*(.+?)(?:[。\n]|$)'
+    priority: 78
+    confidence_base: 0.82
+    group_index: 1
+    enabled: true
+
+# ============================================================================
+# 实体类型 → 标准映射（归一化用）
+# ============================================================================
+entity_type_mappings:
+  # 扩展类型映射
+  disease: "disease"
+  symptom: "symptom"
+  acupoint: "acupoint"
+  meridian: "meridian"
+  dosage: "dosage"
+  preparation: "preparation"
+  administration: "administration"
+  contraindication: "contraindication"
+  indication: "indication"
+  person: "person"
+  dynasty: "dynasty"
+  book_title: "book_title"
+
+# ============================================================================
+# 学术评估权重（可调）
+# ============================================================================
+academic_assessment:
+  dimension_weights:
+    information_density: 0.15
+    entity_diversity: 0.10
+    relation_richness: 0.15
+    formula_novelty: 0.10
+    cross_reference_density: 0.10
+    historical_significance: 0.10
+    clinical_relevance: 0.15
+    completeness: 0.15
+
+# ============================================================================
+# 质量校验参数
+# ============================================================================
+quality_check:
+  min_confidence: 0.60
+  min_entity_count: 3
+  expected_entity_types:
+    - herb
+    - formula
+    - syndrome
+    - efficacy

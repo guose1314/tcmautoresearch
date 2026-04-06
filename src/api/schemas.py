@@ -258,6 +258,56 @@ class ArchitectureSummaryResponse(BaseModel):
     report_metadata: Dict[str, Any] = Field(default_factory=dict, description="报告元数据")
 
 
+# ---------------------------------------------------------------------------
+# 文献提取管道 DTOs
+# ---------------------------------------------------------------------------
+
+class ExtractionDocumentInput(BaseModel):
+    raw_text: str = Field(..., min_length=1, description="原始文本")
+    source_file: str = Field(default="", description="来源文件名")
+    document_id: str = Field(default="", description="文档标识（可选）")
+
+
+class ExtractionPipelineRequest(BaseModel):
+    text: str = Field(..., min_length=1, description="待提取文本")
+    source_file: str = Field(default="", description="来源文件名")
+    enable_metadata: bool = Field(default=True, description="启用元数据提取")
+    enable_medical_content: bool = Field(default=True, description="启用医学内容提取")
+    enable_clinical: bool = Field(default=True, description="启用临床信息提取")
+    enable_relation: bool = Field(default=True, description="启用关系抽取")
+    enable_academic_assessment: bool = Field(default=True, description="启用学术评估")
+    enable_quality_check: bool = Field(default=True, description="启用质量校验")
+
+
+class ExtractionBatchRequest(BaseModel):
+    documents: List[ExtractionDocumentInput] = Field(..., min_length=1, max_length=100, description="文档列表")
+    enable_metadata: bool = Field(default=True, description="启用元数据提取")
+    enable_medical_content: bool = Field(default=True, description="启用医学内容提取")
+    enable_clinical: bool = Field(default=True, description="启用临床信息提取")
+    enable_relation: bool = Field(default=True, description="启用关系抽取")
+    enable_academic_assessment: bool = Field(default=True, description="启用学术评估")
+    enable_quality_check: bool = Field(default=True, description="启用质量校验")
+
+
+class ExtractionPipelineResponse(BaseModel):
+    document_id: str = Field(default="", description="文档 ID")
+    source_file: str = Field(default="", description="来源文件")
+    total_entities: int = Field(default=0, description="总实体数")
+    total_relations: int = Field(default=0, description="总关系数")
+    overall_quality: Dict[str, Any] = Field(default_factory=dict, description="综合质量")
+    total_duration_sec: float = Field(default=0.0, description="总耗时")
+    module_results: Dict[str, Any] = Field(default_factory=dict, description="各模块结果")
+    all_items: List[Dict[str, Any]] = Field(default_factory=list, description="全部实体")
+    all_relations: List[Dict[str, Any]] = Field(default_factory=list, description="全部关系")
+    errors: List[str] = Field(default_factory=list, description="错误列表")
+
+
+class ExtractionBatchResponse(BaseModel):
+    total_documents: int = Field(default=0, description="处理文档数")
+    results: List[ExtractionPipelineResponse] = Field(default_factory=list, description="各文档结果")
+    total_duration_sec: float = Field(default=0.0, description="批量总耗时")
+
+
 class ModuleSummary(BaseModel):
     module_id: str = Field(..., description="模块 ID")
     module_name: str = Field(..., description="模块名称")
