@@ -1856,8 +1856,33 @@ def run_research_session(
             continue
         logger.info(">>> 开始阶段: %s", phase_enum.value)
         try:
-            phase_context = {"question": question, "collect_local_corpus": True}
+            phase_context: Dict[str, Any] = {"question": question}
+
+            if phase_enum.value == "observe":
+                local_data_dir = (
+                    (config.get("local_corpus") or {}).get("data_dir")
+                    or str((Path(__file__).resolve().parent / "data").resolve())
+                )
+                observe_config = config.get("observe_pipeline") or {}
+                phase_context.update(
+                    {
+                        "data_source": "local",
+                        "use_local_corpus": True,
+                        "collect_local_corpus": True,
+                        "local_data_dir": local_data_dir,
+                        "use_ctext_whitelist": False,
+                        "run_preprocess_and_extract": True,
+                        "run_reasoning": True,
+                        "run_literature_retrieval": bool(
+                            (config.get("literature_retrieval") or {}).get("enabled", False)
+                        ),
+                        "max_texts": int(observe_config.get("max_texts", 12)),
+                        "max_chars_per_text": int(observe_config.get("max_chars_per_text", 2000)),
+                    }
+                )
+
             if phase_enum.value == "publish":
+                phase_context["allow_pipeline_citation_fallback"] = False
                 if export_report_formats:
                     phase_context["report_output_formats"] = list(export_report_formats)
                 if report_output_dir:

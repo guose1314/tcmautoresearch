@@ -5,6 +5,7 @@ from src.research.research_pipeline import ResearchPhase, ResearchPipeline
 
 
 class TestResearchPipelineObserve(unittest.TestCase):
+
     @patch("src.research.research_pipeline.ReasoningEngine.cleanup")
     @patch("src.research.research_pipeline.ReasoningEngine.execute")
     @patch("src.research.research_pipeline.ReasoningEngine.initialize")
@@ -88,7 +89,7 @@ class TestResearchPipelineObserve(unittest.TestCase):
         }
 
         pipeline = ResearchPipeline({})
-        result = pipeline.phase_handlers._run_observe_ingestion_pipeline(
+        result = pipeline.phase_handlers.run_observe_ingestion_pipeline(
             {
                 "sources": ["local"],
                 "stats": {"total_documents": 1},
@@ -108,9 +109,9 @@ class TestResearchPipelineObserve(unittest.TestCase):
 
     def test_relationship_conflict_resolution_prefers_priority_and_confidence(self):
         pipeline = ResearchPipeline({})
-        handlers = pipeline.phase_handlers
+        phase_handlers = pipeline.phase_handlers
 
-        merged = handlers._merge_relationship_sources(
+        merged = phase_handlers.merge_observe_relationship_sources(
             [
                 {
                     "source": "黄芪",
@@ -150,9 +151,9 @@ class TestResearchPipelineObserve(unittest.TestCase):
                 }
             }
         )
-        handlers = pipeline.phase_handlers
+        phase_handlers = pipeline.phase_handlers
 
-        merged = handlers._merge_relationship_sources(
+        merged = phase_handlers.merge_observe_relationship_sources(
             [
                 {
                     "source": "黄芪",

@@ -5,19 +5,20 @@ import base64
 import binascii
 import hashlib
 import hmac
-import importlib
 import importlib.util
 import json
 import logging
 import os
 import time
+from importlib import import_module
+from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 
 try:
-    _pyjwt = importlib.import_module("jwt") if importlib.util.find_spec("jwt") else None
+    _pyjwt = import_module("jwt") if importlib.util.find_spec("jwt") else None
 except Exception:
     _pyjwt = None
 
@@ -115,6 +116,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=Fals
 
 _DEFAULT_ALGORITHM = "HS256"
 _DEFAULT_EXPIRES = 3600  # 秒
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _load_jwt_config() -> Dict[str, Any]:
@@ -128,28 +130,46 @@ def _load_jwt_config() -> Dict[str, Any]:
             from src.infrastructure.config_loader import load_settings
 
             settings = load_settings()
-            sec = getattr(settings, "raw", {}).get("security", {})
-            secret_key = sec.get("jwt_secret_key", "")
-            algorithm = sec.get("jwt_algorithm", algorithm)
-            expires = int(sec.get("jwt_expires_seconds", expires))
+            if hasattr(settings, "get_secret"):
+                secret_key = str(
+                    settings.get_secret("security.jwt_secret_key", default=secret_key)
+                    or secret_key
+                )
+            if hasattr(settings, "get"):
+                algorithm = str(settings.get("security.jwt_algorithm", algorithm) or algorithm)
+                expires = int(settings.get("security.jwt_expires_seconds", expires) or expires)
         except Exception:
             pass
 
     if not secret_key:
-        # 从 secrets.yml 直接读取
-        try:
-            from pathlib import Path
-
-            import yaml
-
-            secrets_path = Path("secrets.yml")
-            if secrets_path.exists():
-                with open(secrets_path, "r", encoding="utf-8") as f:
-                    secrets = yaml.safe_load(f) or {}
-                sec = secrets.get("security", {})
-                secret_key = sec.get("jwt_secret_key", "")
-        except Exception:
-            pass
+        # 从 secrets 文件直接读取（优先项目根目录，避免依赖当前工作目录）
+        candidates = [
+            _PROJECT_ROOT / "secrets.yml",
+            _PROJECT_ROOT / "secrets.yaml",
+            Path("secrets.yml"),
+            Path("secrets.yaml"),
+        ]
+        seen: set[str] = set()
+        for secrets_path in candidates:
+            normalized = str(secrets_path.resolve(strict=False))
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            if not secrets_path.exists():
+                continue
+            try:
+                yaml_module = import_module("yaml")
+                secrets = yaml_module.safe_load(secrets_path.read_text(encoding="utf-8")) or {}
+                sec = secrets.get("security", {}) if isinstance(secrets, dict) else {}
+                if not isinstance(sec, dict):
+                    continue
+                secret_key = str(sec.get("jwt_secret_key", "") or "")
+                algorithm = str(sec.get("jwt_algorithm", algorithm) or algorithm)
+                expires = int(sec.get("jwt_expires_seconds", expires) or expires)
+                if secret_key:
+                    break
+            except Exception:
+                continue
 
     if not secret_key:
         raise RuntimeError(
@@ -227,7 +247,7 @@ async def get_current_user(
     """FastAPI 依赖：从请求中提取并验证 JWT，返回用户信息。"""
     if token is None:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=401,
             detail="未提供认证令牌",
             headers={"WWW-Authenticate": "Bearer"},
         )
@@ -235,14 +255,14 @@ async def get_current_user(
         payload = verify_token(token)
     except jwt.ExpiredSignatureError:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=401,
             detail="令牌已过期",
             headers={"WWW-Authenticate": "Bearer"},
         )
     except jwt.InvalidTokenError as exc:
         logger.warning("[auth] 无效令牌: %s", exc)
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=401,
             detail="无效的认证令牌",
             headers={"WWW-Authenticate": "Bearer"},
         )
@@ -250,7 +270,7 @@ async def get_current_user(
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=401,
             detail="令牌缺少用户标识",
             headers={"WWW-Authenticate": "Bearer"},
         )

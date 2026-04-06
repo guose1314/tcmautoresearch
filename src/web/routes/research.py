@@ -121,13 +121,13 @@ async def get_research_detail(
     """获取研究课题详情。"""
     try:
         pipeline = _get_pipeline()
-        orchestrator = getattr(pipeline, "orchestrator", None)
-        if orchestrator is None:
+        cycles = getattr(pipeline, "research_cycles", None)
+        if cycles is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="研究编排器未初始化",
             )
-        cycle = orchestrator.get_research_cycle(cycle_id)
+        cycle = cycles.get(cycle_id)
         if cycle is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

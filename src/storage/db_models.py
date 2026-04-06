@@ -22,7 +22,16 @@ RelationshipType = _persistence.RelationshipType
 ResearchAnalysis = _persistence.ResearchAnalysis
 ResearchRecord = _persistence.ResearchRecord
 
+# P3.1 新增
+ArtifactTypeEnum = _persistence.ArtifactTypeEnum
+PhaseExecution = _persistence.PhaseExecution
+PhaseStatusEnum = _persistence.PhaseStatusEnum
+ResearchArtifact = _persistence.ResearchArtifact
+ResearchSession = _persistence.ResearchSession
+SessionStatusEnum = _persistence.SessionStatusEnum
+
 __all__ = [
+    "ArtifactTypeEnum",
     "Base",
     "DatabaseManager",
     "Document",
@@ -30,6 +39,8 @@ __all__ = [
     "EntityRelationship",
     "EntityTypeEnum",
     "LogStatusEnum",
+    "PhaseExecution",
+    "PhaseStatusEnum",
     "ProcessStatusEnum",
     "ProcessingLog",
     "ProcessingStatistics",
@@ -37,5 +48,8 @@ __all__ = [
     "RelationshipCategoryEnum",
     "RelationshipType",
     "ResearchAnalysis",
+    "ResearchArtifact",
     "ResearchRecord",
+    "ResearchSession",
+    "SessionStatusEnum",
 ]

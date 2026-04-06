@@ -20,24 +20,37 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from src.research.research_pipeline import ResearchPhase, ResearchPipeline
+if TYPE_CHECKING:
+    from src.research.research_pipeline import ResearchPhase, ResearchPipeline
+
+# 供单测 patch 的模块级符号（延迟解析，不在导入期触发重依赖）。
+ResearchPhase = None
+ResearchPipeline = None
 
 logger = logging.getLogger(__name__)
 
 # 默认执行的阶段顺序
 _DEFAULT_PHASES = [
-    ResearchPhase.OBSERVE,
-    ResearchPhase.HYPOTHESIS,
-    ResearchPhase.EXPERIMENT,
-    ResearchPhase.ANALYZE,
-    ResearchPhase.PUBLISH,
-    ResearchPhase.REFLECT,
+    "observe",
+    "hypothesis",
+    "experiment",
+    "analyze",
+    "publish",
+    "reflect",
 ]
+
+
+def _import_pipeline_symbols():
+    """延迟导入研究流水线符号，避免导入期循环依赖。"""
+    from src.research.research_pipeline import ResearchPhase, ResearchPipeline
+
+    return ResearchPhase, ResearchPipeline
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,11 +140,32 @@ class ResearchOrchestrator:
         self.pipeline_config: Dict[str, Any] = self.config.get("pipeline_config") or {}
         self.stop_on_failure: bool = bool(self.config.get("stop_on_failure", True))
         self.researchers: List[str] = self.config.get("researchers") or ["orchestrator"]
-        self._phases: List[ResearchPhase] = [
-            ResearchPhase(p) if isinstance(p, str) else p
+        self._research_phase_cls, self._pipeline_cls = self._resolve_pipeline_symbols()
+        self._phases: List[Any] = [
+            self._coerce_phase(p)
             for p in (self.config.get("phases") or _DEFAULT_PHASES)
         ]
         self.logger = logging.getLogger(__name__)
+
+    def _resolve_pipeline_symbols(self):
+        global ResearchPhase, ResearchPipeline
+
+        imported_phase_cls = None
+        imported_pipeline_cls = None
+        if ResearchPhase is None or ResearchPipeline is None:
+            imported_phase_cls, imported_pipeline_cls = _import_pipeline_symbols()
+
+        if ResearchPhase is None:
+            ResearchPhase = imported_phase_cls
+        if ResearchPipeline is None:
+            ResearchPipeline = imported_pipeline_cls
+
+        return ResearchPhase, ResearchPipeline
+
+    def _coerce_phase(self, phase: Any) -> Any:
+        if isinstance(phase, str):
+            return self._research_phase_cls(phase)
+        return phase
 
     # ── 공공 API ─────────────────────────────────────────────────────────── #
 
@@ -143,6 +177,10 @@ class ResearchOrchestrator:
         cycle_name: Optional[str] = None,
         description: Optional[str] = None,
         scope: Optional[str] = None,
+        study_type: Optional[str] = None,
+        primary_outcome: Optional[str] = None,
+        intervention: Optional[str] = None,
+        comparison: Optional[str] = None,
     ) -> OrchestrationResult:
         """执行完整研究流程并返回 :class:`OrchestrationResult`。
 
@@ -153,6 +191,10 @@ class ResearchOrchestrator:
             cycle_name: 研究周期名称（默认从 topic 生成）。
             description: 研究周期描述（默认等于 topic）。
             scope: 研究范围描述（默认从 topic 生成）。
+            study_type: 显式研究设计类型（如 rct / cohort）。
+            primary_outcome: 显式主要结局。
+            intervention: 显式干预方案。
+            comparison: 显式对照方案。
         """
         if not topic or not topic.strip():
             raise ValueError("topic 不能为空")
@@ -190,6 +232,10 @@ class ResearchOrchestrator:
                 cycle_id=cycle_id,
                 topic=topic,
                 phase_contexts=phase_contexts,
+                study_type=study_type,
+                primary_outcome=primary_outcome,
+                intervention=intervention,
+                comparison=comparison,
             )
             publish_highlights = self._extract_publish_result_highlights(pipeline, cycle_id)
         finally:
@@ -214,6 +260,12 @@ class ResearchOrchestrator:
                 "description": description,
                 "scope": scope,
                 "phases_requested": [p.value for p in self._phases],
+                "protocol_inputs": {
+                    "study_type": study_type,
+                    "primary_outcome": primary_outcome,
+                    "intervention": intervention,
+                    "comparison": comparison,
+                },
             },
             analysis_results=publish_highlights.get("analysis_results") or {},
             research_artifact=publish_highlights.get("research_artifact") or {},
@@ -225,9 +277,9 @@ class ResearchOrchestrator:
         cycle_name: Optional[str],
         description: Optional[str],
         scope: Optional[str],
-    ) -> tuple[ResearchPipeline, str, str, str, str]:
+    ) -> tuple[Any, str, str, str, str]:
         """创建 pipeline 与 cycle，并返回运行所需元信息。"""
-        pipeline = ResearchPipeline(self.pipeline_config)
+        pipeline = self._pipeline_cls(self.pipeline_config)
         resolved_cycle_name = cycle_name or _slug_topic(topic)
         resolved_description = description or topic
         resolved_scope = scope or self._infer_scope(topic)
@@ -243,17 +295,29 @@ class ResearchOrchestrator:
 
     def _execute_phases(
         self,
-        pipeline: ResearchPipeline,
+        pipeline: Any,
         cycle_id: str,
         topic: str,
         phase_contexts: Dict[str, Dict[str, Any]],
+        study_type: Optional[str],
+        primary_outcome: Optional[str],
+        intervention: Optional[str],
+        comparison: Optional[str],
     ) -> tuple[List[PhaseOutcome], str]:
         """顺序执行阶段并处理失败后的中断/继续策略。"""
         outcomes: List[PhaseOutcome] = []
         overall_status = "completed"
 
         for phase in self._phases:
-            ctx = self._build_phase_context(topic, phase, phase_contexts)
+            ctx = self._build_phase_context(
+                topic,
+                phase,
+                phase_contexts,
+                study_type=study_type,
+                primary_outcome=primary_outcome,
+                intervention=intervention,
+                comparison=comparison,
+            )
             outcome = self._run_single_phase(pipeline, cycle_id, phase, ctx)
             outcomes.append(outcome)
 
@@ -267,7 +331,7 @@ class ResearchOrchestrator:
 
         return outcomes, overall_status
 
-    def _build_skipped_outcomes(self, failed_phase: ResearchPhase) -> List[PhaseOutcome]:
+    def _build_skipped_outcomes(self, failed_phase: Any) -> List[PhaseOutcome]:
         """在 stop_on_failure 生效时为剩余阶段生成 skipped 结果。"""
         skipped: List[PhaseOutcome] = []
         remaining = self._phases[self._phases.index(failed_phase) + 1 :]
@@ -286,9 +350,9 @@ class ResearchOrchestrator:
 
     def _run_single_phase(
         self,
-        pipeline: ResearchPipeline,
+        pipeline: Any,
         cycle_id: str,
-        phase: ResearchPhase,
+        phase: Any,
         ctx: Dict[str, Any],
     ) -> PhaseOutcome:
         phase_t0 = time.perf_counter()
@@ -328,12 +392,24 @@ class ResearchOrchestrator:
     def _build_phase_context(
         self,
         topic: str,
-        phase: ResearchPhase,
+        phase: Any,
         phase_contexts: Dict[str, Dict[str, Any]],
+        *,
+        study_type: Optional[str],
+        primary_outcome: Optional[str],
+        intervention: Optional[str],
+        comparison: Optional[str],
     ) -> Dict[str, Any]:
         """将默认 context、config 覆盖、调用方覆盖三层合并。"""
         # 1. 从 topic 自动生成基础 context
-        base = topic_to_phase_context(topic, phase)
+        base = topic_to_phase_context(
+            topic,
+            phase,
+            study_type=study_type,
+            primary_outcome=primary_outcome,
+            intervention=intervention,
+            comparison=comparison,
+        )
 
         # 2. config 中的默认覆盖（如 default_observe_context）
         config_key = f"default_{phase.value}_context"
@@ -348,11 +424,13 @@ class ResearchOrchestrator:
 
     @staticmethod
     def _summarize_phase_result(
-        phase: ResearchPhase,
+        phase: Any,
         result: Dict[str, Any],
     ) -> Dict[str, Any]:
         """从各阶段原始结果中提取关键指标。"""
-        if phase == ResearchPhase.OBSERVE:
+        phase_name = str(getattr(phase, "value", phase)).lower()
+
+        if phase_name == "observe":
             return {
                 "observation_count": len(result.get("observations", [])),
                 "finding_count": len(result.get("findings", [])),
@@ -360,14 +438,14 @@ class ResearchOrchestrator:
                 "corpus_schema": (result.get("metadata") or {}).get("corpus_schema"),
                 "literature_records": (result.get("literature_pipeline") or {}).get("record_count", 0),
             }
-        if phase == ResearchPhase.HYPOTHESIS:
+        if phase_name == "hypothesis":
             hyps = result.get("hypotheses") or []
             return {
                 "hypothesis_count": len(hyps),
                 "validated_count": sum(1 for h in hyps if h.get("status") == "validated"),
                 "domain": result.get("domain", ""),
             }
-        if phase == ResearchPhase.EXPERIMENT:
+        if phase_name == "experiment":
             experiment_results = result.get("results") or {}
             experiments = result.get("experiments") or []
             first_experiment = experiments[0] if experiments else {}
@@ -381,12 +459,12 @@ class ResearchOrchestrator:
                 "sample_size": experiment_results.get("sample_size") or first_experiment.get("sample_size", 0),
                 "highest_gap_priority": (result.get("metadata") or {}).get("highest_gap_priority", "低"),
             }
-        if phase == ResearchPhase.ANALYZE:
+        if phase_name == "analyze":
             return {
                 "analysis_methods": result.get("methods_used", []),
                 "key_findings": result.get("key_findings", [])[:3],
             }
-        if phase == ResearchPhase.PUBLISH:
+        if phase_name == "publish":
             summary = {
                 "deliverable_count": len(result.get("deliverables", [])),
                 "abstract_word_count": len(str(result.get("abstract", "")).split()),
@@ -395,7 +473,7 @@ class ResearchOrchestrator:
             if isinstance(output_files, dict) and output_files:
                 summary["output_files"] = output_files
             return summary
-        if phase == ResearchPhase.REFLECT:
+        if phase_name == "reflect":
             return {
                 "improvement_suggestions": result.get("improvements", [])[:3],
                 "next_cycle_focus": result.get("next_cycle_focus", ""),
@@ -404,13 +482,13 @@ class ResearchOrchestrator:
 
     @staticmethod
     def _extract_publish_result_highlights(
-        pipeline: ResearchPipeline,
+        pipeline: Any,
         cycle_id: str,
     ) -> Dict[str, Dict[str, Any]]:
         cycle = pipeline.research_cycles.get(cycle_id)
         if cycle is None:
             return {}
-        publish_execution = cycle.phase_executions.get(ResearchPhase.PUBLISH) or {}
+        publish_execution = cycle.phase_executions.get(pipeline.ResearchPhase.PUBLISH) or {}
         publish_result = publish_execution.get("result") or {}
         if not isinstance(publish_result, dict):
             return {}
@@ -441,6 +519,10 @@ def run_research(
     cycle_name: Optional[str] = None,
     description: Optional[str] = None,
     scope: Optional[str] = None,
+    study_type: Optional[str] = None,
+    primary_outcome: Optional[str] = None,
+    intervention: Optional[str] = None,
+    comparison: Optional[str] = None,
 ) -> OrchestrationResult:
     """函数式单一入口：一行代码触发完整研究流水线。"""
     orchestrator = ResearchOrchestrator(config=config)
@@ -450,6 +532,10 @@ def run_research(
         cycle_name=cycle_name,
         description=description,
         scope=scope,
+        study_type=study_type,
+        primary_outcome=primary_outcome,
+        intervention=intervention,
+        comparison=comparison,
     )
 
 
@@ -457,15 +543,29 @@ def run_research(
 # 辅助函数（可单独复用）
 # ─────────────────────────────────────────────────────────────────────────────
 
-def topic_to_phase_context(topic: str, phase: ResearchPhase) -> Dict[str, Any]:
+def topic_to_phase_context(
+    topic: str,
+    phase: Any,
+    *,
+    study_type: Optional[str] = None,
+    primary_outcome: Optional[str] = None,
+    intervention: Optional[str] = None,
+    comparison: Optional[str] = None,
+) -> Dict[str, Any]:
     """从研究主题字符串为各阶段自动生成基础 context。
 
     生成的 context 为保守默认值，不触发任何需要网络或 LLM 的操作，
     除非调用方在 ``phase_contexts`` 中显式开启。
     """
+    phase_name = str(getattr(phase, "value", phase)).lower()
+    resolved_study_type = study_type or _infer_study_type(topic)
+    resolved_primary_outcome = primary_outcome or _infer_primary_outcome(topic)
+    resolved_intervention = intervention or _infer_intervention(topic)
+    resolved_comparison = comparison or _infer_comparison(topic)
+
     base: Dict[str, Any] = {"research_topic": topic}
 
-    if phase == ResearchPhase.OBSERVE:
+    if phase_name == "observe":
         return {
             **base,
             "run_literature_retrieval": False,
@@ -474,20 +574,79 @@ def topic_to_phase_context(topic: str, phase: ResearchPhase) -> Dict[str, Any]:
             "data_source": "manual",
             "literature_query": topic,
         }
-    if phase == ResearchPhase.HYPOTHESIS:
+    if phase_name == "hypothesis":
         return {
             **base,
             "research_objective": topic,
+            "study_type": resolved_study_type,
+            "primary_outcome": resolved_primary_outcome,
+            "intervention": resolved_intervention,
+            "comparison": resolved_comparison,
         }
-    if phase == ResearchPhase.EXPERIMENT:
+    if phase_name == "experiment":
+        return {
+            **base,
+            "study_type": resolved_study_type,
+            "primary_outcome": resolved_primary_outcome,
+            "outcome": resolved_primary_outcome,
+            "intervention": resolved_intervention,
+            "comparison": resolved_comparison,
+        }
+    if phase_name == "analyze":
         return {**base}
-    if phase == ResearchPhase.ANALYZE:
+    if phase_name == "publish":
         return {**base}
-    if phase == ResearchPhase.PUBLISH:
-        return {**base}
-    if phase == ResearchPhase.REFLECT:
+    if phase_name == "reflect":
         return {**base}
     return base
+
+
+def _infer_study_type(topic: str) -> str:
+    normalized = topic.lower()
+    if any(keyword in normalized for keyword in ("meta", "荟萃", "合并分析", "合并效应")):
+        return "meta_analysis"
+    if any(keyword in normalized for keyword in ("系统综述", "systematic", "prisma", "文献综述")):
+        return "systematic_review"
+    if any(keyword in normalized for keyword in ("病例对照", "case-control", "odds ratio", "危险因素")):
+        return "case_control"
+    if any(keyword in normalized for keyword in ("队列", "cohort", "随访", "预后")):
+        return "cohort"
+    if any(keyword in normalized for keyword in ("网络药理", "靶点", "通路", "分子对接", "kegg", "ppi")):
+        return "network_pharmacology"
+    return "rct"
+
+
+def _infer_primary_outcome(topic: str) -> str:
+    normalized = topic.lower()
+    if any(keyword in normalized for keyword in ("血压", "高血压")):
+        return "收缩压/舒张压变化"
+    if any(keyword in normalized for keyword in ("血糖", "糖尿病", "hba1c")):
+        return "HbA1c 或空腹血糖变化"
+    if any(keyword in normalized for keyword in ("生存", "死亡", "复发", "事件")):
+        return "事件发生率或复发率"
+    if any(keyword in normalized for keyword in ("疼痛", "症状", "评分", "量表")):
+        return "症状量表评分变化"
+    if any(keyword in normalized for keyword in ("机制", "靶点", "通路", "网络药理")):
+        return "核心靶点与通路富集特征"
+    return "主要临床疗效结局"
+
+
+def _infer_intervention(topic: str) -> str:
+    matches = re.findall(r"[\u4e00-\u9fa5A-Za-z0-9]{2,20}(?:汤|散|丸|方|颗粒|胶囊|针灸|艾灸)", topic)
+    if matches:
+        return f"{matches[0]} 干预"
+    if "中药" in topic or "方剂" in topic:
+        return "目标中药/方剂干预"
+    return "目标中医干预方案"
+
+
+def _infer_comparison(topic: str) -> str:
+    normalized = topic.lower()
+    if "安慰剂" in topic:
+        return "安慰剂对照"
+    if any(keyword in normalized for keyword in ("队列", "cohort", "病例对照", "case-control")):
+        return "非暴露组或匹配对照组"
+    return "常规治疗或安慰剂"
 
 
 def _slug_topic(topic: str, max_len: int = 40) -> str:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING, Any, Dict, List
 
 if TYPE_CHECKING:
@@ -19,6 +20,15 @@ except Exception:
     PaperWriter = None
 
 try:
+    from src.generation.llm_context_adapter import (
+        DEFAULT_LLM_ANALYSIS_MODULE_ALIASES,
+        wrap_paper_writer_with_llm_context,
+    )
+except Exception:
+    DEFAULT_LLM_ANALYSIS_MODULE_ALIASES = {}
+    wrap_paper_writer_with_llm_context = None
+
+try:
     from src.generation.output_formatter import OutputGenerator
 except Exception:
     OutputGenerator = None
@@ -32,6 +42,24 @@ try:
     from src.quality import EvidenceGrader
 except Exception:
     EvidenceGrader = None
+
+_PUBLISH_LLM_ANALYSIS_MODULE_ALIASES: Dict[str, tuple[str, ...]] = (
+    dict(DEFAULT_LLM_ANALYSIS_MODULE_ALIASES)
+    if DEFAULT_LLM_ANALYSIS_MODULE_ALIASES
+    else {
+        "research_perspectives": ("research_perspectives",),
+        "formula_comparisons": ("formula_comparisons",),
+        "herb_properties_analysis": ("herb_properties_analysis", "herb_properties"),
+        "pharmacology_integration": ("pharmacology_integration",),
+        "network_pharmacology": ("network_pharmacology", "network_pharmacology_systems_biology"),
+        "supramolecular_physicochemistry": ("supramolecular_physicochemistry",),
+        "knowledge_archaeology": ("knowledge_archaeology",),
+        "complexity_dynamics": ("complexity_dynamics", "complexity_nonlinear_dynamics"),
+        "research_scoring_panel": ("research_scoring_panel",),
+        "summary_analysis": ("summary_analysis",),
+    }
+)
+
 
 class PublishPhaseMixin:
     """Mixin: publish 阶段处理方法。
@@ -146,6 +174,7 @@ class PublishPhaseMixin:
             "report_generation_errors": report_generation_result.get("errors", []) if isinstance(report_generation_result, dict) else [],
             "analysis_results": paper_context.get("analysis_results", {}),
             "research_artifact": paper_context.get("research_artifact", {}),
+            "llm_analysis_context": paper_context.get("llm_analysis_context", {}),
             "output_files": merged_output_files,
             "metadata": {
                 "publication_count": len(publications),
@@ -180,6 +209,114 @@ class PublishPhaseMixin:
         if isinstance(literature_records, list) and literature_records:
             return [dict(item) for item in literature_records if isinstance(item, dict)]
 
+        corpus_records = self._collect_citation_records_from_observe_corpus(cycle, context)
+        if corpus_records:
+            return corpus_records
+
+        if not self._should_allow_pipeline_citation_fallback(context):
+            return []
+
+        return self._build_pipeline_outcome_citation_records(cycle)
+
+    def _collect_citation_records_from_observe_corpus(
+        self,
+        cycle: "ResearchCycle",
+        context: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        observe_execution = cycle.phase_executions.get(self.pipeline.ResearchPhase.OBSERVE, {})
+        observe_result = observe_execution.get("result") if isinstance(observe_execution, dict) else {}
+        if not isinstance(observe_result, dict):
+            return []
+
+        corpus_result = observe_result.get("corpus_collection")
+        if not isinstance(corpus_result, dict) or corpus_result.get("error"):
+            return []
+
+        try:
+            text_entries = self.pipeline._extract_corpus_text_entries(corpus_result)
+        except Exception:
+            return []
+
+        if not isinstance(text_entries, list) or not text_entries:
+            return []
+
+        raw_max_records = context.get("max_local_citation_records", 20)
+        try:
+            max_records = max(1, min(int(raw_max_records), 200))
+        except (TypeError, ValueError):
+            max_records = 20
+
+        authors = [
+            str(author).strip()
+            for author in (cycle.researchers or [])
+            if str(author).strip()
+        ] or ["中医古籍研究团队"]
+        context_authors = context.get("citation_authors")
+        if isinstance(context_authors, list):
+            normalized_context_authors = [
+                str(author).strip() for author in context_authors if str(author).strip()
+            ]
+            if normalized_context_authors:
+                authors = normalized_context_authors
+
+        citation_year = context.get("citation_year", datetime.now().year)
+        local_journal = str(context.get("local_citation_journal") or "本地古籍语料库").strip()
+        ctext_journal = str(context.get("ctext_citation_journal") or "ctext 标准语料库").strip()
+        local_publisher = str(context.get("local_citation_publisher") or "中医古籍语料数据集").strip()
+
+        citations: List[Dict[str, Any]] = []
+        seen_keys: set[tuple[str, str]] = set()
+
+        for entry in text_entries:
+            if not isinstance(entry, dict):
+                continue
+
+            source_ref = str(entry.get("urn") or "").strip()
+            source_type = str(entry.get("source_type") or "local").strip().lower()
+            title = str(entry.get("title") or "").strip()
+            if not title and source_ref:
+                title = os.path.splitext(os.path.basename(source_ref))[0].strip()
+            if not title:
+                continue
+
+            dedupe_key = (title, source_ref)
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
+
+            journal = ctext_journal if source_type == "ctext" else local_journal
+            note_segments = ["evidence_type=corpus_document"]
+            if source_ref:
+                note_segments.insert(0, f"source_ref={source_ref}")
+
+            citations.append(
+                {
+                    "title": title,
+                    "authors": authors,
+                    "year": citation_year,
+                    "journal": journal,
+                    "publisher": local_publisher,
+                    "entry_type": "book",
+                    "source": f"{source_type}_corpus" if source_type else "corpus",
+                    "source_type": source_type,
+                    "source_ref": source_ref,
+                    "note": "; ".join(note_segments),
+                }
+            )
+
+            if len(citations) >= max_records:
+                break
+
+        return citations
+
+    def _should_allow_pipeline_citation_fallback(self, context: Dict[str, Any]) -> bool:
+        if "allow_pipeline_citation_fallback" in context:
+            return bool(context.get("allow_pipeline_citation_fallback"))
+
+        publish_config = self.pipeline.config.get("publish", {})
+        return bool(publish_config.get("allow_pipeline_citation_fallback", True))
+
+    def _build_pipeline_outcome_citation_records(self, cycle: "ResearchCycle") -> List[Dict[str, Any]]:
         publications = [
             {
                 "title": outcome.get("result", {}).get("title", "") or outcome.get("result", {}).get("phase", ""),
@@ -217,12 +354,19 @@ class PublishPhaseMixin:
     def _create_paper_writer(self) -> Any:
         paper_config = dict(self.pipeline.config.get("paper_writing") or {})
         try:
-            return self.pipeline.output_port.create_paper_writer(paper_config)
+            paper_writer = self.pipeline.output_port.create_paper_writer(paper_config)
         except Exception:
             paper_writer_cls = PaperWriter or getattr(self.pipeline, "PaperWriter", None)
             if paper_writer_cls is None:
                 raise RuntimeError("PaperWriter 不可用")
-            return paper_writer_cls(paper_config)
+            paper_writer = paper_writer_cls(paper_config)
+
+        if not callable(wrap_paper_writer_with_llm_context):
+            return paper_writer
+        return wrap_paper_writer_with_llm_context(
+            paper_writer,
+            module_aliases=_PUBLISH_LLM_ANALYSIS_MODULE_ALIASES,
+        )
 
     def _create_output_generator(self) -> Any:
         output_config = dict(
@@ -238,7 +382,7 @@ class PublishPhaseMixin:
                 raise RuntimeError("OutputGenerator 不可用")
             return output_generator_cls(output_config)
 
-    def _create_report_generator(self, context: Dict[str, Any] | None = None) -> Any:
+    def _create_report_generator(self, context: Dict[str, Any] | None=None) -> Any:
         report_context = context or {}
         report_config = dict(self.pipeline.config.get("report_generation") or {})
         if report_context.get("report_output_dir"):
@@ -366,6 +510,14 @@ class PublishPhaseMixin:
             }
         elif evidence_grade_summary and not isinstance(research_artifact.get("evidence_grade_summary"), dict):
             research_artifact["evidence_grade_summary"] = evidence_grade_summary
+        llm_analysis_context = self._build_publish_llm_analysis_context(
+            context,
+            analyze_result,
+            analyze_results,
+            structured_payload,
+            research_artifact,
+            research_perspectives,
+        )
         analysis_results_payload = self._compose_publish_analysis_results(
             structured_payload,
             analyze_result,
@@ -375,6 +527,7 @@ class PublishPhaseMixin:
             data_mining_result,
             research_perspectives,
             similar_formula_graph_evidence_summary,
+            llm_analysis_context,
         )
         output_dir = context.get("paper_output_dir") or context.get("output_dir") or os.path.join("output", "papers", cycle.cycle_id)
         output_formats = context.get("paper_output_formats") or context.get("output_formats") or ["markdown", "docx"]
@@ -408,6 +561,7 @@ class PublishPhaseMixin:
             "gap_analysis": experiment_context.get("clinical_gap_analysis") or {},
             "analysis_results": analysis_results_payload,
             "research_artifact": research_artifact,
+            "llm_analysis_context": llm_analysis_context,
             "output_data": structured_payload,
             "quality_metrics": structured_payload.get("quality_metrics") if isinstance(structured_payload, dict) else {},
             "recommendations": structured_payload.get("recommendations") if isinstance(structured_payload, dict) else [],
@@ -416,6 +570,7 @@ class PublishPhaseMixin:
             "output_formats": output_formats,
             "file_stem": context.get("paper_file_stem") or cycle.cycle_name or cycle.cycle_id,
         }
+        paper_context.update(self._resolve_publish_paper_iteration_settings(context))
         if isinstance(context.get("figure_paths"), list):
             paper_context["figure_paths"] = context.get("figure_paths")
         return paper_context
@@ -752,6 +907,7 @@ class PublishPhaseMixin:
         data_mining_result: Dict[str, Any],
         research_perspectives: Dict[str, Any],
         similar_formula_graph_evidence_summary: Dict[str, Any],
+        llm_analysis_context: Dict[str, Any],
     ) -> Dict[str, Any]:
         composed: Dict[str, Any] = {}
         structured_analysis = structured_payload.get("analysis_results") if isinstance(structured_payload, dict) else {}
@@ -791,7 +947,84 @@ class PublishPhaseMixin:
         recommendations = structured_payload.get("recommendations") if isinstance(structured_payload, dict) else None
         if isinstance(recommendations, list) and recommendations:
             composed["recommendations"] = recommendations
+        if llm_analysis_context:
+            composed["llm_analysis_context"] = llm_analysis_context
+            analysis_modules = llm_analysis_context.get("analysis_modules")
+            if isinstance(analysis_modules, dict):
+                for module_name, module_value in analysis_modules.items():
+                    if module_name not in composed:
+                        composed[module_name] = module_value
         return composed
+
+    def _build_publish_llm_analysis_context(
+        self,
+        context: Dict[str, Any],
+        analyze_result: Dict[str, Any],
+        analyze_results: Dict[str, Any],
+        structured_payload: Dict[str, Any],
+        research_artifact: Dict[str, Any],
+        research_perspectives: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        structured_analysis = structured_payload.get("analysis_results") if isinstance(structured_payload, dict) else {}
+        containers: List[Any] = [
+            context,
+            analyze_result,
+            analyze_results,
+            structured_payload,
+            structured_analysis if isinstance(structured_analysis, dict) else {},
+            research_artifact,
+        ]
+
+        modules: Dict[str, Any] = {}
+        for module_name, aliases in _PUBLISH_LLM_ANALYSIS_MODULE_ALIASES.items():
+            module_value = self._resolve_publish_field(containers, aliases)
+            if module_name == "research_perspectives" and module_value is None and research_perspectives:
+                module_value = copy.deepcopy(research_perspectives)
+            modules[module_name] = module_value if module_value is not None else {}
+
+        module_presence = {
+            module_name: self._has_publish_payload(module_value)
+            for module_name, module_value in modules.items()
+        }
+        populated_modules = [
+            module_name
+            for module_name, present in module_presence.items()
+            if present
+        ]
+        return {
+            "contract_version": "llm-analysis-context-v1",
+            "analysis_modules": modules,
+            "module_presence": module_presence,
+            "module_count": len(modules),
+            "populated_module_count": len(populated_modules),
+            "populated_modules": populated_modules,
+        }
+
+    def _resolve_publish_field(
+        self,
+        containers: List[Any],
+        field_names: tuple[str, ...],
+    ) -> Any:
+        for container in containers:
+            if not isinstance(container, dict):
+                continue
+            for field_name in field_names:
+                if field_name not in container:
+                    continue
+                value = container.get(field_name)
+                if value is None:
+                    continue
+                return copy.deepcopy(value)
+        return None
+
+    def _has_publish_payload(self, value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (dict, list, tuple, set)):
+            return bool(value)
+        return True
 
     def _build_publish_reasoning_results(
         self,
@@ -912,6 +1145,45 @@ class PublishPhaseMixin:
         if isinstance(statistical_analysis, dict) and statistical_analysis.get("limitations"):
             return statistical_analysis.get("limitations")
         return []
+
+    def _resolve_publish_paper_iteration_settings(
+        self,
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not isinstance(context, dict):
+            return {}
+
+        resolved: Dict[str, Any] = {}
+        field_aliases = {
+            "enable_iterative_refinement": (
+                "paper_enable_iterative_refinement",
+                "enable_iterative_refinement",
+            ),
+            "max_revision_rounds": (
+                "paper_max_revision_rounds",
+                "max_revision_rounds",
+                "paper_revision_rounds",
+            ),
+            "min_revision_rounds": (
+                "paper_min_revision_rounds",
+                "min_revision_rounds",
+            ),
+            "review_score_threshold": (
+                "paper_review_score_threshold",
+                "review_score_threshold",
+            ),
+            "min_section_characters": (
+                "paper_min_section_characters",
+                "min_section_characters",
+            ),
+        }
+
+        for target_key, aliases in field_aliases.items():
+            for alias in aliases:
+                if alias in context and context.get(alias) is not None:
+                    resolved[target_key] = context.get(alias)
+                    break
+        return resolved
 
     def _resolve_publish_dict_field(
         self,

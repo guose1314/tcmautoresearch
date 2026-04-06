@@ -3,6 +3,7 @@
 from .config_loader import (
     AppSettings,
     ConfigCenter,
+    ConfigManager,
     load_secret_section,
     load_settings,
     load_settings_section,
@@ -31,6 +32,7 @@ __all__ = [
     "AppSettings",
     "Base",
     "ConfigCenter",
+    "ConfigManager",
     "DatabaseManager",
     "Document",
     "Entity",

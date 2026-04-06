@@ -17,6 +17,7 @@ from fastapi.responses import Response, StreamingResponse
 from src.api import websocket as websocket_streaming
 from src.api.dependencies import get_job_manager, require_management_api_key
 from src.api.research_utils import (
+    build_research_dashboard_payload,
     build_artifact_file_response,
     build_markdown_report,
     build_report_stem,
@@ -28,6 +29,7 @@ from src.api.schemas import (
     ResearchJobDeletionResponse,
     ResearchJobListResponse,
     ResearchJobSnapshot,
+    ResearchDashboardResponse,
     ResearchResult,
     ResearchRunRequest,
 )
@@ -39,8 +41,8 @@ router = APIRouter(tags=["research"])
 @router.post("/run")
 def run_research(
     payload: ResearchRunRequest,
-    manager: ResearchJobManager = Depends(get_job_manager),
-    _: None = Depends(require_management_api_key),
+    manager: ResearchJobManager=Depends(get_job_manager),
+    _: None=Depends(require_management_api_key),
 ) -> ResearchResult:
     try:
         return manager.run_sync(normalize_research_request(payload.model_dump()))
@@ -51,8 +53,8 @@ def run_research(
 @router.post("/jobs", status_code=202)
 def create_research_job(
     payload: ResearchRunRequest,
-    manager: ResearchJobManager = Depends(get_job_manager),
-    _: None = Depends(require_management_api_key),
+    manager: ResearchJobManager=Depends(get_job_manager),
+    _: None=Depends(require_management_api_key),
 ) -> ResearchJobAccepted:
     try:
         job = manager.create_job(normalize_research_request(payload.model_dump()))
@@ -72,9 +74,9 @@ def create_research_job(
 
 @router.get("/jobs")
 def list_research_jobs(
-    limit: int = Query(8, ge=1, le=50),
-    manager: ResearchJobManager = Depends(get_job_manager),
-    _: None = Depends(require_management_api_key),
+    limit: int=Query(8, ge=1, le=50),
+    manager: ResearchJobManager=Depends(get_job_manager),
+    _: None=Depends(require_management_api_key),
 ) -> ResearchJobListResponse:
     jobs = manager.list_jobs(limit=limit)
     return {
@@ -87,8 +89,8 @@ def list_research_jobs(
 @router.get("/jobs/{job_id}")
 def get_research_job(
     job_id: str,
-    manager: ResearchJobManager = Depends(get_job_manager),
-    _: None = Depends(require_management_api_key),
+    manager: ResearchJobManager=Depends(get_job_manager),
+    _: None=Depends(require_management_api_key),
 ) -> ResearchJobSnapshot:
     job = manager.get_job(job_id)
     if job is None:
@@ -96,11 +98,23 @@ def get_research_job(
     return job.snapshot()
 
 
+@router.get("/jobs/{job_id}/dashboard")
+def get_research_job_dashboard(
+    job_id: str,
+    manager: ResearchJobManager=Depends(get_job_manager),
+    _: None=Depends(require_management_api_key),
+) -> ResearchDashboardResponse:
+    job = manager.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job 不存在")
+    return build_research_dashboard_payload(job.snapshot())
+
+
 @router.delete("/jobs/{job_id}")
 def delete_research_job(
     job_id: str,
-    manager: ResearchJobManager = Depends(get_job_manager),
-    _: None = Depends(require_management_api_key),
+    manager: ResearchJobManager=Depends(get_job_manager),
+    _: None=Depends(require_management_api_key),
 ) -> ResearchJobDeletionResponse:
     try:
         return manager.delete_job(job_id)
@@ -115,9 +129,9 @@ def delete_research_job(
 @router.get("/jobs/{job_id}/report")
 def export_research_job_report(
     job_id: str,
-    report_format: str = Query("auto", alias="format"),
-    manager: ResearchJobManager = Depends(get_job_manager),
-    _: None = Depends(require_management_api_key),
+    report_format: str=Query("auto", alias="format"),
+    manager: ResearchJobManager=Depends(get_job_manager),
+    _: None=Depends(require_management_api_key),
 ) -> Response:
     job = manager.get_job(job_id)
     if job is None:
@@ -150,8 +164,8 @@ def export_research_job_report(
 @router.get("/jobs/{job_id}/events")
 def stream_research_job(
     job_id: str,
-    manager: ResearchJobManager = Depends(get_job_manager),
-    _: None = Depends(require_management_api_key),
+    manager: ResearchJobManager=Depends(get_job_manager),
+    _: None=Depends(require_management_api_key),
 ) -> StreamingResponse:
     job = manager.get_job(job_id)
     if job is None:

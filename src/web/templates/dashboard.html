@@ -4,12 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>主控台 — 中医智慧科研平台</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script
-      defer
-      src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"
-    ></script>
-    <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.9.12/dist/htmx.min.js"></script>
+    <script src="/static/js/tailwind.min.js"></script>
+    <script defer src="/static/js/alpine.min.js"></script>
+    <script src="/static/js/htmx.min.js"></script>
     <style>
       [x-cloak] {
         display: none !important;
@@ -117,124 +114,163 @@
         <!-- ---- Dashboard Tab ---- -->
         <template x-if="activeTab === 'dashboard'">
           <div class="space-y-6">
-            <!-- Stats Row -->
+            <!-- Stats Row (multi-row from backend) -->
             <div
-              class="grid grid-cols-2 lg:grid-cols-4 gap-4"
               hx-get="/api/dashboard/stats"
               hx-trigger="load"
               hx-target="#stats-container"
               hx-indicator="#stats-loading"
             >
-              <div id="stats-container" class="contents">
-                <div
-                  class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
-                >
-                  <p class="text-xs text-gray-500 uppercase tracking-wide">
-                    进行中项目
-                  </p>
-                  <p class="text-2xl font-bold text-gray-800 mt-1">—</p>
-                </div>
-                <div
-                  class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
-                >
-                  <p class="text-xs text-gray-500 uppercase tracking-wide">
-                    文献总量
-                  </p>
-                  <p class="text-2xl font-bold text-gray-800 mt-1">—</p>
-                </div>
-                <div
-                  class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
-                >
-                  <p class="text-xs text-gray-500 uppercase tracking-wide">
-                    知识实体
-                  </p>
-                  <p class="text-2xl font-bold text-gray-800 mt-1">—</p>
-                </div>
-                <div
-                  class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
-                >
-                  <p class="text-xs text-gray-500 uppercase tracking-wide">
-                    质量均分
-                  </p>
-                  <p class="text-2xl font-bold text-emerald-600 mt-1">—</p>
+              <div id="stats-container">
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div
+                    class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
+                  >
+                    <p class="text-xs text-gray-500 uppercase tracking-wide">
+                      加载中…
+                    </p>
+                    <p class="text-2xl font-bold text-gray-300 mt-1">—</p>
+                  </div>
+                  <div
+                    class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
+                  >
+                    <p class="text-xs text-gray-500 uppercase tracking-wide">
+                      加载中…
+                    </p>
+                    <p class="text-2xl font-bold text-gray-300 mt-1">—</p>
+                  </div>
+                  <div
+                    class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
+                  >
+                    <p class="text-xs text-gray-500 uppercase tracking-wide">
+                      加载中…
+                    </p>
+                    <p class="text-2xl font-bold text-gray-300 mt-1">—</p>
+                  </div>
+                  <div
+                    class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
+                  >
+                    <p class="text-xs text-gray-500 uppercase tracking-wide">
+                      加载中…
+                    </p>
+                    <p class="text-2xl font-bold text-gray-300 mt-1">—</p>
+                  </div>
                 </div>
               </div>
               <div
                 id="stats-loading"
-                class="htmx-indicator col-span-full text-center text-sm text-gray-400"
+                class="htmx-indicator text-center text-sm text-gray-400 py-2"
               >
                 加载中…
               </div>
             </div>
 
-            <!-- Current Projects -->
-            <section
-              class="bg-white rounded-xl shadow-sm border border-gray-100"
+            <!-- Research Workflow Pipeline -->
+            <div
+              hx-get="/api/dashboard/research-workflow"
+              hx-trigger="load"
+              hx-target="#workflow-container"
+              hx-indicator="#workflow-loading"
             >
+              <div id="workflow-container">
+                <div
+                  class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
+                >
+                  <h2 class="font-semibold text-gray-800 mb-2">
+                    🔬 科研论文书写流程
+                  </h2>
+                  <p class="text-sm text-gray-400">加载研究管线…</p>
+                </div>
+              </div>
               <div
-                class="px-5 py-4 border-b border-gray-100 flex items-center justify-between"
+                id="workflow-loading"
+                class="htmx-indicator text-center text-sm text-gray-400 py-2"
               >
-                <h2 class="font-semibold text-gray-800">当前项目操作</h2>
-                <button
-                  class="text-sm text-emerald-600 hover:text-emerald-800 font-medium"
+                加载中…
+              </div>
+            </div>
+
+            <!-- Current Projects + Quality side by side -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <!-- Recent Research Sessions -->
+              <section
+                class="bg-white rounded-xl shadow-sm border border-gray-100"
+              >
+                <div
+                  class="px-5 py-4 border-b border-gray-100 flex items-center justify-between"
+                >
+                  <h2 class="font-semibold text-gray-800">📋 最近研究课题</h2>
+                  <button
+                    class="text-sm text-emerald-600 hover:text-emerald-800 font-medium"
+                    hx-get="/api/projects/recent"
+                    hx-target="#projects-list"
+                    hx-indicator="#proj-loading"
+                  >
+                    刷新
+                  </button>
+                </div>
+                <div
+                  id="projects-list"
+                  class="divide-y divide-gray-50"
                   hx-get="/api/projects/recent"
-                  hx-target="#projects-list"
+                  hx-trigger="load"
+                  hx-target="this"
                   hx-indicator="#proj-loading"
                 >
-                  刷新
-                </button>
-              </div>
-              <div id="projects-list" class="divide-y divide-gray-50">
-                <div class="px-5 py-8 text-center text-sm text-gray-400">
-                  暂无进行中的项目，点击 "科研项目" 创建新项目
+                  <div class="px-5 py-8 text-center text-sm text-gray-400">
+                    加载研究记录…
+                  </div>
                 </div>
-              </div>
-              <div
-                id="proj-loading"
-                class="htmx-indicator text-center text-sm text-gray-400 py-2"
-              >
-                加载中…
-              </div>
-            </section>
+                <div
+                  id="proj-loading"
+                  class="htmx-indicator text-center text-sm text-gray-400 py-2"
+                >
+                  加载中…
+                </div>
+              </section>
 
-            <!-- Quality Score -->
-            <section
-              class="bg-white rounded-xl shadow-sm border border-gray-100"
-              hx-get="/api/dashboard/quality"
-              hx-trigger="load"
-              hx-target="#quality-content"
-              hx-indicator="#quality-loading"
-            >
-              <div class="px-5 py-4 border-b border-gray-100">
-                <h2 class="font-semibold text-gray-800">质量评分概览</h2>
-              </div>
-              <div id="quality-content" class="px-5 py-6">
-                <div class="flex items-center gap-4">
-                  <div
-                    class="w-20 h-20 rounded-full border-4 border-emerald-500 flex items-center justify-center"
-                  >
-                    <span class="text-xl font-bold text-emerald-700">—</span>
-                  </div>
-                  <div class="text-sm text-gray-500 space-y-1">
-                    <p>
-                      完整性：<span class="text-gray-700 font-medium">—</span>
-                    </p>
-                    <p>
-                      准确性：<span class="text-gray-700 font-medium">—</span>
-                    </p>
-                    <p>
-                      可追溯性：<span class="text-gray-700 font-medium">—</span>
-                    </p>
+              <!-- Quality Score -->
+              <section
+                class="bg-white rounded-xl shadow-sm border border-gray-100"
+                hx-get="/api/dashboard/quality"
+                hx-trigger="load"
+                hx-target="#quality-content"
+                hx-indicator="#quality-loading"
+              >
+                <div class="px-5 py-4 border-b border-gray-100">
+                  <h2 class="font-semibold text-gray-800">质量评分概览</h2>
+                </div>
+                <div id="quality-content" class="px-5 py-6">
+                  <div class="flex items-center gap-4">
+                    <div
+                      class="w-20 h-20 rounded-full border-4 border-emerald-500 flex items-center justify-center"
+                    >
+                      <span class="text-xl font-bold text-emerald-700">—</span>
+                    </div>
+                    <div class="text-sm text-gray-500 space-y-1">
+                      <p>
+                        完整性：<span class="text-gray-700 font-medium">—</span>
+                      </p>
+                      <p>
+                        准确性：<span class="text-gray-700 font-medium">—</span>
+                      </p>
+                      <p>
+                        可追溯性：<span class="text-gray-700 font-medium"
+                          >—</span
+                        >
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div
-                id="quality-loading"
-                class="htmx-indicator text-center text-sm text-gray-400 py-2"
-              >
-                加载中…
-              </div>
-            </section>
+                <div
+                  id="quality-loading"
+                  class="htmx-indicator text-center text-sm text-gray-400 py-2"
+                >
+                  加载中…
+                </div>
+              </section>
+            </div>
+            <!-- close grid-cols-2 for projects + quality -->
 
             <!-- Quick Access -->
             <section>

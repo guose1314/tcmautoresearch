@@ -16,7 +16,7 @@ async def stream_job_events_over_websocket(websocket: WebSocket, job_id: str) ->
     try:
         verify_management_api_key_for_websocket(websocket)
     except HTTPException:
-        await websocket.close(code=4401, reason="缺少或无效的管理 API Key")
+        await websocket.close(code=4401, reason="缺少或无效的认证凭据")
         return
 
     manager = getattr(websocket.app.state, "job_manager", None)

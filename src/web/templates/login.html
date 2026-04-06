@@ -4,26 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>登录 — 中医智慧科研平台</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script
-      defer
-      src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"
-    ></script>
+    <script src="/static/js/tailwind.min.js"></script>
+    <script defer src="/static/js/alpine.min.js"></script>
     <style>
       [x-cloak] {
         display: none !important;
       }
     </style>
+    <noscript
+      ><style>
+        [x-cloak] {
+          display: block !important;
+        }
+      </style></noscript
+    >
   </head>
   <body
     class="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 flex items-center justify-center"
   >
-    <div
-      x-data="loginApp()"
-      x-init="init()"
-      x-cloak
-      class="w-full max-w-md px-6"
-    >
+    <div x-data="loginApp()" x-cloak class="w-full max-w-md px-6">
       <!-- Card -->
       <div class="bg-white rounded-2xl shadow-xl p-8 space-y-6">
         <!-- Logo / Title -->

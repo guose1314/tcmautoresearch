@@ -5,6 +5,8 @@ tests/test_ai_assistant.py
 """
 from __future__ import annotations
 
+import sys
+import types
 from unittest.mock import MagicMock
 
 import pytest
@@ -172,3 +174,25 @@ class TestNoLLMFallback:
         eng = AssistantEngine(llm_engine=mock_llm)
         result = eng.chat("问题")
         assert "错误" in result["reply"] or "Error" in result["reply"]
+
+    def test_failed_lazy_load_does_not_cache_unloaded_engine(self, monkeypatch):
+        """惰性加载失败后，不应缓存未初始化引擎对象。"""
+
+        class _BrokenLLMEngine:
+            def load(self):
+                raise RuntimeError("load failed")
+
+            def generate(self, prompt, system_prompt=""):
+                raise RuntimeError("should not be called")
+
+        fake_module = types.ModuleType("src.llm.llm_engine")
+        fake_module.LLMEngine = _BrokenLLMEngine
+        monkeypatch.setitem(sys.modules, "src.llm.llm_engine", fake_module)
+
+        eng = AssistantEngine(llm_engine=None)
+        first = eng._get_llm()
+        assert first is None
+        assert eng._llm is None
+
+        result = eng.chat("问题")
+        assert "尚未加载" in result["reply"]

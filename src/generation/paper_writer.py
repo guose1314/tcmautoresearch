@@ -41,6 +41,30 @@ _BIAS_LABELS_ZH = {
     "moderate": "中等",
     "high": "高",
 }
+_LLM_ANALYSIS_MODULE_ALIASES: Dict[str, tuple[str, ...]] = {
+    "research_perspectives": ("research_perspectives",),
+    "formula_comparisons": ("formula_comparisons",),
+    "herb_properties_analysis": ("herb_properties_analysis", "herb_properties"),
+    "pharmacology_integration": ("pharmacology_integration",),
+    "network_pharmacology": ("network_pharmacology", "network_pharmacology_systems_biology"),
+    "supramolecular_physicochemistry": ("supramolecular_physicochemistry",),
+    "knowledge_archaeology": ("knowledge_archaeology",),
+    "complexity_dynamics": ("complexity_dynamics", "complexity_nonlinear_dynamics"),
+    "research_scoring_panel": ("research_scoring_panel",),
+    "summary_analysis": ("summary_analysis",),
+}
+_LLM_ANALYSIS_MODULE_LABELS_ZH = {
+    "research_perspectives": "研究视角",
+    "formula_comparisons": "方剂比较",
+    "herb_properties_analysis": "药性分析",
+    "pharmacology_integration": "药理整合",
+    "network_pharmacology": "网络药理学",
+    "supramolecular_physicochemistry": "超分子理化",
+    "knowledge_archaeology": "知识考古",
+    "complexity_dynamics": "复杂性动力学",
+    "research_scoring_panel": "研究评分",
+    "summary_analysis": "总结分析",
+}
 
 
 @dataclass
@@ -77,7 +101,7 @@ class PaperDraft:
 class PaperWriter(BaseModule):
     """论文撰写器 — 生成 IMRD 结构论文初稿。"""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]]=None):
         super().__init__("paper_writer", config)
         self.output_dir = os.path.abspath(str(self.config.get("output_dir", "output/papers")))
         self.language = str(self.config.get("language", "zh")).lower()
@@ -87,6 +111,14 @@ class PaperWriter(BaseModule):
         self.include_conclusion = bool(self.config.get("include_conclusion", True))
         self.reference_format = str(self.config.get("reference_format", "GB/T 7714-2015"))
         self.embed_figures = bool(self.config.get("embed_figures", False))
+        self.enable_iterative_refinement = bool(self.config.get("enable_iterative_refinement", True))
+        self.max_revision_rounds = self._coerce_iteration_limit(self.config.get("max_revision_rounds", 2))
+        self.min_revision_rounds = self._coerce_iteration_limit(
+            self.config.get("min_revision_rounds", 1),
+            upper=self.max_revision_rounds,
+        )
+        self.review_score_threshold = self._coerce_score_threshold(self.config.get("review_score_threshold", 0.86))
+        self.min_section_characters = max(120, self._coerce_iteration_limit(self.config.get("min_section_characters", 220), maximum=2000))
         self._Document: Any = None
         self._DocumentType: Any = None
         self._WD_ALIGN_CENTER: Any = None
@@ -114,17 +146,23 @@ class PaperWriter(BaseModule):
         return True
 
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        draft = self.build_draft(context)
+        initial_draft = self.build_draft(context)
+        draft, iteration_history, review_summary = self._run_iterative_refinement(initial_draft, context)
         formats = self._normalize_formats(context.get("output_formats") or context.get("output_format") or self.default_formats)
         output_files = self.export_draft(draft, formats=formats, context=context)
         return {
             "success": True,
             "paper_draft": draft.to_dict(),
+            "initial_paper_draft": initial_draft.to_dict(),
             "output_files": output_files,
             "section_count": len(draft.sections),
             "reference_count": len(draft.references),
             "figure_count": len(self._resolve_figure_paths(context)),
             "language": draft.metadata.get("language", self.language),
+            "iteration_count": int(review_summary.get("rounds_completed") or 0),
+            "final_review_score": float(review_summary.get("final_score") or 0.0),
+            "iteration_history": iteration_history,
+            "review_summary": review_summary,
         }
 
     def _do_cleanup(self) -> bool:
@@ -162,6 +200,7 @@ class PaperWriter(BaseModule):
             "affiliation": str(context.get("affiliation") or "").strip(),
             "journal": str(context.get("journal") or "").strip(),
             "figure_paths": self._resolve_figure_paths(context),
+            "section_overrides": sorted(section_overrides.keys()),
         }
         return PaperDraft(
             title=title,
@@ -173,11 +212,365 @@ class PaperWriter(BaseModule):
             metadata=metadata,
         )
 
+    def _run_iterative_refinement(
+        self,
+        draft: PaperDraft,
+        context: Dict[str, Any],
+    ) -> tuple[PaperDraft, List[Dict[str, Any]], Dict[str, Any]]:
+        enabled_flag = context.get("enable_iterative_refinement")
+        enabled = self.enable_iterative_refinement if enabled_flag is None else bool(enabled_flag)
+        if not enabled:
+            return (
+                draft,
+                [],
+                {
+                    "enabled": False,
+                    "rounds_completed": 0,
+                    "max_rounds": 0,
+                    "min_rounds": 0,
+                    "score_threshold": self.review_score_threshold,
+                    "final_score": 0.0,
+                    "accepted": True,
+                    "issue_overview": [],
+                },
+            )
+
+        max_rounds = self._coerce_iteration_limit(
+            context.get("max_revision_rounds") or context.get("paper_revision_rounds") or self.max_revision_rounds,
+        )
+        min_rounds = self._coerce_iteration_limit(
+            context.get("min_revision_rounds") or self.min_revision_rounds,
+            upper=max_rounds,
+        )
+        score_threshold = self._coerce_score_threshold(
+            context.get("review_score_threshold") if context.get("review_score_threshold") is not None else self.review_score_threshold
+        )
+
+        current_draft = self._clone_draft(draft)
+        history: List[Dict[str, Any]] = []
+
+        for round_index in range(1, max_rounds + 1):
+            review = self._review_draft(current_draft, context, round_index)
+            score = float(review.get("score") or 0.0)
+            should_continue = (
+                round_index < max_rounds
+                and (score < score_threshold or round_index < min_rounds)
+            )
+
+            applied_revisions: List[str] = []
+            decision = "accept"
+            if should_continue:
+                current_draft, applied_revisions = self._revise_draft(
+                    current_draft,
+                    context,
+                    review,
+                    round_index,
+                )
+                decision = "revise"
+
+            history.append(
+                {
+                    "round": round_index,
+                    "score": round(score, 3),
+                    "metrics": review.get("metrics", {}),
+                    "issues": review.get("issues", []),
+                    "suggestions": review.get("suggestions", []),
+                    "decision": decision,
+                    "applied_revisions": applied_revisions,
+                }
+            )
+
+            if not should_continue:
+                break
+
+        final_score = float(history[-1].get("score") or 0.0) if history else 0.0
+        summary = {
+            "enabled": True,
+            "rounds_completed": len(history),
+            "max_rounds": max_rounds,
+            "min_rounds": min_rounds,
+            "score_threshold": score_threshold,
+            "final_score": round(final_score, 3),
+            "accepted": final_score >= score_threshold,
+            "issue_overview": self._summarize_review_issues(history),
+        }
+        metadata = dict(current_draft.metadata)
+        metadata["review_summary"] = summary
+        metadata["iteration_history"] = history
+        current_draft.metadata = metadata
+        return current_draft, history, summary
+
+    def _review_draft(
+        self,
+        draft: PaperDraft,
+        context: Dict[str, Any],
+        round_index: int,
+    ) -> Dict[str, Any]:
+        language = str(draft.metadata.get("language") or context.get("language") or self.language or "zh").lower()
+        expected_sections = [item for item in _SECTION_ORDER if item != "conclusion" or self.include_conclusion]
+        section_map = {section.section_type: section for section in draft.sections}
+        missing_sections = [item for item in expected_sections if item not in section_map]
+        short_sections = [
+            section.section_type
+            for section in draft.sections
+            if len(str(section.content or "").strip()) < self.min_section_characters
+        ]
+        abstract_length = len(str(draft.abstract or "").strip())
+        reference_count = len([ref for ref in draft.references if str(ref or "").strip()])
+        keyword_count = len([keyword for keyword in draft.keywords if str(keyword or "").strip()])
+
+        structure_score = max(0.0, 1.0 - len(missing_sections) / max(1, len(expected_sections)))
+        depth_score = max(0.0, 1.0 - len(short_sections) / max(1, len(draft.sections)))
+        abstract_score = min(1.0, abstract_length / float(self._minimum_abstract_characters(language)))
+        reference_target = 5 if language == "en" else 4
+        reference_score = min(1.0, reference_count / float(reference_target))
+        keyword_score = min(1.0, keyword_count / 4.0)
+
+        score = round(
+            0.30 * structure_score
+            +0.30 * depth_score
+            +0.20 * abstract_score
+            +0.15 * reference_score
+            +0.05 * keyword_score,
+            3,
+        )
+
+        issues: List[Dict[str, Any]] = []
+        suggestions: List[str] = []
+        if missing_sections:
+            issues.append({"code": "missing_sections", "detail": missing_sections})
+            if language == "en":
+                suggestions.append("Add missing IMRD sections to complete manuscript structure.")
+            else:
+                suggestions.append("补全缺失章节，确保 IMRD 结构完整。")
+        if short_sections:
+            issues.append({"code": "short_sections", "detail": short_sections})
+            if language == "en":
+                suggestions.append("Expand short sections with clearer methods, evidence chains, and interpretation details.")
+            else:
+                suggestions.append("扩展过短章节，补充方法细节、证据链和解释逻辑。")
+        if abstract_length < self._minimum_abstract_characters(language):
+            issues.append({"code": "abstract_too_short", "detail": abstract_length})
+            if language == "en":
+                suggestions.append("Regenerate abstract to include background, methods, key results, and conclusion.")
+            else:
+                suggestions.append("重写摘要，补全背景、方法、核心结果和结论信息。")
+        if reference_count < 2:
+            issues.append({"code": "insufficient_references", "detail": reference_count})
+            if language == "en":
+                suggestions.append("Increase reference coverage to support claims in results and discussion.")
+            else:
+                suggestions.append("补充参考文献覆盖，支撑结果与讨论中的关键论断。")
+        if keyword_count < 3:
+            issues.append({"code": "insufficient_keywords", "detail": keyword_count})
+            if language == "en":
+                suggestions.append("Add at least three representative keywords for indexing.")
+            else:
+                suggestions.append("补充至少 3 个代表性关键词，提升检索与索引质量。")
+
+        return {
+            "round": round_index,
+            "score": score,
+            "metrics": {
+                "structure_score": round(structure_score, 3),
+                "depth_score": round(depth_score, 3),
+                "abstract_score": round(abstract_score, 3),
+                "reference_score": round(reference_score, 3),
+                "keyword_score": round(keyword_score, 3),
+                "missing_sections": missing_sections,
+                "short_sections": short_sections,
+                "abstract_length": abstract_length,
+                "reference_count": reference_count,
+                "keyword_count": keyword_count,
+            },
+            "issues": issues,
+            "suggestions": suggestions,
+        }
+
+    def _revise_draft(
+        self,
+        draft: PaperDraft,
+        context: Dict[str, Any],
+        review: Dict[str, Any],
+        round_index: int,
+    ) -> tuple[PaperDraft, List[str]]:
+        revised = self._clone_draft(draft)
+        language = str(revised.metadata.get("language") or context.get("language") or self.language or "zh").lower()
+        raw_metrics = review.get("metrics") if isinstance(review, dict) else None
+        metrics: Dict[str, Any] = raw_metrics if isinstance(raw_metrics, dict) else {}
+        short_sections = set(metrics.get("short_sections") or [])
+        missing_sections = list(metrics.get("missing_sections") or [])
+        protected_sections = set(revised.metadata.get("section_overrides") or [])
+        applied: List[str] = []
+
+        for section in revised.sections:
+            if section.section_type not in short_sections or section.section_type in protected_sections:
+                continue
+            addition = self._build_revision_paragraph(section.section_type, context, language, round_index)
+            if not addition:
+                continue
+            section.content = f"{str(section.content or '').rstrip()}\n\n{addition}".strip()
+            applied.append(f"扩展章节: {section.section_type}")
+
+        for section_type in missing_sections:
+            if section_type == "conclusion" and not self.include_conclusion:
+                continue
+            content = self._generate_section_content(section_type, context, revised.title, language, revised.references)
+            if len(str(content or "").strip()) < self.min_section_characters:
+                addition = self._build_revision_paragraph(section_type, context, language, round_index)
+                content = f"{str(content or '').strip()}\n\n{addition}".strip() if addition else str(content or "").strip()
+            revised.sections.append(
+                PaperSection(
+                    section_type=section_type,
+                    title=self._section_title(section_type, language),
+                    content=content,
+                    references=self._section_reference_markers(section_type, revised.references),
+                )
+            )
+            applied.append(f"补全章节: {section_type}")
+
+        if missing_sections:
+            revised.sections = self._sort_sections_by_order(revised.sections)
+
+        if int(metrics.get("abstract_length") or 0) < self._minimum_abstract_characters(language):
+            revised_abstract_context = {**context, "abstract": ""}
+            revised.abstract = self._resolve_abstract(revised_abstract_context, revised.title, revised.sections, language)
+            applied.append("重写摘要")
+
+        if int(metrics.get("reference_count") or 0) < 2:
+            candidates = self._resolve_references(context)
+            merged_references = list(revised.references)
+            for item in candidates:
+                text = str(item or "").strip()
+                if text and text not in merged_references:
+                    merged_references.append(text)
+            if len(merged_references) > len(revised.references):
+                revised.references = merged_references
+                applied.append("补充参考文献")
+
+        if int(metrics.get("keyword_count") or 0) < 3:
+            keyword_candidates = self._resolve_keywords(context)
+            merged_keywords = list(revised.keywords)
+            for item in keyword_candidates:
+                text = str(item or "").strip()
+                if text and text not in merged_keywords:
+                    merged_keywords.append(text)
+            if len(merged_keywords) > len(revised.keywords):
+                revised.keywords = merged_keywords[:8]
+                applied.append("补充关键词")
+
+        if not applied and revised.sections:
+            section = next(
+                (item for item in revised.sections if item.section_type not in protected_sections),
+                revised.sections[0],
+            )
+            addition = self._build_revision_paragraph(section.section_type, context, language, round_index)
+            if addition:
+                section.content = f"{str(section.content or '').rstrip()}\n\n{addition}".strip()
+                applied.append(f"增强章节: {section.section_type}")
+
+        updated_metadata = dict(revised.metadata)
+        updated_metadata["last_revision_round"] = round_index
+        updated_metadata["last_revision_actions"] = applied
+        updated_metadata["last_revision_at"] = datetime.now().isoformat()
+        revised.metadata = updated_metadata
+        return revised, applied
+
+    def _summarize_review_issues(self, history: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        bucket: Dict[str, int] = {}
+        for entry in history:
+            for issue in entry.get("issues") or []:
+                code = str((issue or {}).get("code") or "unknown")
+                bucket[code] = bucket.get(code, 0) + 1
+        return [
+            {"code": code, "count": count}
+            for code, count in sorted(bucket.items(), key=lambda item: (-item[1], item[0]))
+        ]
+
+    def _build_revision_paragraph(
+        self,
+        section_type: str,
+        context: Dict[str, Any],
+        language: str,
+        round_index: int,
+    ) -> str:
+        objective = str(context.get("objective") or "提升论文证据表达质量").strip()
+        if language == "en":
+            templates_en = {
+                "introduction": f"Revision round {round_index} enriches the background rationale around {objective}, clarifies unresolved evidence gaps, and strengthens the problem statement.",
+                "methods": f"Revision round {round_index} expands methodological transparency, including data-source selection, analysis workflow, and quality-control checkpoints.",
+                "results": f"Revision round {round_index} adds clearer result interpretation, linking extracted evidence with statistical and mining outcomes for reproducibility.",
+                "discussion": f"Revision round {round_index} broadens implication analysis, highlights limitations, and aligns findings with downstream validation priorities.",
+                "conclusion": f"Revision round {round_index} refines the concluding claims to match reported evidence scope and practical manuscript deliverables.",
+            }
+            return templates_en.get(section_type, f"Revision round {round_index} enhances the {section_type} section by improving evidence coherence and narrative completeness.")
+
+        templates_zh = {
+            "introduction": f"第 {round_index} 轮修订补充了研究背景与问题界定，围绕“{objective}”进一步明确证据缺口与研究动机。",
+            "methods": f"第 {round_index} 轮修订细化了方法流程，补充了数据来源选择依据、分析步骤和质量控制要点。",
+            "results": f"第 {round_index} 轮修订强化了结果阐释，将证据抽取、统计分析与数据挖掘结果进行对应说明。",
+            "discussion": f"第 {round_index} 轮修订完善了讨论深度，补充了局限性说明与后续验证方向。",
+            "conclusion": f"第 {round_index} 轮修订收敛了结论表达，使结论与证据范围、研究目标及交付产物保持一致。",
+        }
+        return templates_zh.get(section_type, f"第 {round_index} 轮修订增强了本节叙事完整性，补充了证据链说明与关键结论支撑。")
+
+    def _clone_draft(self, draft: PaperDraft) -> PaperDraft:
+        return PaperDraft(
+            title=draft.title,
+            abstract=draft.abstract,
+            keywords=list(draft.keywords),
+            sections=[
+                PaperSection(
+                    section_type=section.section_type,
+                    title=section.title,
+                    content=section.content,
+                    references=list(section.references),
+                )
+                for section in draft.sections
+            ],
+            references=list(draft.references),
+            output_format=draft.output_format,
+            metadata=dict(draft.metadata),
+        )
+
+    def _sort_sections_by_order(self, sections: Sequence[PaperSection]) -> List[PaperSection]:
+        order_map = {name: index for index, name in enumerate(_SECTION_ORDER)}
+        return sorted(
+            list(sections),
+            key=lambda item: (order_map.get(item.section_type, len(order_map)), item.section_type),
+        )
+
+    def _minimum_abstract_characters(self, language: str) -> int:
+        return 320 if language == "en" else 180
+
+    def _coerce_iteration_limit(
+        self,
+        value: Any,
+        *,
+        minimum: int=1,
+        maximum: int=6,
+        upper: Optional[int]=None,
+    ) -> int:
+        if upper is not None:
+            maximum = min(maximum, max(minimum, int(upper)))
+        try:
+            coerced = int(value)
+        except (TypeError, ValueError):
+            coerced = minimum
+        return max(minimum, min(maximum, coerced))
+
+    def _coerce_score_threshold(self, value: Any) -> float:
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            score = 0.86
+        return max(0.0, min(1.0, score))
+
     def export_draft(
         self,
         draft: PaperDraft,
         formats: Sequence[str],
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[Dict[str, Any]]=None,
     ) -> Dict[str, str]:
         exec_context = context or {}
         output_dir = os.path.abspath(str(exec_context.get("output_dir") or self.output_dir))
@@ -470,6 +863,7 @@ class PaperWriter(BaseModule):
         analysis_results = self._resolve_analysis_results(context)
         statistical_analysis = self._resolve_statistical_analysis(context)
         evidence_grade_summary = self._resolve_evidence_grade_summary(context)
+        llm_analysis_modules = self._resolve_llm_analysis_modules(context, analysis_results)
         rule_count = len(mining.get("association_rules", {}).get("rules", []) or [])
         cluster_summary = list(mining.get("clustering", {}).get("cluster_summary", []) or [])
         figure_paths = self._resolve_figure_paths(context)
@@ -477,6 +871,7 @@ class PaperWriter(BaseModule):
         graph_evidence_section = self._build_similar_formula_graph_evidence_section(context, language)
         analysis_note = self._build_analysis_result_note(language, statistical_analysis, analysis_results)
         evidence_grade_note = self._build_evidence_grade_result_note(language, evidence_grade_summary)
+        llm_context_note = self._build_llm_analysis_context_note(language, llm_analysis_modules)
         top_cluster_text = ""
         if cluster_summary:
             first_cluster = cluster_summary[0]
@@ -487,13 +882,13 @@ class PaperWriter(BaseModule):
             base = (
                 f"The integrated workflow identified {len(entities)} entities and consolidated {len(evidence)} evidence records. "
                 f"Data mining yielded {rule_count} association rules and {len(cluster_summary)} cluster summaries. "
-                f"{top_cluster_text or ''} {analysis_note} {evidence_grade_note} {('Figures were generated to support the narrative interpretation.' if figure_paths else '')}".strip()
+                f"{top_cluster_text or ''} {analysis_note} {evidence_grade_note} {llm_context_note} {('Figures were generated to support the narrative interpretation.' if figure_paths else '')}".strip()
             )
             return f"{base}\n\n{graph_evidence_section}".strip() if graph_evidence_section else base
         base = (
             f"研究结果显示，当前流程共汇总 {len(entities)} 个核心实体、{len(evidence)} 条证据记录。"
             f"数据挖掘模块进一步识别出 {rule_count} 条关联规则和 {len(cluster_summary)} 个聚类摘要。"
-            f"{top_cluster_text}{analysis_note}{evidence_grade_note}{figure_note} 这些结果为后续结果展示、图表引用和讨论部分的证据解释提供了结构化支撑。"
+            f"{top_cluster_text}{analysis_note}{evidence_grade_note}{llm_context_note}{figure_note} 这些结果为后续结果展示、图表引用和讨论部分的证据解释提供了结构化支撑。"
         )
         return f"{base}\n\n{graph_evidence_section}".strip() if graph_evidence_section else base
 
@@ -541,6 +936,7 @@ class PaperWriter(BaseModule):
         quality_metrics = self._resolve_quality_metrics(context)
         recommendations = self._resolve_recommendations(context)
         evidence_grade_summary = self._resolve_evidence_grade_summary(context)
+        llm_analysis_modules = self._resolve_llm_analysis_modules(context)
         association_rules = list(mining.get("association_rules", {}).get("rules", []) or [])
         high_rule = association_rules[0] if association_rules else None
         rule_text = ""
@@ -555,14 +951,15 @@ class PaperWriter(BaseModule):
         hypothesis_audit_text = self._build_hypothesis_audit_text(context, language)
         evidence_grade_text = self._build_evidence_grade_discussion_text(language, evidence_grade_summary)
         quality_text = self._build_quality_discussion_text(language, quality_metrics, recommendations)
+        llm_discussion_text = self._build_llm_analysis_discussion_text(language, llm_analysis_modules)
         if language == "en":
             return (
                 f"The manuscript draft suggests that integrated evidence processing can improve coherence between classical knowledge and modern analysis. "
-                f"{rule_text} {hypothesis_text}{hypothesis_audit_text}{evidence_grade_text}{quality_text} A key limitation is that {limitation}"
+                f"{rule_text} {hypothesis_text}{hypothesis_audit_text}{evidence_grade_text}{quality_text}{llm_discussion_text} A key limitation is that {limitation}"
             )
         return (
             f"讨论部分表明，将古籍知识、现代文献与结构化分析结果整合到统一写作框架中，有助于提升科研叙事的一致性与可追溯性。"
-            f"{rule_text}{hypothesis_text}{hypothesis_audit_text}{evidence_grade_text}{quality_text}{limitation} 因此，本初稿更适合作为投稿前的研究骨架和专家协作底稿，而非最终定稿。"
+            f"{rule_text}{hypothesis_text}{hypothesis_audit_text}{evidence_grade_text}{quality_text}{llm_discussion_text}{limitation} 因此，本初稿更适合作为投稿前的研究骨架和专家协作底稿，而非最终定稿。"
         )
 
     def _build_conclusion(
@@ -796,6 +1193,136 @@ class PaperWriter(BaseModule):
                 return nested
         return {}
 
+    def _resolve_llm_analysis_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        direct = context.get("llm_analysis_context")
+        if isinstance(direct, dict) and direct:
+            return direct
+
+        analysis_results = self._resolve_analysis_results(context)
+        nested = analysis_results.get("llm_analysis_context") if isinstance(analysis_results, dict) else None
+        if isinstance(nested, dict) and nested:
+            return nested
+        return {}
+
+    def _resolve_llm_analysis_modules(
+        self,
+        context: Dict[str, Any],
+        analysis_results: Optional[Dict[str, Any]]=None,
+    ) -> Dict[str, Any]:
+        if analysis_results is None:
+            analysis_results = self._resolve_analysis_results(context)
+
+        llm_analysis_context = self._resolve_llm_analysis_context(context)
+        direct_modules = llm_analysis_context.get("analysis_modules") if isinstance(llm_analysis_context, dict) else None
+
+        containers: List[Any] = [
+            direct_modules,
+            context,
+            analysis_results,
+        ]
+        research_artifact = context.get("research_artifact")
+        if isinstance(research_artifact, dict):
+            containers.append(research_artifact)
+        output_data = context.get("output_data")
+        if isinstance(output_data, dict):
+            containers.append(output_data)
+            nested_analysis = output_data.get("analysis_results")
+            if isinstance(nested_analysis, dict):
+                containers.append(nested_analysis)
+
+        modules: Dict[str, Any] = {}
+        for module_name, aliases in _LLM_ANALYSIS_MODULE_ALIASES.items():
+            resolved = self._resolve_module_from_containers(containers, aliases)
+            modules[module_name] = resolved if resolved is not None else {}
+        return modules
+
+    def _resolve_module_from_containers(
+        self,
+        containers: Sequence[Any],
+        field_names: Sequence[str],
+    ) -> Any:
+        for container in containers:
+            if not isinstance(container, dict):
+                continue
+            for field_name in field_names:
+                if field_name not in container:
+                    continue
+                value = container.get(field_name)
+                if value is None:
+                    continue
+                return self._clone_analysis_payload(value)
+        return None
+
+    def _clone_analysis_payload(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return dict(value)
+        if isinstance(value, list):
+            return list(value)
+        if isinstance(value, tuple):
+            return list(value)
+        return value
+
+    def _has_analysis_payload(self, value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (dict, list, tuple, set)):
+            return bool(value)
+        return True
+
+    def _build_llm_analysis_context_note(
+        self,
+        language: str,
+        analysis_modules: Dict[str, Any],
+    ) -> str:
+        if not isinstance(analysis_modules, dict) or not analysis_modules:
+            return ""
+
+        populated = [
+            module_name
+            for module_name, module_value in analysis_modules.items()
+            if self._has_analysis_payload(module_value)
+        ]
+        if not populated:
+            return ""
+
+        total_count = len(_LLM_ANALYSIS_MODULE_ALIASES)
+        if language == "en":
+            preview = ", ".join(module_name.replace("_", " ") for module_name in populated[:4])
+            if len(populated) > 4:
+                preview = f"{preview}, ..."
+            return (
+                f"LLM analysis context covered {len(populated)}/{total_count} analytical modules"
+                f" ({preview}), grounding the manuscript content in real analysis outputs."
+            )
+
+        labels = [
+            _LLM_ANALYSIS_MODULE_LABELS_ZH.get(module_name, module_name)
+            for module_name in populated[:4]
+        ]
+        label_text = "、".join(labels)
+        if len(populated) > 4:
+            label_text = f"{label_text}等模块"
+        return (
+            f"LLM 分析上下文已覆盖 {len(populated)}/{total_count} 个分析模块（{label_text}），"
+            "当前段落叙述基于真实分析结果。"
+        )
+
+    def _build_llm_analysis_discussion_text(
+        self,
+        language: str,
+        analysis_modules: Dict[str, Any],
+    ) -> str:
+        has_summary = self._has_analysis_payload((analysis_modules or {}).get("summary_analysis"))
+        has_scoring = self._has_analysis_payload((analysis_modules or {}).get("research_scoring_panel"))
+        if not has_summary and not has_scoring:
+            return ""
+
+        if language == "en":
+            return " The discussion also cross-checked summary analysis and research scoring outputs to keep claims aligned with quantitative evidence."
+        return "讨论还结合总结分析与研究评分结果对关键论断进行了交叉校验，确保结论与量化证据一致。"
+
     def _resolve_statistical_analysis(self, context: Dict[str, Any]) -> Dict[str, Any]:
         analysis_results = self._resolve_analysis_results(context)
         statistical_analysis = analysis_results.get("statistical_analysis")
@@ -881,8 +1408,8 @@ class PaperWriter(BaseModule):
                     metric_bits.append(f"effect size {effect_size}")
                 fragments.append(
                     "Statistical analysis suggested a meaningful signal"
-                    + (f" ({', '.join(metric_bits)})" if metric_bits else "")
-                    + "."
+                    +(f" ({', '.join(metric_bits)})" if metric_bits else "")
+                    +"."
                 )
             if interpretation:
                 fragments.append(f"Interpretation: {interpretation}.")
@@ -898,8 +1425,8 @@ class PaperWriter(BaseModule):
                 metric_bits.append(f"效应量 {effect_size}")
             fragments.append(
                 "统计分析提示当前结果具有稳定信号"
-                + (f"（{'，'.join(metric_bits)}）" if metric_bits else "")
-                + "。"
+                +(f"（{'，'.join(metric_bits)}）" if metric_bits else "")
+                +"。"
             )
         if interpretation:
             fragments.append(f"综合解释认为：{interpretation}。")

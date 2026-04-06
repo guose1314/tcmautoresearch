@@ -31,6 +31,8 @@ class CitationEntry:
     abstract: str = ""
     note: str = ""
     source: str = ""
+    source_type: str = ""
+    source_ref: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -239,6 +241,9 @@ class CitationManager(BaseModule):
             ("doi", entry.doi),
             ("url", entry.url),
             ("note", entry.note),
+            ("source", entry.source),
+            ("source_type", entry.source_type),
+            ("source_ref", entry.source_ref),
         ]
         for field_name, raw_value in optional_fields:
             if raw_value:
@@ -306,6 +311,8 @@ class CitationManager(BaseModule):
         abstract = text_fields["abstract"]
         note = text_fields["note"]
         source = text_fields["source"]
+        source_type = text_fields["source_type"]
+        source_ref = text_fields["source_ref"]
 
         entry_type = str(normalized.get("entry_type") or self._infer_entry_type(normalized, journal, booktitle, publisher, url)).strip()
         citation_key = str(normalized.get("citation_key") or "").strip() or self._build_citation_key(authors, year, title, index)
@@ -327,6 +334,8 @@ class CitationManager(BaseModule):
             abstract=abstract,
             note=note,
             source=source,
+            source_type=source_type,
+            source_ref=source_ref,
         )
 
     def _resolve_record_inputs(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -376,6 +385,8 @@ class CitationManager(BaseModule):
             "abstract",
             "note",
             "source",
+            "source_type",
+            "source_ref",
         ):
             current_value = getattr(merged, field_name)
             if current_value:
@@ -396,6 +407,21 @@ class CitationManager(BaseModule):
 
     def _collect_record_text_fields(self, record: Dict[str, Any]) -> Dict[str, str]:
         """统一提取 record 中的文本字段，减少归一化分支复杂度。"""
+        note = self._read_first_text(record, ["note", "status"])
+        source = self._read_first_text(record, ["source"])
+        source_type = self._read_first_text(record, ["source_type"])
+        source_ref = self._read_first_text(record, ["source_ref", "urn"])
+
+        if note and (not source_type or not source_ref):
+            note_mapping = self._parse_note_mapping(note)
+            if not source_ref:
+                source_ref = note_mapping.get("source_ref", "")
+            if not source_type:
+                source_type = note_mapping.get("source_type", "")
+
+        if not source_type and source:
+            source_type = self._infer_source_type_from_source(source)
+
         return {
             "journal": self._read_first_text(record, ["journal", "venue", "source"]),
             "booktitle": self._read_first_text(record, ["booktitle", "conference"]),
@@ -406,9 +432,35 @@ class CitationManager(BaseModule):
             "volume": self._read_first_text(record, ["volume"]),
             "number": self._read_first_text(record, ["number", "issue"]),
             "abstract": self._read_first_text(record, ["abstract", "snippet"]),
-            "note": self._read_first_text(record, ["note", "status"]),
-            "source": self._read_first_text(record, ["source"]),
+            "note": note,
+            "source": source,
+            "source_type": source_type,
+            "source_ref": source_ref,
         }
+
+    def _parse_note_mapping(self, note: str) -> Dict[str, str]:
+        """从 `k=v; k2=v2` 形式的 note 中抽取键值对。"""
+        mapping: Dict[str, str] = {}
+        for segment in str(note or "").split(";"):
+            part = segment.strip()
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            key = key.strip().lower()
+            if not key:
+                continue
+            mapping[key] = value.strip()
+        return mapping
+
+    def _infer_source_type_from_source(self, source: str) -> str:
+        normalized = str(source or "").strip().lower()
+        if not normalized:
+            return ""
+        if normalized.endswith("_corpus"):
+            return normalized.removesuffix("_corpus")
+        if normalized in {"local", "ctext", "pdf", "web", "pipeline", "literature", "corpus"}:
+            return normalized
+        return ""
 
     def _read_first_text(self, record: Dict[str, Any], keys: List[str]) -> str:
         """按候选键顺序读取首个非空文本。"""
@@ -616,7 +668,22 @@ class CitationManager(BaseModule):
             extras.append(f"DOI: {entry.doi}")
         if entry.url:
             extras.append(entry.url)
+        structured_note = self._build_structured_provenance_note(entry)
+        if structured_note:
+            extras.append(structured_note)
         return " ".join(item for item in extras if item)
+
+    def _build_structured_provenance_note(self, entry: CitationEntry) -> str:
+        fields: List[str] = []
+        if entry.source:
+            fields.append(f"source={entry.source}")
+        if entry.source_type:
+            fields.append(f"source_type={entry.source_type}")
+        if entry.source_ref:
+            fields.append(f"source_ref={entry.source_ref}")
+        if not fields:
+            return ""
+        return f"【结构化附注】{'; '.join(fields)}"
 
     def _join_with_sep(self, values: List[str], sep: str) -> str:
         cleaned = [str(item).strip() for item in values if str(item).strip()]

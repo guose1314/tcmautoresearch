@@ -17,14 +17,126 @@ Usage:
 """
 
 import argparse
+import importlib
 import json
 import subprocess
 import sys
 import time
+import types
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
+
+
+def _normalize_key_path(path: str | tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    if isinstance(path, str):
+        return tuple(segment for segment in path.split(".") if segment)
+    return tuple(str(segment) for segment in path if str(segment))
+
+
+def _get_nested(mapping: Dict[str, Any], keys: tuple[str, ...]) -> Any:
+    current: Any = mapping
+    for key in keys:
+        if not isinstance(current, dict) or key not in current:
+            return None
+        current = current[key]
+    return current
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(existing, value)
+            continue
+        merged[key] = value
+    return merged
+
+
+def _resolve_fallback_config_path(
+    root_path: str | Path | None,
+    config_path: str | Path | None,
+) -> Path:
+    if config_path is not None:
+        candidate = Path(config_path)
+        if not candidate.is_absolute():
+            base_root = Path(root_path).resolve() if root_path is not None else Path.cwd()
+            candidate = (base_root / candidate).resolve()
+        return candidate
+
+    if root_path is not None:
+        return (Path(root_path).resolve() / "config.yml").resolve()
+
+    return (Path.cwd() / "config.yml").resolve()
+
+
+def _fallback_load_settings_section(
+    *candidates: str | tuple[str, ...] | list[str],
+    root_path: str | Path | None = None,
+    config_path: str | Path | None = None,
+    environment: str | None = None,
+    default: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    del environment
+
+    merged_default = dict(default or {})
+    try:
+        yaml_module = __import__("yaml")
+    except Exception:
+        return merged_default
+
+    resolved_config = _resolve_fallback_config_path(root_path, config_path)
+    if not resolved_config.exists():
+        return merged_default
+
+    try:
+        payload = yaml_module.safe_load(resolved_config.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return merged_default
+
+    if not isinstance(payload, dict):
+        return merged_default
+
+    merged = dict(merged_default)
+    found_mapping = False
+    for candidate in candidates:
+        keys = _normalize_key_path(candidate)
+        if not keys:
+            continue
+        section = _get_nested(payload, keys)
+        if isinstance(section, dict):
+            merged = _deep_merge(merged, section)
+            found_mapping = True
+
+    if found_mapping or default is not None:
+        return merged
+    return {}
+
+
+def _install_fallback_config_loader_module() -> None:
+    src_module = sys.modules.get("src")
+    if src_module is None:
+        src_module = types.ModuleType("src")
+        setattr(src_module, "__path__", [])
+        sys.modules["src"] = src_module
+    elif not hasattr(src_module, "__path__"):
+        setattr(src_module, "__path__", [])
+
+    infrastructure_module = sys.modules.get("src.infrastructure")
+    if infrastructure_module is None:
+        infrastructure_module = types.ModuleType("src.infrastructure")
+        setattr(infrastructure_module, "__path__", [])
+        sys.modules["src.infrastructure"] = infrastructure_module
+    elif not hasattr(infrastructure_module, "__path__"):
+        setattr(infrastructure_module, "__path__", [])
+
+    config_loader_module = types.ModuleType("src.infrastructure.config_loader")
+    setattr(config_loader_module, "load_settings_section", _fallback_load_settings_section)
+    sys.modules["src.infrastructure.config_loader"] = config_loader_module
+    setattr(infrastructure_module, "config_loader", config_loader_module)
+    setattr(src_module, "infrastructure", infrastructure_module)
 
 _CONFIG_LOADER_REPO_ROOT = next(
     (parent for parent in Path(__file__).resolve().parents if (parent / "src" / "infrastructure" / "config_loader.py").exists()),
@@ -33,7 +145,13 @@ _CONFIG_LOADER_REPO_ROOT = next(
 if _CONFIG_LOADER_REPO_ROOT is not None and str(_CONFIG_LOADER_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_CONFIG_LOADER_REPO_ROOT))
 
-from src.infrastructure.config_loader import load_settings_section
+try:
+    _config_loader = importlib.import_module("src.infrastructure.config_loader")
+except Exception:
+    _install_fallback_config_loader_module()
+    _config_loader = importlib.import_module("src.infrastructure.config_loader")
+
+load_settings_section = getattr(_config_loader, "load_settings_section", _fallback_load_settings_section)
 from tools.code_quality_checks import run_checks as run_code_quality_checks
 from tools.continuous_improvement_loop import (
     build_cycle_report,

@@ -118,6 +118,25 @@ def resolve_authenticated_console_principal(
     if session is not None:
         return session.to_public_dict()
 
+    # 统一登录页签发的 JWT 也允许访问 Console API（用于 jobs / dashboard / events）。
+    if normalized_key:
+        try:
+            from src.web.auth import verify_token
+
+            jwt_payload = verify_token(normalized_key)
+        except Exception:
+            jwt_payload = None
+
+        if isinstance(jwt_payload, dict):
+            user_id = str(jwt_payload.get("sub") or jwt_payload.get("user_id") or "").strip()
+            principal = str(jwt_payload.get("display_name") or user_id or "用户").strip()
+            auth_source = str(jwt_payload.get("auth_source") or "jwt").strip() or "jwt"
+            return {
+                "principal": principal,
+                "auth_source": auth_source,
+                "user_id": user_id,
+            }
+
     if not expected_key and not console_auth_service.auth_required:
         return {
             "principal": "访客",

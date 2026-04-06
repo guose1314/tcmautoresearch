@@ -1,0 +1,280 @@
+"""存储后端工厂 — 根据配置激活 SQLite / PostgreSQL / Neo4j。
+
+解决 PostgreSQL/Neo4j 代码已存在但从未被激活的问题。
+提供统一的工厂方法，根据 config.yml 中的配置自动选择后端。
+
+用法::
+
+    factory = StorageBackendFactory(config)
+    factory.initialize()
+    # 获取事务协调器
+    with factory.transaction() as txn:
+        txn.pg_add(entity)
+        txn.neo4j_write("CREATE ...")
+    factory.close()
+
+配置示例 (config.yml)::
+
+    database:
+      type: "postgresql"  # sqlite | postgresql
+      path: "./data/tcmautoresearch.db"  # SQLite 路径
+      # PostgreSQL 连接
+      host: "localhost"
+      port: 5432
+      name: "tcmautoresearch"
+      user: "tcm"
+      password_env: "TCM_DB_PASSWORD"  # 从环境变量读取密码
+
+    neo4j:
+      enabled: true
+      uri: "neo4j://localhost:7687"
+      user: "neo4j"
+      password_env: "TCM_NEO4J_PASSWORD"
+      database: "neo4j"
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from contextlib import contextmanager
+from typing import Any, Dict, Iterator, Optional
+
+from src.infrastructure.persistence import (
+    Base,
+    DatabaseManager,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _build_pg_connection_string(db_config: Dict[str, Any]) -> str:
+    """从配置构建 PostgreSQL 连接字符串。"""
+    host = db_config.get("host", "localhost")
+    port = int(db_config.get("port", 5432))
+    name = db_config.get("name", "tcmautoresearch")
+    user = db_config.get("user", "tcm")
+    # 从环境变量读取密码（安全做法）
+    password_env = db_config.get("password_env", "TCM_DB_PASSWORD")
+    password = os.environ.get(password_env, db_config.get("password", ""))
+    ssl_mode = db_config.get("ssl_mode", "prefer")
+    return f"postgresql://{user}:{password}@{host}:{port}/{name}?sslmode={ssl_mode}"
+
+
+def _build_sqlite_connection_string(db_config: Dict[str, Any]) -> str:
+    """从配置构建 SQLite 连接字符串。"""
+    path = db_config.get("path", os.path.join("data", "tcmautoresearch.db"))
+    abs_path = os.path.abspath(path)
+    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+    return f"sqlite:///{abs_path}"
+
+
+class StorageBackendFactory:
+    """根据配置激活存储后端并提供事务协调器。
+
+    Parameters
+    ----------
+    config :
+        项目配置字典（从 config.yml 加载）。
+    """
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self._config = config or {}
+        self._db_config = self._config.get("database") or {}
+        self._neo4j_config = self._config.get("neo4j") or {}
+
+        self._db_manager: Optional[DatabaseManager] = None
+        self._neo4j_driver: Any = None
+        self._db_type: str = str(self._db_config.get("type", "sqlite")).strip().lower()
+        self._initialized = False
+
+    @property
+    def db_type(self) -> str:
+        return self._db_type
+
+    @property
+    def neo4j_enabled(self) -> bool:
+        return bool(self._neo4j_config.get("enabled", False))
+
+    @property
+    def db_manager(self) -> Optional[DatabaseManager]:
+        return self._db_manager
+
+    @property
+    def neo4j_driver(self) -> Any:
+        return self._neo4j_driver
+
+    @property
+    def initialized(self) -> bool:
+        return self._initialized
+
+    # ── 生命周期 ──────────────────────────────────────────────────────────
+
+    def initialize(self) -> Dict[str, Any]:
+        """初始化所有配置的后端，返回状态报告。"""
+        report: Dict[str, Any] = {
+            "db_type": self._db_type,
+            "neo4j_enabled": self.neo4j_enabled,
+            "pg_status": "skipped",
+            "neo4j_status": "skipped",
+        }
+
+        # 初始化关系型数据库
+        try:
+            if self._db_type == "postgresql":
+                conn_str = _build_pg_connection_string(self._db_config)
+                report["pg_status"] = "connecting"
+            else:
+                conn_str = _build_sqlite_connection_string(self._db_config)
+                report["pg_status"] = "sqlite_fallback"
+
+            self._db_manager = DatabaseManager(
+                conn_str,
+                echo=bool(self._db_config.get("echo", False)),
+                connection_timeout=self._db_config.get("connection_timeout"),
+                pool_size=self._db_config.get("connection_pool_size"),
+                max_overflow=self._db_config.get("max_overflow"),
+            )
+            self._db_manager.init_db()
+
+            # 创建默认关系类型
+            with self._db_manager.session_scope() as session:
+                DatabaseManager.create_default_relationships(session)
+
+            report["pg_status"] = "active"
+            logger.info("关系型数据库初始化完成: %s (%s)", self._db_type, conn_str.split("@")[-1] if "@" in conn_str else "local")
+        except Exception as exc:
+            report["pg_status"] = f"error: {exc}"
+            logger.error("数据库初始化失败: %s", exc)
+            raise
+
+        # 初始化 Neo4j（可选）
+        if self.neo4j_enabled:
+            try:
+                from src.storage.neo4j_driver import Neo4jDriver
+
+                uri = self._neo4j_config.get("uri", "neo4j://localhost:7687")
+                user = self._neo4j_config.get("user", "neo4j")
+                password_env = self._neo4j_config.get("password_env", "TCM_NEO4J_PASSWORD")
+                password = os.environ.get(password_env, self._neo4j_config.get("password", ""))
+                database = self._neo4j_config.get("database", "neo4j")
+
+                self._neo4j_driver = Neo4jDriver(
+                    uri, (user, password), database=database,
+                    max_connection_pool_size=int(self._neo4j_config.get("max_connection_pool_size", 50)),
+                    connection_acquisition_timeout=float(self._neo4j_config.get("connection_acquisition_timeout", 60)),
+                    max_connection_lifetime=int(self._neo4j_config.get("max_connection_lifetime", 3600)),
+                )
+                self._neo4j_driver.connect()
+                report["neo4j_status"] = "active"
+                logger.info("Neo4j 初始化完成: %s", uri)
+            except Exception as exc:
+                report["neo4j_status"] = f"error: {exc}"
+                logger.warning("Neo4j 初始化失败（降级为仅 PG 模式）: %s", exc)
+                self._neo4j_driver = None
+
+        self._initialized = True
+        return report
+
+    def close(self) -> None:
+        """关闭所有后端连接。"""
+        if self._db_manager:
+            try:
+                self._db_manager.close()
+            except Exception as exc:
+                logger.warning("关闭数据库连接失败: %s", exc)
+            self._db_manager = None
+
+        if self._neo4j_driver:
+            try:
+                self._neo4j_driver.close()
+            except Exception as exc:
+                logger.warning("关闭 Neo4j 连接失败: %s", exc)
+            self._neo4j_driver = None
+
+        self._initialized = False
+
+    # ── 事务 ──────────────────────────────────────────────────────────────
+
+    @contextmanager
+    def transaction(self) -> Iterator[Any]:
+        """创建跨后端事务协调器。
+
+        Yields
+        ------
+        TransactionCoordinator
+            事务协调器实例。
+        """
+        if not self._initialized or self._db_manager is None:
+            raise RuntimeError("StorageBackendFactory 尚未初始化")
+
+        from src.storage.transaction import TransactionCoordinator
+
+        session = self._db_manager.get_session()
+        try:
+            with TransactionCoordinator(session, self._neo4j_driver) as txn:
+                yield txn
+        finally:
+            session.close()
+
+    @contextmanager
+    def session_scope(self) -> Iterator[Any]:
+        """仅 PG 的 session scope（向后兼容）。"""
+        if not self._initialized or self._db_manager is None:
+            raise RuntimeError("StorageBackendFactory 尚未初始化")
+        with self._db_manager.session_scope() as session:
+            yield session
+
+    # ── 查询 ──────────────────────────────────────────────────────────────
+
+    def health_check(self) -> Dict[str, Any]:
+        """检查所有后端健康状态。"""
+        result: Dict[str, Any] = {
+            "initialized": self._initialized,
+            "db_type": self._db_type,
+        }
+        if self._db_manager:
+            result["db_healthy"] = self._db_manager.health_check()
+        else:
+            result["db_healthy"] = False
+
+        if self._neo4j_driver and hasattr(self._neo4j_driver, "driver") and self._neo4j_driver.driver:
+            try:
+                with self._neo4j_driver.driver.session(database=self._neo4j_driver.database) as s:
+                    s.run("RETURN 1").consume()
+                result["neo4j_healthy"] = True
+            except Exception:
+                result["neo4j_healthy"] = False
+        else:
+            result["neo4j_healthy"] = None  # 未启用
+
+        return result
+
+    def get_storage_statistics(self) -> Dict[str, Any]:
+        """获取存储统计信息。"""
+        stats: Dict[str, Any] = {"db_type": self._db_type}
+        if self._db_manager:
+            try:
+                from src.infrastructure.persistence import (
+                    Document,
+                    Entity,
+                    EntityRelationship,
+                    RelationshipType,
+                    ResearchRecord,
+                )
+                with self._db_manager.session_scope() as session:
+                    stats["documents"] = session.query(Document).count()
+                    stats["entities"] = session.query(Entity).count()
+                    stats["relationships"] = session.query(EntityRelationship).count()
+                    stats["relationship_types"] = session.query(RelationshipType).count()
+                    stats["research_records"] = session.query(ResearchRecord).count()
+            except Exception as exc:
+                stats["error"] = str(exc)
+
+        if self._neo4j_driver and hasattr(self._neo4j_driver, "get_graph_statistics"):
+            try:
+                stats["neo4j"] = self._neo4j_driver.get_graph_statistics()
+            except Exception as exc:
+                stats["neo4j_error"] = str(exc)
+
+        return stats

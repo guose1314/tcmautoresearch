@@ -19,8 +19,8 @@ nx = import_module("networkx")
 
 from src.core.phase_tracker import PhaseTrackerMixin
 
-# ModuleStatus 唯一来源：module_interface.py，此处直接引用，不重复定义
-from .module_interface import ModuleStatus
+# ModuleStatus 唯一来源：module_base.py
+from .module_base import ModuleStatus
 
 # 日志对象由主入口统一配置，此处仅获取logger
 logger = logging.getLogger(__name__)

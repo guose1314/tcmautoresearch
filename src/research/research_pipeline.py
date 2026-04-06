@@ -38,6 +38,32 @@ from src.research.study_session_manager import (
 # 配置日志
 logger = logging.getLogger(__name__)
 
+
+def _build_unavailable_module(symbol_name: str):
+    """构造可 patch 的缺省模块占位类，避免可选依赖缺失时测试导入失败。"""
+
+    class _UnavailableModule:
+        def __init__(self, config: Optional[Dict[str, Any]] = None):
+            self.config = config or {}
+            self._symbol_name = symbol_name
+
+        def initialize(self, config: Optional[Dict[str, Any]] = None) -> bool:
+            if config:
+                self.config.update(config)
+            return False
+
+        def execute(self, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+            return {"error": f"模块工厂默认依赖不可用: {self._symbol_name}"}
+
+        def cleanup(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    _UnavailableModule.__name__ = symbol_name
+    return _UnavailableModule
+
 # 供单测 patch 的符号；导入失败时在运行时再惰性加载。
 try:
     from src.llm.llm_engine import LLMEngine as _ImportedLLMEngine
@@ -111,7 +137,7 @@ try:
         SemanticGraphBuilder as _ImportedSemanticGraphBuilder,
     )
 except Exception:
-    _ImportedSemanticGraphBuilder = None
+    _ImportedSemanticGraphBuilder = _build_unavailable_module("SemanticGraphBuilder")
 
 SemanticGraphBuilder = _ImportedSemanticGraphBuilder
 
@@ -120,7 +146,7 @@ try:
         ReasoningEngine as _ImportedReasoningEngine,
     )
 except Exception:
-    _ImportedReasoningEngine = None
+    _ImportedReasoningEngine = _build_unavailable_module("ReasoningEngine")
 
 ReasoningEngine = _ImportedReasoningEngine
 

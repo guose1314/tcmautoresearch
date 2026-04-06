@@ -50,6 +50,7 @@ class ExperimentPhaseMixin:
         experiment = experiment_framework.design_experiment(research_hypothesis, experiment_context)
 
         experiment_payload = experiment.to_dict()
+        study_protocol = experiment_payload.get("study_protocol") if isinstance(experiment_payload.get("study_protocol"), dict) else {}
         experiment_results = {
             "study_design": experiment.experimental_design,
             "sample_size": experiment.sample_size,
@@ -66,15 +67,19 @@ class ExperimentPhaseMixin:
             "evidence_profile": experiment_context.get("evidence_profile", {}),
             "source_weights": experiment_context.get("source_weights", []),
             "gap_priority_summary": experiment_context.get("gap_priority_summary", {}),
+            "study_protocol": study_protocol,
         }
         return {
             "phase": "experiment",
             "experiments": [experiment_payload],
+            "study_protocol": study_protocol,
             "results": experiment_results,
             "selected_hypothesis": selected_hypothesis,
             "success_rate": 1.0,
             "metadata": {
                 "study_type": experiment.experimental_design,
+                "protocol_study_type": study_protocol.get("study_type", ""),
+                "protocol_source": study_protocol.get("protocol_source", ""),
                 "validation_status": "approved",
                 "evidence_record_count": experiment_context.get("evidence_profile", {}).get("record_count", 0),
                 "weighted_evidence_score": experiment_context.get("evidence_profile", {}).get("weighted_evidence_score", 0.0),
@@ -116,6 +121,7 @@ class ExperimentPhaseMixin:
             "research_objective": cycle.research_objective or context.get("research_objective") or cycle.description,
             "research_scope": cycle.research_scope or context.get("research_scope") or "",
             "research_domain": selected_hypothesis.get("domain") or context.get("research_domain") or "integrative_research",
+            "study_type": context.get("study_type"),
             "validation_plan": selected_hypothesis.get("validation_plan") or "",
             "supporting_signals": selected_hypothesis.get("supporting_signals") or [],
             "contradiction_signals": selected_hypothesis.get("contradiction_signals") or [],
@@ -128,6 +134,10 @@ class ExperimentPhaseMixin:
             "clinical_gap_analysis": clinical_gap_analysis,
             "gap_priority_summary": gap_priority_summary,
             "data_sources": context.get("data_sources") or derived_data_sources,
+            "primary_outcome": context.get("primary_outcome") or context.get("outcome") or selected_hypothesis.get("expected_outcome") or cycle.research_objective,
+            "llm_engine": context.get("llm_engine") or self.pipeline.config.get("llm_engine") or self.pipeline.config.get("llm_service"),
+            "llm_service": context.get("llm_service") or self.pipeline.config.get("llm_service") or self.pipeline.config.get("llm_engine"),
+            "use_llm_protocol_generation": context.get("use_llm_protocol_generation", True),
             "sample_size": context.get("sample_size") or self._derive_experiment_sample_size(evidence_profile, selected_hypothesis, gap_priority_summary),
             "duration_days": context.get("duration_days") or self._derive_experiment_duration(evidence_profile, selected_hypothesis),
             "methodology": context.get("methodology") or self._derive_experiment_methodology(evidence_profile, source_weights, gap_priority_summary),

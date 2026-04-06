@@ -284,6 +284,10 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertFalse(pipeline._should_run_clinical_gap_analysis({"run_clinical_gap_analysis": False}))
         pipeline.cleanup()
 
+    def test_should_collect_local_corpus_accepts_collect_alias(self):
+        self.assertTrue(self.pipeline._should_collect_local_corpus({"collect_local_corpus": True}))
+        self.assertFalse(self.pipeline._should_collect_local_corpus({"collect_local_corpus": False}))
+
     @patch("src.research.research_pipeline.SemanticGraphBuilder.initialize", return_value=False)
     @patch("src.research.research_pipeline.AdvancedEntityExtractor.initialize", return_value=True)
     @patch("src.research.research_pipeline.DocumentPreprocessor.initialize", return_value=True)

@@ -7,7 +7,8 @@ from typing import Any, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from src.api.app import _probe_response, configure_api_services, include_api_routers
@@ -23,6 +24,7 @@ from web_console.job_manager import ResearchJobManager
 STATIC_DIR = Path(__file__).with_name("static")
 INDEX_FILE = STATIC_DIR / "index.html"
 _WEB_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "src" / "web" / "templates"
+_WEB_STATIC_DIR = Path(__file__).resolve().parent.parent / "src" / "web" / "static"
 
 
 def create_app(
@@ -41,6 +43,22 @@ def create_app(
         allow_headers=["*"],
     )
 
+    # ---- 主数据库初始化 ----
+    from src.infrastructure.persistence import DatabaseManager
+    db_manager = DatabaseManager(
+        connection_string=resolved_settings.database_url,
+        echo=resolved_settings.database_config.get("echo", False),
+    )
+    db_manager.init_db()
+    # 预置关系类型
+    with db_manager.session_scope() as _s:
+        DatabaseManager.create_default_relationships(_s)
+    app.state.db_manager = db_manager
+
+    # 先注册 Architecture API 路由，避免被后续 Web 路由的动态路径抢占
+    include_api_routers(app, base_prefix="/api")
+    include_api_routers(app, base_prefix="/api/v1")
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "environment": resolved_settings.environment}
@@ -57,15 +75,13 @@ def create_app(
 
     @app.on_event("shutdown")
     def shutdown_job_manager() -> None:
+        if hasattr(app.state, "db_manager") and app.state.db_manager:
+            app.state.db_manager.close()
         manager.close()
 
-    # ---- 控制台 SPA (先于 auth_router 注册，确保 "/" 返回 SPA) ----
+    # ---- 控制台 SPA ----
     @app.get("/console", response_class=FileResponse)
     def console_page() -> FileResponse:
-        return FileResponse(INDEX_FILE)
-
-    @app.get("/")
-    def index() -> FileResponse:
         return FileResponse(INDEX_FILE)
 
     # ---- 统一 JWT 认证路由 (共享 src/web/routes/auth) ----
@@ -73,9 +89,24 @@ def create_app(
 
     app.include_router(auth_router)
 
+    # ---- 仪表盘 & 业务页面路由 (HTMX 端点) ----
+    from src.web.routes.analysis import router as analysis_router
+    from src.web.routes.assistant import router as assistant_router
+    from src.web.routes.dashboard import router as dashboard_router
+    from src.web.routes.research import router as research_router
+
+    app.include_router(dashboard_router)
+    app.include_router(analysis_router)
+    app.include_router(assistant_router)
+    app.include_router(research_router)
+
     # ---- Jinja2 模板支持 (统一登录页) ----
     if _WEB_TEMPLATES_DIR.is_dir():
         app.state.templates = Jinja2Templates(directory=str(_WEB_TEMPLATES_DIR))
+
+    # ---- 静态资源 (本地 JS/CSS，避免依赖外部 CDN) ----
+    if _WEB_STATIC_DIR.is_dir():
+        app.mount("/static", StaticFiles(directory=str(_WEB_STATIC_DIR)), name="web_static")
 
     @app.get("/api/console/auth/status")
     @app.get("/api/v1/console/auth/status")
@@ -177,9 +208,6 @@ def create_app(
         return {
             "revoked": console_auth_service.revoke_session(session_token),
         }
-
-    include_api_routers(app, base_prefix="/api")
-    include_api_routers(app, base_prefix="/api/v1")
 
     return app
 

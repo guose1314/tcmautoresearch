@@ -16,18 +16,18 @@ from .contracts import ModuleResult, PipelineContext
 from .event_bus import EventBus
 
 # BaseModule is the recommended base class for all modules.
-from .module_base import BaseModule
-from .module_factory import ModuleFactory
-
-# ModuleInterface and its data classes are kept for backward compatibility.
-# New code should inherit BaseModule directly.
-from .module_interface import (
+from .module_base import (
+    BaseModule,
     ModuleContext,
-    ModuleInterface,
     ModuleOutput,
     ModulePriority,
     ModuleStatus,
 )
+from .module_factory import ModuleFactory
+
+# ModuleInterface is a deprecated alias for BaseModule — kept for backward compatibility.
+# New code should inherit BaseModule directly.
+from .module_interface import ModuleInterface
 
 # 模块导出
 __all__ = [

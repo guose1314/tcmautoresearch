@@ -92,8 +92,8 @@ class _FakeDriver:
 
 class _FakeGraphDatabase:
     @staticmethod
-    def driver(uri, auth):
-        del uri, auth
+    def driver(uri, auth, **kwargs):
+        del uri, auth, kwargs
         return _FakeDriver()
 
 

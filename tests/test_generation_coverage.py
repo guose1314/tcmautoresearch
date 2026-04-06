@@ -294,6 +294,9 @@ class TestPaperWriterDoExecute(unittest.TestCase):
         result = pw._do_execute({"title": "集成测试论文"})
         self.assertTrue(result["success"])
         self.assertGreater(result["section_count"], 0)
+        self.assertIn("iteration_history", result)
+        self.assertIn("review_summary", result)
+        self.assertEqual(result["iteration_count"], len(result["iteration_history"]))
 
 
 # ============================================================

@@ -80,6 +80,34 @@ class OutputGenerator(BaseModule):
             return False
 
     # ------------------------------------------------------------------
+    # 兼容 API（测试与旧调用方）
+    # ------------------------------------------------------------------
+
+    def to_dict(self, data: Any) -> Dict[str, Any]:
+        """将任意输入归一化为字典。"""
+        if data is None:
+            return {}
+        if isinstance(data, dict):
+            return data
+        return {"data": data}
+
+    def to_json(self, data: Any) -> str:
+        """将任意输入序列化为 JSON 字符串。"""
+        safe_data = self._make_json_safe(data)
+        return json.dumps(safe_data, ensure_ascii=False, indent=2, default=str)
+
+    def to_markdown(self, data: Any) -> str:
+        """将输入渲染为 Markdown 报告文本。"""
+        lines: List[str] = [
+            "# 中医研究报告",
+            f"生成时间: {datetime.now().isoformat()}",
+            "---",
+            "",
+        ]
+        self._dict_to_markdown(self.to_dict(data), lines, level=2)
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
     # 结构化输出（管线内处理）
     # ------------------------------------------------------------------
 

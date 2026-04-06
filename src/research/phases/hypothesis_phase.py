@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
-from src.knowledge.tcm_knowledge_graph import TCMKnowledgeGraph
+from src.storage.graph_interface import IKnowledgeGraph
+from src.storage.neo4j_driver import create_knowledge_graph
 
 try:
     from src.research.theoretical_framework import (
@@ -148,8 +149,8 @@ class HypothesisPhaseMixin:
         self,
         entities: List[Dict[str, Any]],
         context: Dict[str, Any],
-    ) -> TCMKnowledgeGraph:
-        graph = TCMKnowledgeGraph(preload_formulas=False)
+    ) -> IKnowledgeGraph:
+        graph = create_knowledge_graph(preload_formulas=False)
         normalized_entities: List[Dict[str, Any]] = []
         for item in entities:
             if isinstance(item, dict) and item.get("name"):
@@ -176,7 +177,7 @@ class HypothesisPhaseMixin:
         self._add_first_pair_relation(graph, type_map, "herb", "pathway", "participates_in")
         return graph
 
-    def _add_hypothesis_relation(self, graph: TCMKnowledgeGraph, relation: Any) -> None:
+    def _add_hypothesis_relation(self, graph: IKnowledgeGraph, relation: Any) -> None:
         if isinstance(relation, dict):
             src = relation.get("source") or relation.get("src")
             dst = relation.get("target") or relation.get("dst")
@@ -197,7 +198,7 @@ class HypothesisPhaseMixin:
 
     def _add_first_pair_relation(
         self,
-        graph: TCMKnowledgeGraph,
+        graph: IKnowledgeGraph,
         type_map: Dict[str, List[str]],
         source_type: str,
         target_type: str,
@@ -209,13 +210,13 @@ class HypothesisPhaseMixin:
             return
         source = sources[0]
         target = targets[0]
-        if target in graph.neighbors(source, relation_type):
+        if hasattr(graph, 'neighbors') and target in graph.neighbors(source, relation_type):
             return
         graph.add_relation(source, relation_type, target, {"inferred": True, "source": "pipeline_hypothesis_context"})
 
     def _derive_hypothesis_knowledge_gap(
         self,
-        graph: TCMKnowledgeGraph,
+        graph: IKnowledgeGraph,
         entities: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         type_map: Dict[str, List[str]] = {}

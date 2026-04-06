@@ -91,6 +91,25 @@ class TestTopicToPhaseContext(unittest.TestCase):
             self.assertIsInstance(ctx, dict)
             self.assertIn("research_topic", ctx)
 
+    def test_experiment_accepts_explicit_protocol_inputs(self):
+        ctx = topic_to_phase_context(
+            "补中益气汤研究",
+            ResearchPhase.EXPERIMENT,
+            study_type="cohort",
+            primary_outcome="复发率",
+            intervention="补中益气汤颗粒",
+            comparison="常规治疗",
+        )
+        self.assertEqual(ctx["study_type"], "cohort")
+        self.assertEqual(ctx["primary_outcome"], "复发率")
+        self.assertEqual(ctx["intervention"], "补中益气汤颗粒")
+        self.assertEqual(ctx["comparison"], "常规治疗")
+
+    def test_experiment_infers_protocol_inputs_when_not_provided(self):
+        ctx = topic_to_phase_context("四君子汤网络药理机制研究", ResearchPhase.EXPERIMENT)
+        self.assertEqual(ctx["study_type"], "network_pharmacology")
+        self.assertIn("靶点", ctx["primary_outcome"])
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # _slug_topic
@@ -541,6 +560,26 @@ class TestRunResearchSingleEntry(unittest.TestCase):
         call = mock_pl.execute_research_phase.call_args_list[0]
         ctx_passed = call.args[2]
         self.assertTrue(ctx_passed["run_literature_retrieval"])
+
+    @patch("src.orchestration.research_orchestrator.ResearchPipeline")
+    def test_run_research_accepts_explicit_protocol_inputs(self, MockPipeline):
+        mock_pl = _mock_pipeline()
+        MockPipeline.return_value = mock_pl
+        run_research(
+            "黄芪颗粒临床研究",
+            study_type="rct",
+            primary_outcome="疲劳量表评分变化",
+            intervention="黄芪颗粒",
+            comparison="安慰剂",
+        )
+
+        # 默认第 3 次为 experiment 阶段
+        experiment_call = mock_pl.execute_research_phase.call_args_list[2]
+        experiment_ctx = experiment_call.args[2]
+        self.assertEqual(experiment_ctx["study_type"], "rct")
+        self.assertEqual(experiment_ctx["primary_outcome"], "疲劳量表评分变化")
+        self.assertEqual(experiment_ctx["intervention"], "黄芪颗粒")
+        self.assertEqual(experiment_ctx["comparison"], "安慰剂")
 
 
 if __name__ == "__main__":

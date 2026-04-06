@@ -16,10 +16,10 @@ RUN apt-get update \
     tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /app/requirements.txt
+COPY requirements/core.txt /app/requirements/core.txt
 
 RUN python -m pip install --upgrade pip setuptools wheel \
-    && python -m pip install -r /app/requirements.txt
+    && python -m pip install -r /app/requirements/core.txt
 
 COPY . /app
 

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_NAME = "config.yml"
@@ -330,6 +333,65 @@ class AppSettings:
     def system_description(self) -> str:
         return str(self.get("system.description", "Architecture 3.0 FastAPI REST API service layer"))
 
+    # ---- Database connection helpers ----
+
+    @property
+    def database_config(self) -> Dict[str, Any]:
+        """返回完整 ``database`` 配置段。"""
+        return self.get_section("database", default={})
+
+    @property
+    def database_type(self) -> str:
+        """``sqlite`` 或 ``postgresql``。"""
+        return str(self.get("database.type", "sqlite")).lower()
+
+    @property
+    def database_url(self) -> str:
+        """构建 SQLAlchemy 连接串。
+
+        SQLite:  ``sqlite:///<resolved_path>``
+        PostgreSQL: ``postgresql://<user>:<password>@<host>:<port>/<name>``
+        """
+        db_type = self.database_type
+        if db_type == "postgresql":
+            host = self.get("database.host", "localhost")
+            port = self.get("database.port", 5432)
+            name = self.get("database.name", "tcmautoresearch")
+            user = self.get("database.user", "tcm")
+            pw_env = self.get("database.password_env", "TCM_DB_PASSWORD")
+            password = os.environ.get(str(pw_env), "")
+            return f"postgresql://{user}:{password}@{host}:{port}/{name}"
+        # default: sqlite
+        db_path = self.get("database.path", "./data/tcmautoresearch.db")
+        return f"sqlite:///{db_path}"
+
+    # ---- Neo4j connection helpers ----
+
+    @property
+    def neo4j_config(self) -> Dict[str, Any]:
+        """返回完整 ``neo4j`` 配置段。"""
+        return self.get_section("neo4j", default={})
+
+    @property
+    def neo4j_enabled(self) -> bool:
+        return bool(self.get("neo4j.enabled", False))
+
+    @property
+    def neo4j_uri(self) -> str:
+        return str(self.get("neo4j.uri", "neo4j://localhost:7687"))
+
+    @property
+    def neo4j_auth(self) -> tuple[str, str]:
+        """返回 ``(user, password)``，密码从环境变量读取。"""
+        user = str(self.get("neo4j.user", "neo4j"))
+        pw_env = str(self.get("neo4j.password_env", "TCM_NEO4J_PASSWORD"))
+        password = os.environ.get(pw_env, "")
+        return (user, password)
+
+    @property
+    def neo4j_database(self) -> str:
+        return str(self.get("neo4j.database", "neo4j"))
+
 
 class ConfigCenter:
     """集中管理基础配置、环境覆盖与环境变量覆盖。"""
@@ -472,3 +534,176 @@ def load_secret_section(
 ) -> Dict[str, Any]:
     settings = load_settings(root_path=root_path, config_path=config_path, environment=environment)
     return settings.get_secret_section(*candidates, default=default)
+
+
+# ---------------------------------------------------------------------------
+# 单例配置管理器 — 向后兼容 + 结构校验
+# ---------------------------------------------------------------------------
+
+# 校验规则（迁移自 src/infra/config_manager.py）
+_REQUIRED_TOP_LEVEL_KEYS: List[str] = ["system", "monitoring", "database", "output"]
+_REQUIRED_NESTED: Dict[str, List[str]] = {
+    "system": ["name", "version"],
+    "monitoring": ["enabled"],
+    "database": ["path"],
+    "output": ["directory"],
+}
+_EXPECTED_TYPES: Dict[tuple, type] = {
+    ("system", "version"): str,
+    ("monitoring", "enabled"): bool,
+    ("monitoring", "interval_seconds"): int,
+}
+
+
+class ConfigManager:
+    """单例配置管理器 — 统一入口。
+
+    兼容旧版 ``src.infra.config_manager.ConfigManager`` API，
+    底层委托给 ``ConfigCenter`` / ``AppSettings``。
+
+    用法::
+
+        cm = ConfigManager()
+        cm.load("config.yml")
+        issues = cm.validate()
+        module_cfg = cm.get_module_config("document_preprocessing")
+    """
+
+    _instance: "Optional[ConfigManager]" = None
+
+    # ---------- singleton ----------
+
+    @classmethod
+    def get_instance(cls) -> "ConfigManager":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    @classmethod
+    def reset(cls) -> None:
+        """清空单例，供测试使用。"""
+        cls._instance = None
+
+    # ---------- lifecycle ----------
+
+    def __init__(self) -> None:
+        self._config: Dict[str, Any] = {}
+        self._path: Optional[str] = None
+        self._loaded: bool = False
+        self._settings: Optional[AppSettings] = None
+
+    # ---------- public API ----------
+
+    def load(self, path: str = "config.yml") -> Dict[str, Any]:
+        """加载 YAML 配置文件。
+
+        Args:
+            path: 配置文件路径，支持相对路径。
+
+        Returns:
+            加载后的配置字典。
+
+        Raises:
+            FileNotFoundError: 文件不存在。
+            yaml.YAMLError: YAML 语法错误。
+        """
+        config_path = Path(path)
+        if not config_path.is_absolute():
+            config_path = Path.cwd() / config_path
+
+        if not config_path.exists():
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+
+        with config_path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"Config file must be a YAML mapping, got {type(data).__name__}"
+            )
+
+        self._config = data
+        self._path = str(config_path)
+        self._loaded = True
+
+        # 同时构造 AppSettings 以便统一查询
+        try:
+            self._settings = load_settings(config_path=config_path)
+        except Exception:
+            self._settings = None
+
+        logger.info(
+            "ConfigManager loaded config from %s (%d top-level keys)",
+            config_path,
+            len(data),
+        )
+        return self._config
+
+    def get_module_config(self, module_name: str) -> Dict[str, Any]:
+        """返回指定模块的配置子字典。
+
+        查找顺序：
+        1. ``config["modules"][module_name]``
+        2. ``config[module_name]``
+        3. 空字典
+        """
+        modules_block = self._config.get("modules", {})
+        if isinstance(modules_block, dict) and module_name in modules_block:
+            return dict(modules_block[module_name] or {})
+        top_level = self._config.get(module_name)
+        if isinstance(top_level, dict):
+            return dict(top_level)
+        return {}
+
+    def validate(self) -> List[str]:
+        """对已加载配置执行结构校验。"""
+        if not self._loaded:
+            return ["Config not loaded — call load() first"]
+
+        issues: List[str] = []
+
+        for key in _REQUIRED_TOP_LEVEL_KEYS:
+            if key not in self._config:
+                issues.append(f"Missing required top-level key: '{key}'")
+
+        for top_key, sub_keys in _REQUIRED_NESTED.items():
+            block = self._config.get(top_key)
+            if not isinstance(block, dict):
+                continue
+            for sub_key in sub_keys:
+                if sub_key not in block:
+                    issues.append(f"Missing required key: '{top_key}.{sub_key}'")
+
+        for key_path, expected_type in _EXPECTED_TYPES.items():
+            value: Any = self._config
+            try:
+                for k in key_path:
+                    value = value[k]
+            except (KeyError, TypeError):
+                continue
+            if not isinstance(value, expected_type):
+                issues.append(
+                    f"Type mismatch at '{'.'.join(key_path)}': "
+                    f"expected {expected_type.__name__}, got {type(value).__name__}"
+                )
+
+        return issues
+
+    # ---------- properties ----------
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return dict(self._config)
+
+    @property
+    def loaded(self) -> bool:
+        return self._loaded
+
+    @property
+    def path(self) -> Optional[str]:
+        return self._path
+
+    @property
+    def settings(self) -> Optional[AppSettings]:
+        """底层 ``AppSettings`` 实例（load 后可用）。"""
+        return self._settings

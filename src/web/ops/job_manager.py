@@ -106,6 +106,10 @@ class StreamingResearchRunner:
         payload: Dict[str, Any],
         emit: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     ) -> OrchestrationResult:
+        def _optional_text(value: Any) -> Optional[str]:
+            text = str(value or "").strip()
+            return text or None
+
         topic = str(payload.get("topic") or "").strip()
         if not topic:
             raise ValueError("topic 不能为空")
@@ -114,6 +118,10 @@ class StreamingResearchRunner:
         cycle_name = payload.get("cycle_name") or _slug_topic(topic)
         description = payload.get("description") or topic
         scope = payload.get("scope") or self.orchestrator._infer_scope(topic)
+        study_type = _optional_text(payload.get("study_type"))
+        primary_outcome = _optional_text(payload.get("primary_outcome"))
+        intervention = _optional_text(payload.get("intervention"))
+        comparison = _optional_text(payload.get("comparison"))
 
         started_at = _utc_now()
         started_perf = time.perf_counter()
@@ -161,7 +169,15 @@ class StreamingResearchRunner:
         try:
             for index, phase in enumerate(self.orchestrator._phases, start=1):
                 progress_before = ((index - 1) / total_phases) * 100.0
-                ctx = self.orchestrator._build_phase_context(topic, phase, phase_contexts)
+                ctx = self.orchestrator._build_phase_context(
+                    topic,
+                    phase,
+                    phase_contexts,
+                    study_type=study_type,
+                    primary_outcome=primary_outcome,
+                    intervention=intervention,
+                    comparison=comparison,
+                )
                 self._emit(
                     emit,
                     "phase_started",
@@ -235,6 +251,12 @@ class StreamingResearchRunner:
                 "description": description,
                 "scope": scope,
                 "phases_requested": [phase.value for phase in self.orchestrator._phases],
+                "protocol_inputs": {
+                    "study_type": study_type,
+                    "primary_outcome": primary_outcome,
+                    "intervention": intervention,
+                    "comparison": comparison,
+                },
             },
             analysis_results=publish_highlights.get("analysis_results") or {},
             research_artifact=publish_highlights.get("research_artifact") or {},

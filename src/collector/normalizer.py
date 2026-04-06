@@ -440,13 +440,33 @@ class Normalizer(BaseModule):
             return raw_text, "utf-8"
         if isinstance(raw_text, bytes):
             detected = self._detect_encoding(raw_text)
+            first_success: Optional[Tuple[str, str]] = None
             for encoding in _unique_preserve_order([detected] + self.encoding_fallbacks):
                 try:
-                    return raw_text.decode(encoding), encoding
+                    decoded_text = raw_text.decode(encoding)
                 except (LookupError, UnicodeDecodeError):
                     continue
+                if first_success is None:
+                    first_success = (decoded_text, encoding)
+                if self._is_plausible_decoded_text(decoded_text):
+                    return decoded_text, encoding
+            if first_success is not None:
+                return first_success
             return raw_text.decode("utf-8", errors="replace"), "utf-8-replace"
         return str(raw_text), "utf-8"
+
+    def _is_plausible_decoded_text(self, text: str) -> bool:
+        if not text:
+            return True
+        if not self.default_language.lower().startswith("zh"):
+            return True
+
+        cjk_count = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+        if cjk_count > 0:
+            return True
+
+        printable_latin_count = sum(1 for ch in text if " " <= ch <= "~")
+        return printable_latin_count >= max(1, int(len(text) * 0.6))
 
     def _detect_encoding(self, raw_bytes: bytes) -> str:
         try:

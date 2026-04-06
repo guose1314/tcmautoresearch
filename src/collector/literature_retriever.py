@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import threading
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -552,7 +551,10 @@ class LiteratureRetriever:
                 await asyncio.sleep(self.request_interval_sec)
             return data
 
-        return await _do()
+        try:
+            return await _do()
+        except Exception as exc:
+            raise RuntimeError(f"request failed: {url}: {exc}") from exc
 
     def _request_text(self, url: str, params: Dict[str, Any]) -> str:
         async def _runner() -> str:
@@ -581,7 +583,10 @@ class LiteratureRetriever:
                 await asyncio.sleep(self.request_interval_sec)
             return response.text
 
-        return await _do()
+        try:
+            return await _do()
+        except Exception as exc:
+            raise RuntimeError(f"request failed: {url}: {exc}") from exc
 
     def _create_async_client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(headers=dict(self.headers), timeout=self.timeout_sec, follow_redirects=True)

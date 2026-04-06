@@ -5,6 +5,7 @@ from src.research.research_pipeline import ResearchPhase, ResearchPipeline
 
 
 class TestResearchPipelineExperimentPhase(unittest.TestCase):
+
     def setUp(self):
         self.pipeline = ResearchPipeline(
             {
@@ -62,7 +63,10 @@ class TestResearchPipelineExperimentPhase(unittest.TestCase):
         self.assertEqual(experiment_result["metadata"]["selected_hypothesis_id"], selected_id)
         self.assertEqual(len(experiment_result["experiments"]), 1)
         self.assertEqual(experiment_result["experiments"][0]["hypothesis_id"], selected_id)
+        self.assertIn("study_protocol", experiment_result)
+        self.assertIn("sample_size", experiment_result["study_protocol"])
         self.assertIn("validation_plan", experiment_result["results"])
+        self.assertIn("study_protocol", experiment_result["results"])
         self.assertEqual(experiment_result["success_rate"], 1.0)
 
     def test_hypothesis_context_prefers_observe_semantic_relationships(self):
@@ -106,7 +110,7 @@ class TestResearchPipelineExperimentPhase(unittest.TestCase):
             }
         }
 
-        hypothesis_context = self.pipeline.phase_handlers._build_hypothesis_context(
+        hypothesis_context = self.pipeline.phase_handlers.build_hypothesis_context(
             cycle,
             {
                 "entities": [

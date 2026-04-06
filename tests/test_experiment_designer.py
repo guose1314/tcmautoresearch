@@ -1,6 +1,8 @@
 """ExperimentDesigner 单元测试。"""
 
+import json
 import unittest
+from unittest.mock import MagicMock
 
 from src.research.experiment_designer import (
     PICO,
@@ -9,6 +11,8 @@ from src.research.experiment_designer import (
     SampleSizeEstimation,
     StudyProtocol,
     StudyType,
+    _estimate_binary_sample_size,
+    _estimate_case_control_sample_size,
     _estimate_sample_size,
 )
 
@@ -40,6 +44,14 @@ class TestSampleSizeEstimation(unittest.TestCase):
         n_large = _estimate_sample_size(effect_size=0.8)
         n_small = _estimate_sample_size(effect_size=0.3)
         self.assertGreater(n_small, n_large)
+
+    def test_binary_outcome_returns_positive(self):
+        n = _estimate_binary_sample_size(alpha=0.05, power=0.8, control_rate=0.45, target_rate=0.65)
+        self.assertGreater(n, 0)
+
+    def test_case_control_returns_positive(self):
+        n = _estimate_case_control_sample_size(alpha=0.05, power=0.8, control_exposure_rate=0.3, odds_ratio=2.0)
+        self.assertGreater(n, 0)
 
 
 class TestPICO(unittest.TestCase):
@@ -86,6 +98,12 @@ class TestStudyProtocol(unittest.TestCase):
         self.assertIn("pico", d)
         self.assertIn("sample_size", d)
         self.assertIn("eligibility", d)
+
+    def test_to_dict_contains_enhanced_protocol_keys(self):
+        sp = StudyProtocol(study_type="rct", hypothesis="H1")
+        d = sp.to_dict()
+        for key in ("title", "objective", "arms", "visit_schedule", "data_collection_plan", "protocol_source"):
+            self.assertIn(key, d)
 
 
 class TestExperimentDesigner(unittest.TestCase):
@@ -180,7 +198,8 @@ class TestExperimentDesigner(unittest.TestCase):
         for key in ("study_type", "hypothesis", "pico", "sample_size",
                      "eligibility", "primary_outcome", "statistical_plan",
                      "blinding", "randomization", "duration",
-                     "ethical_considerations", "design_notes"):
+                     "ethical_considerations", "design_notes", "arms",
+                     "visit_schedule", "protocol_source"):
             self.assertIn(key, d)
 
     # -- 样本量参数 ---------------------------------------------------------
@@ -189,6 +208,72 @@ class TestExperimentDesigner(unittest.TestCase):
         proto = self.designer.design_study("H4", StudyType.RCT, effect_size=0.3)
         self.assertGreater(proto.sample_size.estimated_n, 0)
         self.assertAlmostEqual(proto.sample_size.effect_size, 0.3)
+
+    def test_llm_protocol_enhancement_parses_json(self):
+        llm = MagicMock()
+        llm.generate.return_value = json.dumps({
+            "title": "黄芪颗粒治疗气虚乏力 RCT 方案",
+            "objective": "验证黄芪颗粒对疲劳评分的改善效果",
+            "primary_outcome": "疲劳量表评分变化",
+            "secondary_outcomes": ["证候积分", "安全性"],
+            "pico": {
+                "population": "气虚乏力成年患者",
+                "intervention": "黄芪颗粒 + 常规管理",
+                "comparison": "安慰剂 + 常规管理",
+                "outcome": "疲劳量表评分变化"
+            },
+            "arms": [
+                {
+                    "name": "试验组",
+                    "intervention": "黄芪颗粒",
+                    "description": "每日 2 次，疗程 8 周",
+                    "allocation_ratio": 1
+                },
+                {
+                    "name": "对照组",
+                    "intervention": "安慰剂",
+                    "description": "外观一致",
+                    "allocation_ratio": 1
+                }
+            ],
+            "visit_schedule": [
+                {"timepoint": "基线", "assessments": ["疲劳量表", "实验室检查"]},
+                {"timepoint": "第 8 周", "assessments": ["主要结局", "不良事件"]}
+            ],
+            "sample_size": {
+                "outcome_type": "continuous",
+                "effect_size": 0.45,
+                "dropout_rate": 0.15
+            }
+        }, ensure_ascii=False)
+
+        designer = ExperimentDesigner(llm_engine=llm)
+        proto = designer.design_study(
+            "黄芪颗粒可改善气虚乏力患者疲劳评分",
+            StudyType.RCT,
+            use_llm=True,
+        )
+
+        self.assertEqual(proto.protocol_source, "llm_enhanced")
+        self.assertEqual(proto.title, "黄芪颗粒治疗气虚乏力 RCT 方案")
+        self.assertEqual(proto.pico.population, "气虚乏力成年患者")
+        self.assertEqual(len(proto.arms), 2)
+        self.assertGreater(proto.sample_size.estimated_n, 0)
+        self.assertEqual(proto.sample_size.outcome_type, "continuous")
+
+    def test_invalid_llm_payload_falls_back_to_template(self):
+        llm = MagicMock()
+        llm.generate.return_value = "this is not json"
+
+        designer = ExperimentDesigner(llm_engine=llm)
+        proto = designer.design_study(
+            "观察中药干预对乏力症状的改善",
+            StudyType.RCT,
+            use_llm=True,
+        )
+
+        self.assertEqual(proto.protocol_source, "template")
+        self.assertGreaterEqual(proto.filled_required_count(), 5)
 
     # -- 每种类型至少5个必填字段 ----------------------------------------------
 

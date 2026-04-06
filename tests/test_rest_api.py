@@ -17,6 +17,12 @@ class FakeRunner:
 
     def run(self, payload, emit=None):
         topic = payload["topic"]
+        protocol_inputs = {
+            "study_type": payload.get("study_type"),
+            "primary_outcome": payload.get("primary_outcome"),
+            "intervention": payload.get("intervention"),
+            "comparison": payload.get("comparison"),
+        }
         if emit is not None:
             emit("cycle_created", {"topic": topic, "cycle_id": "cycle-rest", "cycle_name": "demo", "scope": "test"})
             emit("phase_started", {"phase": "observe", "index": 1, "total": 1, "progress": 0.0})
@@ -43,7 +49,7 @@ class FakeRunner:
                 "phases": [
                     {"phase": "observe", "status": "completed", "duration_sec": 0.01, "error": "", "summary": {"observation_count": 1}},
                 ],
-                "pipeline_metadata": {"cycle_name": "demo", "scope": "test"},
+                "pipeline_metadata": {"cycle_name": "demo", "scope": "test", "protocol_inputs": protocol_inputs},
             }
             emit("job_completed", {"status": "completed", "result": result})
             return _ResultWrapper(result)
@@ -57,7 +63,7 @@ class FakeRunner:
                 "completed_at": "2026-03-30T00:00:01",
                 "total_duration_sec": 1.0,
                 "phases": [],
-                "pipeline_metadata": {"cycle_name": "sync-demo", "scope": "test"},
+                "pipeline_metadata": {"cycle_name": "sync-demo", "scope": "test", "protocol_inputs": protocol_inputs},
             }
         )
 
@@ -141,6 +147,12 @@ class TestRestApi(unittest.TestCase):
         self.assertIn("AnalyzeDocumentResponse", schemas)
         self.assertIn("SystemExportResponse", schemas)
 
+        run_request_props = schemas["ResearchRunRequest"]["properties"]
+        self.assertIn("study_type", run_request_props)
+        self.assertIn("primary_outcome", run_request_props)
+        self.assertIn("intervention", run_request_props)
+        self.assertIn("comparison", run_request_props)
+
         job_post = payload["paths"]["/api/v1/research/jobs"]["post"]
         schema_ref = job_post["requestBody"]["content"]["application/json"]["schema"]["$ref"]
         self.assertTrue(schema_ref.endswith("/ResearchRunRequest"))
@@ -190,6 +202,25 @@ class TestRestApi(unittest.TestCase):
         report_response = self.client.get(f"/api/v1/research/jobs/{job_id}/report?format=json")
         self.assertEqual(report_response.status_code, 200)
         self.assertEqual(report_response.json()["cycle_id"], "cycle-rest")
+
+    def test_versioned_run_accepts_explicit_protocol_inputs(self):
+        response = self.client.post(
+            "/api/v1/research/run",
+            json={
+                "topic": "黄芪颗粒治疗疲劳综合征",
+                "study_type": "rct",
+                "primary_outcome": "疲劳量表评分变化",
+                "intervention": "黄芪颗粒",
+                "comparison": "安慰剂",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        protocol_inputs = payload["pipeline_metadata"]["protocol_inputs"]
+        self.assertEqual(protocol_inputs["study_type"], "rct")
+        self.assertEqual(protocol_inputs["primary_outcome"], "疲劳量表评分变化")
+        self.assertEqual(protocol_inputs["intervention"], "黄芪颗粒")
+        self.assertEqual(protocol_inputs["comparison"], "安慰剂")
 
     def test_websocket_progress_stream_coexists_with_sse(self):
         create_response = self.client.post("/api/v1/research/jobs", json={"topic": "WebSocket 研究"})

@@ -34,7 +34,13 @@ from sqlalchemy import (
 )
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.engine.url import make_url
-from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
+from sqlalchemy.orm import (
+    Session,
+    declarative_base,
+    relationship,
+    scoped_session,
+    sessionmaker,
+)
 from sqlalchemy.types import TypeDecorator
 
 from src.core.module_base import BaseModule
@@ -403,6 +409,167 @@ class ResearchRecord(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# P3.1  ResearchSession 持久化 — 会话 / 阶段执行 / 工件 三表
+# ---------------------------------------------------------------------------
+
+
+class SessionStatusEnum(str, enum.Enum):
+    """研究会话状态。"""
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SUSPENDED = "suspended"
+
+
+class PhaseStatusEnum(str, enum.Enum):
+    """阶段执行状态。"""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class ArtifactTypeEnum(str, enum.Enum):
+    """工件类型。"""
+
+    PAPER = "paper"
+    DATASET = "dataset"
+    ANALYSIS = "analysis"
+    HYPOTHESIS = "hypothesis"
+    REPORT = "report"
+    VISUALIZATION = "visualization"
+    REFERENCE = "reference"
+    OTHER = "other"
+
+
+class ResearchSession(Base):
+    """研究会话 — 全生命周期追踪。"""
+
+    __tablename__ = "research_sessions"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    cycle_id = Column(String(128), unique=True, nullable=False, index=True)
+    cycle_name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(
+        _enum_column(SessionStatusEnum, name="session_status_enum"),
+        default=SessionStatusEnum.PENDING,
+        nullable=False,
+    )
+    current_phase = Column(String(64), nullable=True)
+
+    # 研究目标
+    research_objective = Column(Text, nullable=True)
+    research_scope = Column(Text, nullable=True)
+    target_audience = Column(Text, nullable=True)
+
+    # 参与者 & 资源（JSON）
+    researchers_json = Column(Text, nullable=False, default="[]")
+    advisors_json = Column(Text, nullable=False, default="[]")
+    resources_json = Column(Text, nullable=False, default="{}")
+    budget = Column(Float, default=0.0, nullable=False)
+    timeline_json = Column(Text, nullable=False, default="{}")
+
+    # 质量 & 风险（JSON）
+    quality_metrics_json = Column(Text, nullable=False, default="{}")
+    risk_assessment_json = Column(Text, nullable=False, default="{}")
+    expert_reviews_json = Column(Text, nullable=False, default="[]")
+
+    # 分类 & 元数据
+    tags_json = Column(Text, nullable=False, default="[]")
+    categories_json = Column(Text, nullable=False, default="[]")
+    metadata_json = Column(Text, nullable=False, default="{}")
+
+    # 时间戳
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    duration = Column(Float, default=0.0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    # 关系
+    phase_executions = relationship(
+        "PhaseExecution", back_populates="session", cascade="all, delete-orphan", order_by="PhaseExecution.created_at",
+    )
+    artifacts = relationship(
+        "ResearchArtifact", back_populates="session", cascade="all, delete-orphan", order_by="ResearchArtifact.created_at",
+    )
+
+    __table_args__ = (
+        Index("idx_rs_status", "status"),
+        Index("idx_rs_created", "created_at"),
+    )
+
+
+class PhaseExecution(Base):
+    """阶段执行记录。"""
+
+    __tablename__ = "phase_executions"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(GUID(), ForeignKey("research_sessions.id", ondelete="CASCADE"), nullable=False)
+    phase = Column(String(64), nullable=False)
+    status = Column(
+        _enum_column(PhaseStatusEnum, name="phase_status_enum"),
+        default=PhaseStatusEnum.PENDING,
+        nullable=False,
+    )
+
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    duration = Column(Float, default=0.0, nullable=False)
+    input_json = Column(Text, nullable=False, default="{}")
+    output_json = Column(Text, nullable=False, default="{}")
+    error_detail = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    session = relationship("ResearchSession", back_populates="phase_executions")
+    artifacts = relationship(
+        "ResearchArtifact", back_populates="phase_execution", cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("idx_pe_session_phase", "session_id", "phase"),
+    )
+
+
+class ResearchArtifact(Base):
+    """研究工件 / 产出物。"""
+
+    __tablename__ = "research_artifacts"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(GUID(), ForeignKey("research_sessions.id", ondelete="CASCADE"), nullable=False)
+    phase_execution_id = Column(GUID(), ForeignKey("phase_executions.id", ondelete="SET NULL"), nullable=True)
+    artifact_type = Column(
+        _enum_column(ArtifactTypeEnum, name="artifact_type_enum"),
+        default=ArtifactTypeEnum.OTHER,
+        nullable=False,
+    )
+    name = Column(String(500), nullable=False)
+    description = Column(Text, nullable=True)
+    content_json = Column(Text, nullable=False, default="{}")
+    file_path = Column(String(1000), nullable=True)
+    mime_type = Column(String(128), nullable=True)
+    size_bytes = Column(Integer, default=0, nullable=False)
+    metadata_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    session = relationship("ResearchSession", back_populates="artifacts")
+    phase_execution = relationship("PhaseExecution", back_populates="artifacts")
+
+    __table_args__ = (
+        Index("idx_ra_session", "session_id"),
+        Index("idx_ra_type", "artifact_type"),
+    )
+
+
 def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
@@ -469,7 +636,8 @@ class DatabaseManager:
         self.engine = create_engine(self.connection_string, **self._build_engine_kwargs())
         if self.connection_string.startswith("sqlite"):
             event.listen(self.engine, "connect", _enable_sqlite_foreign_keys)
-        self.Session = sessionmaker(bind=self.engine, autoflush=False, expire_on_commit=False)
+        session_factory = sessionmaker(bind=self.engine, autoflush=False, expire_on_commit=False)
+        self.Session = scoped_session(session_factory)
         Base.metadata.create_all(self.engine)
 
     def get_session(self) -> Session:
@@ -487,7 +655,12 @@ class DatabaseManager:
             session.rollback()
             raise
         finally:
-            session.close()
+            self.Session.remove()
+
+    def remove_session(self) -> None:
+        """显式移除当前线程的 scoped session（供 web 请求收尾调用）。"""
+        if self.Session is not None:
+            self.Session.remove()
 
     def health_check(self) -> bool:
         if self.engine is None:
@@ -500,6 +673,8 @@ class DatabaseManager:
             return False
 
     def close(self) -> None:
+        if self.Session is not None:
+            self.Session.remove()
         if self.engine is not None:
             self.engine.dispose()
 

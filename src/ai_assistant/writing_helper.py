@@ -247,7 +247,7 @@ class WritingHelper:
             return ""
         try:
             return engine.generate(prompt, system_prompt=system_prompt)
-        except Exception as exc:
+        except Exception:
             logger.exception("LLM 生成失败")
             return ""
 
@@ -256,10 +256,12 @@ class WritingHelper:
             return self._llm
         try:
             from src.llm.llm_engine import LLMEngine
-            self._llm = LLMEngine()
-            self._llm.load()
-            return self._llm
+            engine = LLMEngine()
+            engine.load()
+            self._llm = engine
+            return engine
         except Exception as exc:
+            self._llm = None
             logger.warning("无法加载 LLM 引擎: %s", exc)
             return None
 

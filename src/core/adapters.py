@@ -18,6 +18,15 @@ from src.core.ports import (
     ResearchPort,
 )
 
+try:
+    from src.generation.llm_context_adapter import (
+        DEFAULT_LLM_ANALYSIS_MODULE_ALIASES,
+        wrap_paper_writer_with_llm_context,
+    )
+except Exception:
+    DEFAULT_LLM_ANALYSIS_MODULE_ALIASES = {}
+    wrap_paper_writer_with_llm_context = None
+
 
 class DefaultCollectionAdapter(CollectionPort):
     """Routes collection calls through the module factory."""
@@ -52,8 +61,8 @@ class DefaultCollectionAdapter(CollectionPort):
         self,
         query: str,
         *,
-        sources: Optional[List[str]] = None,
-        max_results_per_source: int = 20,
+        sources: Optional[List[str]]=None,
+        max_results_per_source: int=20,
     ) -> Dict[str, Any]:
         retriever = self._factory.create("literature_retriever", {})
         try:
@@ -75,16 +84,16 @@ class DefaultAnalysisAdapter(AnalysisPort):
     def __init__(self, module_factory: Any) -> None:
         self._factory = module_factory
 
-    def create_preprocessor(self, config: Optional[Dict[str, Any]] = None) -> Any:
+    def create_preprocessor(self, config: Optional[Dict[str, Any]]=None) -> Any:
         return self._factory.create("document_preprocessor", config or {})
 
-    def create_extractor(self, config: Optional[Dict[str, Any]] = None) -> Any:
+    def create_extractor(self, config: Optional[Dict[str, Any]]=None) -> Any:
         return self._factory.create("entity_extractor", config or {})
 
-    def create_semantic_builder(self, config: Optional[Dict[str, Any]] = None) -> Any:
+    def create_semantic_builder(self, config: Optional[Dict[str, Any]]=None) -> Any:
         return self._factory.create("semantic_graph_builder", config or {})
 
-    def create_reasoning_engine(self, config: Optional[Dict[str, Any]] = None) -> Any:
+    def create_reasoning_engine(self, config: Optional[Dict[str, Any]]=None) -> Any:
         return self._factory.create("reasoning_engine", config or {})
 
 
@@ -137,14 +146,25 @@ class DefaultOutputAdapter(OutputPort):
     def __init__(self, module_factory: Any) -> None:
         self._factory = module_factory
 
-    def create_citation_manager(self, config: Optional[Dict[str, Any]] = None) -> Any:
+    def create_citation_manager(self, config: Optional[Dict[str, Any]]=None) -> Any:
         return self._factory.create("citation_manager", config or {})
 
-    def create_paper_writer(self, config: Optional[Dict[str, Any]] = None) -> Any:
-        return self._factory.create("paper_writer", config or {})
+    def create_paper_writer(self, config: Optional[Dict[str, Any]]=None) -> Any:
+        paper_writer = self._factory.create("paper_writer", config or {})
+        if not callable(wrap_paper_writer_with_llm_context):
+            return paper_writer
+        module_aliases = (
+            dict(DEFAULT_LLM_ANALYSIS_MODULE_ALIASES)
+            if isinstance(DEFAULT_LLM_ANALYSIS_MODULE_ALIASES, dict) and DEFAULT_LLM_ANALYSIS_MODULE_ALIASES
+            else None
+        )
+        return wrap_paper_writer_with_llm_context(
+            paper_writer,
+            module_aliases=module_aliases,
+        )
 
-    def create_output_generator(self, config: Optional[Dict[str, Any]] = None) -> Any:
+    def create_output_generator(self, config: Optional[Dict[str, Any]]=None) -> Any:
         return self._factory.create("output_generator", config or {})
 
-    def create_report_generator(self, config: Optional[Dict[str, Any]] = None) -> Any:
+    def create_report_generator(self, config: Optional[Dict[str, Any]]=None) -> Any:
         return self._factory.create("report_generator", config or {})

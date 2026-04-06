@@ -212,6 +212,7 @@ class ResearchExperiment:
     actual_results: Dict[str, Any] = field(default_factory=dict)
     analysis_results: Dict[str, Any] = field(default_factory=dict)
     conclusions: List[str] = field(default_factory=list)
+    study_protocol: Dict[str, Any] = field(default_factory=dict)
     
     # 专家评价
     expert_evaluations: List[Dict[str, Any]] = field(default_factory=list)
@@ -246,6 +247,7 @@ class ResearchExperiment:
             "actual_results": self.actual_results,
             "analysis_results": self.analysis_results,
             "conclusions": self.conclusions,
+            "study_protocol": self.study_protocol,
             "expert_evaluations": self.expert_evaluations,
             "tags": self.tags,
             "categories": self.categories
@@ -278,6 +280,7 @@ class ResearchExperiment:
             actual_results=data.get("actual_results", {}),
             analysis_results=data.get("analysis_results", {}),
             conclusions=data.get("conclusions", []),
+            study_protocol=data.get("study_protocol", {}),
             expert_evaluations=data.get("expert_evaluations", []),
             tags=data.get("tags", []),
             categories=data.get("categories", [])
@@ -686,6 +689,19 @@ class TheoreticalFramework(PhaseTrackerMixin):
             resolved_context = context or {}
             evidence_profile = resolved_context.get("evidence_profile") or {}
             source_weights = resolved_context.get("source_weights") or []
+            study_protocol = self._build_study_protocol(
+                hypothesis,
+                resolved_context,
+                experiment_title,
+                experiment_description,
+            )
+            resolved_sample_size = self._resolve_experiment_sample_size(resolved_context, evidence_profile)
+            protocol_sample_size = 0
+            if isinstance(study_protocol, dict):
+                protocol_sample_size = int(
+                    ((study_protocol.get("sample_size") or {}).get("estimated_n") or 0)
+                )
+            final_sample_size = protocol_sample_size or resolved_sample_size
             
             # 创建实验
             experiment = ResearchExperiment(
@@ -695,7 +711,7 @@ class TheoreticalFramework(PhaseTrackerMixin):
                 description=experiment_description,
                 experimental_design=self._resolve_experimental_design(resolved_context, evidence_profile, source_weights),
                 methodology=self._resolve_experiment_methodology(resolved_context, evidence_profile),
-                sample_size=self._resolve_experiment_sample_size(resolved_context, evidence_profile),
+                sample_size=final_sample_size,
                 duration=self._resolve_experiment_duration(resolved_context, evidence_profile),
                 phase="planning",
                 conditions=self._resolve_experiment_conditions(resolved_context, evidence_profile),
@@ -707,9 +723,19 @@ class TheoreticalFramework(PhaseTrackerMixin):
                 quality_score=self._resolve_quality_score(evidence_profile),
                 reproducibility_score=self._resolve_reproducibility_score(evidence_profile),
                 scientific_validity=self._resolve_scientific_validity(evidence_profile),
+                study_protocol=study_protocol,
                 tags=["designed", "automated", "tcmautoresearch"],
                 categories=["formal", "scientific"]
             )
+            if study_protocol:
+                experiment.conditions.setdefault(
+                    "protocol_source",
+                    str(study_protocol.get("protocol_source") or "template"),
+                )
+                experiment.conditions.setdefault(
+                    "protocol_study_type",
+                    str(study_protocol.get("study_type") or ""),
+                )
             
             # 存储实验
             self.experiments[experiment_id] = experiment
@@ -734,6 +760,121 @@ class TheoreticalFramework(PhaseTrackerMixin):
             self.logger.error(f"实验设计失败: {e}")
             self._fail_operation("design_experiment", phase_entry, start_time, str(e))
             raise
+
+    def _build_study_protocol(
+        self,
+        hypothesis: ResearchHypothesis,
+        context: Dict[str, Any],
+        experiment_title: str,
+        experiment_description: str,
+    ) -> Dict[str, Any]:
+        try:
+            from src.research.experiment_designer import ExperimentDesigner
+        except Exception as exc:
+            self.logger.debug("ExperimentDesigner 不可用，跳过结构化协议生成: %s", exc)
+            return {}
+
+        study_type = self._infer_protocol_study_type(hypothesis, context, experiment_description)
+        llm_engine = context.get("llm_engine") or context.get("llm_service")
+        designer = ExperimentDesigner(
+            {
+                "llm_engine": llm_engine,
+                "llm_service": llm_engine,
+            },
+            llm_engine=llm_engine,
+        )
+
+        objective = str(
+            context.get("research_objective")
+            or hypothesis.research_objective
+            or experiment_title
+        ).strip()
+        population = str(
+            context.get("population")
+            or context.get("research_scope")
+            or hypothesis.research_objective
+            or "目标研究对象"
+        ).strip()
+        intervention = str(
+            context.get("intervention")
+            or hypothesis.validation_method
+            or hypothesis.title
+        ).strip()
+        comparison = str(
+            context.get("comparison")
+            or "标准治疗、安慰剂或常规证据路径"
+        ).strip()
+        outcome = str(
+            context.get("primary_outcome")
+            or context.get("outcome")
+            or hypothesis.expected_outcome
+            or objective
+        ).strip()
+
+        try:
+            protocol = designer.design_study(
+                hypothesis.description or hypothesis.title,
+                study_type,
+                title=experiment_title,
+                objective=objective,
+                population=population,
+                intervention=intervention,
+                comparison=comparison,
+                outcome=outcome,
+                effect_size=context.get("effect_size"),
+                llm_engine=llm_engine,
+                use_llm=context.get("use_llm_protocol_generation"),
+                additional_context=context,
+                sample_size_override=context.get("sample_size"),
+            )
+        except Exception as exc:
+            self.logger.warning("结构化研究协议生成失败，继续使用基础实验设计: %s", exc)
+            return {}
+        return protocol.to_dict()
+
+    def _infer_protocol_study_type(
+        self,
+        hypothesis: ResearchHypothesis,
+        context: Dict[str, Any],
+        experiment_description: str,
+    ) -> str:
+        explicit = str(context.get("study_type") or "").strip()
+        if explicit:
+            return explicit
+
+        hint_text = " ".join(
+            item
+            for item in [
+                hypothesis.title,
+                hypothesis.description,
+                hypothesis.validation_method,
+                hypothesis.expected_outcome,
+                experiment_description,
+                str(context.get("research_scope") or ""),
+                str(context.get("research_objective") or ""),
+            ]
+            if item
+        ).lower()
+
+        if any(keyword in hint_text for keyword in ("meta", "荟萃", "合并效应")):
+            return "meta_analysis"
+        if any(keyword in hint_text for keyword in ("系统综述", "systematic", "prisma", "文献检索")):
+            return "systematic_review"
+        if any(keyword in hint_text for keyword in ("病例对照", "case-control", "危险因素", "or 值", "odds ratio")):
+            return "case_control"
+        if any(keyword in hint_text for keyword in ("队列", "cohort", "随访", "风险", "预后")):
+            return "cohort"
+        if any(keyword in hint_text for keyword in ("网络药理", "靶点", "通路", "分子对接", "kegg", "ppi")):
+            return "network_pharmacology"
+
+        domain = getattr(hypothesis.research_domain, "value", str(hypothesis.research_domain))
+        if domain == "historical_research":
+            return "systematic_review"
+        if domain in {"formula_research", "herb_research", "pathogenesis_research"}:
+            return "network_pharmacology"
+        if domain == "syndrome_research":
+            return "cohort"
+        return "rct"
 
     def _resolve_experimental_design(
         self,

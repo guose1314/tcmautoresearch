@@ -118,11 +118,11 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             return None
         return self.pipeline.orchestrator._resume_research_cycle_local(cycle_id)
 
-    def _start_phase(  # type: ignore[override]
+    def _start_phase(# type: ignore[override]
         self,
         metadata: Dict[str, Any],
         phase_name: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[Dict[str, Any]]=None,
     ) -> Dict[str, Any]:
         phase_entry = {
             "phase": phase_name,
@@ -152,7 +152,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         )
         return phase_entry
 
-    def _complete_phase(  # type: ignore[override]
+    def _complete_phase(# type: ignore[override]
         self,
         metadata: Dict[str, Any],
         phase_name: str,
@@ -187,7 +187,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             },
         )
 
-    def _fail_phase(  # type: ignore[override]
+    def _fail_phase(# type: ignore[override]
         self,
         metadata: Dict[str, Any],
         failed_operations: List[Dict[str, Any]],
@@ -232,13 +232,13 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             phase_entry.get("context", {}),
         )
 
-    def _record_failed_operation(  # type: ignore[override]
+    def _record_failed_operation(# type: ignore[override]
         self,
         failed_operations: List[Dict[str, Any]],
         operation: str,
         error: str,
         duration: float,
-        details: Optional[Dict[str, Any]] = None,
+        details: Optional[Dict[str, Any]]=None,
     ) -> None:
         if not self.pipeline._governance_config.get("persist_failed_operations", True):
             return
@@ -414,14 +414,38 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             return result
         return self.pipeline.phase_handlers.execute_phase_internal(phase, cycle, context)
 
+    def _get_phase_handler(self, phase_name: str) -> Any:
+        handler = self.pipeline.phase_handlers.get_handler(phase_name)
+        if handler is None:
+            raise RuntimeError(f"阶段处理器不可用: {phase_name}")
+        return handler
+
+    def _observe_handler(self) -> Any:
+        return self._get_phase_handler("observe")
+
+    def _hypothesis_handler(self) -> Any:
+        return self._get_phase_handler("hypothesis")
+
+    def _experiment_handler(self) -> Any:
+        return self._get_phase_handler("experiment")
+
+    def _analyze_handler(self) -> Any:
+        return self._get_phase_handler("analyze")
+
+    def _publish_handler(self) -> Any:
+        return self._get_phase_handler("publish")
+
+    def _reflect_handler(self) -> Any:
+        return self._get_phase_handler("reflect")
+
     def _execute_observe_phase(self, cycle: ResearchCycle, context: Dict[str, Any]) -> Dict[str, Any]:
-        return self.pipeline.phase_handlers.execute_observe_phase(cycle, context)
+        return self._observe_handler().execute_observe_phase(cycle, context)
 
     def _build_observe_seed_lists(self) -> Tuple[List[str], List[str]]:
-        return self.pipeline.phase_handlers._build_observe_seed_lists()
+        return self._observe_handler()._build_observe_seed_lists()
 
     def _collect_observe_corpus_if_enabled(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        return self.pipeline.phase_handlers._collect_observe_corpus_if_enabled(context)
+        return self._observe_handler()._collect_observe_corpus_if_enabled(context)
 
     def _register_observe_collection_result(
         self,
@@ -430,7 +454,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         bundles: List[CorpusBundle],
         fallback_error: Optional[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        return self.pipeline.phase_handlers._register_observe_collection_result(
+        return self._observe_handler()._register_observe_collection_result(
             source_result,
             source_type,
             bundles,
@@ -442,17 +466,17 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         source_result: Dict[str, Any],
         source_type: str,
     ) -> Optional[CorpusBundle]:
-        return self.pipeline.phase_handlers._to_observe_corpus_bundle(source_result, source_type)
+        return self._observe_handler()._to_observe_corpus_bundle(source_result, source_type)
 
     def _run_observe_literature_if_enabled(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        return self.pipeline.phase_handlers._run_observe_literature_if_enabled(context)
+        return self._observe_handler()._run_observe_literature_if_enabled(context)
 
     def _run_observe_ingestion_if_enabled(
         self,
         corpus_result: Optional[Dict[str, Any]],
         context: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
-        return self.pipeline.phase_handlers._run_observe_ingestion_if_enabled(corpus_result, context)
+        return self._observe_handler()._run_observe_ingestion_if_enabled(corpus_result, context)
 
     def _append_corpus_observe_updates(
         self,
@@ -460,7 +484,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         observations: List[str],
         findings: List[str],
     ) -> None:
-        self.pipeline.phase_handlers._append_corpus_observe_updates(corpus_result, observations, findings)
+        self._observe_handler()._append_corpus_observe_updates(corpus_result, observations, findings)
 
     def _append_ingestion_observe_updates(
         self,
@@ -468,7 +492,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         observations: List[str],
         findings: List[str],
     ) -> None:
-        self.pipeline.phase_handlers._append_ingestion_observe_updates(ingestion_result, observations, findings)
+        self._observe_handler()._append_ingestion_observe_updates(ingestion_result, observations, findings)
 
     def _append_literature_observe_updates(
         self,
@@ -476,7 +500,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         observations: List[str],
         findings: List[str],
     ) -> None:
-        self.pipeline.phase_handlers._append_literature_observe_updates(literature_result, observations, findings)
+        self._observe_handler()._append_literature_observe_updates(literature_result, observations, findings)
 
     def _build_observe_metadata(
         self,
@@ -487,7 +511,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         ingestion_result: Optional[Dict[str, Any]],
         literature_result: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        return self.pipeline.phase_handlers._build_observe_metadata(
+        return self._observe_handler()._build_observe_metadata(
             context,
             observations,
             findings,
@@ -497,30 +521,30 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         )
 
     def _is_ctext_corpus_collected(self, corpus_result: Optional[Dict[str, Any]]) -> bool:
-        return self.pipeline.phase_handlers._is_ctext_corpus_collected(corpus_result)
+        return self._observe_handler()._is_ctext_corpus_collected(corpus_result)
 
     def _build_observe_ingestion_flags(
         self,
         ingestion_result: Optional[Dict[str, Any]],
         ingestion_ok: bool,
     ) -> Tuple[bool, bool]:
-        return self.pipeline.phase_handlers._build_observe_ingestion_flags(ingestion_result, ingestion_ok)
+        return self._observe_handler()._build_observe_ingestion_flags(ingestion_result, ingestion_ok)
 
     def _has_observe_evidence_matrix(
         self,
         literature_result: Optional[Dict[str, Any]],
         literature_ok: bool,
     ) -> bool:
-        return self.pipeline.phase_handlers._has_observe_evidence_matrix(literature_result, literature_ok)
+        return self._observe_handler()._has_observe_evidence_matrix(literature_result, literature_ok)
 
     def _should_run_observe_ingestion(self, context: Dict[str, Any]) -> bool:
-        return self.pipeline.phase_handlers._should_run_observe_ingestion(context)
+        return self._observe_handler()._should_run_observe_ingestion(context)
 
     def _should_run_observe_literature(self, context: Dict[str, Any]) -> bool:
-        return self.pipeline.phase_handlers._should_run_observe_literature(context)
+        return self._observe_handler()._should_run_observe_literature(context)
 
     def _run_observe_literature_pipeline(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        return self.pipeline.phase_handlers._run_observe_literature_pipeline(context)
+        return self._observe_handler()._run_observe_literature_pipeline(context)
 
     def _should_run_clinical_gap_analysis(self, context: Dict[str, Any]) -> bool:
         if "run_clinical_gap_analysis" in context:
@@ -662,34 +686,34 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         }
 
     def _should_collect_ctext_corpus(self, context: Dict[str, Any]) -> bool:
-        return self.pipeline.phase_handlers._should_collect_ctext_corpus(context)
+        return self._observe_handler()._should_collect_ctext_corpus(context)
 
     def _should_collect_local_corpus(self, context: Dict[str, Any]) -> bool:
-        return self.pipeline.phase_handlers._should_collect_local_corpus(context)
+        return self._observe_handler()._should_collect_local_corpus(context)
 
     def _collect_local_observation_corpus(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        return self.pipeline.phase_handlers._collect_local_observation_corpus(context)
+        return self._observe_handler()._collect_local_observation_corpus(context)
 
     def _resolve_observe_data_source(self, context: Dict[str, Any]) -> str:
-        return self.pipeline.phase_handlers._resolve_observe_data_source(context)
+        return self._observe_handler()._resolve_observe_data_source(context)
 
     def _resolve_whitelist_groups(self, context: Dict[str, Any]) -> List[str]:
-        return self.pipeline.phase_handlers._resolve_whitelist_groups(context)
+        return self._observe_handler()._resolve_whitelist_groups(context)
 
     def _collect_ctext_observation_corpus(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        return self.pipeline.phase_handlers._collect_ctext_observation_corpus(context)
+        return self._observe_handler()._collect_ctext_observation_corpus(context)
 
     def _run_observe_ingestion_pipeline(self, corpus_result: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        return self.pipeline.phase_handlers._run_observe_ingestion_pipeline(corpus_result, context)
+        return self._observe_handler()._run_observe_ingestion_pipeline(corpus_result, context)
 
     def _extract_corpus_text_entries(self, corpus_result: Dict[str, Any]) -> List[Dict[str, str]]:
-        return self.pipeline.phase_handlers._extract_corpus_text_entries(corpus_result)
+        return self._observe_handler()._extract_corpus_text_entries(corpus_result)
 
     def _execute_hypothesis_phase(self, cycle: ResearchCycle, context: Dict[str, Any]) -> Dict[str, Any]:
-        return self.pipeline.phase_handlers.execute_hypothesis_phase(cycle, context)
+        return self._hypothesis_handler().execute_hypothesis_phase(cycle, context)
 
     def _build_hypothesis_context(self, cycle: ResearchCycle, context: Dict[str, Any]) -> Dict[str, Any]:
-        return self.pipeline.phase_handlers._build_hypothesis_context(cycle, context)
+        return self._hypothesis_handler()._build_hypothesis_context(cycle, context)
 
     def _infer_hypothesis_domain(
         self,
@@ -697,16 +721,16 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         observations: List[str],
         findings: List[str],
     ) -> str:
-        return self.pipeline.phase_handlers._infer_hypothesis_domain(cycle, observations, findings)
+        return self._hypothesis_handler()._infer_hypothesis_domain(cycle, observations, findings)
 
     def _execute_experiment_phase(self, cycle: ResearchCycle, context: Dict[str, Any]) -> Dict[str, Any]:
-        return self.pipeline.phase_handlers.execute_experiment_phase(cycle, context)
+        return self._experiment_handler().execute_experiment_phase(cycle, context)
 
     def _execute_analyze_phase(self, cycle: ResearchCycle, context: Dict[str, Any]) -> Dict[str, Any]:
-        return self.pipeline.phase_handlers.execute_analyze_phase(cycle, context)
+        return self._analyze_handler().execute_analyze_phase(cycle, context)
 
     def _execute_publish_phase(self, cycle: ResearchCycle, context: Dict[str, Any]) -> Dict[str, Any]:
-        return self.pipeline.phase_handlers.execute_publish_phase(cycle, context)
+        return self._publish_handler().execute_publish_phase(cycle, context)
 
     def _collect_citation_records(
         self,
@@ -714,10 +738,10 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         context: Dict[str, Any],
         literature_pipeline: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
-        return self.pipeline.phase_handlers.collect_citation_records(cycle, context, literature_pipeline)
+        return self._publish_handler().collect_citation_records(cycle, context, literature_pipeline)
 
     def _execute_reflect_phase(self, cycle: ResearchCycle, context: Dict[str, Any]) -> Dict[str, Any]:
-        return self.pipeline.phase_handlers.execute_reflect_phase(cycle, context)
+        return self._reflect_handler().execute_reflect_phase(cycle, context)
 
     def get_pipeline_summary(self) -> Dict[str, Any]:
         total_cycles = len(self.pipeline.research_cycles)

@@ -1,0 +1,132 @@
+{
+  "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "normalize_embeddings": true,
+  "faiss_enabled": false,
+  "dimension": 384,
+  "corpus_version": "tcm_formula_catalog.v1",
+  "index_signature": "1cb1a55eb6d8b02655ff271b0146196ee2ced4f7037be207ac2f752d59c606ac",
+  "items": [
+    {
+      "item_id": "六君子汤",
+      "text": "六君子汤；六君子汤添加了半夏（燥湿）和陈皮（理气）",
+      "item_type": "formula",
+      "metadata": {
+        "formula_id": "六君子汤",
+        "name": "六君子汤",
+        "herbs": [],
+        "indications": [],
+        "description": "六君子汤添加了半夏（燥湿）和陈皮（理气）"
+      }
+    },
+    {
+      "item_id": "四君子汤",
+      "text": "四君子汤；药物:人参 白术 茯苓 甘草；脾胃气虚的基础方，比例均等对称；补中益气汤添加了黄芪（升阳）和升麻/柴胡（升陷）；六君子汤添加了半夏（燥湿）和陈皮（理气）",
+      "item_type": "formula",
+      "metadata": {
+        "formula_id": "四君子汤",
+        "name": "四君子汤",
+        "herbs": [
+          "人参",
+          "白术",
+          "茯苓",
+          "甘草"
+        ],
+        "indications": [],
+        "description": "脾胃气虚的基础方，比例均等对称；补中益气汤添加了黄芪（升阳）和升麻/柴胡（升陷）；六君子汤添加了半夏（燥湿）和陈皮（理气）"
+      }
+    },
+    {
+      "item_id": "四逆汤",
+      "text": "四逆汤",
+      "item_type": "formula",
+      "metadata": {
+        "formula_id": "四逆汤",
+        "name": "四逆汤",
+        "herbs": [],
+        "indications": [],
+        "description": ""
+      }
+    },
+    {
+      "item_id": "真武汤",
+      "text": "真武汤",
+      "item_type": "formula",
+      "metadata": {
+        "formula_id": "真武汤",
+        "name": "真武汤",
+        "herbs": [],
+        "indications": [],
+        "description": ""
+      }
+    },
+    {
+      "item_id": "膈下逐瘀汤",
+      "text": "膈下逐瘀汤",
+      "item_type": "formula",
+      "metadata": {
+        "formula_id": "膈下逐瘀汤",
+        "name": "膈下逐瘀汤",
+        "herbs": [],
+        "indications": [],
+        "description": ""
+      }
+    },
+    {
+      "item_id": "血府逐瘀汤",
+      "text": "血府逐瘀汤",
+      "item_type": "formula",
+      "metadata": {
+        "formula_id": "血府逐瘀汤",
+        "name": "血府逐瘀汤",
+        "herbs": [],
+        "indications": [],
+        "description": ""
+      }
+    },
+    {
+      "item_id": "补中益气汤",
+      "text": "补中益气汤；药物:黄芪 人参 党参 白术 升麻 柴胡 甘草 大枣；扶正培本，升阳益气；补中益气汤添加了黄芪（升阳）和升麻/柴胡（升陷）",
+      "item_type": "formula",
+      "metadata": {
+        "formula_id": "补中益气汤",
+        "name": "补中益气汤",
+        "herbs": [
+          "黄芪",
+          "人参",
+          "党参",
+          "白术",
+          "升麻",
+          "柴胡",
+          "甘草",
+          "大枣"
+        ],
+        "indications": [],
+        "description": "扶正培本，升阳益气；补中益气汤添加了黄芪（升阳）和升麻/柴胡（升陷）"
+      }
+    },
+    {
+      "item_id": "身痛逐瘀汤",
+      "text": "身痛逐瘀汤",
+      "item_type": "formula",
+      "metadata": {
+        "formula_id": "身痛逐瘀汤",
+        "name": "身痛逐瘀汤",
+        "herbs": [],
+        "indications": [],
+        "description": ""
+      }
+    },
+    {
+      "item_id": "阳和汤",
+      "text": "阳和汤",
+      "item_type": "formula",
+      "metadata": {
+        "formula_id": "阳和汤",
+        "name": "阳和汤",
+        "herbs": [],
+        "indications": [],
+        "description": ""
+      }
+    }
+  ]
+}

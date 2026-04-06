@@ -2,6 +2,8 @@
 TCM 四级知识图谱：方剂 → 证候 → 靶点 → 通路
 
 基于 NetworkX MultiDiGraph 内存图 + SQLite 持久化。
+IKnowledgeGraph / KnowledgeGap 从 src.storage.graph_interface 导入，
+保持向后兼容的本地名称。
 """
 
 from __future__ import annotations
@@ -9,7 +11,6 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -17,65 +18,15 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 import networkx as nx
 
 from src.semantic_modeling.tcm_relationships import TCMRelationshipDefinitions
+from src.storage.graph_interface import (
+    ENTITY_TYPES,
+    FOUR_LEVELS,
+    LEVEL_RELATION_TYPES,
+    IKnowledgeGraph,
+    KnowledgeGap,
+)
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# 数据结构
-# ---------------------------------------------------------------------------
-
-ENTITY_TYPES: Set[str] = {
-    "formula",    # 方剂
-    "herb",       # 中药
-    "syndrome",   # 证候
-    "target",     # 靶点
-    "pathway",    # 通路
-    "efficacy",   # 功效
-}
-
-FOUR_LEVELS: Tuple[str, ...] = ("formula", "syndrome", "target", "pathway")
-
-# 四级之间的标准关系类型
-LEVEL_RELATION_TYPES: Dict[Tuple[str, str], str] = {
-    ("formula", "syndrome"): "treats",
-    ("syndrome", "target"): "associated_target",
-    ("target", "pathway"): "participates_in",
-}
-
-
-@dataclass(frozen=True)
-class KnowledgeGap:
-    """一条知识缺口记录。"""
-    gap_type: str       # orphan_entity | missing_downstream | incomplete_composition
-    entity: str
-    entity_type: str
-    description: str
-    severity: str       # high | medium | low
-
-
-# ---------------------------------------------------------------------------
-# 接口
-# ---------------------------------------------------------------------------
-
-class IKnowledgeGraph(ABC):
-    """知识图谱统一接口。"""
-
-    @abstractmethod
-    def add_entity(self, entity: Dict[str, Any]) -> None: ...
-
-    @abstractmethod
-    def add_relation(self, src: str, rel_type: str, dst: str,
-                     metadata: Optional[Dict[str, Any]] = None) -> None: ...
-
-    @abstractmethod
-    def query_path(self, src: str, dst: str) -> List[List[str]]: ...
-
-    @abstractmethod
-    def find_gaps(self) -> List[KnowledgeGap]: ...
-
-    @abstractmethod
-    def get_subgraph(self, entity: str, depth: int = 2) -> nx.DiGraph: ...
-
 
 # ---------------------------------------------------------------------------
 # SQLite 持久化层

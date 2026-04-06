@@ -11,7 +11,6 @@ from src.collector.corpus_bundle import (
     extract_text_entries,
     is_corpus_bundle,
 )
-from src.knowledge.tcm_knowledge_graph import TCMKnowledgeGraph
 
 
 class ObservePhaseMixin:
@@ -382,6 +381,10 @@ class ObservePhaseMixin:
     def _should_collect_local_corpus(self, context: Dict[str, Any]) -> bool:
         if "use_local_corpus" in context:
             return bool(context.get("use_local_corpus"))
+
+        # Backward-compatible alias used by run_cycle_demo research mode.
+        if "collect_local_corpus" in context:
+            return bool(context.get("collect_local_corpus"))
 
         if context.get("data_source") == "local":
             return True

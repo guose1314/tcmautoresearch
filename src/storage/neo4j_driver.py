@@ -3,6 +3,11 @@ from __future__ import annotations
 """
 Neo4j 图数据库驱动
 中医古籍全自动研究系统 - 知识图谱存储
+
+提供:
+- Neo4jDriver: 底层 Cypher CRUD
+- Neo4jKnowledgeGraph(IKnowledgeGraph): 统一图谱接口的 Neo4j 实现
+- create_knowledge_graph(): 工厂函数，按配置返回 Neo4j 或 NetworkX 后端
 """
 
 import json
@@ -10,7 +15,15 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from importlib import import_module
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
+
+from .graph_interface import (
+    ENTITY_TYPES,
+    FOUR_LEVELS,
+    LEVEL_RELATION_TYPES,
+    IKnowledgeGraph,
+    KnowledgeGap,
+)
 
 if TYPE_CHECKING:
     from src.infrastructure.persistence import Entity, EntityRelationship
@@ -46,7 +59,16 @@ class Neo4jEdge:
 class Neo4jDriver:
     """Neo4j 驱动封装 - 支持图数据CRUD"""
     
-    def __init__(self, uri: str, auth: Tuple[str, str], database: str = "neo4j"):
+    def __init__(
+        self,
+        uri: str,
+        auth: Tuple[str, str],
+        database: str = "neo4j",
+        *,
+        max_connection_pool_size: int = 50,
+        connection_acquisition_timeout: float = 60.0,
+        max_connection_lifetime: int = 3600,
+    ):
         """
         初始化Neo4j驱动
         
@@ -54,22 +76,39 @@ class Neo4jDriver:
             uri: 连接URI，例如 neo4j://localhost:7687
             auth: (用户名, 密码) 元组
             database: 数据库名称
+            max_connection_pool_size: 连接池最大连接数
+            connection_acquisition_timeout: 从池中获取连接的超时秒数
+            max_connection_lifetime: 连接最大存活秒数
         """
         self.uri = uri
         self.auth = auth
         self.database = database
+        self._pool_config = {
+            "max_connection_pool_size": max_connection_pool_size,
+            "connection_acquisition_timeout": connection_acquisition_timeout,
+            "max_connection_lifetime": max_connection_lifetime,
+        }
         self.driver = None
     
     def connect(self):
-        """建立连接"""
+        """建立连接（启用连接池）"""
         try:
             GraphDatabase = _get_neo4j_graph_database()
-            self.driver = GraphDatabase.driver(self.uri, auth=self.auth)
+            self.driver = GraphDatabase.driver(
+                self.uri,
+                auth=self.auth,
+                max_connection_pool_size=self._pool_config["max_connection_pool_size"],
+                connection_acquisition_timeout=self._pool_config["connection_acquisition_timeout"],
+                max_connection_lifetime=self._pool_config["max_connection_lifetime"],
+            )
             # 验证连接
             with self.driver.session(database=self.database) as session:
                 result = session.run("RETURN 1")
                 result.consume()
-            logger.info(f"Neo4j 连接成功: {self.uri}")
+            logger.info(
+                "Neo4j 连接成功: %s (pool_size=%d)",
+                self.uri, self._pool_config["max_connection_pool_size"],
+            )
         except Exception as e:
             logger.error(f"Neo4j 连接失败: {e}")
             raise
@@ -635,3 +674,425 @@ def relationship_to_neo4j_edge(rel: EntityRelationship, rel_type_name: str) -> N
             'relationship_metadata_json': _to_json_text(rel.relationship_metadata),
         }
     )
+
+
+# ==================== 统一接口实现 ====================
+
+# 实体 type → Neo4j 标签映射
+_TYPE_TO_LABEL: Dict[str, str] = {
+    "formula": "Formula",
+    "herb": "Herb",
+    "syndrome": "Syndrome",
+    "target": "Target",
+    "pathway": "Pathway",
+    "efficacy": "Efficacy",
+    "property": "Property",
+    "taste": "Taste",
+    "meridian": "Meridian",
+    "generic": "Entity",
+}
+
+_COMPOSITION_ROLES: Set[str] = {"sovereign", "minister", "assistant", "envoy"}
+
+
+class Neo4jKnowledgeGraph(IKnowledgeGraph):
+    """基于 Neo4j 的 IKnowledgeGraph 实现。
+
+    作为全系统知识图谱的首选后端。
+    当 Neo4j 不可用时可通过工厂退化为 NetworkX。
+
+    Parameters
+    ----------
+    driver : Neo4jDriver
+        已初始化（已 connect）的 Neo4j 驱动实例。
+    preload_formulas : bool
+        是否预加载 TCMRelationshipDefinitions 静态数据。
+    """
+
+    def __init__(self, driver: Neo4jDriver, *, preload_formulas: bool = True) -> None:
+        self._driver = driver
+        if preload_formulas:
+            self._preload_formula_compositions()
+
+    # ------------------------------------------------------------------ #
+    # IKnowledgeGraph 接口
+    # ------------------------------------------------------------------ #
+
+    def add_entity(self, entity: Dict[str, Any]) -> None:
+        name = entity["name"]
+        etype = entity.get("type", "generic")
+        label = _TYPE_TO_LABEL.get(etype, "Entity")
+        props = {k: v for k, v in entity.items() if k not in ("name", "type")}
+        props["name"] = name
+        props["entity_type"] = etype
+        self._driver.create_node(Neo4jNode(id=name, label=label, properties=props))
+
+    def add_relation(
+        self,
+        src: str,
+        rel_type: str,
+        dst: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        metadata = metadata or {}
+        # 自动补端点（Neo4j MERGE 天然幂等）
+        self._ensure_node(src)
+        self._ensure_node(dst)
+        rel_upper = rel_type.upper()
+        src_label = self._resolve_label(src)
+        dst_label = self._resolve_label(dst)
+        edge = Neo4jEdge(
+            source_id=src,
+            target_id=dst,
+            relationship_type=rel_upper,
+            properties=metadata,
+        )
+        self._driver.create_relationship(edge, src_label, dst_label)
+
+    def query_path(self, src: str, dst: str) -> List[List[str]]:
+        """查询两节点间所有简单路径（最大深度 8）。"""
+        query = """
+        MATCH p = allShortestPaths((a {id: $src})-[*..8]-(b {id: $dst}))
+        RETURN [n IN nodes(p) | n.id] AS path
+        LIMIT 50
+        """
+        try:
+            with self._driver.driver.session(database=self._driver.database) as session:
+                records = session.execute_read(
+                    lambda tx: list(tx.run(query, src=src, dst=dst))
+                )
+            return [list(r["path"]) for r in records if r["path"]]
+        except Exception as exc:
+            logger.warning("Neo4j query_path 失败: %s", exc)
+            return []
+
+    def find_gaps(self) -> List[KnowledgeGap]:
+        gaps: List[KnowledgeGap] = []
+        self._find_orphan_gaps_cypher(gaps)
+        self._find_missing_downstream_gaps_cypher(gaps)
+        self._find_incomplete_composition_gaps_cypher(gaps)
+        return gaps
+
+    def get_subgraph(self, entity: str, depth: int = 2) -> Any:
+        """以 entity 为中心 BFS 提取子图，返回 networkx.DiGraph。"""
+        query = """
+        MATCH (start {id: $entity_id})
+        CALL {
+            WITH start
+            MATCH path = (start)-[*1..%d]-(neighbor)
+            RETURN nodes(path) AS ns, relationships(path) AS rs
+        }
+        WITH ns, rs
+        UNWIND ns AS n
+        WITH collect(DISTINCT n) AS all_nodes,
+             collect(rs) AS all_paths
+        UNWIND all_paths AS rels_in_path
+        UNWIND rels_in_path AS r
+        WITH all_nodes,
+             collect(DISTINCT r) AS all_rels
+        RETURN
+            [n IN all_nodes | {id: n.id, labels: labels(n), props: properties(n)}] AS nodes,
+            [r IN all_rels  | {src: startNode(r).id, dst: endNode(r).id,
+                               type: type(r), props: properties(r)}] AS edges
+        """ % depth
+        try:
+            nx = import_module("networkx")
+            with self._driver.driver.session(database=self._driver.database) as session:
+                record = session.execute_read(
+                    lambda tx: tx.run(query, entity_id=entity).single()
+                )
+            g = nx.DiGraph()
+            if record:
+                for n in record["nodes"]:
+                    g.add_node(n["id"], **(n["props"] or {}))
+                for e in record["edges"]:
+                    g.add_edge(e["src"], e["dst"], rel_type=e["type"], **(e["props"] or {}))
+            return g
+        except Exception as exc:
+            logger.warning("Neo4j get_subgraph 失败: %s", exc)
+            nx = import_module("networkx")
+            return nx.DiGraph()
+
+    # ------------------------------------------------------------------ #
+    # 便捷查询（与 TCMKnowledgeGraph 对齐）
+    # ------------------------------------------------------------------ #
+
+    @property
+    def entity_count(self) -> int:
+        stats = self._driver.get_graph_statistics()
+        return stats.get("total_nodes", 0)
+
+    @property
+    def relation_count(self) -> int:
+        stats = self._driver.get_graph_statistics()
+        return stats.get("total_relationships", 0)
+
+    def entities_by_type(self, entity_type: str) -> List[str]:
+        label = _TYPE_TO_LABEL.get(entity_type, "Entity")
+        query = f"MATCH (n:{label}) RETURN n.id AS id"
+        try:
+            with self._driver.driver.session(database=self._driver.database) as session:
+                records = session.execute_read(lambda tx: list(tx.run(query)))
+            return [r["id"] for r in records if r["id"]]
+        except Exception:
+            return []
+
+    def neighbors(self, entity: str, rel_type: Optional[str] = None) -> List[str]:
+        if rel_type:
+            query = """
+            MATCH (n {id: $eid})-[r]->(m)
+            WHERE type(r) = $rtype
+            RETURN m.id AS id
+            """
+            params: Dict[str, Any] = {"eid": entity, "rtype": rel_type.upper()}
+        else:
+            query = "MATCH (n {id: $eid})-[]->(m) RETURN m.id AS id"
+            params = {"eid": entity}
+        try:
+            with self._driver.driver.session(database=self._driver.database) as session:
+                records = session.execute_read(lambda tx: list(tx.run(query, **params)))
+            return [r["id"] for r in records if r["id"]]
+        except Exception:
+            return []
+
+    # ------------------------------------------------------------------ #
+    # 批量导入
+    # ------------------------------------------------------------------ #
+
+    def bulk_add_entities(self, entities: List[Dict[str, Any]]) -> int:
+        nodes = []
+        for ent in entities:
+            name = ent["name"]
+            etype = ent.get("type", "generic")
+            label = _TYPE_TO_LABEL.get(etype, "Entity")
+            props = {k: v for k, v in ent.items() if k not in ("name", "type")}
+            props["name"] = name
+            props["entity_type"] = etype
+            nodes.append(Neo4jNode(id=name, label=label, properties=props))
+        if nodes:
+            self._driver.batch_create_nodes(nodes)
+        return len(nodes)
+
+    def bulk_add_relations(
+        self, relations: List[Tuple[str, str, str, Optional[Dict[str, Any]]]]
+    ) -> int:
+        edges: List[Tuple[Neo4jEdge, str, str]] = []
+        for src, rel_type, dst, meta in relations:
+            meta = meta or {}
+            self._ensure_node(src)
+            self._ensure_node(dst)
+            src_label = self._resolve_label(src)
+            dst_label = self._resolve_label(dst)
+            edge = Neo4jEdge(
+                source_id=src,
+                target_id=dst,
+                relationship_type=rel_type.upper(),
+                properties=meta,
+            )
+            edges.append((edge, src_label, dst_label))
+        if edges:
+            self._driver.batch_create_relationships(edges)
+        return len(edges)
+
+    # ------------------------------------------------------------------ #
+    # 持久化
+    # ------------------------------------------------------------------ #
+
+    def save(self) -> None:
+        """Neo4j 写操作立即落盘，此处为兼容性空操作。"""
+
+    def close(self) -> None:
+        self._driver.close()
+
+    # ------------------------------------------------------------------ #
+    # 内部方法
+    # ------------------------------------------------------------------ #
+
+    def _ensure_node(self, name: str) -> None:
+        """MERGE 节点，确保存在。"""
+        self._driver.create_node(Neo4jNode(id=name, label="Entity", properties={"name": name}))
+
+    def _resolve_label(self, node_id: str) -> str:
+        """尝试获取已有节点的标签，默认 Entity。"""
+        for label in _TYPE_TO_LABEL.values():
+            node = self._driver.get_node(node_id, label)
+            if node is not None:
+                return label
+        return "Entity"
+
+    def _preload_formula_compositions(self) -> None:
+        """从 TCMRelationshipDefinitions 预加载方剂组成到 Neo4j。"""
+        try:
+            from src.semantic_modeling.tcm_relationships import (
+                TCMRelationshipDefinitions,
+            )
+        except ImportError:
+            logger.debug("TCMRelationshipDefinitions 不可用，跳过预加载")
+            return
+
+        nodes: List[Neo4jNode] = []
+        edge_tuples: List[Tuple[Neo4jEdge, str, str]] = []
+
+        compositions = TCMRelationshipDefinitions.FORMULA_COMPOSITIONS
+        for formula_name, roles in compositions.items():
+            nodes.append(Neo4jNode(id=formula_name, label="Formula",
+                                    properties={"name": formula_name, "entity_type": "formula"}))
+            for role, herbs in roles.items():
+                for herb in herbs:
+                    nodes.append(Neo4jNode(id=herb, label="Herb",
+                                            properties={"name": herb, "entity_type": "herb"}))
+                    edge_tuples.append((
+                        Neo4jEdge(source_id=formula_name, target_id=herb,
+                                  relationship_type=role.upper(), properties={}),
+                        "Formula", "Herb",
+                    ))
+
+        for herb, effs in TCMRelationshipDefinitions.HERB_EFFICACY_MAP.items():
+            nodes.append(Neo4jNode(id=herb, label="Herb",
+                                    properties={"name": herb, "entity_type": "herb"}))
+            for eff in effs:
+                nodes.append(Neo4jNode(id=eff, label="Efficacy",
+                                        properties={"name": eff, "entity_type": "efficacy"}))
+                edge_tuples.append((
+                    Neo4jEdge(source_id=herb, target_id=eff,
+                              relationship_type="EFFICACY", properties={}),
+                    "Herb", "Efficacy",
+                ))
+
+        if nodes:
+            self._driver.batch_create_nodes(nodes)
+        if edge_tuples:
+            self._driver.batch_create_relationships(edge_tuples)
+
+    # -- Cypher gap detection --
+
+    def _find_orphan_gaps_cypher(self, gaps: List[KnowledgeGap]) -> None:
+        query = """
+        MATCH (n)
+        WHERE NOT (n)--()
+        RETURN n.id AS id, labels(n)[0] AS label
+        """
+        try:
+            with self._driver.driver.session(database=self._driver.database) as session:
+                records = session.execute_read(lambda tx: list(tx.run(query)))
+            for r in records:
+                ntype = r["label"].lower() if r["label"] else "generic"
+                gaps.append(KnowledgeGap(
+                    gap_type="orphan_entity",
+                    entity=r["id"],
+                    entity_type=ntype,
+                    description=f"实体 '{r['id']}' 没有任何关系连接",
+                    severity="medium",
+                ))
+        except Exception as exc:
+            logger.warning("orphan gap 查询失败: %s", exc)
+
+    def _find_missing_downstream_gaps_cypher(self, gaps: List[KnowledgeGap]) -> None:
+        level_pairs = [
+            ("Formula", "Syndrome", "TREATS"),
+            ("Syndrome", "Target", "ASSOCIATED_TARGET"),
+            ("Target", "Pathway", "PARTICIPATES_IN"),
+        ]
+        for src_label, dst_label, expected_rel in level_pairs:
+            query = f"""
+            MATCH (n:{src_label})
+            WHERE NOT (n)-[:{expected_rel}]->(:{dst_label})
+            RETURN n.id AS id
+            """
+            try:
+                with self._driver.driver.session(database=self._driver.database) as session:
+                    records = session.execute_read(lambda tx: list(tx.run(query)))
+                for r in records:
+                    gaps.append(KnowledgeGap(
+                        gap_type="missing_downstream",
+                        entity=r["id"],
+                        entity_type=src_label.lower(),
+                        description=(
+                            f"{src_label.lower()} '{r['id']}' 缺少到 {dst_label.lower()}"
+                            f" 层级的 '{expected_rel.lower()}' 关系"
+                        ),
+                        severity="high",
+                    ))
+            except Exception as exc:
+                logger.warning("downstream gap 查询失败 (%s): %s", src_label, exc)
+
+    def _find_incomplete_composition_gaps_cypher(self, gaps: List[KnowledgeGap]) -> None:
+        query = """
+        MATCH (f:Formula)
+        OPTIONAL MATCH (f)-[r]->(h:Herb)
+        WHERE type(r) IN ['SOVEREIGN','MINISTER','ASSISTANT','ENVOY']
+        WITH f, collect(DISTINCT type(r)) AS present_roles
+        WHERE size(present_roles) < 4
+        RETURN f.id AS id, present_roles
+        """
+        try:
+            with self._driver.driver.session(database=self._driver.database) as session:
+                records = session.execute_read(lambda tx: list(tx.run(query)))
+            for r in records:
+                present = {str(role).lower() for role in (r["present_roles"] or [])}
+                missing = _COMPOSITION_ROLES - present
+                if missing:
+                    gaps.append(KnowledgeGap(
+                        gap_type="incomplete_composition",
+                        entity=r["id"],
+                        entity_type="formula",
+                        description=f"方剂 '{r['id']}' 缺少角色: {', '.join(sorted(missing))}",
+                        severity="low" if len(missing) == 1 else "medium",
+                    ))
+        except Exception as exc:
+            logger.warning("composition gap 查询失败: %s", exc)
+
+
+# ==================== 工厂函数 ====================
+
+
+def create_knowledge_graph(
+    config: Optional[Dict[str, Any]] = None,
+    *,
+    preload_formulas: bool = True,
+) -> IKnowledgeGraph:
+    """按配置返回知识图谱后端。
+
+    优先使用 Neo4j；不可用时退化为 NetworkX (TCMKnowledgeGraph)。
+
+    Parameters
+    ----------
+    config : dict | None
+        应用配置字典，需包含 ``neo4j`` 段。
+    preload_formulas : bool
+        是否预加载方剂数据。
+
+    Returns
+    -------
+    IKnowledgeGraph
+        Neo4jKnowledgeGraph 或 TCMKnowledgeGraph 实例。
+    """
+    import os
+
+    config = config or {}
+    neo4j_cfg = config.get("neo4j") or {}
+
+    if neo4j_cfg.get("enabled"):
+        uri = neo4j_cfg.get("uri", "neo4j://localhost:7687")
+        user = neo4j_cfg.get("user", "neo4j")
+        password_env = neo4j_cfg.get("password_env", "TCM_NEO4J_PASSWORD")
+        password = os.environ.get(password_env, "")
+        database = neo4j_cfg.get("database", "neo4j")
+        try:
+            driver = Neo4jDriver(
+                uri=uri, auth=(user, password), database=database,
+                max_connection_pool_size=int(neo4j_cfg.get("max_connection_pool_size", 50)),
+                connection_acquisition_timeout=float(neo4j_cfg.get("connection_acquisition_timeout", 60)),
+                max_connection_lifetime=int(neo4j_cfg.get("max_connection_lifetime", 3600)),
+            )
+            driver.connect()
+            logger.info("知识图谱后端: Neo4j (%s)", uri)
+            return Neo4jKnowledgeGraph(driver, preload_formulas=preload_formulas)
+        except Exception as exc:
+            logger.warning("Neo4j 不可用，退化为 NetworkX: %s", exc)
+
+    # Fallback: NetworkX
+    from src.knowledge.tcm_knowledge_graph import TCMKnowledgeGraph
+
+    logger.info("知识图谱后端: NetworkX (TCMKnowledgeGraph)")
+    return TCMKnowledgeGraph(preload_formulas=preload_formulas)

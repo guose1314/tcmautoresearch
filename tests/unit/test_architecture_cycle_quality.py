@@ -7,7 +7,6 @@ from importlib.util import find_spec
 from src.core import __all__ as core_all
 from src.core.architecture import ModuleInfo, ModuleType, SystemArchitecture
 from src.core.module_base import BaseModule, ModuleContext, ModuleStatus
-from src.core.module_interface import ModuleInterface
 from src.cycle.fixing_stage import FixingStage
 from src.cycle.iteration_cycle import CycleStatus, IterationConfig, IterationCycle
 from src.cycle.module_iteration import ModuleIterationCycle
@@ -32,29 +31,6 @@ class DemoGovernedBaseModule(BaseModule):
             "performance_score": 0.87,
             "academic_relevance": 0.9,
             "payload": context,
-        }
-
-    def _do_cleanup(self) -> bool:
-        return True
-
-
-class DemoGovernedModuleInterface(ModuleInterface):
-    def __init__(self, module_name="demo-interface", config=None, fail_execute=False):
-        super().__init__(module_name, config)
-        self.fail_execute = fail_execute
-
-    def _do_initialize(self) -> bool:
-        return True
-
-    def _do_execute(self, context: ModuleContext):
-        if self.fail_execute:
-            raise RuntimeError("module interface execution failed")
-        return {
-            "output_data": {"payload": context.input_data},
-            "metadata": {"source": "demo"},
-            "quality_metrics": {"quality_score": 0.93},
-            "performance_metrics": {"latency_ms": 12},
-            "tags": ["demo"],
         }
 
     def _do_cleanup(self) -> bool:
@@ -140,88 +116,6 @@ class TestCoreAndCycleQuality(unittest.TestCase):
 
         self.assertTrue(cleaned)
         self.assertFalse(getattr(executor, "_shutdown", False))
-        self.assertEqual(report["metadata"]["final_status"], "cleaned")
-        self.assertEqual(report["message"], "没有执行历史记录")
-
-    def test_module_interface_tracks_runtime_metadata_and_report(self):
-        module = DemoGovernedModuleInterface(config={"export_contract_version": "d47.v1", "minimum_stable_success_rate": 0.5})
-        context = ModuleContext(
-            context_id="ctx-1",
-            module_id="mod-1",
-            module_name="demo-interface",
-            timestamp="2024-01-01T00:00:00",
-            input_data={"source": "unit-test"},
-        )
-
-        self.assertTrue(module.initialize())
-        output = module.execute(context)
-        report = module.get_execution_report()
-
-        self.assertTrue(output.success)
-        self.assertEqual(output.metadata["report_metadata"]["contract_version"], "d47.v1")
-        self.assertEqual(report["analysis_summary"]["status"], "stable")
-        self.assertEqual(report["metadata"]["last_completed_phase"], "execute")
-        self.assertEqual([phase["phase"] for phase in report["metadata"]["phase_history"]], ["initialize", "execute"])
-
-    def test_module_interface_failure_tracks_failed_operation(self):
-        module = DemoGovernedModuleInterface(config={"export_contract_version": "d47.v1"}, fail_execute=True)
-        context = ModuleContext(
-            context_id="ctx-2",
-            module_id="mod-2",
-            module_name="demo-interface",
-            timestamp="2024-01-01T00:00:00",
-        )
-
-        self.assertTrue(module.initialize())
-        output = module.execute(context)
-        report = module.get_execution_report()
-
-        self.assertFalse(output.success)
-        self.assertEqual(report["failed_operations"][0]["operation"], "execute")
-        self.assertEqual(report["failed_operations"][0]["details"]["module_id"], "mod-2")
-        self.assertEqual(report["analysis_summary"]["status"], "needs_followup")
-        self.assertEqual(output.metadata["runtime_metadata"]["failed_phase"], "execute")
-
-    def test_module_interface_export_uses_json_safe_contract(self):
-        module = DemoGovernedModuleInterface(config={"export_contract_version": "d47.v1"})
-        context = ModuleContext(
-            context_id="ctx-3",
-            module_id="mod-3",
-            module_name="demo-interface",
-            timestamp="2024-01-01T00:00:00",
-            input_data={"source": "export-test"},
-        )
-        self.assertTrue(module.initialize())
-        module.execute(context)
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = os.path.join(temp_dir, "module-interface-report.json")
-            exported = module.export_interface_data(output_path)
-
-            self.assertTrue(exported)
-            with open(output_path, "r", encoding="utf-8") as file_obj:
-                payload = json.load(file_obj)
-
-        self.assertEqual(payload["report_metadata"]["contract_version"], "d47.v1")
-        self.assertEqual(payload["metadata"]["last_completed_phase"], "export_interface_data")
-        self.assertIn("execution_report", payload)
-        self.assertIn("report_metadata", payload["interface_compatibility"])
-
-    def test_module_interface_cleanup_resets_runtime_state(self):
-        module = DemoGovernedModuleInterface(config={"export_contract_version": "d47.v1"})
-        context = ModuleContext(
-            context_id="ctx-4",
-            module_id="mod-4",
-            module_name="demo-interface",
-            timestamp="2024-01-01T00:00:00",
-        )
-        self.assertTrue(module.initialize())
-        module.execute(context)
-
-        cleaned = module.cleanup()
-        report = module.get_execution_report()
-
-        self.assertTrue(cleaned)
         self.assertEqual(report["metadata"]["final_status"], "cleaned")
         self.assertEqual(report["message"], "没有执行历史记录")
 

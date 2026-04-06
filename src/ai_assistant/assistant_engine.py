@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import logging
 import re
-import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
@@ -82,6 +81,8 @@ class AssistantEngine:
         研究管线实例，用于辅助文献检索和假说扩展。
     max_history_turns : int
         每个 session 保留的最大对话轮数。
+    kg_rag : KGRAGService | None
+        知识图谱增强检索服务，对话前自动注入图谱上下文。
     """
 
     def __init__(
@@ -89,10 +90,12 @@ class AssistantEngine:
         llm_engine: Optional[Any] = None,
         research_pipeline: Optional[Any] = None,
         max_history_turns: int = _MAX_HISTORY_TURNS,
+        kg_rag: Optional[Any] = None,
     ) -> None:
         self._llm = llm_engine
         self._pipeline = research_pipeline
         self._max_turns = max_history_turns
+        self._kg_rag = kg_rag
         self._history: Dict[str, List[Dict[str, str]]] = defaultdict(list)
         logger.info("AssistantEngine 初始化完成 (max_turns=%d)", max_history_turns)
 
@@ -195,6 +198,16 @@ class AssistantEngine:
         """构建发送给 LLM 的提示词（含历史摘要与上下文）。"""
         parts: List[str] = []
 
+        # KG-RAG：自动检索知识图谱上下文
+        if self._kg_rag is not None:
+            try:
+                rag_ctx = self._kg_rag.retrieve(message)
+                rag_text = rag_ctx.format()
+                if rag_text:
+                    parts.append(f"【知识图谱参考】\n{rag_text}")
+            except Exception as exc:
+                logger.debug("KG-RAG 检索失败: %s", exc)
+
         # 上下文信息
         if context:
             ctx_lines = []
@@ -253,10 +266,13 @@ class AssistantEngine:
             return self._llm
         try:
             from src.llm.llm_engine import LLMEngine
-            self._llm = LLMEngine()
-            self._llm.load()
-            return self._llm
+            engine = LLMEngine()
+            engine.load()
+            self._llm = engine
+            return engine
         except Exception as exc:
+            # 加载失败时显式回滚，避免缓存未初始化引擎对象。
+            self._llm = None
             logger.warning("无法加载 LLM 引擎: %s", exc)
             return None
 

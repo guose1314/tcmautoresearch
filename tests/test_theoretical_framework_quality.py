@@ -43,6 +43,28 @@ class TestTheoreticalFrameworkQuality(unittest.TestCase):
         self.assertEqual(summary["report_metadata"]["final_status"], "completed")
         self.assertEqual(hypothesis.status, HypothesisStatus.VALIDATED)
 
+    def test_design_experiment_contains_structured_study_protocol(self):
+        hypothesis = self.framework.generate_hypothesis(
+            {
+                "text_content": "中医临床研究",
+                "research_objective": "验证黄芪干预对疲劳评分的影响",
+                "domain": ResearchDomain.CLINICAL_RESEARCH,
+            }
+        )
+
+        experiment = self.framework.design_experiment(
+            hypothesis,
+            {
+                "sample_size": 20,
+                "primary_outcome": "疲劳量表评分变化",
+            },
+        )
+
+        self.assertIn("study_protocol", experiment.to_dict())
+        self.assertIsInstance(experiment.study_protocol, dict)
+        self.assertEqual(experiment.study_protocol["sample_size"]["estimated_n"], 20)
+        self.assertIn("study_type", experiment.study_protocol)
+
     def test_failure_is_recorded_in_failed_operations(self):
         with patch.object(self.framework, "_generate_hypothesis_content", side_effect=RuntimeError("content failed")):
             with self.assertRaises(RuntimeError):

@@ -12,6 +12,20 @@ from fastapi.responses import FileResponse
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
 
+DEFAULT_OBSERVE_PHASE_CONTEXT = {
+    "data_source": "local",
+    "use_local_corpus": True,
+    "collect_local_corpus": True,
+    "local_data_dir": str((WORKSPACE_ROOT / "data").resolve()),
+    "use_ctext_whitelist": False,
+    "run_preprocess_and_extract": True,
+    "run_literature_retrieval": False,
+}
+
+DEFAULT_PUBLISH_PHASE_CONTEXT = {
+    "allow_pipeline_citation_fallback": False,
+}
+
 SUMMARY_FIELD_LABELS = {
     "observation_count": "观察记录数",
     "key_findings": "关键发现",
@@ -63,14 +77,44 @@ def _normalize_optional_text(value: Any) -> Optional[str]:
     return text or None
 
 
+def _normalize_phase_contexts(raw_phase_contexts: Any) -> Dict[str, Any]:
+    phase_contexts: Dict[str, Any] = {}
+    if isinstance(raw_phase_contexts, dict):
+        for key, value in raw_phase_contexts.items():
+            phase_name = str(key)
+            if isinstance(value, dict):
+                phase_contexts[phase_name] = dict(value)
+            else:
+                phase_contexts[phase_name] = value
+
+    observe_context = phase_contexts.get("observe")
+    if isinstance(observe_context, dict):
+        merged_observe_context = dict(DEFAULT_OBSERVE_PHASE_CONTEXT)
+        merged_observe_context.update(observe_context)
+        phase_contexts["observe"] = merged_observe_context
+    else:
+        phase_contexts["observe"] = dict(DEFAULT_OBSERVE_PHASE_CONTEXT)
+
+    publish_context = phase_contexts.get("publish")
+    if isinstance(publish_context, dict):
+        merged_publish_context = dict(DEFAULT_PUBLISH_PHASE_CONTEXT)
+        merged_publish_context.update(publish_context)
+        phase_contexts["publish"] = merged_publish_context
+    else:
+        phase_contexts["publish"] = dict(DEFAULT_PUBLISH_PHASE_CONTEXT)
+
+    return phase_contexts
+
+
 def normalize_research_request(payload: Dict[str, Any]) -> Dict[str, Any]:
     topic = str(payload.get("topic") or "").strip()
     if not topic:
         raise ValueError("topic 不能为空")
+    phase_contexts = _normalize_phase_contexts(payload.get("phase_contexts") or {})
     return {
         "topic": topic,
         "orchestrator_config": payload.get("orchestrator_config") or {},
-        "phase_contexts": payload.get("phase_contexts") or {},
+        "phase_contexts": phase_contexts,
         "cycle_name": payload.get("cycle_name"),
         "description": payload.get("description"),
         "scope": payload.get("scope"),

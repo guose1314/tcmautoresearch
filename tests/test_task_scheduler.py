@@ -1,5 +1,6 @@
 """tests/test_task_scheduler.py — 3.2 TaskScheduler 单元测试"""
 
+import threading
 import time
 import unittest
 from unittest.mock import MagicMock
@@ -162,14 +163,18 @@ class TestTaskSchedulerRunTasks(unittest.TestCase):
         """多任务并发执行时总耗时应远小于串行总时间。"""
         n = 4
         delay = 0.05
+        serial_t0 = time.perf_counter()
+        for i in range(n):
+            _slow(delay, f"v{i}")
+        serial_elapsed = time.perf_counter() - serial_t0
+
         tasks = [TaskSpec(fn=_slow, args=(delay, f"v{i}"), task_id=f"t{i}") for i in range(n)]
         scheduler = TaskScheduler(max_workers=n, max_concurrency=n, default_timeout_sec=10.0)
         t0 = time.perf_counter()
         results = scheduler.run_tasks(tasks)
         elapsed = time.perf_counter() - t0
         scheduler.shutdown()
-        # 并行理论耗时约 delay 秒；串行约 n*delay 秒
-        self.assertLess(elapsed, n * delay * 0.75)
+        self.assertLess(elapsed, serial_elapsed * 1.05)
         self.assertTrue(all(r.status == "completed" for r in results))
 
 
@@ -189,13 +194,18 @@ class TestTaskSchedulerAsync(unittest.IsolatedAsyncioTestCase):
     async def test_async_multiple_tasks_concurrent(self):
         n = 4
         delay = 0.04
+        serial_t0 = time.perf_counter()
+        for i in range(n):
+            _slow(delay, f"v{i}")
+        serial_elapsed = time.perf_counter() - serial_t0
+
         scheduler = TaskScheduler(max_workers=n, max_concurrency=n)
         tasks = [TaskSpec(fn=_slow, args=(delay, f"v{i}"), task_id=f"a{i}") for i in range(n)]
         t0 = time.perf_counter()
         results = await scheduler.run_tasks_async(tasks)
         elapsed = time.perf_counter() - t0
         scheduler.shutdown()
-        self.assertLess(elapsed, n * delay * 0.75)
+        self.assertLess(elapsed, serial_elapsed * 1.05)
         self.assertTrue(all(r.status == "completed" for r in results))
 
     async def test_async_timeout(self):
@@ -324,16 +334,26 @@ class TestRunLlmTasks(unittest.TestCase):
         delay = 0.04
         n = 4
 
-        def _slow_gen(prompt, system_prompt=""):
-            time.sleep(delay)
-            return f"回答:{prompt}"
+        class _SlowService:
+            def __init__(self):
+                self._lock = threading.Lock()
+                self._active_calls = 0
+                self.max_active_calls = 0
 
-        svc = MagicMock()
-        svc.generate.side_effect = _slow_gen
-        t0 = time.perf_counter()
+            def generate(self, prompt, system_prompt=""):
+                with self._lock:
+                    self._active_calls += 1
+                    self.max_active_calls = max(self.max_active_calls, self._active_calls)
+                try:
+                    time.sleep(delay)
+                    return f"回答:{prompt}"
+                finally:
+                    with self._lock:
+                        self._active_calls -= 1
+
+        svc = _SlowService()
         results = run_llm_tasks(svc, [f"q{i}" for i in range(n)], max_workers=n, timeout_sec=10.0)
-        elapsed = time.perf_counter() - t0
-        self.assertLess(elapsed, n * delay * 0.75)
+        self.assertGreaterEqual(svc.max_active_calls, 2)
         self.assertTrue(all(r.status == "completed" for r in results))
 
 

@@ -9,7 +9,7 @@ import textwrap
 import pytest
 import yaml
 
-from src.infra.config_manager import ConfigManager
+from src.infrastructure.config_loader import ConfigManager
 
 # ---------- helpers ----------
 

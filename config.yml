@@ -196,8 +196,8 @@ models:
 
 # Database configuration
 database:
-  type: "sqlite"
-  path: "./data/tcmautoresearch.db"
+  type: "sqlite"                        # sqlite | postgresql
+  path: "./data/tcmautoresearch.db"     # SQLite path (when type=sqlite)
   connection_pool_size: 10
   connection_timeout: 30
   max_overflow: 20
@@ -205,6 +205,37 @@ database:
   backup_enabled: true
   backup_frequency: "daily"
   backup_retention_days: 30
+  # PostgreSQL settings (when type=postgresql):
+  # host: "localhost"
+  # port: 5432
+  # name: "tcmautoresearch"
+  # user: "tcm"
+  # password_env: "TCM_DB_PASSWORD"     # read from env var (secure)
+
+# Neo4j graph database (optional)
+neo4j:
+  enabled: false                        # set true to activate
+  uri: "neo4j://localhost:7687"
+  user: "neo4j"
+  password_env: "TCM_NEO4J_PASSWORD"
+  database: "neo4j"
+  max_connection_pool_size: 50          # connection pool capacity
+  connection_acquisition_timeout: 60    # seconds to wait for pool slot
+  max_connection_lifetime: 3600         # max seconds a connection stays alive
+
+# Data retention & auto-cleanup policy
+retention:
+  cache_max_age_days: 30                # cache entries older than this are purged
+  cache_max_size_mb: 2048               # max cache disk usage
+  cache_namespaces: ["llm", "embed", "pipeline", "default"]
+  output_archive_after_days: 90         # output artifacts archived after N days
+  output_archive_dir: "./archive"       # compressed archive destination
+  output_keep_types: ["database"]       # never archive these types
+  output_max_size_mb: 10240             # output dir size cap
+  log_max_age_days: 60                  # log files older than this are deleted
+  log_dir: "./logs"
+  temp_max_age_hours: 24                # temp files older than this are deleted
+  research_db_vacuum_enabled: true      # periodic SQLite VACUUM
 
 # Input/output configuration
 input:

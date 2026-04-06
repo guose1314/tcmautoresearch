@@ -13,6 +13,7 @@ except ImportError:
 
 
 class TestPaperWriter(unittest.TestCase):
+
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.writer = PaperWriter({"output_dir": self.tempdir.name, "output_formats": ["markdown", "docx"]})
@@ -119,6 +120,70 @@ class TestPaperWriter(unittest.TestCase):
         self.assertEqual(sorted(result["output_files"].keys()), ["markdown"])
         self.assertTrue(os.path.exists(result["output_files"]["markdown"]))
 
+    def test_default_execute_exposes_iterative_review_outputs(self):
+        result = self.writer.execute(
+            {
+                "title": "多轮迭代默认输出测试",
+                "output_format": "markdown",
+            }
+        )
+
+        self.assertTrue(result["success"])
+        self.assertIn("iteration_history", result)
+        self.assertIn("iteration_count", result)
+        self.assertIn("review_summary", result)
+        self.assertIn("final_review_score", result)
+        self.assertIsInstance(result["iteration_history"], list)
+        self.assertEqual(result["iteration_count"], len(result["iteration_history"]))
+        self.assertGreaterEqual(result["final_review_score"], 0.0)
+        self.assertLessEqual(result["final_review_score"], 1.0)
+
+    def test_iterative_refinement_can_be_disabled(self):
+        result = self.writer.execute(
+            {
+                "title": "关闭迭代测试",
+                "output_format": "markdown",
+                "enable_iterative_refinement": False,
+            }
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["iteration_count"], 0)
+        self.assertEqual(result["iteration_history"], [])
+        self.assertFalse(result["review_summary"].get("enabled"))
+
+    def test_low_quality_draft_triggers_revision_actions(self):
+        result = self.writer.execute(
+            {
+                "title": "低质量草稿修订测试",
+                "output_format": "markdown",
+                "max_revision_rounds": 2,
+                "review_score_threshold": 0.95,
+                "sections": [
+                    {"section_type": "introduction", "content": "短句。"},
+                    {"section_type": "methods", "content": "短句。"},
+                    {"section_type": "results", "content": "短句。"},
+                    {"section_type": "discussion", "content": "短句。"},
+                    {"section_type": "conclusion", "content": "短句。"},
+                ],
+                "abstract": "简短摘要。",
+                "formatted_references": [],
+            }
+        )
+
+        self.assertTrue(result["success"])
+        history = result["iteration_history"]
+        self.assertGreaterEqual(len(history), 1)
+        self.assertTrue(any(entry.get("applied_revisions") for entry in history if entry.get("decision") == "revise"))
+
+        section_map = {
+            item["section_type"]: item["content"]
+            for item in result["paper_draft"]["sections"]
+        }
+        self.assertIn("methods", section_map)
+        self.assertEqual(section_map["methods"], "短句。")
+        self.assertNotEqual(result["paper_draft"]["abstract"], "简短摘要。")
+
     def test_results_section_includes_similar_formula_graph_evidence_chapter(self):
         result = self.writer.execute(
             {
@@ -202,6 +267,47 @@ class TestPaperWriter(unittest.TestCase):
         self.assertIn("质量评估显示当前输出的置信分数 0.92、完整度 0.88", markdown_text)
         self.assertIn("后续建议优先关注：建议增加更多样本以提高准确性", markdown_text)
         self.assertIn("桂枝汤 与 桂麻各半汤", markdown_text)
+
+    def test_sections_include_llm_analysis_context_modules(self):
+        result = self.writer.execute(
+            {
+                "title": "LLM 分析上下文模块测试",
+                "output_format": "markdown",
+                "analysis_results": {
+                    "llm_analysis_context": {
+                        "contract_version": "llm-analysis-context-v1",
+                        "analysis_modules": {
+                            "research_perspectives": {},
+                            "formula_comparisons": [
+                                {
+                                    "formula_a": "桂枝汤",
+                                    "formula_b": "桂麻各半汤",
+                                    "similarity": 0.87,
+                                }
+                            ],
+                            "herb_properties_analysis": {},
+                            "pharmacology_integration": {},
+                            "network_pharmacology": {
+                                "桂枝汤": {"targets": ["TNF", "IL6"]}
+                            },
+                            "supramolecular_physicochemistry": {},
+                            "knowledge_archaeology": {},
+                            "complexity_dynamics": {},
+                            "research_scoring_panel": {},
+                            "summary_analysis": {
+                                "core_findings": ["网络靶点与证候路径具有一致性"]
+                            },
+                        },
+                    },
+                },
+            }
+        )
+
+        self.assertTrue(result["success"])
+        markdown_text = open(result["output_files"]["markdown"], "r", encoding="utf-8").read()
+        self.assertIn("LLM 分析上下文已覆盖", markdown_text)
+        self.assertIn("方剂比较", markdown_text)
+        self.assertIn("网络药理学", markdown_text)
 
     def test_discussion_includes_hypothesis_audit_summary(self):
         result = self.writer.execute(

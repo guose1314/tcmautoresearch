@@ -43,6 +43,7 @@ _CATEGORY_TO_ATTR: dict[str, str] = {
     "efficacy": "efficacy",
     "common": "common_words",
 }
+_ATTR_TO_CATEGORY: dict[str, str] = {value: key for key, value in _CATEGORY_TO_ATTR.items()}
 
 
 class LexiconService:
@@ -223,6 +224,23 @@ class LexiconService:
         if category is None:
             return None
         return {"word": word, "type": category, "category": category}
+
+    def get_word_info(self, word: str) -> Optional[Dict[str, str]]:
+        """兼容旧接口：返回词条信息。"""
+        return self.lookup(word)
+
+    def get_words_by_type(self, word_type: str) -> List[str]:
+        """兼容旧接口：按类型获取词汇列表。"""
+        self.refresh_if_needed()
+        attr = _CATEGORY_TO_ATTR.get(word_type, word_type)
+        words = getattr(self, attr, set())
+        if isinstance(words, set):
+            return list(words)
+        return []
+
+    def get_types(self) -> List[str]:
+        """兼容旧接口：返回可用类型列表。"""
+        return list(_CATEGORY_TO_ATTR.keys())
 
     # ── 词典写操作 ───────────────────────────────────────────────────────
 

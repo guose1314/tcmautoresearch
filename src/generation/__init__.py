@@ -21,6 +21,11 @@ from src.generation.citation_manager import (
     CitationManager,
 )
 from src.generation.figure_generator import FigureGenerator, FigureResult, FigureSpec
+from src.generation.llm_context_adapter import (
+    LLMContextAdaptedPaperWriter,
+    LLMContextAdapter,
+    wrap_paper_writer_with_llm_context,
+)
 from src.generation.output_formatter import OutputGenerator
 from src.generation.paper_writer import PaperDraft, PaperSection, PaperWriter
 from src.generation.report_generator import Report, ReportFormat, ReportGenerator
@@ -35,6 +40,9 @@ __all__ = [
     "FigureGenerator",
     "FigureSpec",
     "FigureResult",
+    "LLMContextAdapter",
+    "LLMContextAdaptedPaperWriter",
+    "wrap_paper_writer_with_llm_context",
     "PaperWriter",
     "PaperDraft",
     "PaperSection",
