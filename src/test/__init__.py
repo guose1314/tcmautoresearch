@@ -3,23 +3,38 @@
 中医古籍全自动研究系统 - 专业学术测试框架初始化文件
 """
 
+import importlib as _importlib
+from typing import TYPE_CHECKING
+
 __version__ = "2.0.0"
 __author__ = "中医古籍全自动研究团队"
 __description__ = "基于T/C IATCM 098-2023标准的中医古籍研究系统测试框架"
 
-# 导入主要类和函数
-from .automated_tester import AutomatedTester, TestResult, TestSuite
-from .integration_tester import IntegrationTester, IntegrationTest, TestEnvironment
+if TYPE_CHECKING:
+    from .automated_tester import AutomatedTester, TestResult, TestSuite
+    from .integration_tester import IntegrationTest, IntegrationTester, TestEnvironment
 
 # 模块导出
-__all__ = [
-    'AutomatedTester',
-    'TestResult',
-    'TestSuite',
-    'IntegrationTester',
-    'IntegrationTest',
-    'TestEnvironment'
-]
+_LAZY_IMPORTS: dict[str, tuple[str, str]] = {
+    "AutomatedTester": (".automated_tester", "AutomatedTester"),
+    "TestResult": (".automated_tester", "TestResult"),
+    "TestSuite": (".automated_tester", "TestSuite"),
+    "IntegrationTester": (".integration_tester", "IntegrationTester"),
+    "IntegrationTest": (".integration_tester", "IntegrationTest"),
+    "TestEnvironment": (".integration_tester", "TestEnvironment"),
+}
+
+__all__ = list(_LAZY_IMPORTS.keys())
+
+
+def __getattr__(name: str):
+    if name in _LAZY_IMPORTS:
+        module_path, attr = _LAZY_IMPORTS[name]
+        mod = _importlib.import_module(module_path, __name__)
+        val = getattr(mod, attr)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # 测试框架配置
 TEST_FRAMEWORK_CONFIG = {
@@ -179,6 +194,7 @@ TEST_ENVIRONMENTS = {
 
 # 初始化日志配置
 import logging
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'

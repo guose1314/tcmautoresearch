@@ -133,6 +133,25 @@ class TestExceptionIsolation:
         assert results == ["safe"]
 
 
+# ---------- Dead-letter ----------
+
+class TestDeadLetter:
+    def test_dead_letter_logged_when_no_subscribers(self, bus, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING, logger="src.core.event_bus"):
+            count = bus.publish("orphan_event", {"key": "val"})
+        assert count == 0
+        assert any("Dead-letter" in rec.message and "orphan_event" in rec.message for rec in caplog.records)
+
+    def test_no_dead_letter_when_subscriber_exists(self, bus, caplog):
+        import logging
+        bus.subscribe("handled_event", lambda d: None)
+        with caplog.at_level(logging.WARNING, logger="src.core.event_bus"):
+            count = bus.publish("handled_event", {"a": 1})
+        assert count == 1
+        assert not any("Dead-letter" in rec.message for rec in caplog.records)
+
+
 # ---------- 取消订阅 ----------
 
 class TestUnsubscribe:

@@ -16,7 +16,7 @@ def _write_secrets(path: Path) -> None:
     path.write_text(
         """
 security:
-  jwt_secret_key: "unit-test-jwt-secret-from-file"
+  jwt_secret_key: "unit-test-jwt-secret-from-file-pad32"
   management_api_key: "mgmt-key"
   console_auth:
     users:
@@ -35,7 +35,7 @@ def test_auth_login_still_works_when_cwd_changes(tmp_path: Path, monkeypatch) ->
     _write_secrets(fake_project_root / "secrets.yml")
 
     monkeypatch.setattr(auth_routes, "_PROJECT_ROOT", fake_project_root)
-    monkeypatch.setenv("JWT_SECRET_KEY", "unit-test-jwt-secret")
+    monkeypatch.setenv("JWT_SECRET_KEY", "unit-test-jwt-secret-padded-to-32b")
     auth_routes.reset_user_cache()
 
     original_cwd = Path.cwd()

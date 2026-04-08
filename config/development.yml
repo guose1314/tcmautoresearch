@@ -34,3 +34,10 @@ models:
 
 web_console:
   job_storage_dir: "./output/development/web_console_jobs"
+
+# ── 图数据库：开发环境默认启用 Neo4j ──
+neo4j:
+  enabled: true
+  uri: "neo4j://localhost:7687"
+  user: "neo4j"
+  password_env: "TCM_NEO4J_PASSWORD"

@@ -588,17 +588,22 @@ _EXPECTED_TYPES: Dict[tuple, type] = {
 
 
 class ConfigManager:
-    """单例配置管理器 — 统一入口。
+    """单例配置管理器 — **已弃用**，请改用 ``load_settings()``。
 
-    兼容旧版 ``src.infra.config_manager.ConfigManager`` API，
-    底层委托给 ``ConfigCenter`` / ``AppSettings``。
+    .. deprecated:: 3.0
+        请使用 ``load_settings()`` 或 ``load_settings_section()`` 替代。
+        此类仅保留向后兼容，将在后续版本删除。
 
-    用法::
+    旧版用法::
 
         cm = ConfigManager()
         cm.load("config.yml")
-        issues = cm.validate()
-        module_cfg = cm.get_module_config("document_preprocessing")
+
+    推荐用法::
+
+        from src.infrastructure.config_loader import load_settings
+        settings = load_settings()
+        val = settings.get("section.key")
     """
 
     _instance: "Optional[ConfigManager]" = None
@@ -619,6 +624,13 @@ class ConfigManager:
     # ---------- lifecycle ----------
 
     def __init__(self) -> None:
+        import warnings
+        warnings.warn(
+            "ConfigManager 已弃用，请改用 load_settings()。"
+            "此类将在后续版本删除。",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._config: Dict[str, Any] = {}
         self._path: Optional[str] = None
         self._loaded: bool = False

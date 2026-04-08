@@ -50,6 +50,9 @@ jobs:
             tests/test_ai_assistant.py \
             -v --tb=short
 
+      - name: Run Cypher injection scan
+        run: python tools/cypher_injection_scan.py
+
       - name: Run unified quality gate
         run: python tools/quality_gate.py --report output/quality-gate.json
 

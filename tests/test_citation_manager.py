@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from src.collector.literature_retriever import LiteratureRecord
-from src.output.citation_manager import CitationManager
+from src.generation.citation_manager import CitationManager
 from src.research.research_pipeline import ResearchPhase, ResearchPipeline
 
 DOCX_AVAILABLE = True

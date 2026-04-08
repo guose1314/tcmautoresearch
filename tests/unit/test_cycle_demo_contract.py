@@ -4,42 +4,41 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import run_cycle_demo
+from src.cycle.cycle_runner import execute_real_module_pipeline, run_iteration_cycle
 from src.research.study_session_manager import ResearchPhase
 
 
 class TestCycleDemoContract(unittest.TestCase):
     def test_run_iteration_cycle_includes_governance_contract(self):
-        original_execute = run_cycle_demo.execute_real_module_pipeline
-        try:
-            run_cycle_demo.execute_real_module_pipeline = lambda input_data, modules=None, manage_module_lifecycle=False: [
-                {
-                    "module": "DemoModule",
-                    "status": "completed",
-                    "execution_time": 0.01,
-                    "timestamp": "2026-03-29T00:00:00",
-                    "input_data": input_data,
-                    "output_data": {"result": "ok"},
-                    "quality_metrics": {"completeness": 0.9, "accuracy": 0.92, "consistency": 0.91},
-                }
-            ]
+        """System A run_iteration_cycle 契约验证（直接测试 cycle_runner）。"""
+        fake_pipeline = lambda input_data, modules=None, manage_module_lifecycle=False, optional_modules=None: [
+            {
+                "module": "DemoModule",
+                "status": "completed",
+                "execution_time": 0.01,
+                "timestamp": "2026-03-29T00:00:00",
+                "input_data": input_data,
+                "output_data": {"result": "ok"},
+                "quality_metrics": {"completeness": 0.9, "accuracy": 0.92, "consistency": 0.91},
+            }
+        ]
 
-            result = run_cycle_demo.run_iteration_cycle(
-                1,
-                {"raw_text": "demo", "metadata": {"source": "unit-test"}},
-                max_iterations=2,
-                shared_modules=[],
-                governance_config={"export_contract_version": "d58.v1", "minimum_stable_quality_score": 0.85, "persist_failed_operations": True},
-            )
+        result = run_iteration_cycle(
+            1,
+            {"raw_text": "demo", "metadata": {"source": "unit-test"}},
+            max_iterations=2,
+            shared_modules=[],
+            governance_config={"export_contract_version": "d58.v1", "minimum_stable_quality_score": 0.85, "persist_failed_operations": True},
+            execute_pipeline=fake_pipeline,
+        )
 
-            self.assertEqual(result["status"], "completed")
-            self.assertIn("metadata", result)
-            self.assertIn("analysis_summary", result)
-            self.assertIn("failed_operations", result)
-            self.assertEqual(result["metadata"]["last_completed_phase"], "assemble_iteration_cycle_summary")
-            self.assertEqual(result["analysis_summary"]["module_count"], 1)
-            self.assertEqual(result["analysis_summary"]["failed_operation_count"], 0)
-        finally:
-            run_cycle_demo.execute_real_module_pipeline = original_execute
+        self.assertEqual(result["status"], "completed")
+        self.assertIn("metadata", result)
+        self.assertIn("analysis_summary", result)
+        self.assertIn("failed_operations", result)
+        self.assertEqual(result["metadata"]["last_completed_phase"], "assemble_iteration_cycle_summary")
+        self.assertEqual(result["analysis_summary"]["module_count"], 1)
+        self.assertEqual(result["analysis_summary"]["failed_operation_count"], 0)
 
     def test_run_full_cycle_demo_exports_governed_report(self):
         original_run_research_session = run_cycle_demo.run_research_session
@@ -208,59 +207,61 @@ class TestCycleDemoContract(unittest.TestCase):
 
 
     def test_pipeline_iteration_returns_iteration_contract(self):
-        """_run_pipeline_iteration 桥接函数返回与 run_iteration_cycle 兼容的契约。"""
-        original_run_research_session = run_cycle_demo.run_research_session
-        try:
-            run_cycle_demo.run_research_session = lambda question, config, phase_names=None, **kw: {
-                "status": "completed",
-                "session_id": "bridge_test",
-                "executed_phases": phase_names or [],
-                "phase_results": {
-                    "observe": {"phase": "observe", "status": "completed"},
-                    "reflect": {
-                        "phase": "reflect",
-                        "reflections": [{"topic": "t", "reflection": "r", "action": "a", "source": "quality_assessor"}],
-                        "quality_assessment": {"overall_cycle_score": 0.85},
-                        "improvement_plan": ["计划一"],
-                    },
+        """6 阶段桥接函数返回与 run_iteration_cycle 兼容的契约。"""
+        from src.cycle.cycle_pipeline_bridge import run_pipeline_iteration
+        from src.cycle.cycle_reporter import summarize_module_quality
+
+        fake_session = lambda question, config, phase_names=None, **kw: {
+            "status": "completed",
+            "session_id": "bridge_test",
+            "executed_phases": phase_names or [],
+            "phase_results": {
+                "observe": {"phase": "observe", "status": "completed"},
+                "reflect": {
+                    "phase": "reflect",
+                    "reflections": [{"topic": "t", "reflection": "r", "action": "a", "source": "quality_assessor"}],
+                    "quality_assessment": {"overall_cycle_score": 0.85},
+                    "improvement_plan": ["计划一"],
                 },
-            }
+            },
+        }
 
-            result = run_cycle_demo._run_pipeline_iteration(
-                1,
-                {"raw_text": "test", "objective": "小柴胡汤分析"},
-                max_iterations=2,
-            )
+        result = run_pipeline_iteration(
+            1,
+            {"raw_text": "test", "objective": "小柴胡汤分析"},
+            run_research_session_fn=fake_session,
+            summarize_module_quality_fn=summarize_module_quality,
+            max_iterations=2,
+        )
 
-            # 返回契约: 必须包含 run_iteration_cycle 合同字段
-            self.assertEqual(result["iteration_id"], "iter_1")
-            self.assertEqual(result["iteration_number"], 1)
-            self.assertEqual(result["status"], "completed")
-            self.assertIn("duration", result)
-            self.assertIn("modules", result)
-            self.assertIn("academic_insights", result)
-            self.assertIn("recommendations", result)
-            self.assertIn("metadata", result)
-            self.assertTrue(result["metadata"]["pipeline_mode"])
-            self.assertIn("analysis_summary", result)
-            self.assertEqual(result["analysis_summary"]["module_count"], 2)
-        finally:
-            run_cycle_demo.run_research_session = original_run_research_session
+        # 返回契约: 必须包含 run_iteration_cycle 合同字段
+        self.assertEqual(result["iteration_id"], "iter_1")
+        self.assertEqual(result["iteration_number"], 1)
+        self.assertEqual(result["status"], "completed")
+        self.assertIn("duration", result)
+        self.assertIn("modules", result)
+        self.assertIn("academic_insights", result)
+        self.assertIn("recommendations", result)
+        self.assertIn("metadata", result)
+        self.assertTrue(result["metadata"]["pipeline_mode"])
+        self.assertIn("analysis_summary", result)
+        self.assertEqual(result["analysis_summary"]["module_count"], 2)
 
     def test_pipeline_iteration_handles_session_failure(self):
-        """run_research_session 抛异常时 _run_pipeline_iteration 返回 failed。"""
-        original_run_research_session = run_cycle_demo.run_research_session
-        try:
-            run_cycle_demo.run_research_session = lambda **kw: (_ for _ in ()).throw(RuntimeError("boom"))
+        """run_research_session 抛异常时桥接函数返回 failed。"""
+        from src.cycle.cycle_pipeline_bridge import run_pipeline_iteration
+        from src.cycle.cycle_reporter import summarize_module_quality
 
-            result = run_cycle_demo._run_pipeline_iteration(
-                1, {"raw_text": "test"}, max_iterations=1,
-            )
+        result = run_pipeline_iteration(
+            1,
+            {"raw_text": "test"},
+            run_research_session_fn=lambda **kw: (_ for _ in ()).throw(RuntimeError("boom")),
+            summarize_module_quality_fn=summarize_module_quality,
+            max_iterations=1,
+        )
 
-            self.assertEqual(result["status"], "failed")
-            self.assertIn("boom", result["error"])
-        finally:
-            run_cycle_demo.run_research_session = original_run_research_session
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("boom", result["error"])
 
 
 if __name__ == "__main__":

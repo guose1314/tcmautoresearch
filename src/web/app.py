@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """TCMAutoResearch Web 应用入口 — FastAPI 应用构建与中间件配置。"""
 
+import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -64,6 +66,34 @@ def create_app(
     # ---- 额外配置 ----
     app.state.config = extra_config or {}
 
+    # ---- 数据库初始化 ----
+    try:
+        from src.infrastructure.persistence import DatabaseManager
+
+        _db_cfg = extra_config.get("database", {}) if extra_config else {}
+        _db_type = str(_db_cfg.get("type", "sqlite")).strip().lower()
+        _db_path = str(
+            _db_cfg.get("path")
+            or os.path.join("data", "tcmautoresearch.db")
+        ).strip()
+        if _db_type == "sqlite":
+            _conn_str = f"sqlite:///{os.path.abspath(_db_path)}"
+        else:
+            _conn_str = str(_db_cfg.get("connection_string", "")).strip()
+
+        if _conn_str:
+            db_manager = DatabaseManager(
+                connection_string=_conn_str,
+                echo=bool(_db_cfg.get("echo", False)),
+            )
+            db_manager.init_db()
+            with db_manager.session_scope() as _sess:
+                DatabaseManager.create_default_relationships(_sess)
+            app.state.db_manager = db_manager
+            logging.getLogger(__name__).info("数据库已连接: %s", _conn_str)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("数据库初始化失败，ORM 查询将不可用: %s", exc)
+
     # ---- 认证 & 页面路由 ----
     from src.web.routes.auth import router as auth_router
 
@@ -84,5 +114,12 @@ def create_app(
     @app.get("/health", tags=["system"])
     async def health_check() -> Dict[str, str]:
         return {"status": "ok", "version": version}
+
+    # ---- 关闭时清理数据库连接 ----
+    @app.on_event("shutdown")
+    def shutdown_db() -> None:
+        db_mgr = getattr(getattr(app, "state", None), "db_manager", None)
+        if db_mgr is not None:
+            db_mgr.close()
 
     return app

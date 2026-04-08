@@ -78,90 +78,36 @@ def _build_unavailable_module(symbol_name: str):
     return _UnavailableModule
 
 # 供单测 patch 的符号；导入失败时在运行时再惰性加载。
-try:
-    from src.llm.llm_engine import LLMEngine as _ImportedLLMEngine
-except Exception:
-    _ImportedLLMEngine = None
 
-LLMEngine = _ImportedLLMEngine
 
-try:
-    from src.infra.llm_service import CachedLLMService as _ImportedCachedLLMService
-except Exception:
-    _ImportedCachedLLMService = None
+def _try_import(module_path: str, symbol: str, fallback=None):
+    """尝试导入符号，失败时记录 WARNING 并返回 fallback。"""
+    try:
+        mod = import_module(module_path)
+        return getattr(mod, symbol)
+    except Exception as exc:
+        logger.warning("可选依赖 %s.%s 导入失败，降级为 stub: %s", module_path, symbol, exc)
+        return fallback
 
-CachedLLMService = _ImportedCachedLLMService
 
-try:
-    from src.generation.citation_manager import (
-        CitationManager as _ImportedCitationManager,
-    )
-except Exception:
-    _ImportedCitationManager = None
-
-CitationManager = _ImportedCitationManager
-
-try:
-    from src.generation.paper_writer import PaperWriter as _ImportedPaperWriter
-except Exception:
-    _ImportedPaperWriter = None
-
-PaperWriter = _ImportedPaperWriter
-
-try:
-    from src.generation.output_formatter import (
-        OutputGenerator as _ImportedOutputGenerator,
-    )
-except Exception:
-    _ImportedOutputGenerator = None
-
-OutputGenerator = _ImportedOutputGenerator
-
-try:
-    from src.generation.report_generator import (
-        ReportGenerator as _ImportedReportGenerator,
-    )
-except Exception:
-    _ImportedReportGenerator = None
-
-ReportGenerator = _ImportedReportGenerator
+LLMEngine = _try_import("src.llm.llm_engine", "LLMEngine")
+CachedLLMService = _try_import("src.infra.llm_service", "CachedLLMService")
+CitationManager = _try_import("src.generation.citation_manager", "CitationManager")
+PaperWriter = _try_import("src.generation.paper_writer", "PaperWriter")
+OutputGenerator = _try_import("src.generation.output_formatter", "OutputGenerator")
+ReportGenerator = _try_import("src.generation.report_generator", "ReportGenerator")
 
 # 分析模块 — 延迟导入，支持依赖注入
-try:
-    from src.analysis.entity_extractor import (
-        AdvancedEntityExtractor as _ImportedAdvancedEntityExtractor,
-    )
-except Exception:
-    _ImportedAdvancedEntityExtractor = None
-
-AdvancedEntityExtractor = _ImportedAdvancedEntityExtractor
-
-try:
-    from src.analysis.preprocessor import (
-        DocumentPreprocessor as _ImportedDocumentPreprocessor,
-    )
-except Exception:
-    _ImportedDocumentPreprocessor = None
-
-DocumentPreprocessor = _ImportedDocumentPreprocessor
-
-try:
-    from src.analysis.semantic_graph import (
-        SemanticGraphBuilder as _ImportedSemanticGraphBuilder,
-    )
-except Exception:
-    _ImportedSemanticGraphBuilder = _build_unavailable_module("SemanticGraphBuilder")
-
-SemanticGraphBuilder = _ImportedSemanticGraphBuilder
-
-try:
-    from src.analysis.reasoning_engine import (
-        ReasoningEngine as _ImportedReasoningEngine,
-    )
-except Exception:
-    _ImportedReasoningEngine = _build_unavailable_module("ReasoningEngine")
-
-ReasoningEngine = _ImportedReasoningEngine
+AdvancedEntityExtractor = _try_import("src.analysis.entity_extractor", "AdvancedEntityExtractor")
+DocumentPreprocessor = _try_import("src.analysis.preprocessor", "DocumentPreprocessor")
+SemanticGraphBuilder = _try_import(
+    "src.analysis.semantic_graph", "SemanticGraphBuilder",
+    fallback=_build_unavailable_module("SemanticGraphBuilder"),
+)
+ReasoningEngine = _try_import(
+    "src.analysis.reasoning_engine", "ReasoningEngine",
+    fallback=_build_unavailable_module("ReasoningEngine"),
+)
 
 
 class ResearchPipeline:
@@ -331,7 +277,11 @@ class ResearchPipeline:
         try:
             module = import_module(module_name)
             resolved_class = getattr(module, attribute_name)
-        except Exception:
+        except Exception as exc:
+            self.logger.warning(
+                "运行时惰性加载 %s (%s.%s) 失败，降级为 stub: %s",
+                symbol_name, module_name, attribute_name, exc,
+            )
             return cls
 
         globals()[symbol_name] = resolved_class
@@ -365,7 +315,7 @@ class ResearchPipeline:
         return self.session_manager.serialize_cycle(cycle)
 
     def _build_report_metadata(self) -> Dict[str, Any]:
-        runtime_metadata = self.phase_orchestrator._build_runtime_metadata()
+        runtime_metadata = self._build_runtime_metadata()
         return {
             "contract_version": self._governance_config["export_contract_version"],
             "generated_at": datetime.now().isoformat(),
@@ -425,6 +375,181 @@ class ResearchPipeline:
     def get_cycle_history(self, cycle_id: str) -> List[Dict[str, Any]]:
         return self.session_manager.get_cycle_history(cycle_id)
 
+    def get_phase_handler(self, phase_name: str) -> Any:
+        return self.phase_orchestrator.get_handler(phase_name)
+
+    def _call_phase_handler_method(self, phase_name: str, method_name: str, *args: Any, **kwargs: Any) -> Any:
+        handler = self.get_phase_handler(phase_name)
+        method = getattr(handler, method_name, None)
+        if method is None:
+            raise AttributeError(f"阶段 {phase_name} 不支持方法: {method_name}")
+        return method(*args, **kwargs)
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        return self.phase_orchestrator._build_runtime_metadata()
+
+    def _start_phase(
+        self,
+        metadata: Dict[str, Any],
+        phase_name: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        return self.phase_orchestrator._start_phase(metadata, phase_name, context)
+
+    def _complete_phase(
+        self,
+        metadata: Dict[str, Any],
+        phase_name: str,
+        phase_entry: Dict[str, Any],
+        start_time: float,
+    ) -> None:
+        self.phase_orchestrator._complete_phase(metadata, phase_name, phase_entry, start_time)
+
+    def _fail_phase(
+        self,
+        metadata: Dict[str, Any],
+        failed_operations: List[Dict[str, Any]],
+        phase_name: str,
+        phase_entry: Dict[str, Any],
+        start_time: float,
+        error: str,
+    ) -> None:
+        self.phase_orchestrator._fail_phase(
+            metadata,
+            failed_operations,
+            phase_name,
+            phase_entry,
+            start_time,
+            error,
+        )
+
+    def _validate_research_phase_request(self, cycle_id: str) -> Optional[Dict[str, Any]]:
+        return self.phase_orchestrator._validate_research_phase_request(cycle_id)
+
+    def _advance_research_cycle_phase(self, research_cycle: ResearchCycle, phase: ResearchPhase) -> None:
+        self.phase_orchestrator._advance_research_cycle_phase(research_cycle, phase)
+
+    def _build_phase_execution(
+        self,
+        phase: ResearchPhase,
+        started_at: str,
+        start_time: float,
+        phase_context: Dict[str, Any],
+        phase_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return self.phase_orchestrator._build_phase_execution(
+            phase,
+            started_at,
+            start_time,
+            phase_context,
+            phase_result,
+        )
+
+    def _sync_phase_history_entry(
+        self,
+        phase_entry: Dict[str, Any],
+        phase_execution: Dict[str, Any],
+        phase_result: Dict[str, Any],
+    ) -> None:
+        self.phase_orchestrator._sync_phase_history_entry(phase_entry, phase_execution, phase_result)
+
+    def _apply_phase_result(
+        self,
+        research_cycle: ResearchCycle,
+        phase: ResearchPhase,
+        phase_result: Dict[str, Any],
+    ) -> None:
+        self.phase_orchestrator._apply_phase_result(research_cycle, phase, phase_result)
+
+    def _record_phase_success(self, cycle_id: str, phase: ResearchPhase, start_time: float) -> None:
+        self.phase_orchestrator._record_phase_success(cycle_id, phase, start_time)
+
+    def _handle_phase_execution_failure(
+        self,
+        cycle_id: str,
+        phase: ResearchPhase,
+        start_time: float,
+        exc: Exception,
+    ) -> Dict[str, Any]:
+        return self.phase_orchestrator._handle_phase_execution_failure(cycle_id, phase, start_time, exc)
+
+    def _execute_phase_internal(
+        self,
+        phase: ResearchPhase,
+        cycle: ResearchCycle,
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return self.phase_orchestrator._execute_phase_internal(phase, cycle, context)
+
+    def _collect_observe_corpus_if_enabled(self, context: Dict[str, Any]) -> Dict[str, Any] | None:
+        return self._call_phase_handler_method("observe", "_collect_observe_corpus_if_enabled", context)
+
+    def _build_observe_metadata(
+        self,
+        context: Dict[str, Any],
+        observations: List[str],
+        findings: List[str],
+        corpus_result: Dict[str, Any] | None,
+        ingestion_result: Dict[str, Any] | None,
+        literature_result: Dict[str, Any] | None,
+    ) -> Dict[str, Any]:
+        return self._call_phase_handler_method(
+            "observe",
+            "_build_observe_metadata",
+            context,
+            observations,
+            findings,
+            corpus_result,
+            ingestion_result,
+            literature_result,
+        )
+
+    def _should_collect_ctext_corpus(self, context: Dict[str, Any]) -> bool:
+        return bool(self._call_phase_handler_method("observe", "_should_collect_ctext_corpus", context))
+
+    def _should_collect_local_corpus(self, context: Dict[str, Any]) -> bool:
+        return bool(self._call_phase_handler_method("observe", "_should_collect_local_corpus", context))
+
+    def _collect_local_observation_corpus(self, context: Dict[str, Any]) -> Dict[str, Any] | None:
+        return self._call_phase_handler_method("observe", "_collect_local_observation_corpus", context)
+
+    def _resolve_observe_data_source(self, context: Dict[str, Any]) -> str:
+        return str(self._call_phase_handler_method("observe", "_resolve_observe_data_source", context))
+
+    def _resolve_whitelist_groups(self, context: Dict[str, Any]) -> List[str]:
+        return list(self._call_phase_handler_method("observe", "_resolve_whitelist_groups", context))
+
+    def _collect_ctext_observation_corpus(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        return self._call_phase_handler_method("observe", "_collect_ctext_observation_corpus", context)
+
+    def _run_observe_ingestion_pipeline(self, corpus_result: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        return self._call_phase_handler_method("observe", "_run_observe_ingestion_pipeline", corpus_result, context)
+
+    def _extract_corpus_text_entries(self, corpus_result: Dict[str, Any]) -> List[Dict[str, str]]:
+        return list(self._call_phase_handler_method("observe", "_extract_corpus_text_entries", corpus_result))
+
+    def _should_run_observe_ingestion(self, context: Dict[str, Any]) -> bool:
+        return bool(self._call_phase_handler_method("observe", "_should_run_observe_ingestion", context))
+
+    def _should_run_observe_literature(self, context: Dict[str, Any]) -> bool:
+        return bool(self._call_phase_handler_method("observe", "_should_run_observe_literature", context))
+
+    def _run_observe_literature_pipeline(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        return self._call_phase_handler_method("observe", "_run_observe_literature_pipeline", context)
+
+    def _should_run_clinical_gap_analysis(self, context: Dict[str, Any]) -> bool:
+        return bool(self.phase_orchestrator._should_run_clinical_gap_analysis(context))
+
+    def _extract_literature_summaries(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return self.phase_orchestrator._extract_literature_summaries(records)
+
+    def _build_evidence_matrix(
+        self,
+        summaries: List[Dict[str, Any]],
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return self.phase_orchestrator._build_evidence_matrix(summaries, context)
+
     def get_pipeline_summary(self) -> Dict[str, Any]:
         return self.phase_orchestrator.get_pipeline_summary()
 
@@ -471,18 +596,6 @@ class ResearchPipeline:
         except Exception as e:
             self.logger.error(f"资源清理失败: {e}")
             return False
-
-    def __getattr__(self, name: str) -> Any:
-        """将未定义的属性访问委托到 phase_orchestrator。
-
-        委托目标包含: get_pipeline_summary, export_pipeline_data,
-        _build_runtime_metadata, _persist_result 等 PhaseOrchestrator 公开方法。
-        """
-        try:
-            phase_orchestrator = object.__getattribute__(self, "phase_orchestrator")
-            return getattr(phase_orchestrator, name)
-        except AttributeError as exc:
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'") from exc
 
 
 __all__ = [

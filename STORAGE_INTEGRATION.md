@@ -117,7 +117,7 @@ from pathlib import Path
 # 导入存储模块
 from src.storage import UnifiedStorageDriver
 from src.analysis.entity_extractor import AdvancedEntityExtractor
-from src.output.output_generator import OutputGenerator
+from src.generation.output_formatter import OutputGenerator
 from src.analysis.preprocessor import DocumentPreprocessor
 from src.analysis.reasoning_engine import ReasoningEngine
 from src.analysis.semantic_graph import SemanticGraphBuilder

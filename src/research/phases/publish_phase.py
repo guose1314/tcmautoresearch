@@ -120,24 +120,9 @@ class PublishPhaseMixin:
             report_output_files if isinstance(report_output_files, dict) else {},
         )
 
-        publications = [
-            {
-                "title": "基于AI的中医古籍方剂分析研究",
-                "journal": "中医研究学报",
-                "authors": cycle.researchers,
-                "keywords": ["AI", "中医", "古籍", "方剂", "数据分析"],
-                "status": "submitted",
-                "citation_key": f"{self._safe_researcher_key(cycle.researchers)}2026AI",
-            },
-            {
-                "title": "古代方剂剂量演变规律研究",
-                "journal": "中医药学报",
-                "authors": cycle.researchers,
-                "keywords": ["剂量", "历史", "演变", "中医"],
-                "status": "accepted",
-                "citation_key": f"{self._safe_researcher_key(cycle.researchers)}2026Dose",
-            },
-        ]
+        publications = self._build_publications_from_paper_result(
+            cycle, context, paper_context, paper_result if isinstance(paper_result, dict) else {}
+        )
 
         deliverables = [
             "研究报告",
@@ -1374,3 +1359,67 @@ class PublishPhaseMixin:
         primary = str(researchers[0]).strip() or "research"
         compact = "".join(ch for ch in primary if ch.isalnum())
         return compact[:24] or "research"
+
+    def _build_publications_from_paper_result(
+        self,
+        cycle: "ResearchCycle",
+        context: Dict[str, Any],
+        paper_context: Dict[str, Any],
+        paper_result: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """从 PaperWriter 真实产出构建 publications 列表。"""
+        publications: List[Dict[str, Any]] = []
+
+        paper_draft = paper_result.get("paper_draft") or {}
+        if not isinstance(paper_draft, dict):
+            paper_draft = {}
+
+        title = (
+            paper_draft.get("title")
+            or paper_context.get("title")
+            or context.get("paper_title")
+            or f"{cycle.research_objective or cycle.description}研究"
+        )
+        authors = paper_context.get("authors") or cycle.researchers
+        keywords = paper_draft.get("keywords") or paper_context.get("keywords") or []
+        journal = paper_context.get("journal") or context.get("journal") or ""
+        year = datetime.now().year
+
+        # 主论文条目（来自 PaperWriter 真实产出）
+        section_count = paper_result.get("section_count", 0)
+        reference_count = paper_result.get("reference_count", 0)
+        has_content = bool(paper_draft.get("sections") or paper_draft.get("abstract"))
+
+        publications.append({
+            "title": str(title).strip(),
+            "journal": journal,
+            "authors": authors,
+            "keywords": list(keywords)[:20],
+            "status": "draft_generated" if has_content else "draft_empty",
+            "citation_key": f"{self._safe_researcher_key(authors)}{year}",
+            "section_count": section_count,
+            "reference_count": reference_count,
+            "language": paper_result.get("language", "zh"),
+            "review_score": paper_result.get("final_review_score", 0.0),
+            "iteration_count": paper_result.get("iteration_count", 0),
+        })
+
+        # 若有 IMRD sections，为每个主要章节生成子条目
+        sections = paper_draft.get("sections") or []
+        if isinstance(sections, list):
+            for section in sections:
+                if not isinstance(section, dict):
+                    continue
+                sec_type = str(section.get("section_type") or "").strip()
+                sec_title = str(section.get("title") or "").strip()
+                sec_content = str(section.get("content") or "").strip()
+                if sec_type and sec_content:
+                    publications.append({
+                        "title": sec_title or f"{title} — {sec_type}",
+                        "section_type": sec_type,
+                        "authors": authors,
+                        "status": "section_generated",
+                        "content_length": len(sec_content),
+                    })
+
+        return publications

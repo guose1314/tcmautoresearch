@@ -411,6 +411,77 @@ class TestResearchPipelineObserve(unittest.TestCase):
         self.assertIsNone(doc.get("output_generation"))
         self.assertEqual(result["aggregate"]["output_quality_metrics"], [])
 
+    @patch("src.research.research_pipeline.OutputGenerator.cleanup")
+    @patch("src.research.research_pipeline.OutputGenerator.execute")
+    @patch("src.research.research_pipeline.OutputGenerator.initialize")
+    @patch("src.research.research_pipeline.ReasoningEngine.cleanup")
+    @patch("src.research.research_pipeline.ReasoningEngine.execute")
+    @patch("src.research.research_pipeline.ReasoningEngine.initialize")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.cleanup")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.execute")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.initialize")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.cleanup")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.execute")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.initialize")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.cleanup")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.execute")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.initialize")
+    def test_observe_ingestion_degrades_when_reasoning_execution_fails(
+        self,
+        mock_pre_init, mock_pre_exec, mock_pre_clean,
+        mock_ex_init, mock_ex_exec, mock_ex_clean,
+        mock_sem_init, mock_sem_exec, mock_sem_clean,
+        mock_reason_init, mock_reason_exec, mock_reason_clean,
+        mock_out_init, mock_out_exec, mock_out_clean,
+    ):
+        mock_pre_init.return_value = True
+        mock_pre_clean.return_value = True
+        mock_pre_exec.return_value = {"processed_text": "test"}
+
+        mock_ex_init.return_value = True
+        mock_ex_clean.return_value = True
+        mock_ex_exec.return_value = {
+            "entities": [{"name": "test", "type": "herb", "confidence": 0.9}],
+            "statistics": {"by_type": {"herb": 1}},
+            "confidence_scores": {"average_confidence": 0.9},
+        }
+
+        mock_sem_init.return_value = True
+        mock_sem_clean.return_value = True
+        mock_sem_exec.return_value = {
+            "semantic_graph": {"nodes": [], "edges": []},
+            "graph_statistics": {"nodes_count": 0, "edges_count": 0, "relationships_by_type": {}},
+        }
+
+        mock_reason_init.return_value = True
+        mock_reason_clean.return_value = True
+        mock_reason_exec.side_effect = RuntimeError("reason failed")
+
+        mock_out_init.return_value = True
+        mock_out_clean.return_value = True
+        mock_out_exec.return_value = {
+            "output_data": {
+                "quality_metrics": {"entities_extracted": 1},
+                "recommendations": ["keep going"],
+            }
+        }
+
+        pipeline = ResearchPipeline({})
+        result = pipeline.phase_handlers.run_observe_ingestion_pipeline(
+            {
+                "sources": ["local"],
+                "stats": {"total_documents": 1},
+                "documents": [{"text": "测试文本", "urn": "doc:reason-fail", "title": "fail"}],
+            },
+            {"max_texts": 1, "max_chars_per_text": 500},
+        )
+
+        self.assertEqual(result["processed_document_count"], 1)
+        self.assertNotIn("error", result)
+        self.assertEqual(result["aggregate"]["reasoning_summary"], {})
+        self.assertEqual(result["aggregate"]["output_quality_metrics"], [{"entities_extracted": 1}])
+        self.assertIn("keep going", result["aggregate"]["output_recommendations"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -35,16 +35,22 @@ class ReflectPhaseMixin:
         outcomes: List[Dict[str, Any]] = getattr(cycle, "outcomes", None) or []
         quality_assessor = self.pipeline.quality_assessor
 
-        # ---- 1. 基于 QualityAssessor 评估各阶段 ----
-        cycle_assessment = quality_assessor.assess_cycle_for_reflection(outcomes)
+        # ---- 1. 获取 LLM 引擎（可选） ----
+        llm_engine = self.pipeline.config.get("llm_engine") or self.pipeline.config.get("llm_service")
+        has_llm = llm_engine is not None and hasattr(llm_engine, "generate")
 
-        # ---- 2. 构建反思 ----
+        # ---- 2. 基于 QualityAssessor 评估各阶段（LLM 可用时启用深度诊断） ----
+        if has_llm:
+            cycle_assessment = quality_assessor.assess_cycle_for_reflection_with_llm(outcomes, llm_engine)
+        else:
+            cycle_assessment = quality_assessor.assess_cycle_for_reflection(outcomes)
+
+        # ---- 3. 构建反思 ----
         reflections = self._build_reflections_from_assessment(cycle_assessment)
 
-        # ---- 3. LLM 增强（可选） ----
+        # ---- 4. LLM 增强反思（可选，在评估级诊断之外追加反思级洞察） ----
         llm_enhanced = False
-        llm_engine = self.pipeline.config.get("llm_engine") or self.pipeline.config.get("llm_service")
-        if llm_engine is not None and hasattr(llm_engine, "generate"):
+        if has_llm:
             llm_reflection = self._generate_llm_reflection(llm_engine, cycle_assessment, outcomes)
             if llm_reflection:
                 reflections.append(llm_reflection)
@@ -64,6 +70,7 @@ class ReflectPhaseMixin:
                 "overall_cycle_score": cycle_assessment["overall_cycle_score"],
                 "weaknesses": cycle_assessment["weaknesses"],
                 "strengths": cycle_assessment["strengths"],
+                "llm_diagnosis": cycle_assessment.get("llm_diagnosis"),
             },
             "learning_summary": learning_summary,
             "metadata": {

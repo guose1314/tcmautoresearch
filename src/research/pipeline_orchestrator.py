@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from src.research.audit_history import publish_audit_event
-from src.research.study_session_manager import ResearchCycle
+from src.research.study_session_manager import ResearchCycle, ResearchPhase
 
 if TYPE_CHECKING:
     from src.research.pipeline_phase_handlers import ResearchPhaseHandlers
@@ -207,6 +207,17 @@ class ResearchPipelineOrchestrator:
             self.pipeline._apply_phase_result(research_cycle, phase, phase_result)
             research_cycle.metadata["analysis_summary"] = self.pipeline._build_cycle_analysis_summary(research_cycle)
             self.pipeline._record_phase_success(cycle_id, phase, start_time)
+
+            if phase == ResearchPhase.ANALYZE:
+                findings_count = (phase_result.get("metadata") or {}).get("record_count", 0)
+                if findings_count == 0:
+                    phase_entry["status"] = "degraded"
+                    research_cycle.metadata["final_status"] = "degraded"
+                    phase_result.setdefault("metadata", {})["status"] = "degraded"
+                    self.pipeline.logger.warning(
+                        "analyze 阶段 findings=0，标记 status=degraded"
+                    )
+
             self.pipeline.logger.info(f"研究阶段执行完成: {phase.value}")
             return phase_result
         except Exception as exc:

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Tuple
 
 from src.research.phase_orchestrator import PhaseOrchestrator
 from src.research.pipeline_phase_handlers import ResearchPhaseHandlers
+from src.research.research_pipeline import ResearchPipeline
 
 
 class _FakeEventBus:
@@ -127,41 +128,63 @@ class _FakePipeline:
 
 def test_phase_orchestrator_observe_contract_uses_explicit_handler() -> None:
     orchestrator = PhaseOrchestrator(_FakePipeline())
+    observe_handler = orchestrator.get_handler("observe")
 
-    observations, findings = orchestrator._build_observe_seed_lists()
+    observations, findings = observe_handler._build_observe_seed_lists()
     assert observations == ["seed"]
     assert findings == ["finding"]
 
-    result = orchestrator._execute_observe_phase(cycle={}, context={"k": "v"})
+    result = observe_handler.execute_observe_phase({}, {"k": "v"})
     assert result["phase"] == "observe"
     assert result["context"] == {"k": "v"}
 
 
 def test_phase_orchestrator_hypothesis_contract_uses_explicit_handler() -> None:
     orchestrator = PhaseOrchestrator(_FakePipeline())
+    hypothesis_handler = orchestrator.get_handler("hypothesis")
 
-    hypothesis_context = orchestrator._build_hypothesis_context(cycle={}, context={"foo": "bar"})
+    hypothesis_context = hypothesis_handler._build_hypothesis_context({}, {"foo": "bar"})
     assert hypothesis_context["source"] == "hypothesis_handler"
     assert hypothesis_context["foo"] == "bar"
 
-    domain = orchestrator._infer_hypothesis_domain(cycle={}, observations=["o"], findings=["f"])
+    domain = hypothesis_handler._infer_hypothesis_domain({}, ["o"], ["f"])
     assert domain == "integrative_research"
 
 
 def test_phase_orchestrator_publish_reflect_contract_uses_explicit_handlers() -> None:
     orchestrator = PhaseOrchestrator(_FakePipeline())
+    publish_handler = orchestrator.get_handler("publish")
+    reflect_handler = orchestrator.get_handler("reflect")
 
-    citations = orchestrator._collect_citation_records(cycle={}, context={}, literature_pipeline={})
+    citations = publish_handler.collect_citation_records({}, {}, {})
     assert citations == [{"title": "contract-citation"}]
 
-    publish_result = orchestrator._execute_publish_phase(cycle={}, context={})
-    reflect_result = orchestrator._execute_reflect_phase(cycle={}, context={})
+    publish_result = publish_handler.execute_publish_phase({}, {})
+    reflect_result = reflect_handler.execute_reflect_phase({}, {})
     assert publish_result["phase"] == "publish"
     assert reflect_result["phase"] == "reflect"
 
 
+def test_phase_orchestrator_removes_phase_passthrough_bridge() -> None:
+    assert "get_handler" in PhaseOrchestrator.__dict__
+    for method_name in (
+        "_execute_observe_phase",
+        "_build_observe_seed_lists",
+        "_collect_observe_corpus_if_enabled",
+        "_run_observe_ingestion_pipeline",
+        "_execute_hypothesis_phase",
+        "_build_hypothesis_context",
+        "_infer_hypothesis_domain",
+        "_execute_publish_phase",
+        "_collect_citation_records",
+        "_execute_reflect_phase",
+    ):
+        assert method_name not in PhaseOrchestrator.__dict__
+
+
 def test_research_phase_handlers_remove_implicit_getattr_bridge() -> None:
     assert "__getattr__" not in ResearchPhaseHandlers.__dict__
+    assert "__getattr__" not in ResearchPipeline.__dict__
     for method_name in (
         "run_observe_ingestion_pipeline",
         "extract_corpus_text_entries",

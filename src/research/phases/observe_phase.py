@@ -11,6 +11,7 @@ from src.collector.corpus_bundle import (
     extract_text_entries,
     is_corpus_bundle,
 )
+from src.cycle.cycle_runner import execute_real_module_pipeline
 
 
 class ObservePhaseMixin:
@@ -486,29 +487,11 @@ class ObservePhaseMixin:
                 },
             }
 
-        preprocessor = self.pipeline.analysis_port.create_preprocessor(context.get("preprocessor_config") or {})
-        extractor = self.pipeline.analysis_port.create_extractor(context.get("extractor_config") or {})
-        semantic_builder = self.pipeline.analysis_port.create_semantic_builder(context.get("semantic_builder_config") or {})
-        reasoning_engine = self.pipeline.analysis_port.create_reasoning_engine(context.get("reasoning_engine_config") or {})
-        output_generator = self.pipeline.output_port.create_output_generator(context.get("output_generator_config") or {})
-
-        if not preprocessor.initialize():
-            return {"error": "文档预处理器初始化失败"}
-        if not extractor.initialize():
-            preprocessor.cleanup()
-            return {"error": "实体抽取器初始化失败"}
-        if not semantic_builder.initialize():
-            extractor.cleanup()
-            preprocessor.cleanup()
-            return {"error": "语义图构建器初始化失败"}
-        reasoning_enabled = bool(context.get("run_reasoning", True))
-        if reasoning_enabled and not reasoning_engine.initialize():
-            reasoning_enabled = False
-            self.pipeline.logger.warning("推理引擎初始化失败，继续使用语义图关系")
-        output_generation_enabled = bool(context.get("run_output_generation", True))
-        if output_generation_enabled and not output_generator.initialize():
-            output_generation_enabled = False
-            self.pipeline.logger.warning("输出生成器初始化失败，跳过结构化输出生成")
+        try:
+            module_chain, cleanup_modules = self._build_observe_subpipeline_modules(context)
+        except Exception as e:
+            self.pipeline.logger.error("观察阶段子流程初始化失败: %s", e)
+            return {"error": str(e)}
 
         document_results: List[Dict[str, Any]] = []
         entity_type_counts: Dict[str, int] = {}
@@ -524,7 +507,7 @@ class ObservePhaseMixin:
         try:
             for entry in selected_entries:
                 raw_text = entry.get("text", "")[:max_chars_per_text]
-                preprocess_result = preprocessor.execute(
+                module_results = execute_real_module_pipeline(
                     {
                         "raw_text": raw_text,
                         "source_file": entry.get("urn", "unknown"),
@@ -533,23 +516,17 @@ class ObservePhaseMixin:
                             "source": "ctext",
                             "collection_stage": "observe",
                         },
-                    }
+                    },
+                    modules=module_chain,
+                    manage_module_lifecycle=False,
+                    optional_modules={"ReasoningEngine", "OutputGenerator"},
                 )
-                extraction_result = extractor.execute(preprocess_result)
-                semantic_result = semantic_builder.execute(extraction_result)
-                reasoning_result = self._run_observe_reasoning_if_enabled(
-                    reasoning_engine,
-                    reasoning_enabled,
-                    extraction_result,
-                    semantic_result,
-                )
-                output_result = self._run_observe_output_generation_if_enabled(
-                    output_generator,
-                    output_generation_enabled,
-                    extraction_result,
-                    semantic_result,
-                    reasoning_result,
-                )
+
+                preprocess_result = self._extract_module_output(module_results, "DocumentPreprocessor")
+                extraction_result = self._extract_module_output(module_results, "EntityExtractor")
+                semantic_result = self._extract_module_output(module_results, "SemanticModeler")
+                reasoning_result = self._extract_module_output(module_results, "ReasoningEngine")
+                output_result = self._extract_module_output(module_results, "OutputGenerator")
 
                 entities = extraction_result.get("entities", [])
                 total_entities += len(entities)
@@ -618,11 +595,66 @@ class ObservePhaseMixin:
             self.pipeline.logger.error("观察阶段预处理/抽取/建模链路失败: %s", e)
             return {"error": str(e)}
         finally:
-            output_generator.cleanup()
-            reasoning_engine.cleanup()
-            semantic_builder.cleanup()
-            extractor.cleanup()
-            preprocessor.cleanup()
+            self._cleanup_observe_subpipeline_modules(cleanup_modules)
+
+    def _build_observe_subpipeline_modules(
+        self,
+        context: Dict[str, Any],
+    ) -> tuple[List[tuple[str, Any]], List[Any]]:
+        preprocessor = self.pipeline.analysis_port.create_preprocessor(context.get("preprocessor_config") or {})
+        extractor = self.pipeline.analysis_port.create_extractor(context.get("extractor_config") or {})
+        semantic_builder = self.pipeline.analysis_port.create_semantic_builder(context.get("semantic_builder_config") or {})
+        reasoning_engine = self.pipeline.analysis_port.create_reasoning_engine(context.get("reasoning_engine_config") or {})
+        output_generator = self.pipeline.output_port.create_output_generator(context.get("output_generator_config") or {})
+
+        cleanup_modules = [output_generator, reasoning_engine, semantic_builder, extractor, preprocessor]
+        module_chain: List[tuple[str, Any]] = []
+
+        if not preprocessor.initialize():
+            raise RuntimeError("文档预处理器初始化失败")
+        module_chain.append(("DocumentPreprocessor", preprocessor))
+
+        if not extractor.initialize():
+            raise RuntimeError("实体抽取器初始化失败")
+        module_chain.append(("EntityExtractor", extractor))
+
+        if not semantic_builder.initialize():
+            raise RuntimeError("语义图构建器初始化失败")
+        module_chain.append(("SemanticModeler", semantic_builder))
+
+        if bool(context.get("run_reasoning", True)):
+            if reasoning_engine.initialize():
+                module_chain.append(("ReasoningEngine", reasoning_engine))
+            else:
+                self.pipeline.logger.warning("推理引擎初始化失败，继续使用语义图关系")
+
+        if bool(context.get("run_output_generation", True)):
+            if output_generator.initialize():
+                module_chain.append(("OutputGenerator", output_generator))
+            else:
+                self.pipeline.logger.warning("输出生成器初始化失败，跳过结构化输出生成")
+
+        return module_chain, cleanup_modules
+
+    def _cleanup_observe_subpipeline_modules(self, modules: List[Any]) -> None:
+        for module in reversed(modules):
+            try:
+                module.cleanup()
+            except Exception as exc:
+                self.pipeline.logger.warning("观察阶段子流程模块清理失败: %s", exc)
+
+    def _extract_module_output(
+        self,
+        module_results: List[Dict[str, Any]],
+        module_name: str,
+    ) -> Dict[str, Any]:
+        for module_result in module_results:
+            if module_result.get("module") == module_name:
+                if module_result.get("status") != "completed":
+                    return {}
+                output_data = module_result.get("output_data")
+                return output_data if isinstance(output_data, dict) else {}
+        return {}
 
     def _extract_corpus_text_entries(self, corpus_result: Dict[str, Any]) -> List[Dict[str, str]]:
         return extract_text_entries(corpus_result)
@@ -682,48 +714,6 @@ class ObservePhaseMixin:
                 }
             )
         return self._deduplicate_relationships(relationships)
-
-    def _run_observe_reasoning_if_enabled(
-        self,
-        reasoning_engine: Any,
-        reasoning_enabled: bool,
-        extraction_result: Dict[str, Any],
-        semantic_result: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        if not reasoning_enabled:
-            return {}
-        try:
-            return reasoning_engine.execute(
-                {
-                    "entities": extraction_result.get("entities", []),
-                    "semantic_graph": semantic_result.get("semantic_graph", {}),
-                }
-            )
-        except Exception as exc:
-            self.pipeline.logger.warning("观察阶段推理链路失败，忽略 reasoning 结果: %s", exc)
-            return {}
-
-    def _run_observe_output_generation_if_enabled(
-        self,
-        output_generator: Any,
-        output_generation_enabled: bool,
-        extraction_result: Dict[str, Any],
-        semantic_result: Dict[str, Any],
-        reasoning_result: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        if not output_generation_enabled:
-            return {}
-        try:
-            context_for_output: Dict[str, Any] = {}
-            context_for_output.update(extraction_result)
-            context_for_output["semantic_graph"] = semantic_result.get("semantic_graph", {})
-            context_for_output["graph_statistics"] = semantic_result.get("graph_statistics", {})
-            context_for_output["research_perspectives"] = semantic_result.get("research_perspectives", {})
-            context_for_output.update(reasoning_result)
-            return output_generator.execute(context_for_output)
-        except Exception as exc:
-            self.pipeline.logger.warning("观察阶段输出生成链路失败，跳过结构化输出: %s", exc)
-            return {}
 
     def _extract_reasoning_relationships(
         self,

@@ -9,7 +9,7 @@ import time
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, NamedTuple, Optional
+from typing import Any, Callable, Collection, Dict, List, NamedTuple, Optional
 
 from .cycle_reporter import (
     DEFAULT_CYCLE_DEMO_GOVERNANCE,
@@ -261,11 +261,13 @@ def execute_real_module_pipeline(
     input_data: Dict[str, Any],
     modules: Optional[List[tuple[str, Any]]] = None,
     manage_module_lifecycle: bool = False,
+    optional_modules: Optional[Collection[str]] = None,
 ) -> List[Dict[str, Any]]:
     """顺序执行真实 src 模块。"""
     context = dict(input_data)
     module_results = []
     module_chain = modules or build_real_modules()
+    optional_module_names = {str(module_name) for module_name in (optional_modules or [])}
 
     if manage_module_lifecycle:
         initialize_real_modules(module_chain)
@@ -275,7 +277,28 @@ def execute_real_module_pipeline(
             logger.info("开始执行真实模块: %s", module_name)
 
             module_start_time = time.time()
-            result = module.execute(context)
+            try:
+                result = module.execute(context)
+            except Exception as exc:
+                execution_time = time.time() - module_start_time
+                if module_name not in optional_module_names:
+                    raise
+
+                logger.warning("可选真实模块 %s 执行失败，继续后续链路: %s", module_name, exc)
+                module_results.append(
+                    {
+                        "module": module_name,
+                        "status": "failed_optional",
+                        "execution_time": execution_time,
+                        "timestamp": datetime.now().isoformat(),
+                        "input_data": dict(context),
+                        "output_data": {},
+                        "quality_metrics": {},
+                        "error": str(exc),
+                    }
+                )
+                continue
+
             execution_time = time.time() - module_start_time
             context.update(result)
 
@@ -553,6 +576,28 @@ def _finalize_cycle_report(
     return cycle_results
 
 
+def _default_pipeline_iteration(
+    iteration_number: int,
+    input_data: Dict[str, Any],
+    max_iterations: int = 5,
+    shared_modules: Optional[List[tuple[str, Any]]] = None,
+    governance_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """默认迭代执行器：通过 6 阶段 ResearchPipeline 执行单次迭代。"""
+    from .cycle_pipeline_bridge import run_pipeline_iteration
+    from .cycle_research_session import run_research_session
+
+    del shared_modules  # 6 阶段管道自管理模块生命周期
+    return run_pipeline_iteration(
+        iteration_number=iteration_number,
+        input_data=input_data,
+        run_research_session_fn=run_research_session,
+        summarize_module_quality_fn=summarize_module_quality,
+        max_iterations=max_iterations,
+        governance_config=governance_config,
+    )
+
+
 def run_full_cycle_demo(
     max_iterations: int = 3,
     sample_data: Optional[List[str]] = None,
@@ -560,11 +605,13 @@ def run_full_cycle_demo(
     output_path: Optional[str] = None,
     governance_config_loader: Optional[Callable[[Optional[Path]], Dict[str, Any]]] = None,
     module_lifecycle: Optional[ModuleLifecycle] = None,
-    run_iteration: Callable[..., Dict[str, Any]] = run_iteration_cycle,
+    run_iteration: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """运行完整循环演示。"""
     logger.info("=== 开始中医古籍全自动研究系统迭代循环演示 ===")
     demo_started_at = time.time()
+    if run_iteration is None:
+        run_iteration = _default_pipeline_iteration
     lifecycle = module_lifecycle or _DEFAULT_MODULE_LIFECYCLE
 
     config_loader = governance_config_loader

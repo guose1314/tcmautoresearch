@@ -93,7 +93,12 @@ class AnalyzePhaseMixin:
             record = self._build_analyze_record_from_document(document, index)
             if record:
                 records.append(record)
-        return records
+
+        if records:
+            return records
+
+        # Fallback: 从 Hypothesis 阶段的 source_entities 合成分析记录
+        return self._synthesize_records_from_hypotheses(cycle)
 
     def _normalize_analyze_records(self, records: List[Any]) -> List[Dict[str, Any]]:
         normalized_records: List[Dict[str, Any]] = []
@@ -183,7 +188,12 @@ class AnalyzePhaseMixin:
             relationships.extend(
                 item for item in (document.get("semantic_relationships") or []) if isinstance(item, dict)
             )
-        return self._deduplicate_analyze_relationships(relationships)
+
+        if relationships:
+            return self._deduplicate_analyze_relationships(relationships)
+
+        # Fallback: 从 Hypothesis 阶段的 source_entities 合成关系
+        return self._synthesize_relationships_from_hypotheses(cycle)
 
     def _deduplicate_analyze_relationships(self, relationships: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         deduplicated: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
@@ -612,3 +622,86 @@ class AnalyzePhaseMixin:
             "bias_risk_distribution": bias_distribution,
             "summary": summary_lines,
         }
+
+    # ── Hypothesis fallback: 从先前阶段合成分析数据 ──────────────
+
+    def _synthesize_records_from_hypotheses(
+        self,
+        cycle: "ResearchCycle",
+    ) -> List[Dict[str, Any]]:
+        """从 Hypothesis 阶段的 source_entities 合成分析记录。
+
+        当 Observe 阶段未产出 ingestion_pipeline（无语料采集）时，
+        利用假设中的实体列表构建最小化分析记录，避免 Analyze 阶段空转。
+        """
+        hypothesis_result = (
+            cycle.phase_executions
+            .get(self.pipeline.ResearchPhase.HYPOTHESIS, {})
+            .get("result", {})
+        )
+        hypotheses = hypothesis_result.get("hypotheses") or []
+        if not hypotheses:
+            return []
+
+        records: List[Dict[str, Any]] = []
+        for index, hyp in enumerate(hypotheses, start=1):
+            if not isinstance(hyp, dict):
+                continue
+            entities = hyp.get("source_entities") or hyp.get("keywords") or []
+            if not entities:
+                continue
+            entity_list = [str(e).strip() for e in entities if str(e).strip()]
+            if not entity_list:
+                continue
+            records.append({
+                "formula": hyp.get("title") or f"hypothesis_{index}",
+                "title": hyp.get("title") or f"hypothesis_{index}",
+                "syndrome": hyp.get("source_gap_type") or "unknown",
+                "herbs": entity_list,
+            })
+        return records
+
+    def _synthesize_relationships_from_hypotheses(
+        self,
+        cycle: "ResearchCycle",
+    ) -> List[Dict[str, Any]]:
+        """从 Hypothesis 阶段的 source_entities 合成语义关系。
+
+        利用假设中实体对生成 'hypothesis_association' 类型关系，
+        使 ReasoningEngine 能在此基础上进行推理分析。
+        """
+        hypothesis_result = (
+            cycle.phase_executions
+            .get(self.pipeline.ResearchPhase.HYPOTHESIS, {})
+            .get("result", {})
+        )
+        hypotheses = hypothesis_result.get("hypotheses") or []
+        if not hypotheses:
+            return []
+
+        relationships: List[Dict[str, Any]] = []
+        for hyp in hypotheses:
+            if not isinstance(hyp, dict):
+                continue
+            entities = [
+                str(e).strip()
+                for e in (hyp.get("source_entities") or [])
+                if str(e).strip()
+            ]
+            confidence = float(hyp.get("confidence") or hyp.get("evidence_support") or 0.5)
+            # 为每对实体生成一条关系
+            for i in range(len(entities)):
+                for j in range(i + 1, len(entities)):
+                    relationships.append({
+                        "source": entities[i],
+                        "source_type": "herb",
+                        "target": entities[j],
+                        "target_type": "herb",
+                        "type": "hypothesis_association",
+                        "metadata": {
+                            "confidence": confidence,
+                            "source": "hypothesis_engine",
+                            "hypothesis_title": hyp.get("title") or "",
+                        },
+                    })
+        return self._deduplicate_analyze_relationships(relationships)

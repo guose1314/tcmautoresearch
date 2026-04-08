@@ -589,10 +589,7 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertEqual(result["clinical_gap_analysis"], {"report": "ok"})
         pipeline.cleanup()
 
-    @patch("src.research.research_pipeline.SemanticGraphBuilder")
-    @patch("src.research.research_pipeline.AdvancedEntityExtractor")
-    @patch("src.research.research_pipeline.DocumentPreprocessor")
-    def test_run_ingestion_happy_path_with_mocks(self, mock_pre, mock_ext, mock_sem):
+    def test_run_ingestion_happy_path_with_mocks(self):
         pre = Mock()
         pre.initialize.return_value = True
         pre.execute.return_value = {"processed_text": "p"}
@@ -614,19 +611,19 @@ class TestResearchPipelineQuality(unittest.TestCase):
         }
         sem.cleanup.return_value = None
 
-        mock_pre.return_value = pre
-        mock_ext.return_value = ext
-        mock_sem.return_value = sem
+        pipeline = ResearchPipeline({}, preprocessor=pre, extractor=ext, graph_builder=sem)
+        try:
+            with patch.object(
+                pipeline,
+                "_extract_corpus_text_entries",
+                return_value=[{"urn": "u", "title": "t", "text": "abc"}],
+            ):
+                result = pipeline._run_observe_ingestion_pipeline({"documents": [{}]}, {})
 
-        with patch.object(
-            self.pipeline,
-            "_extract_corpus_text_entries",
-            return_value=[{"urn": "u", "title": "t", "text": "abc"}],
-        ):
-            result = self.pipeline._run_observe_ingestion_pipeline({"documents": [{}]}, {})
-
-        self.assertEqual(result["processed_document_count"], 1)
-        self.assertEqual(result["aggregate"]["total_entities"], 1)
+            self.assertEqual(result["processed_document_count"], 1)
+            self.assertEqual(result["aggregate"]["total_entities"], 1)
+        finally:
+            pipeline.cleanup()
 
     @patch("src.research.research_pipeline.LiteratureRetriever.close")
     @patch("src.research.research_pipeline.LiteratureRetriever.search")

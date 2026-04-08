@@ -1,15 +1,22 @@
-from src.research.phase_handlers.analyze_handler import AnalyzePhaseHandler
-from src.research.phase_handlers.experiment_handler import ExperimentPhaseHandler
-from src.research.phase_handlers.hypothesis_handler import HypothesisPhaseHandler
-from src.research.phase_handlers.observe_handler import ObservePhaseHandler
-from src.research.phase_handlers.publish_handler import PublishPhaseHandler
-from src.research.phase_handlers.reflect_handler import ReflectPhaseHandler
+import importlib as _importlib
 
-__all__ = [
-    "AnalyzePhaseHandler",
-    "ExperimentPhaseHandler",
-    "HypothesisPhaseHandler",
-    "ObservePhaseHandler",
-    "PublishPhaseHandler",
-    "ReflectPhaseHandler",
-]
+_LAZY_IMPORTS: dict[str, tuple[str, str]] = {
+    "AnalyzePhaseHandler": ("src.research.phase_handlers.analyze_handler", "AnalyzePhaseHandler"),
+    "ExperimentPhaseHandler": ("src.research.phase_handlers.experiment_handler", "ExperimentPhaseHandler"),
+    "HypothesisPhaseHandler": ("src.research.phase_handlers.hypothesis_handler", "HypothesisPhaseHandler"),
+    "ObservePhaseHandler": ("src.research.phase_handlers.observe_handler", "ObservePhaseHandler"),
+    "PublishPhaseHandler": ("src.research.phase_handlers.publish_handler", "PublishPhaseHandler"),
+    "ReflectPhaseHandler": ("src.research.phase_handlers.reflect_handler", "ReflectPhaseHandler"),
+}
+
+__all__ = list(_LAZY_IMPORTS.keys())
+
+
+def __getattr__(name: str):
+    if name in _LAZY_IMPORTS:
+        module_path, attr = _LAZY_IMPORTS[name]
+        mod = _importlib.import_module(module_path)
+        val = getattr(mod, attr)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

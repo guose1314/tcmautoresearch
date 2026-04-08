@@ -12,28 +12,28 @@
 * :func:`run_llm_tasks`         — LLM 并发调用便捷函数
 """
 
-from src.orchestration.research_orchestrator import (
-    OrchestrationResult,
-    PhaseOutcome,
-    ResearchOrchestrator,
-    run_research,
-    topic_to_phase_context,
-)
-from src.orchestration.task_scheduler import (
-    TaskResult,
-    TaskScheduler,
-    TaskSpec,
-    run_llm_tasks,
-)
+import importlib as _importlib
 
-__all__ = [
-    "OrchestrationResult",
-    "PhaseOutcome",
-    "ResearchOrchestrator",
-    "run_research",
-    "topic_to_phase_context",
-    "TaskResult",
-    "TaskScheduler",
-    "TaskSpec",
-    "run_llm_tasks",
-]
+_LAZY_IMPORTS: dict[str, tuple[str, str]] = {
+    "OrchestrationResult": ("src.orchestration.research_orchestrator", "OrchestrationResult"),
+    "PhaseOutcome": ("src.orchestration.research_orchestrator", "PhaseOutcome"),
+    "ResearchOrchestrator": ("src.orchestration.research_orchestrator", "ResearchOrchestrator"),
+    "run_research": ("src.orchestration.research_orchestrator", "run_research"),
+    "topic_to_phase_context": ("src.orchestration.research_orchestrator", "topic_to_phase_context"),
+    "TaskResult": ("src.orchestration.task_scheduler", "TaskResult"),
+    "TaskScheduler": ("src.orchestration.task_scheduler", "TaskScheduler"),
+    "TaskSpec": ("src.orchestration.task_scheduler", "TaskSpec"),
+    "run_llm_tasks": ("src.orchestration.task_scheduler", "run_llm_tasks"),
+}
+
+__all__ = list(_LAZY_IMPORTS.keys())
+
+
+def __getattr__(name: str):
+    if name in _LAZY_IMPORTS:
+        module_path, attr = _LAZY_IMPORTS[name]
+        mod = _importlib.import_module(module_path)
+        val = getattr(mod, attr)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

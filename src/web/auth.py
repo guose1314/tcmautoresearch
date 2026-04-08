@@ -177,6 +177,15 @@ def _load_jwt_config() -> Dict[str, Any]:
             "或环境变量 JWT_SECRET_KEY 中设置。"
         )
 
+    # RFC 7518 §3.2: HMAC 密钥 ≥256-bit (32 字节) 用于 HS256
+    _min_key_bytes = 32
+    if len(secret_key.encode("utf-8")) < _min_key_bytes:
+        raise RuntimeError(
+            f"JWT secret key 长度不足: {len(secret_key.encode('utf-8'))} 字节 "
+            f"(最低要求 {_min_key_bytes} 字节 / 256-bit)。"
+            "请更新 secrets.yml 的 security.jwt_secret_key 或环境变量 JWT_SECRET_KEY。"
+        )
+
     return {
         "secret_key": secret_key,
         "algorithm": algorithm,

@@ -5,29 +5,42 @@
 提供研究成果质量评分、指标计算和 GRADE 合规校验能力。
 """
 
-from importlib import import_module
+import importlib as _importlib
+from typing import TYPE_CHECKING
 
-from .quality_assessor import (
-    ComplianceReport,
-    QualityAssessor,
-    QualityScore,
-)
+if TYPE_CHECKING:
+    from .evidence_grader import (
+        BiasRiskAssessment,
+        EvidenceGrader,
+        GRADEResult,
+        StudyGRADEAssessment,
+        StudyRecord,
+    )
+    from .quality_assessor import (
+        ComplianceReport,
+        QualityAssessor,
+        QualityScore,
+    )
 
-_evidence_grader = import_module("src.quality.evidence_grader")
+_LAZY_IMPORTS: dict[str, tuple[str, str]] = {
+    "BiasRiskAssessment": ("src.quality.evidence_grader", "BiasRiskAssessment"),
+    "EvidenceGrader": ("src.quality.evidence_grader", "EvidenceGrader"),
+    "GRADEResult": ("src.quality.evidence_grader", "GRADEResult"),
+    "QualityAssessor": ("src.quality.quality_assessor", "QualityAssessor"),
+    "QualityScore": ("src.quality.quality_assessor", "QualityScore"),
+    "ComplianceReport": ("src.quality.quality_assessor", "ComplianceReport"),
+    "StudyGRADEAssessment": ("src.quality.evidence_grader", "StudyGRADEAssessment"),
+    "StudyRecord": ("src.quality.evidence_grader", "StudyRecord"),
+}
 
-BiasRiskAssessment = _evidence_grader.BiasRiskAssessment
-EvidenceGrader = _evidence_grader.EvidenceGrader
-GRADEResult = _evidence_grader.GRADEResult
-StudyGRADEAssessment = _evidence_grader.StudyGRADEAssessment
-StudyRecord = _evidence_grader.StudyRecord
+__all__ = list(_LAZY_IMPORTS.keys())
 
-__all__ = [
-    "BiasRiskAssessment",
-    "EvidenceGrader",
-    "GRADEResult",
-    "QualityAssessor",
-    "QualityScore",
-    "ComplianceReport",
-    "StudyGRADEAssessment",
-    "StudyRecord",
-]
+
+def __getattr__(name: str):
+    if name in _LAZY_IMPORTS:
+        module_path, attr = _LAZY_IMPORTS[name]
+        mod = _importlib.import_module(module_path)
+        val = getattr(mod, attr)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

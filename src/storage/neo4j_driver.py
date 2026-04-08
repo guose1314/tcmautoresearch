@@ -12,6 +12,7 @@ Neo4j 图数据库驱动
 
 import json
 import logging
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from importlib import import_module
@@ -29,6 +30,21 @@ if TYPE_CHECKING:
     from src.infrastructure.persistence import Entity, EntityRelationship
 
 logger = logging.getLogger(__name__)
+
+_CYPHER_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _safe_cypher_label(value: str) -> str:
+    """校验 Cypher 标签/关系类型标识符，防止注入。
+
+    Cypher 不支持对 label 和 relationship-type 使用 ``$param`` 参数化，
+    因此必须在拼接前确保值仅含合法标识符字符。
+    """
+    if not isinstance(value, str) or not _CYPHER_IDENTIFIER_RE.match(value):
+        raise ValueError(
+            f"非法 Cypher 标识符: {value!r}，仅允许字母、数字和下划线"
+        )
+    return value
 
 
 def _get_neo4j_graph_database() -> Any:
@@ -143,7 +159,7 @@ class Neo4jDriver:
         """
         try:
             query = f"""
-            MERGE (n:{node.label} {{id: $id}})
+            MERGE (n:{_safe_cypher_label(node.label)} {{id: $id}})
             SET n += $properties
             RETURN n
             """
@@ -180,7 +196,7 @@ class Neo4jDriver:
                 for label, rows in grouped_rows.items():
                     query = f"""
                     UNWIND $rows AS row
-                    MERGE (n:{label} {{id: row.id}})
+                    MERGE (n:{_safe_cypher_label(label)} {{id: row.id}})
                     SET n += row.properties
                     """
                     session.execute_write(lambda tx: tx.run(query, rows=rows))
@@ -203,7 +219,7 @@ class Neo4jDriver:
             节点数据或None
         """
         try:
-            query = f"MATCH (n:{label} {{id: $id}}) RETURN n"
+            query = f"MATCH (n:{_safe_cypher_label(label)} {{id: $id}}) RETURN n"
             
             with self.driver.session(database=self.database) as session:
                 result = session.execute_read(
@@ -220,7 +236,7 @@ class Neo4jDriver:
     def delete_node(self, node_id: str, label: str) -> bool:
         """删除节点及其关系"""
         try:
-            query = f"MATCH (n:{label} {{id: $id}}) DETACH DELETE n"
+            query = f"MATCH (n:{_safe_cypher_label(label)} {{id: $id}}) DETACH DELETE n"
             
             with self.driver.session(database=self.database) as session:
                 session.execute_write(lambda tx: tx.run(query, id=node_id))
@@ -245,9 +261,9 @@ class Neo4jDriver:
         """
         try:
             query = f"""
-            MATCH (source:{source_label} {{id: $source_id}})
-            MATCH (target:{target_label} {{id: $target_id}})
-            MERGE (source)-[r:{edge.relationship_type}]->(target)
+            MATCH (source:{_safe_cypher_label(source_label)} {{id: $source_id}})
+            MATCH (target:{_safe_cypher_label(target_label)} {{id: $target_id}})
+            MERGE (source)-[r:{_safe_cypher_label(edge.relationship_type)}]->(target)
             SET r += $properties
             RETURN r
             """
@@ -294,9 +310,9 @@ class Neo4jDriver:
                 for (source_label, target_label, rel_type), rows in grouped_rows.items():
                     query = f"""
                     UNWIND $rows AS row
-                    MATCH (source:{source_label} {{id: row.source_id}})
-                    MATCH (target:{target_label} {{id: row.target_id}})
-                    MERGE (source)-[r:{rel_type}]->(target)
+                    MATCH (source:{_safe_cypher_label(source_label)} {{id: row.source_id}})
+                    MATCH (target:{_safe_cypher_label(target_label)} {{id: row.target_id}})
+                    MERGE (source)-[r:{_safe_cypher_label(rel_type)}]->(target)
                     SET r += row.properties
                     """
                     session.execute_write(lambda tx: tx.run(query, rows=rows))
@@ -323,12 +339,12 @@ class Neo4jDriver:
         try:
             if rel_type:
                 query = f"""
-                MATCH (source:{source_label} {{id: $source_id}})-[r:{rel_type}]->(target)
+                MATCH (source:{_safe_cypher_label(source_label)} {{id: $source_id}})-[r:{_safe_cypher_label(rel_type)}]->(target)
                 RETURN r, target
                 """
             else:
                 query = f"""
-                MATCH (source:{source_label} {{id: $source_id}})-[r]->(target)
+                MATCH (source:{_safe_cypher_label(source_label)} {{id: $source_id}})-[r]->(target)
                 RETURN r, target
                 """
             
@@ -353,7 +369,7 @@ class Neo4jDriver:
         """删除关系"""
         try:
             query = f"""
-            MATCH (source:{source_label} {{id: $source_id}})-[r:{rel_type}]->(target:{target_label} {{id: $target_id}})
+            MATCH (source:{_safe_cypher_label(source_label)} {{id: $source_id}})-[r:{_safe_cypher_label(rel_type)}]->(target:{_safe_cypher_label(target_label)} {{id: $target_id}})
             DELETE r
             """
             
@@ -775,13 +791,14 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
 
     def get_subgraph(self, entity: str, depth: int = 2) -> Any:
         """以 entity 为中心 BFS 提取子图，返回 networkx.DiGraph。"""
-        query = """
-        MATCH (start {id: $entity_id})
-        CALL {
+        safe_depth = max(1, min(int(depth), 20))
+        query = f"""  # nosec: cypher — safe_depth is a bounded int(1-20)
+        MATCH (start {{id: $entity_id}})
+        CALL {{
             WITH start
-            MATCH path = (start)-[*1..%d]-(neighbor)
+            MATCH path = (start)-[*1..{safe_depth}]-(neighbor)
             RETURN nodes(path) AS ns, relationships(path) AS rs
-        }
+        }}
         WITH ns, rs
         UNWIND ns AS n
         WITH collect(DISTINCT n) AS all_nodes,
@@ -791,10 +808,10 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
         WITH all_nodes,
              collect(DISTINCT r) AS all_rels
         RETURN
-            [n IN all_nodes | {id: n.id, labels: labels(n), props: properties(n)}] AS nodes,
-            [r IN all_rels  | {src: startNode(r).id, dst: endNode(r).id,
-                               type: type(r), props: properties(r)}] AS edges
-        """ % depth
+            [n IN all_nodes | {{id: n.id, labels: labels(n), props: properties(n)}}] AS nodes,
+            [r IN all_rels  | {{src: startNode(r).id, dst: endNode(r).id,
+                               type: type(r), props: properties(r)}}] AS edges
+        """
         try:
             nx = import_module("networkx")
             with self._driver.driver.session(database=self._driver.database) as session:
@@ -829,7 +846,7 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
 
     def entities_by_type(self, entity_type: str) -> List[str]:
         label = _TYPE_TO_LABEL.get(entity_type, "Entity")
-        query = f"MATCH (n:{label}) RETURN n.id AS id"
+        query = f"MATCH (n:{_safe_cypher_label(label)}) RETURN n.id AS id"
         try:
             with self._driver.driver.session(database=self._driver.database) as session:
                 records = session.execute_read(lambda tx: list(tx.run(query)))
@@ -995,8 +1012,8 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
         ]
         for src_label, dst_label, expected_rel in level_pairs:
             query = f"""
-            MATCH (n:{src_label})
-            WHERE NOT (n)-[:{expected_rel}]->(:{dst_label})
+            MATCH (n:{_safe_cypher_label(src_label)})
+            WHERE NOT (n)-[:{_safe_cypher_label(expected_rel)}]->(:{_safe_cypher_label(dst_label)})
             RETURN n.id AS id
             """
             try:

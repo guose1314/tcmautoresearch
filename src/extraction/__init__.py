@@ -11,28 +11,29 @@
 - relation_extractor: 语义关系抽取（原有）
 """
 
-from src.extraction.base import (
-    ExtractedEntityType,
-    ExtractedItem,
-    ExtractionRelation,
-    ExtractionResult,
-    ExtractionRule,
-    ExtractionRuleEngine,
-    PipelineResult,
-    RuleType,
-)
-from src.extraction.extraction_pipeline import ExtractionPipeline
-from src.extraction.relation_extractor import RelationExtractor
+import importlib as _importlib
 
-__all__ = [
-    "ExtractionPipeline",
-    "ExtractionResult",
-    "ExtractionRule",
-    "ExtractionRuleEngine",
-    "ExtractedEntityType",
-    "ExtractedItem",
-    "ExtractionRelation",
-    "PipelineResult",
-    "RelationExtractor",
-    "RuleType",
-]
+_LAZY_IMPORTS: dict[str, tuple[str, str]] = {
+    "ExtractionPipeline": ("src.extraction.extraction_pipeline", "ExtractionPipeline"),
+    "ExtractionResult": ("src.extraction.base", "ExtractionResult"),
+    "ExtractionRule": ("src.extraction.base", "ExtractionRule"),
+    "ExtractionRuleEngine": ("src.extraction.base", "ExtractionRuleEngine"),
+    "ExtractedEntityType": ("src.extraction.base", "ExtractedEntityType"),
+    "ExtractedItem": ("src.extraction.base", "ExtractedItem"),
+    "ExtractionRelation": ("src.extraction.base", "ExtractionRelation"),
+    "PipelineResult": ("src.extraction.base", "PipelineResult"),
+    "RelationExtractor": ("src.extraction.relation_extractor", "RelationExtractor"),
+    "RuleType": ("src.extraction.base", "RuleType"),
+}
+
+__all__ = list(_LAZY_IMPORTS.keys())
+
+
+def __getattr__(name: str):
+    if name in _LAZY_IMPORTS:
+        module_path, attr = _LAZY_IMPORTS[name]
+        mod = _importlib.import_module(module_path)
+        val = getattr(mod, attr)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

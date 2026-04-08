@@ -51,10 +51,20 @@ class EventBus:
             handlers.remove(handler)
 
     def publish(self, event_type: str, data: Any = None) -> int:
-        """同步发布事件。返回成功调用的 handler 数量。"""
+        """同步发布事件。返回成功调用的 handler 数量。
+
+        无订阅者时记录 dead-letter WARNING，便于排查管道断裂。
+        """
         if data is None:
             data = {}
         handlers = list(self._handlers.get(event_type, []))
+        if not handlers:
+            logger.warning(
+                "Dead-letter: 事件 '%s' 无订阅者，数据被丢弃 (keys=%s)",
+                event_type,
+                list(data.keys()) if isinstance(data, dict) else type(data).__name__,
+            )
+            return 0
         success = 0
         for handler in handlers:
             try:

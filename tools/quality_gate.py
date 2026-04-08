@@ -161,6 +161,7 @@ from tools.continuous_improvement_loop import (
     load_archive_history,
     load_history,
 )
+from tools.cypher_injection_scan import scan as scan_cypher_injection
 from tools.generate_dependency_graph import build_dependency_graph, write_outputs
 from tools.logic_checks import run_checks
 from tools.quality_assessment import assess_from_gate_results, export_assessment_report
@@ -523,6 +524,23 @@ def _build_issue_gate_result(name: str, issues: List[object], root: Path) -> Gat
         },
         details={
             "issues": [_serialize_issue(issue, root) for issue in issues]
+        },
+    )
+
+
+def run_cypher_injection_scan_gate(root: Path) -> GateResult:
+    violations = scan_cypher_injection(root)
+    return GateResult(
+        name="cypher_injection_scan",
+        success=len(violations) == 0,
+        metrics={
+            "violation_count": len(violations),
+        },
+        details={
+            "violations": [
+                {"file": v.file, "line": v.line, "snippet": v.snippet, "reason": v.reason}
+                for v in violations
+            ]
         },
     )
 
@@ -1038,6 +1056,7 @@ def main() -> int:
     failed_operations: List[Dict[str, Any]] = []
 
     core_results = [
+        _run_gate_phase("run_cypher_injection_scan_gate", root, runtime_metadata, failed_operations, governance_config, lambda: run_cypher_injection_scan_gate(root)),
         _run_gate_phase("run_logic_gate", root, runtime_metadata, failed_operations, governance_config, lambda: run_logic_gate(root)),
         _run_gate_phase(
             "run_dependency_graph_gate",

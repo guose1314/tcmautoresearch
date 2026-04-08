@@ -1,7 +1,9 @@
 """跨存储后端事务协调器。
 
-解决 Phase 0-2 遗留的关键问题：PostgreSQL commit 后 Neo4j 失败导致数据不一致。
-提供统一的事务边界，确保跨阶段原子性。
+保证 PostgreSQL + Neo4j 跨引擎原子性：
+- PG flush（验证约束）→ Neo4j 执行 → PG commit
+- Neo4j 失败时 PG 从未 commit，可安全 rollback
+- PG commit 失败时补偿已执行的 Neo4j 操作
 
 用法::
 
@@ -18,6 +20,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Sequence
+
+from .neo4j_driver import _safe_cypher_label
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +49,13 @@ class TransactionResult:
 class TransactionCoordinator:
     """跨 PostgreSQL + Neo4j 的事务协调器。
 
-    策略：prepare-then-commit
-    1. 在 PostgreSQL session 中累积所有变更（flush 但不 commit）
+    策略：prepare-both → commit-both
+    1. 在 PostgreSQL session 中累积所有变更（flush 验证约束，但不 commit）
     2. 收集所有 Neo4j 写操作到待执行队列
-    3. commit 阶段：先 PG commit，再逐一执行 Neo4j 操作
-    4. 如果 Neo4j 失败：对已执行的 Neo4j 操作执行补偿，PG 回滚
-    5. 如果 PG 失败：不执行 Neo4j，直接回滚
+    3. commit 阶段：先执行 Neo4j 操作（PG 尚未 commit，可安全回滚）
+    4. Neo4j 全部成功后再 PG commit
+    5. 如果 Neo4j 失败：补偿已执行的 Neo4j 操作 + PG rollback（从未 commit）
+    6. 如果 PG commit 失败：补偿已执行的 Neo4j 操作
 
     Parameters
     ----------
@@ -146,11 +151,12 @@ class TransactionCoordinator:
         for node in nodes:
             props = dict(node.properties or {})
             props["id"] = node.id
+            safe_label = _safe_cypher_label(node.label)
             cypher = (
-                f"MERGE (n:{node.label} {{id: $id}}) "
+                f"MERGE (n:{safe_label} {{id: $id}}) "
                 f"SET n += $props"
             )
-            comp = f"MATCH (n:{node.label} {{id: $id}}) DETACH DELETE n" if compensate else None
+            comp = f"MATCH (n:{safe_label} {{id: $id}}) DETACH DELETE n" if compensate else None
             self._neo4j_pending.append(_Neo4jPendingOp(
                 cypher=cypher,
                 params={"id": node.id, "props": props},
@@ -165,14 +171,17 @@ class TransactionCoordinator:
     ) -> None:
         """批量注册 Neo4j 关系创建。edges 为 (Neo4jEdge, src_label, tgt_label) 三元组。"""
         for edge, src_label, tgt_label in edges:
+            safe_src = _safe_cypher_label(src_label)
+            safe_tgt = _safe_cypher_label(tgt_label)
+            safe_rel = _safe_cypher_label(edge.relationship_type)
             cypher = (
-                f"MATCH (a:{src_label} {{id: $src_id}}), (b:{tgt_label} {{id: $tgt_id}}) "
-                f"MERGE (a)-[r:{edge.relationship_type}]->(b) "
+                f"MATCH (a:{safe_src} {{id: $src_id}}), (b:{safe_tgt} {{id: $tgt_id}}) "
+                f"MERGE (a)-[r:{safe_rel}]->(b) "
                 f"SET r += $props"
             )
             comp = (
-                f"MATCH (a:{src_label} {{id: $src_id}})-[r:{edge.relationship_type}]->"
-                f"(b:{tgt_label} {{id: $tgt_id}}) DELETE r"
+                f"MATCH (a:{safe_src} {{id: $src_id}})-[r:{safe_rel}]->"
+                f"(b:{safe_tgt} {{id: $tgt_id}}) DELETE r"
             ) if compensate else None
             self._neo4j_pending.append(_Neo4jPendingOp(
                 cypher=cypher,
@@ -191,43 +200,65 @@ class TransactionCoordinator:
     # ── Commit / Rollback ────────────────────────────────────────────────
 
     def commit(self) -> TransactionResult:
-        """执行两阶段提交：PG → Neo4j。"""
+        """执行两阶段提交：flush PG → Neo4j execute → PG commit。
+
+        保证原子性：PG 在 Neo4j 全部成功前不 commit，
+        任一端失败都可完整回滚。
+        """
         if self._committed or self._rolledback:
             return TransactionResult(success=self._committed, pg_committed=self._committed)
 
         result = TransactionResult(success=False)
 
-        # Phase 1: PG commit
+        # Phase 1: PG flush（验证约束，生成 ID，但不 commit）
         try:
-            self._pg.commit()
-            result.pg_committed = True
+            self._pg.flush()
         except Exception as exc:
             self._pg.rollback()
-            result.error = f"PostgreSQL commit 失败: {exc}"
+            result.error = f"PostgreSQL flush 失败: {exc}"
             self._rolledback = True
             logger.error(result.error)
             return result
 
-        # Phase 2: Neo4j execute (only if there's a driver and pending ops)
+        # Phase 2: Neo4j execute（PG 尚未 commit，可安全回滚）
         if self._neo4j is not None and self._neo4j_pending:
             neo4j_error = self._execute_neo4j_ops()
             if neo4j_error is not None:
-                # Neo4j 部分失败 → 补偿已执行的 Neo4j 操作
+                # Neo4j 部分失败 → 补偿已执行的 Neo4j 操作 + 回滚 PG
                 compensations = self._compensate_neo4j()
+                self._pg.rollback()
                 result.compensations_applied = compensations
-                # 回滚 PG
-                # 注意：PG 已 commit，此处需要显式 DELETE 来回滚
-                # 但在实际场景中，最安全的做法是记录不一致并告警
-                result.error = f"Neo4j 执行失败（已补偿 {compensations} 操作）: {neo4j_error}"
+                result.error = (
+                    f"Neo4j 执行失败，已回滚 PG 并补偿 {compensations} 个 Neo4j 操作: "
+                    f"{neo4j_error}"
+                )
+                result.success = False
+                result.pg_committed = False
                 result.neo4j_committed = False
+                self._rolledback = True
                 logger.error(result.error)
-                # 标记为部分成功：PG 已持久化，Neo4j 已回滚
-                result.success = True  # PG 数据已保留，Neo4j 可在后续同步
-                self._committed = True
                 return result
             result.neo4j_committed = True
         else:
             result.neo4j_committed = True  # 无 Neo4j 操作也视为成功
+
+        # Phase 3: PG commit（Neo4j 已全部成功）
+        try:
+            self._pg.commit()
+            result.pg_committed = True
+        except Exception as exc:
+            # PG commit 失败 → 补偿已执行的 Neo4j 操作
+            compensations = self._compensate_neo4j()
+            result.compensations_applied = compensations
+            result.error = (
+                f"PostgreSQL commit 失败，已补偿 {compensations} 个 Neo4j 操作: {exc}"
+            )
+            result.success = False
+            result.pg_committed = False
+            result.neo4j_committed = False
+            self._rolledback = True
+            logger.error(result.error)
+            return result
 
         result.success = True
         self._committed = True

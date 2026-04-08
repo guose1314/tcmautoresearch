@@ -1,5 +1,99 @@
 # 阶段性推进摘要
 
+## 阶段性收口（2026-04-08）
+
+### 本轮收口目标
+- 对齐架构审计 Roadmap 的当前实现面，补齐 6 阶段科研主链与 `run_cycle_demo` 的边界拆分。
+- 落地 Neo4j/Cypher 注入防护、跨存储事务原子性和质量门扫描接入。
+- 收尾 Web 登录与 Dashboard 数据显示问题，保证当前版本能以统一登录页进入并正确读取 ORM 数据。
+
+### 当前已落地成果
+
+#### 1. 6 阶段科研主链与 `run_cycle_demo` 收口
+- `run_cycle_demo.py` 大幅瘦身，主文件从“大而全脚本”拆到 `src/cycle/` 下的桥接/插件/研究会话/存储持久化/子进程模块。
+- 新增 `src/cycle/cycle_pipeline_bridge.py`，让 `cycle_runner` 默认通过真实 `ResearchPipeline` 执行 6 阶段迭代，而不是继续堆积在 CLI 文件内。
+- 新增 `src/cycle/cycle_research_session.py`，把 research mode 的 session 生命周期、结果序列化、报告导出从入口脚本中抽离。
+- 新增 `src/cycle/cycle_plugin_workflows.py`、`src/cycle/cycle_storage_persist.py`、`src/cycle/cycle_subprocess.py`，把插件工作流、双库存档、subprocess 安全包装单独封装。
+
+#### 2. Pipeline/Phase 显式化与降级路径补齐
+- `src/research/research_pipeline.py` 去掉隐式 `__getattr__` 桥接，改为显式暴露 phase/runtime 相关方法，减少动态委托带来的不可追踪行为。
+- `src/research/phase_orchestrator.py` 去掉大量阶段 passthrough 私有桥，统一通过 `get_handler()` 直接拿显式 handler 执行。
+- `src/research/phases/observe_phase.py` 改为调用 `execute_real_module_pipeline()` 执行观察阶段子流程，支持可选模块失败时继续链路。
+- `src/research/phases/analyze_phase.py` 增加 Hypothesis fallback：当 Observe 没有 ingest 产物时，可从假设阶段合成最小分析记录与关系，避免 Analyze 空转。
+- `src/research/pipeline_orchestrator.py` 为 analyze 阶段补充 degraded 标记：`record_count == 0` 时显式把阶段和循环状态打成 degraded。
+- `src/research/phases/publish_phase.py` 从 `PaperWriter` 真实产出动态构建 publications，不再使用纯占位假数据。
+- `src/research/phases/reflect_phase.py` 与 `src/learning/self_learning_engine.py` 打通 LLM 诊断、模式提取和 AdaptiveTuner 调参闭环。
+
+#### 3. 安全与质量治理收口
+- `src/storage/neo4j_driver.py` 增加 `_safe_cypher_label()`，所有动态 label/relationship-type 在拼接前做标识符校验，封堵 Cypher 注入入口。
+- `src/storage/transaction.py` 改为“PG flush -> Neo4j execute -> PG commit”的原子提交顺序，补上 Neo4j 失败/PG commit 失败时的补偿逻辑。
+- 新增 `tools/cypher_injection_scan.py`，并接入 `tools/quality_gate.py` 与 `.github/workflows/quality-control.yml`，把 Cypher 注入扫描纳入质量门和 CI。
+- `src/core/event_bus.py` 增加 dead-letter warning，便于排查事件发出但无人消费的链路断裂。
+- `src/web/auth.py` 增加 JWT HS256 最小 32 字节密钥长度校验，避免弱密钥配置继续工作。
+
+#### 4. 惰性导出与兼容层清理
+- 多个包入口改为 lazy import：`src/ai_assistant`, `src/analytics`, `src/api/routes`, `src/common`, `src/data`, `src/extraction`, `src/infra`, `src/learning`, `src/llm`, `src/orchestration`, `src/quality`, `src/visualization`, `src/research/phase_handlers`, `src/research/phases`, `src/semantic_modeling/methods`。
+- 清理旧兼容层与重复包导出：删除 `src/output/*`、`src/reasoning/*`、`src/extractors/*` 等已迁移 shim，推动导入路径向权威实现收敛。
+- `src/infrastructure/config_loader.py` 与 `src/infra/config_manager.py` 明确标注 `ConfigManager` 已弃用，后续应统一走 `load_settings()`。
+
+#### 5. Web 登录与 Dashboard 运行面修复
+- 登录链路已确认：统一登录页 `/login`、JWT 登录 `/api/auth/login`、用户信息 `/api/auth/me` 可用。
+- `src/web/app.py` 新增数据库初始化与 shutdown 清理，`dashboard` 的 ORM 指标不再因 `app.state.db_manager` 缺失而全部显示 0。
+- 当前实际验证结果：Dashboard 已能正确显示 SQLite 中的 ORM 数据，至少恢复为 `知识实体(ORM)=6`、`分析文档=5`；`知识关系(ORM)=0` 是数据库当前真实内容而不是显示错误。
+
+### 关键验证记录
+- 手动诊断登录配置与密码校验：确认统一登录页可用，账号加载与 JWT 签发正常。
+- 手动启动 `src.web.main` 后验证接口：
+  - `/api/auth/status` 200
+  - `/api/auth/login` 200
+  - `/api/auth/me` 200
+  - `/api/dashboard/stats` 200
+- 定向测试已补充：
+  - `tests/test_auth_login_resilience.py`
+  - `tests/test_event_bus.py`
+  - `tests/test_phase_orchestrator_contract.py`
+  - `tests/test_research_pipeline_observe.py`
+  - `tests/test_research_pipeline_quality.py`
+  - `tests/test_research_pipeline_analyze_degrade.py`
+  - `tests/unit/test_analyze_phase.py`
+  - `tests/unit/test_publish_phase.py`
+  - `tests/unit/test_reflect_phase_extended.py`
+  - `tests/unit/test_self_learning_feedback_loop.py`
+  - `tests/unit/test_cypher_injection_scan.py`
+  - `integration_tests/test_transaction.py`
+  - `integration_tests/test_transaction_docker_e2e.py`
+
+### 当前续接锚点
+
+#### 代码入口
+- CLI/演示主入口：`run_cycle_demo.py`
+- 新 cycle 拆分模块：`src/cycle/`
+- 科研主链：`src/research/research_pipeline.py`
+- 阶段实现：`src/research/phases/`
+- 存储与事务：`src/storage/neo4j_driver.py`, `src/storage/transaction.py`
+- 质量门：`tools/quality_gate.py`, `tools/cypher_injection_scan.py`
+- Web 入口与登录：`src/web/app.py`, `src/web/auth.py`, `src/web/routes/auth.py`
+
+#### 运行基线
+1. 激活环境：`.\venv310\Scripts\activate`
+2. 启动 Web：`python -m src.web.main --port 8000`
+3. 浏览器检查：`/login` -> `/dashboard`
+4. 质量门：`python tools/quality_gate.py --report output/quality-gate.json`
+5. 定向事务/阶段测试优先从新增测试文件开始回归。
+
+### 任意日期继续接手建议
+1. 先看本文件“阶段性收口（2026-04-08）”和下方历史阶段，确认当下收口位置而不是从旧 Roadmap 重新判题。
+2. 若继续推进架构线，优先检查 `run_cycle_demo.py` 与 `src/cycle/` 是否还存在残留 CLI 逻辑可以继续下沉。
+3. 若继续推进科研主链，优先围绕 Analyze/Publish/Reflect 的新增 fallback 和 degraded 契约补集成回归。
+4. 若继续推进安全线，优先把 Cypher 注入扫描从 `neo4j_driver.py` 扩展到更多存储/图查询调用点，并把事务 docker e2e 纳入条件化 CI。
+5. 若继续推进 Web 线，优先解决 `src.web.main` 模式下没有 `/console` 路由的问题；当前 `/dashboard` 正常，`/console` 仍属于 `web_console/app.py` 启动路径。
+
+### 提交边界说明
+- 临时诊断脚本 `_diag_login.py`、`_check_*` 类文件不属于正式交付面，按约定不纳入代码基线。
+- 本次应提交的正式资产以架构拆分、测试补齐、安全治理、Web 修复和本摘要文档为主。
+
+---
+
 ## 架构审计 Roadmap 推进（2026-04-06）
 
 ### 本轮目标

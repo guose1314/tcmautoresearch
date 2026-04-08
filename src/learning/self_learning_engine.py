@@ -394,6 +394,14 @@ class SelfLearningEngine(BaseModule):
                 weaknesses, strengths, overall
             )
 
+            # ---- 模式提取 → PatternRecognizer ----
+            extracted_patterns = self._extract_reflection_patterns(
+                phase_assessments, weaknesses, strengths
+            )
+
+            # ---- 调参闭环 → AdaptiveTuner ----
+            tuned_parameters = self._tune_from_reflection(overall, weaknesses)
+
             # 循环级 EWMA 趋势
             cycle_trend = self._compute_cycle_trend(overall)
 
@@ -403,6 +411,8 @@ class SelfLearningEngine(BaseModule):
                 "improvement_priorities": improvement_priorities,
                 "cycle_trend": cycle_trend,
                 "overall_score": overall,
+                "extracted_patterns": extracted_patterns,
+                "tuned_parameters": tuned_parameters,
             }
 
             self.model_improvement_log.append({
@@ -499,6 +509,78 @@ class SelfLearningEngine(BaseModule):
         elif diff < -0.05:
             return "declining"
         return "stable"
+
+    # ------------------------------------------------------------------
+    # 反馈闭环：模式提取 + 自适应调参
+    # ------------------------------------------------------------------
+
+    def _extract_reflection_patterns(
+        self,
+        phase_assessments: List[Dict[str, Any]],
+        weaknesses: List[Dict[str, Any]],
+        strengths: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """从反思阶段的质量评估中提取模式，喂给 PatternRecognizer。"""
+        context: Dict[str, Any] = {
+            "phase_scores": {
+                pa.get("phase", "unknown"): (
+                    pa["score"].overall_score
+                    if hasattr(pa.get("score"), "overall_score")
+                    else float(pa.get("score", 0.0))
+                )
+                for pa in phase_assessments
+            },
+            "weaknesses": [
+                {"phase": w.get("phase"), "score": w.get("score", 0.0)}
+                for w in weaknesses
+            ],
+            "strengths": [
+                {"phase": s.get("phase"), "score": s.get("score", 0.0)}
+                for s in strengths
+            ],
+            "dimension_trends": dict(self._dimension_trends),
+        }
+        try:
+            patterns = self._pattern_recognizer.analyze(context)
+        except Exception as exc:
+            self.logger.warning("反思阶段模式提取失败: %s", exc)
+            return []
+        return [
+            {
+                "pattern_id": getattr(p, "pattern_id", None),
+                "type": getattr(p, "type", None),
+                "description": getattr(p, "description", ""),
+                "confidence": getattr(p, "confidence", 0.0),
+            }
+            for p in (patterns or [])
+        ]
+
+    def _tune_from_reflection(
+        self,
+        overall_score: float,
+        weaknesses: List[Dict[str, Any]],
+    ) -> Dict[str, float]:
+        """将反思评分 + 维度趋势转化为 AdaptiveTuner 调参信号。"""
+        # 基础 metrics —— 沿用 overall_score 作为 performance 信号
+        metrics: Dict[str, float] = {"performance": overall_score}
+
+        # 如果有维度趋势，取最近值作为额外 metrics 供 tuner 感知
+        for dim_name, history in self._dimension_trends.items():
+            if history:
+                metrics[dim_name] = history[-1]
+
+        # 基于弱项调低相关阈值的灵敏度
+        weak_scores = [w.get("score", 1.0) for w in weaknesses]
+        if weak_scores:
+            metrics["min_phase_score"] = min(weak_scores)
+
+        try:
+            self._adaptive_tuner.step(metrics)
+        except Exception as exc:
+            self.logger.warning("反思阶段自适应调参失败: %s", exc)
+            return {}
+
+        return dict(self._adaptive_tuner.current_values())
 
     def _save_learning_data(self) -> None:
         try:
