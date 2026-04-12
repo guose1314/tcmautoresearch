@@ -12,6 +12,17 @@ from src.generation.output_formatter import OutputGenerator
 from src.generation.report_generator import Report, ReportFormat, ReportGenerator
 
 
+def _phase_result(phase, results=None, metadata=None):
+    return {
+        "phase": phase,
+        "status": "completed",
+        "results": results or {},
+        "artifacts": [],
+        "metadata": metadata or {},
+        "error": None,
+    }
+
+
 @pytest.fixture
 def generator():
     og = OutputGenerator()
@@ -131,12 +142,12 @@ _SESSION_RESULT = {
     "question": "黄芪补气机制研究",
     "metadata": {"research_question": "黄芪补气机制"},
     "phase_results": {
-        "observe": {
+        "observe": _phase_result("observe", {
             "observations": ["黄芪含皂苷类成分", "补气药物长期使用安全性高"],
             "findings": ["黄芪多糖具有免疫调节作用"],
-        },
-        "experiment": {},
-        "analyze": {},
+        }),
+        "experiment": _phase_result("experiment", {}),
+        "analyze": _phase_result("analyze", {}),
     },
 }
 

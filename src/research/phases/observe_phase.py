@@ -12,6 +12,7 @@ from src.collector.corpus_bundle import (
     is_corpus_bundle,
 )
 from src.cycle.cycle_runner import execute_real_module_pipeline
+from src.research.phase_result import build_phase_result
 
 
 class ObservePhaseMixin:
@@ -36,22 +37,37 @@ class ObservePhaseMixin:
         self._append_ingestion_observe_updates(ingestion_result, observations, findings)
         self._append_literature_observe_updates(literature_result, observations, findings)
 
-        return {
-            "phase": "observe",
-            "observations": observations,
-            "findings": findings,
-            "corpus_collection": corpus_result,
-            "ingestion_pipeline": ingestion_result,
-            "literature_pipeline": literature_result,
-            "metadata": self._build_observe_metadata(
-                context,
-                observations,
-                findings,
-                corpus_result,
-                ingestion_result,
-                literature_result,
-            ),
-        }
+        metadata = self._build_observe_metadata(
+            context,
+            observations,
+            findings,
+            corpus_result,
+            ingestion_result,
+            literature_result,
+        )
+        status = "degraded" if any(
+            isinstance(item, dict) and item.get("error")
+            for item in (corpus_result, ingestion_result, literature_result)
+        ) else "completed"
+        return build_phase_result(
+            "observe",
+            status=status,
+            results={
+                "observations": observations,
+                "findings": findings,
+                "corpus_collection": corpus_result,
+                "ingestion_pipeline": ingestion_result,
+                "literature_pipeline": literature_result,
+            },
+            metadata=metadata,
+            extra_fields={
+                "observations": observations,
+                "findings": findings,
+                "corpus_collection": corpus_result,
+                "ingestion_pipeline": ingestion_result,
+                "literature_pipeline": literature_result,
+            },
+        )
 
     def _build_observe_seed_lists(self) -> tuple[list[str], list[str]]:
         observations = [

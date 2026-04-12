@@ -10,6 +10,8 @@ from typing import Any, Dict, Iterable, Optional
 
 from fastapi.responses import FileResponse
 
+from src.research.phase_result import get_phase_artifact_map, get_phase_value
+
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
 
 DEFAULT_OBSERVE_PHASE_CONTEXT = {
@@ -302,7 +304,7 @@ def score_report_candidate(kind: str, candidate: Path, requested_format: str) ->
 
 def resolve_preferred_report_artifact(result: Dict[str, Any], requested_format: str) -> Optional[Path]:
     best_match: Optional[tuple[int, Path]] = None
-    for kind, path_text in iter_output_file_candidates(result):
+    for kind, path_text in _iter_report_artifact_candidates(result):
         safe_path = is_safe_workspace_file(path_text)
         if safe_path is None:
             continue
@@ -344,37 +346,58 @@ def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def _resolve_publish_phase_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+
+    if str(result.get("phase") or "").strip().lower() == "publish":
+        return result
+
+    phase_results = _as_dict(result.get("phase_results"))
+    return _as_dict(phase_results.get("publish"))
+
+
+def _resolve_publish_highlight_payload(result: Dict[str, Any], key: str) -> Dict[str, Any]:
+    publish_result = _resolve_publish_phase_result(result)
+    nested = _as_dict(get_phase_value(publish_result, key))
+    if nested:
+        return nested
+    return _as_dict(result.get(key))
+
+
+def _iter_report_artifact_candidates(result: Dict[str, Any]) -> Iterable[tuple[str, str]]:
+    seen: set[tuple[str, str]] = set()
+    for container in (result, _resolve_publish_phase_result(result)):
+        if not isinstance(container, dict) or not container:
+            continue
+        for kind, path_text in get_phase_artifact_map(container).items():
+            candidate = (str(kind), str(path_text))
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            yield candidate
+
+    for kind, path_text in iter_output_file_candidates(result):
+        candidate = (str(kind), str(path_text))
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        yield candidate
+
+
 def _resolve_primary_association(
     analysis_results: Dict[str, Any],
     research_artifact: Dict[str, Any],
 ) -> Dict[str, Any]:
-    direct = _as_dict(analysis_results.get("primary_association"))
-    if direct:
-        return direct
-
-    statistical_analysis = _as_dict(analysis_results.get("statistical_analysis"))
-    nested = _as_dict(statistical_analysis.get("primary_association"))
-    if nested:
-        return nested
-
-    return _as_dict(research_artifact.get("primary_association"))
+    statistical_analysis = _as_dict(get_phase_value(analysis_results, "statistical_analysis"))
+    return _as_dict(get_phase_value(statistical_analysis, "primary_association"))
 
 
 def _resolve_data_mining_summary(
     analysis_results: Dict[str, Any],
     research_artifact: Dict[str, Any],
 ) -> Dict[str, Any]:
-    direct = _as_dict(analysis_results.get("data_mining_summary"))
-    if direct:
-        return direct
-
-    nested = _as_dict(research_artifact.get("data_mining_summary"))
-    if nested:
-        return nested
-
-    data_mining_result = _as_dict(analysis_results.get("data_mining_result"))
-    if not data_mining_result:
-        data_mining_result = _as_dict(research_artifact.get("data_mining_result"))
+    data_mining_result = _as_dict(get_phase_value(analysis_results, "data_mining_result"))
     if not data_mining_result:
         return {}
 
@@ -647,8 +670,8 @@ def _build_graph_highlights(edge_items: list[Dict[str, Any]]) -> list[Dict[str, 
 
 
 def _build_knowledge_graph_board(result: Dict[str, Any]) -> Dict[str, Any]:
-    research_artifact = _as_dict(result.get("research_artifact"))
-    analysis_results = _as_dict(result.get("analysis_results"))
+    research_artifact = _resolve_publish_highlight_payload(result, "research_artifact")
+    analysis_results = _resolve_publish_highlight_payload(result, "analysis_results")
     graph_summary = _as_dict(research_artifact.get("similar_formula_graph_evidence_summary"))
     matches = [item for item in _as_list(graph_summary.get("matches")) if isinstance(item, dict)]
 
@@ -685,7 +708,8 @@ def _resolve_dashboard_data_mining_methods(
     analysis_results: Dict[str, Any],
     data_mining_summary: Dict[str, Any],
 ) -> list[str]:
-    raw_methods = analysis_results.get("data_mining_methods")
+    data_mining_result = _as_dict(get_phase_value(analysis_results, "data_mining_result"))
+    raw_methods = data_mining_result.get("methods_executed")
     if not raw_methods:
         raw_methods = data_mining_summary.get("methods_executed")
     return [
@@ -806,8 +830,8 @@ def build_research_dashboard_payload(snapshot: Dict[str, Any]) -> Dict[str, Any]
     pipeline_metadata = _as_dict(result.get("pipeline_metadata"))
     protocol_inputs = _as_dict(pipeline_metadata.get("protocol_inputs"))
 
-    analysis_results = _as_dict(result.get("analysis_results"))
-    research_artifact = _as_dict(result.get("research_artifact"))
+    analysis_results = _resolve_publish_highlight_payload(result, "analysis_results")
+    research_artifact = _resolve_publish_highlight_payload(result, "research_artifact")
     quality_metrics = _as_dict(analysis_results.get("quality_metrics"))
     evidence_protocol = _as_dict(analysis_results.get("evidence_protocol"))
     primary_association = _resolve_primary_association(analysis_results, research_artifact)

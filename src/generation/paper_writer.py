@@ -12,6 +12,12 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from src.core.module_base import BaseModule
 from src.generation.citation_manager import CitationManager
+from src.research.phase_result import (
+    get_phase_artifact_map,
+    get_phase_results,
+    get_phase_value,
+    is_phase_result_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -725,14 +731,14 @@ class PaperWriter(BaseModule):
         return [line.strip() for line in str(formatted).splitlines() if line.strip()]
 
     def _extract_literature_records(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
-        literature_pipeline = context.get("literature_pipeline")
+        literature_pipeline = get_phase_value(context, "literature_pipeline")
         if isinstance(literature_pipeline, dict):
             records = literature_pipeline.get("records")
             if isinstance(records, list):
                 return [record for record in records if isinstance(record, dict)]
-        analysis_results = context.get("analysis_results")
+        analysis_results = get_phase_value(context, "analysis_results")
         if isinstance(analysis_results, dict):
-            literature_pipeline = analysis_results.get("literature_pipeline")
+            literature_pipeline = get_phase_value(analysis_results, "literature_pipeline")
             if isinstance(literature_pipeline, dict):
                 records = literature_pipeline.get("records")
                 if isinstance(records, list):
@@ -1074,8 +1080,21 @@ class PaperWriter(BaseModule):
                 sources.append(text)
         return sources[:6]
 
+    def _resolve_output_data(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        output_data = get_phase_value(context, "output_data")
+        return output_data if isinstance(output_data, dict) else {}
+
+    def _resolve_research_artifact(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        research_artifact = get_phase_value(context, "research_artifact")
+        if isinstance(research_artifact, dict):
+            return research_artifact
+
+        output_data = self._resolve_output_data(context)
+        nested = get_phase_value(output_data, "research_artifact")
+        return nested if isinstance(nested, dict) else {}
+
     def _resolve_hypothesis(self, context: Dict[str, Any]) -> str:
-        hypothesis = context.get("hypothesis") or context.get("hypotheses") or []
+        hypothesis = get_phase_value(context, "hypothesis") or get_phase_value(context, "hypotheses") or []
         if isinstance(hypothesis, str):
             return hypothesis.strip()
         if isinstance(hypothesis, dict):
@@ -1085,8 +1104,8 @@ class PaperWriter(BaseModule):
             if isinstance(first, dict):
                 return str(first.get("title") or first.get("statement") or "").strip()
             return str(first).strip()
-        research_artifact = context.get("research_artifact")
-        if isinstance(research_artifact, dict):
+        research_artifact = self._resolve_research_artifact(context)
+        if isinstance(research_artifact, dict) and research_artifact:
             return self._resolve_hypothesis(research_artifact)
         return ""
 
@@ -1119,19 +1138,19 @@ class PaperWriter(BaseModule):
         )
 
     def _resolve_hypothesis_audit_summary(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        direct = context.get("hypothesis_audit_summary")
+        direct = get_phase_value(context, "hypothesis_audit_summary")
         if isinstance(direct, dict) and direct:
             return direct
 
-        research_artifact = context.get("research_artifact")
+        research_artifact = self._resolve_research_artifact(context)
         if isinstance(research_artifact, dict):
             nested = research_artifact.get("hypothesis_audit_summary")
             if isinstance(nested, dict) and nested:
                 return nested
 
-        output_data = context.get("output_data")
+        output_data = self._resolve_output_data(context)
         if isinstance(output_data, dict):
-            artifact = output_data.get("research_artifact")
+            artifact = get_phase_value(output_data, "research_artifact")
             if isinstance(artifact, dict):
                 nested = artifact.get("hypothesis_audit_summary")
                 if isinstance(nested, dict) and nested:
@@ -1139,7 +1158,7 @@ class PaperWriter(BaseModule):
         return {}
 
     def _resolve_evidence_grade_summary(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        direct = context.get("evidence_grade_summary")
+        direct = get_phase_value(context, "evidence_grade_summary")
         if isinstance(direct, dict) and direct:
             return direct
 
@@ -1148,18 +1167,18 @@ class PaperWriter(BaseModule):
         if resolved:
             return resolved
 
-        research_artifact = context.get("research_artifact")
+        research_artifact = get_phase_value(context, "research_artifact")
         if isinstance(research_artifact, dict):
             resolved = self._extract_evidence_grade_summary(research_artifact)
             if resolved:
                 return resolved
 
-        output_data = context.get("output_data")
+        output_data = self._resolve_output_data(context)
         if isinstance(output_data, dict):
-            resolved = self._extract_evidence_grade_summary(output_data.get("analysis_results"))
+            resolved = self._extract_evidence_grade_summary(get_phase_value(output_data, "analysis_results"))
             if resolved:
                 return resolved
-            resolved = self._extract_evidence_grade_summary(output_data.get("research_artifact"))
+            resolved = self._extract_evidence_grade_summary(get_phase_value(output_data, "research_artifact"))
             if resolved:
                 return resolved
         return {}
@@ -1224,36 +1243,50 @@ class PaperWriter(BaseModule):
         return []
 
     def _iter_evidence_sources(self, context: Dict[str, Any]):
-        reasoning = context.get("reasoning_results") or {}
+        reasoning = self._resolve_reasoning_results(context)
         if isinstance(reasoning, dict):
             yield reasoning.get("evidence_records")
         analysis_results = self._resolve_analysis_results(context)
-        nested_reasoning = analysis_results.get("reasoning_results") if isinstance(analysis_results, dict) else {}
+        nested_reasoning = analysis_results.get("reasoning_results", {}) if isinstance(analysis_results, dict) else {}
         if isinstance(nested_reasoning, dict):
             yield nested_reasoning.get("evidence_records")
-        research_artifact = context.get("research_artifact")
+        research_artifact = self._resolve_research_artifact(context)
         if isinstance(research_artifact, dict):
             yield research_artifact.get("evidence")
-        yield context.get("evidence") or []
+        yield get_phase_value(context, "evidence", []) or []
+
+    def _resolve_reasoning_results(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        phase_results = get_phase_results(context)
+        nested_reasoning = phase_results.get("reasoning_results")
+        if isinstance(nested_reasoning, dict):
+            return dict(nested_reasoning)
+
+        if is_phase_result_payload(context):
+            return {}
+
+        direct_reasoning = context.get("reasoning_results")
+        if isinstance(direct_reasoning, dict):
+            return dict(direct_reasoning)
+        return {}
 
     def _resolve_data_mining_result(self, context: Dict[str, Any]) -> Dict[str, Any]:
         for key in ("data_mining_result", "data_mining", "mining_result"):
-            value = context.get(key)
+            value = get_phase_value(context, key)
             if isinstance(value, dict):
                 return value
-        research_artifact = context.get("research_artifact")
+        research_artifact = self._resolve_research_artifact(context)
         if isinstance(research_artifact, dict):
             value = research_artifact.get("data_mining_result")
             if isinstance(value, dict):
                 return value
-        analysis_results = context.get("analysis_results")
+        analysis_results = get_phase_value(context, "analysis_results")
         if isinstance(analysis_results, dict):
-            value = analysis_results.get("data_mining_result")
+            value = get_phase_value(analysis_results, "data_mining_result")
             if isinstance(value, dict):
                 return value
-        output_data = context.get("output_data")
+        output_data = self._resolve_output_data(context)
         if isinstance(output_data, dict):
-            research_artifact = output_data.get("research_artifact")
+            research_artifact = get_phase_value(output_data, "research_artifact")
             if isinstance(research_artifact, dict):
                 value = research_artifact.get("data_mining_result")
                 if isinstance(value, dict):
@@ -1261,18 +1294,18 @@ class PaperWriter(BaseModule):
         return {}
 
     def _resolve_analysis_results(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        analysis_results = context.get("analysis_results")
+        analysis_results = get_phase_value(context, "analysis_results")
         if isinstance(analysis_results, dict):
             return analysis_results
-        output_data = context.get("output_data")
+        output_data = self._resolve_output_data(context)
         if isinstance(output_data, dict):
-            nested = output_data.get("analysis_results")
+            nested = get_phase_value(output_data, "analysis_results")
             if isinstance(nested, dict):
                 return nested
         return {}
 
     def _resolve_llm_analysis_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        direct = context.get("llm_analysis_context")
+        direct = get_phase_value(context, "llm_analysis_context")
         if isinstance(direct, dict) and direct:
             return direct
 
@@ -1298,13 +1331,13 @@ class PaperWriter(BaseModule):
             context,
             analysis_results,
         ]
-        research_artifact = context.get("research_artifact")
+        research_artifact = self._resolve_research_artifact(context)
         if isinstance(research_artifact, dict):
             containers.append(research_artifact)
-        output_data = context.get("output_data")
+        output_data = self._resolve_output_data(context)
         if isinstance(output_data, dict):
             containers.append(output_data)
-            nested_analysis = output_data.get("analysis_results")
+            nested_analysis = get_phase_value(output_data, "analysis_results")
             if isinstance(nested_analysis, dict):
                 containers.append(nested_analysis)
 
@@ -1406,46 +1439,42 @@ class PaperWriter(BaseModule):
         statistical_analysis = analysis_results.get("statistical_analysis")
         if isinstance(statistical_analysis, dict):
             return statistical_analysis
-        fallback = {
-            key: analysis_results.get(key)
-            for key in ("statistical_significance", "confidence_level", "effect_size", "p_value", "interpretation", "limitations")
-            if key in analysis_results
-        }
-        return fallback if fallback else {}
+        return {}
 
     def _resolve_quality_metrics(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        quality_metrics = context.get("quality_metrics")
+        quality_metrics = get_phase_value(context, "quality_metrics")
         if isinstance(quality_metrics, dict):
             return quality_metrics
         analysis_results = self._resolve_analysis_results(context)
         quality_metrics = analysis_results.get("quality_metrics")
         if isinstance(quality_metrics, dict):
             return quality_metrics
-        output_data = context.get("output_data")
+        output_data = self._resolve_output_data(context)
         if isinstance(output_data, dict):
-            nested = output_data.get("quality_metrics")
+            nested = get_phase_value(output_data, "quality_metrics")
             if isinstance(nested, dict):
                 return nested
         return {}
 
     def _resolve_recommendations(self, context: Dict[str, Any]) -> List[str]:
-        recommendations = context.get("recommendations")
+        recommendations = get_phase_value(context, "recommendations")
         if isinstance(recommendations, list):
             return [str(item).strip() for item in recommendations if str(item).strip()]
         analysis_results = self._resolve_analysis_results(context)
         recommendations = analysis_results.get("recommendations") if isinstance(analysis_results, dict) else None
         if isinstance(recommendations, list):
             return [str(item).strip() for item in recommendations if str(item).strip()]
-        output_data = context.get("output_data")
-        if isinstance(output_data, dict) and isinstance(output_data.get("recommendations"), list):
-            return [str(item).strip() for item in output_data.get("recommendations", []) if str(item).strip()]
+        output_data = self._resolve_output_data(context)
+        nested_recommendations = get_phase_value(output_data, "recommendations") if isinstance(output_data, dict) else None
+        if isinstance(nested_recommendations, list):
+            return [str(item).strip() for item in nested_recommendations if str(item).strip()]
         return []
 
     def _resolve_limitations_text(self, context: Dict[str, Any]) -> str:
-        raw_limitations = context.get("limitations")
-        if not raw_limitations:
-            statistical_analysis = self._resolve_statistical_analysis(context)
-            raw_limitations = statistical_analysis.get("limitations") if isinstance(statistical_analysis, dict) else None
+        statistical_analysis = self._resolve_statistical_analysis(context)
+        raw_limitations = statistical_analysis.get("limitations") if isinstance(statistical_analysis, dict) else None
+        if not raw_limitations and not is_phase_result_payload(context):
+            raw_limitations = context.get("limitations")
 
         if isinstance(raw_limitations, str):
             limitation_text = raw_limitations.strip()
@@ -1468,7 +1497,7 @@ class PaperWriter(BaseModule):
     ) -> str:
         if not isinstance(statistical_analysis, dict):
             statistical_analysis = {}
-        interpretation = str(statistical_analysis.get("interpretation") or analysis_results.get("interpretation") or "").strip()
+        interpretation = str(statistical_analysis.get("interpretation") or "").strip()
         p_value = statistical_analysis.get("p_value")
         confidence_level = statistical_analysis.get("confidence_level")
         effect_size = statistical_analysis.get("effect_size")
@@ -1638,21 +1667,19 @@ class PaperWriter(BaseModule):
         return _BIAS_LABELS_ZH.get(risk_level, risk_level)
 
     def _resolve_similar_formula_graph_evidence_summary(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        for key in ("similar_formula_graph_evidence_summary",):
-            value = context.get(key)
-            if isinstance(value, dict):
-                return value
+        value = get_phase_value(context, "similar_formula_graph_evidence_summary")
+        if isinstance(value, dict):
+            return value
 
-        research_artifact = context.get("research_artifact")
+        research_artifact = self._resolve_research_artifact(context)
         if isinstance(research_artifact, dict):
             value = research_artifact.get("similar_formula_graph_evidence_summary")
             if isinstance(value, dict):
                 return value
 
-        for key in ("analysis_results", "output_data"):
-            container = context.get(key)
+        for container in (self._resolve_analysis_results(context), self._resolve_output_data(context)):
             if isinstance(container, dict):
-                nested_artifact = container.get("research_artifact")
+                nested_artifact = get_phase_value(container, "research_artifact")
                 if isinstance(nested_artifact, dict):
                     value = nested_artifact.get("similar_formula_graph_evidence_summary")
                     if isinstance(value, dict):
@@ -1714,8 +1741,8 @@ class PaperWriter(BaseModule):
         return _slugify(title)
 
     def _resolve_output_path(self, context: Dict[str, Any], output_dir: str, file_stem: str, fmt: str) -> str:
-        output_files = context.get("output_files")
-        if isinstance(output_files, dict) and fmt in output_files:
+        output_files = get_phase_artifact_map(context)
+        if fmt in output_files:
             return os.path.abspath(str(output_files[fmt]))
         output_file = str(context.get("output_file") or "").strip()
         if output_file and len(self._normalize_formats(context.get("output_formats") or context.get("output_format") or self.default_formats)) == 1:

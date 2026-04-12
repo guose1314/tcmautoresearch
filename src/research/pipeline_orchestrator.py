@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from src.research.audit_history import publish_audit_event
+from src.research.phase_result import normalize_phase_result
 from src.research.study_session_manager import ResearchCycle, ResearchPhase
 
 if TYPE_CHECKING:
@@ -168,11 +169,12 @@ class ResearchPipelineOrchestrator:
             "phase": phase,
             "phase_context": phase_context,
         }
+        phase_name = getattr(phase, "value", str(phase))
         event_result = self.pipeline.event_bus.request("cycle.phase.execute.requested", payload)
         if isinstance(event_result, dict):
-            return event_result
+            return normalize_phase_result(phase_name, event_result)
         if event_result is not None:
-            return {"result": event_result}
+            return normalize_phase_result(phase_name, {"results": {"value": event_result}})
         return self._execute_research_phase_local(cycle_id, phase, phase_context)
 
     def _execute_research_phase_local(
@@ -183,16 +185,28 @@ class ResearchPipelineOrchestrator:
     ) -> Dict[str, Any]:
         phase_context_payload = phase_context or {}
         start_time = time.perf_counter()
+        phase_name = getattr(phase, "value", str(phase))
 
         validation_error = self.pipeline._validate_research_phase_request(cycle_id)
         if validation_error:
-            return validation_error
+            return normalize_phase_result(
+                phase_name,
+                {
+                    "status": "failed",
+                    "error": validation_error.get("error", "研究阶段执行请求无效"),
+                    "metadata": {"validation_error": True},
+                    "results": {},
+                },
+            )
 
         research_cycle = self.pipeline.research_cycles[cycle_id]
         phase_entry = self.pipeline._start_phase(research_cycle.metadata, phase.value, phase_context_payload)
 
         try:
-            phase_result = self.pipeline._execute_phase_internal(phase, research_cycle, phase_context_payload)
+            phase_result = normalize_phase_result(
+                phase_name,
+                self.pipeline._execute_phase_internal(phase, research_cycle, phase_context_payload),
+            )
             self.pipeline._advance_research_cycle_phase(research_cycle, phase)
             phase_execution = self.pipeline._build_phase_execution(
                 phase=phase,
@@ -213,6 +227,7 @@ class ResearchPipelineOrchestrator:
                 if findings_count == 0:
                     phase_entry["status"] = "degraded"
                     research_cycle.metadata["final_status"] = "degraded"
+                    phase_result["status"] = "degraded"
                     phase_result.setdefault("metadata", {})["status"] = "degraded"
                     self.pipeline.logger.warning(
                         "analyze 阶段 findings=0，标记 status=degraded"

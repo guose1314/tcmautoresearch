@@ -5,6 +5,17 @@ from tempfile import TemporaryDirectory
 from src.generation.report_generator import ReportFormat, ReportGenerator
 
 
+def _phase_result(phase: str, results: dict | None = None, metadata: dict | None = None):
+    return {
+        "phase": phase,
+        "status": "completed",
+        "results": results or {},
+        "artifacts": [],
+        "metadata": metadata or {},
+        "error": None,
+    }
+
+
 def _build_session_result():
     return {
         "session_id": "session_report_001",
@@ -14,7 +25,7 @@ def _build_session_result():
             "research_field": "中医方剂学",
         },
         "phase_results": {
-            "observe": {
+            "observe": _phase_result("observe", {
                 "observations": [
                     "小柴胡汤核心药物集中于和解少阳相关配伍单元",
                     "柴胡与黄芩在人群研究与古籍记载中均表现出高频共现",
@@ -72,8 +83,8 @@ def _build_session_result():
                         ],
                     },
                 },
-            },
-            "experiment": {
+            }),
+            "experiment": _phase_result("experiment", {
                 "study_protocol": {
                     "study_type": "systematic_review",
                     "pico": {
@@ -91,42 +102,43 @@ def _build_session_result():
                         "exclusion": ["重复发表", "无全文", "数据不完整"],
                     },
                 },
-            },
-            "analyze": {
-                "analysis_methods": [
-                    "文本预处理与术语标准化",
-                    "实体抽取与关系归并",
-                    "知识图谱统计与结构分析",
-                    "基于证据线索的规则推理",
-                ],
-                "comparison_with_literature": [
-                    "当前结果更强调配伍层级结构，而非仅报告临床有效率",
-                    "图谱结果补充了方剂-证候-药物之间的中介关系表达",
-                ],
-                "limitations": [
-                    "当前文献样本量有限，尚未覆盖全部古籍与现代试验",
-                    "自动抽取结果仍需专家复核以减少概念映射偏差",
-                ],
-                "reasoning_results": [
-                    {
-                        "title": "核心配伍规律",
-                        "description": "柴胡与黄芩构成和解少阳的核心药对，半夏与生姜承担和胃降逆作用。",
+            }),
+            "analyze": _phase_result(
+                "analyze",
+                {
+                    "statistical_analysis": {
+                        "interpretation": "统计分析与语义推理共同支持小柴胡汤呈现稳定的配伍层级结构。",
+                        "limitations": [
+                            "当前文献样本量有限，尚未覆盖全部古籍与现代试验",
+                            "自动抽取结果仍需专家复核以减少概念映射偏差",
+                        ],
                     },
-                    {
-                        "title": "结构性解释",
-                        "description": "方剂内部分工呈现主轴药对加调和药的分层结构，与现代网络药理结果具有可比性。",
-                    },
-                ],
-            },
-            "reflect": {
-                "future_directions": [
+                    "comparison_with_literature": [
+                        "当前结果更强调配伍层级结构，而非仅报告临床有效率",
+                        "图谱结果补充了方剂-证候-药物之间的中介关系表达",
+                    ],
+                    "reasoning_results": [
+                        {
+                            "title": "核心配伍规律",
+                            "description": "柴胡与黄芩构成和解少阳的核心药对，半夏与生姜承担和胃降逆作用。",
+                        },
+                        {
+                            "title": "结构性解释",
+                            "description": "方剂内部分工呈现主轴药对加调和药的分层结构，与现代网络药理结果具有可比性。",
+                        },
+                    ],
+                },
+                metadata={
+                    "analysis_modules": ["reasoning_engine", "statistical_data_miner"],
+                    "data_mining_methods": ["frequency_chi_square", "association_rules"],
+                },
+            ),
+            "reflect": _phase_result("reflect", {
+                "improvement_plan": [
                     "扩展至更多病种和剂量分层的证据综合",
                     "引入机制实验与高质量 RCT 验证配伍推断",
                 ],
-                "recommendations": [
-                    "构建可重复更新的小柴胡汤证据库",
-                ],
-            },
+            }),
         },
     }
 
@@ -156,6 +168,12 @@ class TestReportGenerator(unittest.TestCase):
         self.assertIn("黄芩", report.content)
         self.assertIn("核心配伍规律", report.content)
         self.assertEqual(set(report.sections.keys()), {"introduction", "methods", "results", "discussion"})
+
+    def test_markdown_report_reads_standard_phase_result_fields(self):
+        report = self.generator.generate_report(self.session_result, ReportFormat.MARKDOWN)
+
+        self.assertIn("统计分析与语义推理共同支持小柴胡汤呈现稳定的配伍层级结构", report.content)
+        self.assertIn("扩展至更多病种和剂量分层的证据综合", report.content)
 
     def test_generate_docx_report_writes_output_file(self):
         report = self.generator.generate_report(self.session_result, "docx")

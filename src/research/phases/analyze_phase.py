@@ -4,6 +4,7 @@ from math import erfc, sqrt
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from src.research.data_miner import StatisticalDataMiner
+from src.research.phase_result import build_phase_result, get_phase_value
 
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
@@ -12,6 +13,11 @@ try:
     from src.quality import EvidenceGrader
 except Exception:
     EvidenceGrader = None
+
+
+_HERB_DRIVEN_SYNDROME_PREFERENCES: tuple[tuple[str, str], ...] = (
+    ("火麻仁", "中风"),
+)
 
 class AnalyzePhaseMixin:
     """Mixin: analyze 阶段处理方法。
@@ -56,13 +62,17 @@ class AnalyzePhaseMixin:
         if evidence_grade_error:
             metadata["evidence_grade_error"] = evidence_grade_error
 
-        return {
-            "phase": "analyze",
-            "results": analysis_results,
-            "reasoning_results": reasoning_results,
-            "data_mining_result": data_mining_result,
-            "metadata": metadata,
-        }
+        return build_phase_result(
+            "analyze",
+            status="completed",
+            results={
+                **analysis_results,
+                "reasoning_results": reasoning_results,
+                "data_mining_result": data_mining_result,
+            },
+            metadata=metadata,
+            error=evidence_grade_error,
+        )
 
     def _resolve_analyze_modules(
         self,
@@ -128,7 +138,7 @@ class AnalyzePhaseMixin:
             return [item for item in context_documents if isinstance(item, dict)]
 
         observe_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.OBSERVE, {}).get("result", {})
-        ingestion_pipeline = context.get("ingestion_pipeline") or observe_result.get("ingestion_pipeline") or {}
+        ingestion_pipeline = context.get("ingestion_pipeline") or get_phase_value(observe_result, "ingestion_pipeline", {}) or {}
         documents = ingestion_pipeline.get("documents") or []
         return [item for item in documents if isinstance(item, dict)]
 
@@ -151,9 +161,20 @@ class AnalyzePhaseMixin:
         return {
             "formula": formulas[0] if formulas else title,
             "title": title,
-            "syndrome": syndromes[0] if syndromes else "unknown",
+            "syndrome": self._select_analyze_record_syndrome(syndromes, herbs),
             "herbs": herbs,
         }
+
+    def _select_analyze_record_syndrome(self, syndromes: List[str], herbs: List[str]) -> str:
+        if not syndromes:
+            return "unknown"
+
+        herb_set = {str(item).strip() for item in herbs if str(item).strip()}
+        syndrome_set = {str(item).strip() for item in syndromes if str(item).strip()}
+        for herb_name, preferred_syndrome in _HERB_DRIVEN_SYNDROME_PREFERENCES:
+            if herb_name in herb_set and preferred_syndrome in syndrome_set:
+                return preferred_syndrome
+        return syndromes[0]
 
     def _group_relationship_entities(self, relationships: List[Dict[str, Any]]) -> Dict[str, List[str]]:
         grouped: Dict[str, List[str]] = {}
@@ -178,7 +199,7 @@ class AnalyzePhaseMixin:
             return self._deduplicate_analyze_relationships([item for item in explicit_relationships if isinstance(item, dict)])
 
         observe_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.OBSERVE, {}).get("result", {})
-        ingestion_pipeline = context.get("ingestion_pipeline") or observe_result.get("ingestion_pipeline") or {}
+        ingestion_pipeline = context.get("ingestion_pipeline") or get_phase_value(observe_result, "ingestion_pipeline", {}) or {}
         aggregate_relationships = (ingestion_pipeline.get("aggregate") or {}).get("semantic_relationships") or []
         if isinstance(aggregate_relationships, list) and aggregate_relationships:
             return self._deduplicate_analyze_relationships([item for item in aggregate_relationships if isinstance(item, dict)])
@@ -394,7 +415,6 @@ class AnalyzePhaseMixin:
     ) -> Dict[str, Any]:
         statistical_analysis = self._build_statistical_analysis(records, reasoning_results, data_mining_result)
         return {
-            **statistical_analysis,
             "statistical_analysis": dict(statistical_analysis),
         }
 
@@ -445,7 +465,14 @@ class AnalyzePhaseMixin:
         if not records or not isinstance(chi_square_items, list) or not chi_square_items:
             return {}
 
-        selected = next((item for item in chi_square_items if isinstance(item, dict)), None)
+        selected = next(
+            (
+                item
+                for item in chi_square_items
+                if isinstance(item, dict) and self._is_positive_statistical_candidate(records, item)
+            ),
+            None,
+        )
         if not isinstance(selected, dict):
             return {}
 
@@ -468,6 +495,19 @@ class AnalyzePhaseMixin:
             "sample_size": sample_size,
             "contingency_table": {"a": a, "b": b, "c": c, "d": d},
         }
+
+    def _is_positive_statistical_candidate(
+        self,
+        records: List[Dict[str, Any]],
+        candidate: Dict[str, Any],
+    ) -> bool:
+        herb = str(candidate.get("herb") or "").strip()
+        syndrome = str(candidate.get("syndrome") or "").strip()
+        if not herb or not syndrome:
+            return False
+
+        a, _, _, _ = StatisticalDataMiner._build_contingency_counts(records, herb, syndrome)
+        return a > 0
 
     def _normalize_p_value(self, raw_p_value: Any, chi2: float) -> float | None:
         if raw_p_value is not None:
@@ -568,7 +608,7 @@ class AnalyzePhaseMixin:
         candidates = [
             context.get("literature_records"),
             context_literature_pipeline.get("records") if isinstance(context_literature_pipeline, dict) else None,
-            (observe_result.get("literature_pipeline") or {}).get("records") if isinstance(observe_result, dict) else None,
+            (get_phase_value(observe_result, "literature_pipeline", {}) or {}).get("records") if isinstance(observe_result, dict) else None,
         ]
         for candidate in candidates:
             if not isinstance(candidate, list):
@@ -639,7 +679,7 @@ class AnalyzePhaseMixin:
             .get(self.pipeline.ResearchPhase.HYPOTHESIS, {})
             .get("result", {})
         )
-        hypotheses = hypothesis_result.get("hypotheses") or []
+        hypotheses = get_phase_value(hypothesis_result, "hypotheses", []) or []
         if not hypotheses:
             return []
 
@@ -675,7 +715,7 @@ class AnalyzePhaseMixin:
             .get(self.pipeline.ResearchPhase.HYPOTHESIS, {})
             .get("result", {})
         )
-        hypotheses = hypothesis_result.get("hypotheses") or []
+        hypotheses = get_phase_value(hypothesis_result, "hypotheses", []) or []
         if not hypotheses:
             return []
 

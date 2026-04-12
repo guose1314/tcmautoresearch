@@ -29,8 +29,8 @@
 | src/semantic_modeling/semantic_graph_builder.py | 语义图构建与研究视角分析 | entities | semantic_graph | networkx | 图规模受控，避免无上限节点增长 |
 | src/reasoning/reasoning_engine.py | 关系推理与模式识别 | entities, graph | reasoning results | networkx | 输出结构化，避免返回不可序列化对象 |
 | src/output/output_generator.py | 最终结构化结果组装 | pipeline context | structured_json | BaseModule | 路径脱敏、列表限长、JSON 安全化 |
-| src/cycle/iteration_cycle.py | 生成-测试-修复主循环 | context | IterationResult | core.get_global_executor | 使用共享线程池，减少线程创建开销 |
-| src/cycle/test_driven_iteration.py | 测试驱动迭代管理 | test suite/context | TestResult list | unittest (pytest可选) | pytest 仅可选加载，防止运行时硬依赖 |
+| src/cycle/cycle_runner.py | 真实模块链执行与迭代汇总 | input_data(dict) | module_results(list), iteration summary(dict) | analysis/preprocessor/extractor/reasoning/output | 支持可选模块降级，避免旧 iteration 子系统回流 |
+| src/cycle/cycle_research_session.py | 研究 session 执行、导出与持久化 | session context | research_session JSON/report paths | research_pipeline, cycle_reporter | 只持久化当前会话契约，避免历史镜像膨胀 |
 | src/research/research_pipeline.py | 科研闭环编排 | cycle context | phase outputs | preprocessor/extractor/LLM | LLMEngine 延迟导入，降低模块导入副作用 |
 | src/llm/llm_engine.py | 本地 GGUF 推理与科研提示词编排 | prompt/system_prompt | model response | llama-cpp-python | 导入失败可诊断、模型路径校验、GPU 参数受控 |
 | src/common/exceptions.py | 统一异常体系（7 种子类） | message/code/detail/context | TCMBaseError 子类 | — | 所有业务异常继承 TCMBaseError，保持可序列化 context |

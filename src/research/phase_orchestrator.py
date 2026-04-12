@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from src.core.phase_tracker import PhaseTrackerMixin
 from src.research.audit_history import publish_audit_event
 from src.research.gap_analyzer import GapAnalyzer
+from src.research.phase_result import get_phase_value
 from src.research.pipeline_events import publish_phase_lifecycle_event
 from src.research.study_session_manager import (
     ResearchCycle,
@@ -322,7 +323,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
 
         research_cycle.outcomes.append({"phase": phase.value, "result": phase_result})
         if phase == ResearchPhase.PUBLISH:
-            research_cycle.deliverables = phase_result.get("deliverables", [])
+            research_cycle.deliverables = get_phase_value(phase_result, "deliverables", []) or []
         if phase == ResearchPhase.ANALYZE:
             research_cycle.quality_metrics = phase_result.get("results", {})
 

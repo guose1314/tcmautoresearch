@@ -7,6 +7,11 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from src.core.module_base import BaseModule
+from src.research.phase_result import (
+    get_phase_results,
+    get_phase_value,
+    is_phase_result_payload,
+)
 
 
 class OutputGenerator(BaseModule):
@@ -70,7 +75,7 @@ class OutputGenerator(BaseModule):
             "analysis_results": {
                 "entities": entities[: self.max_entities],
                 "semantic_graph": context.get("semantic_graph", {}),
-                "reasoning_results": context.get("reasoning_results", {}),
+                "reasoning_results": self._resolve_reasoning_payload(context),
                 "temporal_analysis": context.get("temporal_analysis", {}),
                 "pattern_recognition": context.get("pattern_recognition", {}),
                 "evidence_protocol": self._build_evidence_protocol(context),
@@ -236,6 +241,11 @@ class OutputGenerator(BaseModule):
             nested = analysis_results.get("evidence_grade")
             if isinstance(nested, dict):
                 return dict(nested)
+            statistical_analysis = analysis_results.get("statistical_analysis")
+            if isinstance(statistical_analysis, dict):
+                nested = statistical_analysis.get("evidence_grade")
+                if isinstance(nested, dict):
+                    return dict(nested)
         return {}
 
     def _resolve_evidence_grade_summary(self, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -248,6 +258,11 @@ class OutputGenerator(BaseModule):
             nested = analysis_results.get("evidence_grade_summary")
             if isinstance(nested, dict):
                 return dict(nested)
+            statistical_analysis = analysis_results.get("statistical_analysis")
+            if isinstance(statistical_analysis, dict):
+                nested = statistical_analysis.get("evidence_grade_summary")
+                if isinstance(nested, dict):
+                    return dict(nested)
 
         evidence_grade = self._resolve_evidence_grade_payload(context)
         if not evidence_grade:
@@ -287,24 +302,39 @@ class OutputGenerator(BaseModule):
         }
 
     def _resolve_evidence_payload(self, context: Dict[str, Any]) -> Any:
-        reasoning_results = context.get("reasoning_results", {})
+        reasoning_results = self._resolve_reasoning_payload(context)
         if isinstance(reasoning_results, dict) and "evidence_records" in reasoning_results:
             return reasoning_results.get("evidence_records", [])
-        return context.get("evidence", [])
+        return get_phase_value(context, "evidence", [])
+
+    def _resolve_reasoning_payload(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        phase_results = get_phase_results(context)
+        nested_reasoning = phase_results.get("reasoning_results")
+        if isinstance(nested_reasoning, dict):
+            return dict(nested_reasoning)
+
+        if is_phase_result_payload(context):
+            return {}
+
+        direct_reasoning = context.get("reasoning_results")
+        if isinstance(direct_reasoning, dict):
+            return dict(direct_reasoning)
+        return {}
 
     def _resolve_data_mining_payload(self, context: Dict[str, Any]) -> Any:
         for key in ("data_mining_result", "data_mining", "mining_result"):
-            if key in context:
-                return context.get(key)
+            value = get_phase_value(context, key)
+            if value is not None:
+                return value
 
-        analysis_results = context.get("analysis_results", {})
-        if isinstance(analysis_results, dict) and "data_mining_result" in analysis_results:
-            return analysis_results.get("data_mining_result")
+        analysis_results = get_phase_value(context, "analysis_results", {})
+        if isinstance(analysis_results, dict):
+            return get_phase_value(analysis_results, "data_mining_result", {})
         return {}
 
     def _build_evidence_protocol(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """构建 Evidence/Claim 输出协议，统一证据可追溯字段。"""
-        reasoning_results = context.get("reasoning_results", {})
+        reasoning_results = self._resolve_reasoning_payload(context)
         evidence_records = [
             self._normalize_evidence_record(record)
             for record in list(reasoning_results.get("evidence_records", []) or [])

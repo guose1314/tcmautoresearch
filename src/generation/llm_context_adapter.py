@@ -3,6 +3,8 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, Mapping, Sequence
 
+from src.research.phase_result import get_phase_results, get_phase_value
+
 DEFAULT_LLM_ANALYSIS_MODULE_ALIASES: Dict[str, tuple[str, ...]] = {
     "research_perspectives": ("research_perspectives",),
     "formula_comparisons": ("formula_comparisons",),
@@ -41,7 +43,7 @@ class LLMContextAdapter:
 
         adapted["llm_analysis_context"] = llm_analysis_context
 
-        analysis_results = adapted.get("analysis_results")
+        analysis_results = self._resolve_analysis_results(adapted)
         if isinstance(analysis_results, dict):
             analysis_results_payload = dict(analysis_results)
         else:
@@ -78,22 +80,30 @@ class LLMContextAdapter:
         }
 
     def _resolve_analysis_modules(self, context: Mapping[str, Any]) -> Dict[str, Any]:
-        llm_context = context.get("llm_analysis_context")
+        llm_context = self._resolve_llm_analysis_context(context)
         llm_modules = llm_context.get("analysis_modules") if isinstance(llm_context, dict) else {}
 
-        analysis_results = context.get("analysis_results")
-        output_data = context.get("output_data")
-        output_analysis_results = output_data.get("analysis_results") if isinstance(output_data, dict) else {}
-        research_artifact = context.get("research_artifact")
-        research_perspectives = context.get("research_perspectives")
+        top_level_analysis_modules = context.get("analysis_modules")
+        phase_results = get_phase_results(context)
+        analysis_results = self._resolve_analysis_results(context)
+        output_data = self._resolve_output_data(context)
+        output_analysis_results = get_phase_value(output_data, "analysis_results")
+        research_artifact = self._resolve_research_artifact(context)
+        publish_phase_results = get_phase_results(self._resolve_phase_payload(context, "publish"))
+        analyze_phase_results = get_phase_results(self._resolve_phase_payload(context, "analyze"))
+        research_perspectives = self._resolve_research_perspectives(context)
 
         containers = [
             llm_modules if isinstance(llm_modules, dict) else {},
+            top_level_analysis_modules if isinstance(top_level_analysis_modules, dict) else {},
+            phase_results if isinstance(phase_results, dict) else {},
             context,
             analysis_results if isinstance(analysis_results, dict) else {},
             output_data if isinstance(output_data, dict) else {},
             output_analysis_results if isinstance(output_analysis_results, dict) else {},
             research_artifact if isinstance(research_artifact, dict) else {},
+            publish_phase_results if isinstance(publish_phase_results, dict) else {},
+            analyze_phase_results if isinstance(analyze_phase_results, dict) else {},
         ]
 
         resolved: Dict[str, Any] = {}
@@ -114,6 +124,83 @@ class LLMContextAdapter:
                     continue
                 return copy.deepcopy(value)
         return None
+
+    def _resolve_phase_payload(self, context: Mapping[str, Any], phase_name: str) -> Dict[str, Any]:
+        phase_results = context.get("phase_results")
+        if not isinstance(phase_results, dict):
+            return {}
+        payload = phase_results.get(phase_name)
+        return payload if isinstance(payload, dict) else {}
+
+    def _resolve_analysis_results(self, context: Mapping[str, Any]) -> Dict[str, Any]:
+        analysis_results = get_phase_value(context, "analysis_results")
+        if isinstance(analysis_results, dict) and analysis_results:
+            return analysis_results
+
+        output_data = self._resolve_output_data(context)
+        nested = get_phase_value(output_data, "analysis_results")
+        if isinstance(nested, dict) and nested:
+            return nested
+
+        publish_phase = self._resolve_phase_payload(context, "publish")
+        nested = get_phase_value(publish_phase, "analysis_results")
+        return nested if isinstance(nested, dict) else {}
+
+    def _resolve_output_data(self, context: Mapping[str, Any]) -> Dict[str, Any]:
+        output_data = get_phase_value(context, "output_data")
+        if isinstance(output_data, dict) and output_data:
+            return output_data
+
+        publish_phase = self._resolve_phase_payload(context, "publish")
+        nested = get_phase_value(publish_phase, "output_data")
+        return nested if isinstance(nested, dict) else {}
+
+    def _resolve_research_artifact(self, context: Mapping[str, Any]) -> Dict[str, Any]:
+        research_artifact = get_phase_value(context, "research_artifact")
+        if isinstance(research_artifact, dict) and research_artifact:
+            return research_artifact
+
+        output_data = self._resolve_output_data(context)
+        nested = get_phase_value(output_data, "research_artifact")
+        if isinstance(nested, dict) and nested:
+            return nested
+
+        publish_phase = self._resolve_phase_payload(context, "publish")
+        nested = get_phase_value(publish_phase, "research_artifact")
+        return nested if isinstance(nested, dict) else {}
+
+    def _resolve_research_perspectives(self, context: Mapping[str, Any]) -> Dict[str, Any]:
+        research_perspectives = get_phase_value(context, "research_perspectives")
+        if isinstance(research_perspectives, dict) and research_perspectives:
+            return research_perspectives
+
+        analysis_results = self._resolve_analysis_results(context)
+        nested = get_phase_value(analysis_results, "research_perspectives")
+        if isinstance(nested, dict) and nested:
+            return nested
+
+        research_artifact = self._resolve_research_artifact(context)
+        nested = get_phase_value(research_artifact, "research_perspectives")
+        if isinstance(nested, dict) and nested:
+            return nested
+
+        analyze_phase = self._resolve_phase_payload(context, "analyze")
+        nested = get_phase_value(analyze_phase, "research_perspectives")
+        return nested if isinstance(nested, dict) else {}
+
+    def _resolve_llm_analysis_context(self, context: Mapping[str, Any]) -> Dict[str, Any]:
+        llm_context = get_phase_value(context, "llm_analysis_context")
+        if isinstance(llm_context, dict) and llm_context:
+            return llm_context
+
+        analysis_results = self._resolve_analysis_results(context)
+        nested = get_phase_value(analysis_results, "llm_analysis_context")
+        if isinstance(nested, dict) and nested:
+            return nested
+
+        output_data = self._resolve_output_data(context)
+        nested = get_phase_value(output_data, "llm_analysis_context")
+        return nested if isinstance(nested, dict) else {}
 
     def _has_payload(self, value: Any) -> bool:
         if value is None:

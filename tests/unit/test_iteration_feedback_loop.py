@@ -1,6 +1,6 @@
 # tests/unit/test_iteration_feedback_loop.py
 """
-IterationCycle 真实迭代闭环单元测试
+cycle_runner 真实迭代闭环单元测试
 
 覆盖：
   - _extract_iteration_feedback: 从迭代结果提取反馈

@@ -229,7 +229,7 @@ gantt
     section 框架/Stub
     SelfLearningEngine           :crit, 0, 30
     QualityAssessor              :crit, 0, 20
-    IterationCycle               :crit, 0, 20
+    CycleLegacySubsystem         :crit, 0, 20
     AnalyzePhase                 :crit, 0, 20
     ReflectPhase                 :crit, 0, 5
 ```
@@ -274,7 +274,7 @@ gantt
 | ReflectPhase 真实反思 | 无闭环改进 | P0 |
 | QualityAssessor 实质评估 | 质量门无效 | P1 |
 | SelfLearningEngine 分析/反馈 | 学习功能空转 | P2 |
-| IterationCycle 真实闭环 | cycle/ 仅框架 | P2 |
+| 旧 cycle 子系统清理 | 历史 iteration/fixing/test-driven 子系统仅剩框架，后续已删除 | P2 |
 
 ---
 
@@ -341,7 +341,7 @@ graph TD
 |---|---|---|
 | QualityAssessor 升级为 LLM 驱动 | 质量门有效 | LLM prompt 设计 |
 | SelfLearningEngine 接入分析反馈 | SelfLearningEngine 接入分析反馈 | 算法设计 |
-| IterationCycle 接入真实循环 | 多轮迭代改进 | 依赖 Phase 2 |
+| Cycle runtime 接入真实循环 | 多轮迭代改进 | 依赖 Phase 2 |
 
 ### Phase 4: 生产化 (持续)
 

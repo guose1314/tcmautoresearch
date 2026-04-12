@@ -179,7 +179,7 @@ class EmbeddingService:
         if not candidate_indexes:
             return []
 
-        query_vector = self._prepare_query_vector(query)
+        query_vector = self._prepare_query_vector(query, normalized_item_type)
         ranked_pairs = self._rank_candidates(query_vector, top_k)
 
         return self._build_search_results(ranked_pairs, candidate_indexes, min_score, top_k)
@@ -201,12 +201,32 @@ class EmbeddingService:
             raise ValueError(f"不支持的 item_type: {item_type}")
         return normalized_item_type
 
-    def _prepare_query_vector(self, query: str) -> np.ndarray:
+    def _prepare_query_vector(self, query: str, item_type: Optional[str] = None) -> np.ndarray:
         """编码并标准化查询向量。"""
+        cached_vector = self._match_existing_query_vector(query, item_type)
+        if cached_vector is not None:
+            return cached_vector
+
         query_vector = np.asarray(self._encode([query]), dtype=np.float32)
         if self.normalize_embeddings:
             query_vector = self._normalize(query_vector)
         return query_vector
+
+    def _match_existing_query_vector(
+        self,
+        query: str,
+        item_type: Optional[str],
+    ) -> Optional[np.ndarray]:
+        if self._embeddings is None:
+            return None
+
+        for index, item in enumerate(self._items):
+            if item_type and item.item_type != item_type:
+                continue
+            if item.text != query:
+                continue
+            return np.asarray(self._embeddings[index : index + 1], dtype=np.float32)
+        return None
 
     def _rank_candidates(self, query_vector: np.ndarray, top_k: int) -> List[tuple[int, float]]:
         """按相似度生成候选排序。"""

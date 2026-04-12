@@ -19,6 +19,9 @@ except Exception:
     ResearchHypothesis = None
     TheoreticalFramework = None
 
+from src.research.phase_result import build_phase_result, get_phase_value
+
+
 class ExperimentPhaseMixin:
     """Mixin: experiment 阶段处理方法。
 
@@ -32,17 +35,22 @@ class ExperimentPhaseMixin:
         context = context or {}
         selected_hypothesis, selection_metadata = self._resolve_selected_hypothesis(cycle, context)
         if selected_hypothesis is None:
-            return {
-                "phase": "experiment",
-                "experiments": [],
-                "results": {},
-                "success_rate": 0.0,
-                "metadata": {
-                    "validation_status": "blocked",
-                    "reason": "missing_hypothesis_selection",
-                    **selection_metadata,
-                },
+            blocked_metadata = {
+                "validation_status": "blocked",
+                "reason": "missing_hypothesis_selection",
+                **selection_metadata,
             }
+            return build_phase_result(
+                "experiment",
+                status="blocked",
+                results={
+                    "experiments": [],
+                    "study_protocol": {},
+                    "selected_hypothesis": None,
+                    "success_rate": 0.0,
+                },
+                metadata=blocked_metadata,
+            )
 
         experiment_framework = self._create_theoretical_framework()
         experiment_context = self._build_experiment_context(cycle, context, selected_hypothesis)
@@ -52,6 +60,7 @@ class ExperimentPhaseMixin:
         experiment_payload = experiment.to_dict()
         study_protocol = experiment_payload.get("study_protocol") if isinstance(experiment_payload.get("study_protocol"), dict) else {}
         experiment_results = {
+            "experiments": [experiment_payload],
             "study_design": experiment.experimental_design,
             "sample_size": experiment.sample_size,
             "duration_days": experiment.duration,
@@ -68,26 +77,26 @@ class ExperimentPhaseMixin:
             "source_weights": experiment_context.get("source_weights", []),
             "gap_priority_summary": experiment_context.get("gap_priority_summary", {}),
             "study_protocol": study_protocol,
-        }
-        return {
-            "phase": "experiment",
-            "experiments": [experiment_payload],
-            "study_protocol": study_protocol,
-            "results": experiment_results,
             "selected_hypothesis": selected_hypothesis,
             "success_rate": 1.0,
-            "metadata": {
-                "study_type": experiment.experimental_design,
-                "protocol_study_type": study_protocol.get("study_type", ""),
-                "protocol_source": study_protocol.get("protocol_source", ""),
-                "validation_status": "approved",
-                "evidence_record_count": experiment_context.get("evidence_profile", {}).get("record_count", 0),
-                "weighted_evidence_score": experiment_context.get("evidence_profile", {}).get("weighted_evidence_score", 0.0),
-                "clinical_gap_available": experiment_context.get("evidence_profile", {}).get("clinical_gap_available", False),
-                "highest_gap_priority": experiment_context.get("gap_priority_summary", {}).get("highest_priority", "低"),
-                **selection_metadata,
-            },
         }
+        metadata = {
+            "study_type": experiment.experimental_design,
+            "protocol_study_type": study_protocol.get("study_type", ""),
+            "protocol_source": study_protocol.get("protocol_source", ""),
+            "validation_status": "approved",
+            "evidence_record_count": experiment_context.get("evidence_profile", {}).get("record_count", 0),
+            "weighted_evidence_score": experiment_context.get("evidence_profile", {}).get("weighted_evidence_score", 0.0),
+            "clinical_gap_available": experiment_context.get("evidence_profile", {}).get("clinical_gap_available", False),
+            "highest_gap_priority": experiment_context.get("gap_priority_summary", {}).get("highest_priority", "低"),
+            **selection_metadata,
+        }
+        return build_phase_result(
+            "experiment",
+            status="completed",
+            results=experiment_results,
+            metadata=metadata,
+        )
 
     def _create_theoretical_framework(self) -> Any:
         if TheoreticalFramework is None:
@@ -101,7 +110,7 @@ class ExperimentPhaseMixin:
         selected_hypothesis: Dict[str, Any],
     ) -> Dict[str, Any]:
         observe_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.OBSERVE, {}).get("result", {})
-        literature_pipeline = observe_result.get("literature_pipeline") or {}
+        literature_pipeline = get_phase_value(observe_result, "literature_pipeline", {}) or {}
         evidence_matrix = literature_pipeline.get("evidence_matrix") or {}
         clinical_gap_analysis = literature_pipeline.get("clinical_gap_analysis") or {}
         evidence_records = evidence_matrix.get("records") or []

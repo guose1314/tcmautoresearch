@@ -9,6 +9,16 @@ from src.research.study_session_manager import ResearchPhase
 
 
 class TestCycleDemoContract(unittest.TestCase):
+    def test_describe_cycle_demo_export_contract_exposes_required_fields(self):
+        contract = run_cycle_demo.describe_cycle_demo_export_contract()
+
+        self.assertEqual(contract["result_schema"], "cycle_demo_report")
+        self.assertEqual(contract["export_contract_version"], run_cycle_demo.DEFAULT_CYCLE_DEMO_GOVERNANCE["export_contract_version"])
+        self.assertEqual(
+            contract["required_fields"],
+            ["metadata", "report_metadata", "analysis_summary", "failed_operations"],
+        )
+
     def test_run_iteration_cycle_includes_governance_contract(self):
         """System A run_iteration_cycle 契约验证（直接测试 cycle_runner）。"""
         fake_pipeline = lambda input_data, modules=None, manage_module_lifecycle=False, optional_modules=None: [

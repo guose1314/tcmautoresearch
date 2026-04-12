@@ -1,8 +1,8 @@
 {
   "module_count": 205,
-  "module_edge_count": 432,
-  "package_count": 28,
-  "package_edge_count": 66,
+  "module_edge_count": 410,
+  "package_count": 25,
+  "package_edge_count": 65,
   "modules": [
     {
       "module": "src",
@@ -17,11 +17,6 @@
     {
       "module": "src.ai_assistant.assistant_engine",
       "file_path": "src/ai_assistant/assistant_engine.py",
-      "package": "src.ai_assistant"
-    },
-    {
-      "module": "src.ai_assistant.engine",
-      "file_path": "src/ai_assistant/engine.py",
       "package": "src.ai_assistant"
     },
     {
@@ -162,6 +157,11 @@
     {
       "module": "src.api.routes.collection",
       "file_path": "src/api/routes/collection.py",
+      "package": "src.api"
+    },
+    {
+      "module": "src.api.routes.extraction",
+      "file_path": "src/api/routes/extraction.py",
       "package": "src.api"
     },
     {
@@ -335,8 +335,18 @@
       "package": "src.cycle"
     },
     {
+      "module": "src.cycle.cycle_pipeline_bridge",
+      "file_path": "src/cycle/cycle_pipeline_bridge.py",
+      "package": "src.cycle"
+    },
+    {
       "module": "src.cycle.cycle_plugin_workflow_handlers",
       "file_path": "src/cycle/cycle_plugin_workflow_handlers.py",
+      "package": "src.cycle"
+    },
+    {
+      "module": "src.cycle.cycle_plugin_workflows",
+      "file_path": "src/cycle/cycle_plugin_workflows.py",
       "package": "src.cycle"
     },
     {
@@ -350,33 +360,23 @@
       "package": "src.cycle"
     },
     {
+      "module": "src.cycle.cycle_research_session",
+      "file_path": "src/cycle/cycle_research_session.py",
+      "package": "src.cycle"
+    },
+    {
       "module": "src.cycle.cycle_runner",
       "file_path": "src/cycle/cycle_runner.py",
       "package": "src.cycle"
     },
     {
-      "module": "src.cycle.fixing_stage",
-      "file_path": "src/cycle/fixing_stage.py",
+      "module": "src.cycle.cycle_storage_persist",
+      "file_path": "src/cycle/cycle_storage_persist.py",
       "package": "src.cycle"
     },
     {
-      "module": "src.cycle.iteration_cycle",
-      "file_path": "src/cycle/iteration_cycle.py",
-      "package": "src.cycle"
-    },
-    {
-      "module": "src.cycle.module_iteration",
-      "file_path": "src/cycle/module_iteration.py",
-      "package": "src.cycle"
-    },
-    {
-      "module": "src.cycle.system_iteration",
-      "file_path": "src/cycle/system_iteration.py",
-      "package": "src.cycle"
-    },
-    {
-      "module": "src.cycle.test_driven_iteration",
-      "file_path": "src/cycle/test_driven_iteration.py",
+      "module": "src.cycle.cycle_subprocess",
+      "file_path": "src/cycle/cycle_subprocess.py",
       "package": "src.cycle"
     },
     {
@@ -400,19 +400,44 @@
       "package": "src.extraction"
     },
     {
-      "module": "src.extraction.relation_extractor",
-      "file_path": "src/extraction/relation_extractor.py",
+      "module": "src.extraction.academic_value_assessor",
+      "file_path": "src/extraction/academic_value_assessor.py",
       "package": "src.extraction"
     },
     {
-      "module": "src.extractors",
-      "file_path": "src/extractors/__init__.py",
-      "package": "src.extractors"
+      "module": "src.extraction.base",
+      "file_path": "src/extraction/base.py",
+      "package": "src.extraction"
     },
     {
-      "module": "src.extractors.advanced_entity_extractor",
-      "file_path": "src/extractors/advanced_entity_extractor.py",
-      "package": "src.extractors"
+      "module": "src.extraction.clinical_extractor",
+      "file_path": "src/extraction/clinical_extractor.py",
+      "package": "src.extraction"
+    },
+    {
+      "module": "src.extraction.extraction_pipeline",
+      "file_path": "src/extraction/extraction_pipeline.py",
+      "package": "src.extraction"
+    },
+    {
+      "module": "src.extraction.medical_content_extractor",
+      "file_path": "src/extraction/medical_content_extractor.py",
+      "package": "src.extraction"
+    },
+    {
+      "module": "src.extraction.metadata_extractor",
+      "file_path": "src/extraction/metadata_extractor.py",
+      "package": "src.extraction"
+    },
+    {
+      "module": "src.extraction.quality_checker",
+      "file_path": "src/extraction/quality_checker.py",
+      "package": "src.extraction"
+    },
+    {
+      "module": "src.extraction.relation_extractor",
+      "file_path": "src/extraction/relation_extractor.py",
+      "package": "src.extraction"
     },
     {
       "module": "src.generation",
@@ -575,26 +600,6 @@
       "package": "src.orchestration"
     },
     {
-      "module": "src.output",
-      "file_path": "src/output/__init__.py",
-      "package": "src.output"
-    },
-    {
-      "module": "src.output.citation_manager",
-      "file_path": "src/output/citation_manager.py",
-      "package": "src.output"
-    },
-    {
-      "module": "src.output.output_generator",
-      "file_path": "src/output/output_generator.py",
-      "package": "src.output"
-    },
-    {
-      "module": "src.output.report_generator",
-      "file_path": "src/output/report_generator.py",
-      "package": "src.output"
-    },
-    {
       "module": "src.quality",
       "file_path": "src/quality/__init__.py",
       "package": "src.quality"
@@ -608,16 +613,6 @@
       "module": "src.quality.quality_assessor",
       "file_path": "src/quality/quality_assessor.py",
       "package": "src.quality"
-    },
-    {
-      "module": "src.reasoning",
-      "file_path": "src/reasoning/__init__.py",
-      "package": "src.reasoning"
-    },
-    {
-      "module": "src.reasoning.reasoning_engine",
-      "file_path": "src/reasoning/reasoning_engine.py",
-      "package": "src.reasoning"
     },
     {
       "module": "src.research",
@@ -722,6 +717,11 @@
     {
       "module": "src.research.phase_orchestrator",
       "file_path": "src/research/phase_orchestrator.py",
+      "package": "src.research"
+    },
+    {
+      "module": "src.research.phase_result",
+      "file_path": "src/research/phase_result.py",
       "package": "src.research"
     },
     {
@@ -1032,10 +1032,6 @@
   ],
   "module_edges": [
     {
-      "source": "src.ai_assistant",
-      "target": "src.ai_assistant.assistant_engine"
-    },
-    {
       "source": "src.ai_assistant.assistant_engine",
       "target": "src.llm.llm_engine"
     },
@@ -1264,20 +1260,8 @@
       "target": "src.web.auth"
     },
     {
-      "source": "src.api.routes",
-      "target": "src.api.routes.analysis"
-    },
-    {
-      "source": "src.api.routes",
-      "target": "src.api.routes.collection"
-    },
-    {
-      "source": "src.api.routes",
-      "target": "src.api.routes.research"
-    },
-    {
-      "source": "src.api.routes",
-      "target": "src.api.routes.system"
+      "source": "src.api.research_utils",
+      "target": "src.research.phase_result"
     },
     {
       "source": "src.api.routes.analysis",
@@ -1310,6 +1294,14 @@
     {
       "source": "src.api.routes.collection",
       "target": "src.collector.normalizer"
+    },
+    {
+      "source": "src.api.routes.extraction",
+      "target": "src.api.schemas"
+    },
+    {
+      "source": "src.api.routes.extraction",
+      "target": "src.extraction.extraction_pipeline"
     },
     {
       "source": "src.api.routes.research",
@@ -1428,22 +1420,6 @@
       "target": "src.knowledge.ontology_manager"
     },
     {
-      "source": "src.common",
-      "target": "src.common.cache"
-    },
-    {
-      "source": "src.common",
-      "target": "src.common.exceptions"
-    },
-    {
-      "source": "src.common",
-      "target": "src.common.http_client"
-    },
-    {
-      "source": "src.common",
-      "target": "src.common.retry_utils"
-    },
-    {
       "source": "src.common.http_client",
       "target": "src.common.retry_utils"
     },
@@ -1509,23 +1485,19 @@
     },
     {
       "source": "src.cycle",
-      "target": "src.cycle.fixing_stage"
+      "target": "src.cycle.cycle_cli"
     },
     {
       "source": "src.cycle",
-      "target": "src.cycle.iteration_cycle"
+      "target": "src.cycle.cycle_command_executor"
     },
     {
       "source": "src.cycle",
-      "target": "src.cycle.module_iteration"
+      "target": "src.cycle.cycle_research_session"
     },
     {
       "source": "src.cycle",
-      "target": "src.cycle.system_iteration"
-    },
-    {
-      "source": "src.cycle",
-      "target": "src.cycle.test_driven_iteration"
+      "target": "src.cycle.cycle_runner"
     },
     {
       "source": "src.cycle.cycle_command_executor",
@@ -1544,12 +1516,24 @@
       "target": "src.cycle.cycle_plugin_workflow_handlers"
     },
     {
+      "source": "src.cycle.cycle_plugin_workflows",
+      "target": "src.cycle.cycle_storage_persist"
+    },
+    {
+      "source": "src.cycle.cycle_plugin_workflows",
+      "target": "src.cycle.cycle_subprocess"
+    },
+    {
       "source": "src.cycle.cycle_reporter",
       "target": "src.generation.report_generator"
     },
     {
       "source": "src.cycle.cycle_reporter",
       "target": "src.infrastructure.config_loader"
+    },
+    {
+      "source": "src.cycle.cycle_research_session",
+      "target": "src.cycle.cycle_reporter"
     },
     {
       "source": "src.cycle.cycle_runner",
@@ -1569,75 +1553,91 @@
     },
     {
       "source": "src.cycle.cycle_runner",
+      "target": "src.cycle.cycle_pipeline_bridge"
+    },
+    {
+      "source": "src.cycle.cycle_runner",
       "target": "src.cycle.cycle_reporter"
+    },
+    {
+      "source": "src.cycle.cycle_runner",
+      "target": "src.cycle.cycle_research_session"
     },
     {
       "source": "src.cycle.cycle_runner",
       "target": "src.generation.output_formatter"
     },
     {
-      "source": "src.cycle.fixing_stage",
-      "target": "src.core.phase_tracker"
-    },
-    {
-      "source": "src.cycle.iteration_cycle",
-      "target": "src.analysis.entity_extractor"
-    },
-    {
-      "source": "src.cycle.iteration_cycle",
-      "target": "src.analysis.preprocessor"
-    },
-    {
-      "source": "src.cycle.iteration_cycle",
-      "target": "src.core.module_base"
-    },
-    {
-      "source": "src.cycle.iteration_cycle",
-      "target": "src.core.phase_tracker"
-    },
-    {
-      "source": "src.cycle.iteration_cycle",
-      "target": "src.cycle.fixing_stage"
-    },
-    {
-      "source": "src.cycle.iteration_cycle",
-      "target": "src.test.automated_tester"
-    },
-    {
-      "source": "src.cycle.module_iteration",
-      "target": "src.core.phase_tracker"
-    },
-    {
-      "source": "src.cycle.module_iteration",
-      "target": "src.cycle.iteration_cycle"
-    },
-    {
-      "source": "src.cycle.system_iteration",
-      "target": "src.core.phase_tracker"
-    },
-    {
-      "source": "src.cycle.system_iteration",
-      "target": "src.cycle.iteration_cycle"
-    },
-    {
-      "source": "src.cycle.system_iteration",
-      "target": "src.cycle.module_iteration"
-    },
-    {
-      "source": "src.cycle.test_driven_iteration",
-      "target": "src.core.phase_tracker"
-    },
-    {
-      "source": "src.data",
-      "target": "src.data.tcm_lexicon"
+      "source": "src.cycle.cycle_runner",
+      "target": "src.research.phase_result"
     },
     {
       "source": "src.data.tcm_lexicon",
       "target": "src.infra.lexicon_service"
     },
     {
-      "source": "src.extraction",
+      "source": "src.extraction.academic_value_assessor",
+      "target": "src.extraction.base"
+    },
+    {
+      "source": "src.extraction.clinical_extractor",
+      "target": "src.data.tcm_lexicon"
+    },
+    {
+      "source": "src.extraction.clinical_extractor",
+      "target": "src.extraction.base"
+    },
+    {
+      "source": "src.extraction.extraction_pipeline",
+      "target": "src.analysis.entity_extractor"
+    },
+    {
+      "source": "src.extraction.extraction_pipeline",
+      "target": "src.analysis.preprocessor"
+    },
+    {
+      "source": "src.extraction.extraction_pipeline",
+      "target": "src.extraction.academic_value_assessor"
+    },
+    {
+      "source": "src.extraction.extraction_pipeline",
+      "target": "src.extraction.base"
+    },
+    {
+      "source": "src.extraction.extraction_pipeline",
+      "target": "src.extraction.clinical_extractor"
+    },
+    {
+      "source": "src.extraction.extraction_pipeline",
+      "target": "src.extraction.medical_content_extractor"
+    },
+    {
+      "source": "src.extraction.extraction_pipeline",
+      "target": "src.extraction.metadata_extractor"
+    },
+    {
+      "source": "src.extraction.extraction_pipeline",
+      "target": "src.extraction.quality_checker"
+    },
+    {
+      "source": "src.extraction.extraction_pipeline",
       "target": "src.extraction.relation_extractor"
+    },
+    {
+      "source": "src.extraction.medical_content_extractor",
+      "target": "src.data.tcm_lexicon"
+    },
+    {
+      "source": "src.extraction.medical_content_extractor",
+      "target": "src.extraction.base"
+    },
+    {
+      "source": "src.extraction.metadata_extractor",
+      "target": "src.extraction.base"
+    },
+    {
+      "source": "src.extraction.quality_checker",
+      "target": "src.extraction.base"
     },
     {
       "source": "src.extraction.relation_extractor",
@@ -1646,14 +1646,6 @@
     {
       "source": "src.extraction.relation_extractor",
       "target": "src.semantic_modeling.tcm_relationships"
-    },
-    {
-      "source": "src.extractors",
-      "target": "src.analysis.entity_extractor"
-    },
-    {
-      "source": "src.extractors.advanced_entity_extractor",
-      "target": "src.analysis.entity_extractor"
     },
     {
       "source": "src.generation",
@@ -1688,8 +1680,16 @@
       "target": "src.core.module_base"
     },
     {
+      "source": "src.generation.llm_context_adapter",
+      "target": "src.research.phase_result"
+    },
+    {
       "source": "src.generation.output_formatter",
       "target": "src.core.module_base"
+    },
+    {
+      "source": "src.generation.output_formatter",
+      "target": "src.research.phase_result"
     },
     {
       "source": "src.generation.paper_writer",
@@ -1700,8 +1700,16 @@
       "target": "src.generation.citation_manager"
     },
     {
+      "source": "src.generation.paper_writer",
+      "target": "src.research.phase_result"
+    },
+    {
       "source": "src.generation.report_generator",
       "target": "src.core.module_base"
+    },
+    {
+      "source": "src.generation.report_generator",
+      "target": "src.research.phase_result"
     },
     {
       "source": "src.infra",
@@ -1832,44 +1840,20 @@
       "target": "src.learning.pattern_recognizer"
     },
     {
-      "source": "src.llm",
-      "target": "src.infra.llm_service"
-    },
-    {
-      "source": "src.llm",
-      "target": "src.llm.llm_engine"
-    },
-    {
       "source": "src.llm.llm_engine",
       "target": "src.research.gap_analyzer"
     },
     {
-      "source": "src.orchestration",
-      "target": "src.orchestration.research_orchestrator"
-    },
-    {
-      "source": "src.orchestration",
-      "target": "src.orchestration.task_scheduler"
+      "source": "src.orchestration.research_orchestrator",
+      "target": "src.research.phase_result"
     },
     {
       "source": "src.orchestration.research_orchestrator",
       "target": "src.research.research_pipeline"
     },
     {
-      "source": "src.output",
-      "target": "src.output.output_generator"
-    },
-    {
-      "source": "src.output.citation_manager",
-      "target": "src.generation.citation_manager"
-    },
-    {
-      "source": "src.output.output_generator",
-      "target": "src.core.module_base"
-    },
-    {
-      "source": "src.output.report_generator",
-      "target": "src.generation.report_generator"
+      "source": "src.quality",
+      "target": "src.quality.evidence_grader"
     },
     {
       "source": "src.quality",
@@ -1890,14 +1874,6 @@
     {
       "source": "src.quality.quality_assessor",
       "target": "src.research.study_session_manager"
-    },
-    {
-      "source": "src.reasoning",
-      "target": "src.analysis.reasoning_engine"
-    },
-    {
-      "source": "src.reasoning.reasoning_engine",
-      "target": "src.analysis.reasoning_engine"
     },
     {
       "source": "src.research",
@@ -2016,30 +1992,6 @@
       "target": "src.llm.llm_engine"
     },
     {
-      "source": "src.research.phase_handlers",
-      "target": "src.research.phase_handlers.analyze_handler"
-    },
-    {
-      "source": "src.research.phase_handlers",
-      "target": "src.research.phase_handlers.experiment_handler"
-    },
-    {
-      "source": "src.research.phase_handlers",
-      "target": "src.research.phase_handlers.hypothesis_handler"
-    },
-    {
-      "source": "src.research.phase_handlers",
-      "target": "src.research.phase_handlers.observe_handler"
-    },
-    {
-      "source": "src.research.phase_handlers",
-      "target": "src.research.phase_handlers.publish_handler"
-    },
-    {
-      "source": "src.research.phase_handlers",
-      "target": "src.research.phase_handlers.reflect_handler"
-    },
-    {
       "source": "src.research.phase_handlers.analyze_handler",
       "target": "src.quality"
     },
@@ -2145,10 +2097,6 @@
     },
     {
       "source": "src.research.phase_orchestrator",
-      "target": "src.collector.corpus_bundle"
-    },
-    {
-      "source": "src.research.phase_orchestrator",
       "target": "src.core.phase_tracker"
     },
     {
@@ -2162,6 +2110,10 @@
     {
       "source": "src.research.phase_orchestrator",
       "target": "src.research.gap_analyzer"
+    },
+    {
+      "source": "src.research.phase_orchestrator",
+      "target": "src.research.phase_result"
     },
     {
       "source": "src.research.phase_orchestrator",
@@ -2205,7 +2157,15 @@
     },
     {
       "source": "src.research.phases.analyze_phase",
+      "target": "src.research.phase_result"
+    },
+    {
+      "source": "src.research.phases.analyze_phase",
       "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.phases.experiment_phase",
+      "target": "src.research.phase_result"
     },
     {
       "source": "src.research.phases.experiment_phase",
@@ -2214,6 +2174,10 @@
     {
       "source": "src.research.phases.experiment_phase",
       "target": "src.research.theoretical_framework"
+    },
+    {
+      "source": "src.research.phases.hypothesis_phase",
+      "target": "src.research.phase_result"
     },
     {
       "source": "src.research.phases.hypothesis_phase",
@@ -2234,6 +2198,14 @@
     {
       "source": "src.research.phases.observe_phase",
       "target": "src.collector.corpus_bundle"
+    },
+    {
+      "source": "src.research.phases.observe_phase",
+      "target": "src.cycle.cycle_runner"
+    },
+    {
+      "source": "src.research.phases.observe_phase",
+      "target": "src.research.phase_result"
     },
     {
       "source": "src.research.phases.observe_phase",
@@ -2265,7 +2237,15 @@
     },
     {
       "source": "src.research.phases.publish_phase",
+      "target": "src.research.phase_result"
+    },
+    {
+      "source": "src.research.phases.publish_phase",
       "target": "src.research.research_pipeline"
+    },
+    {
+      "source": "src.research.phases.reflect_phase",
+      "target": "src.research.phase_result"
     },
     {
       "source": "src.research.phases.reflect_phase",
@@ -2274,6 +2254,10 @@
     {
       "source": "src.research.pipeline_orchestrator",
       "target": "src.research.audit_history"
+    },
+    {
+      "source": "src.research.pipeline_orchestrator",
+      "target": "src.research.phase_result"
     },
     {
       "source": "src.research.pipeline_orchestrator",
@@ -2297,23 +2281,11 @@
     },
     {
       "source": "src.research.real_observe_smoke",
+      "target": "src.research.phase_result"
+    },
+    {
+      "source": "src.research.real_observe_smoke",
       "target": "src.research.research_pipeline"
-    },
-    {
-      "source": "src.research.research_pipeline",
-      "target": "src.analysis.entity_extractor"
-    },
-    {
-      "source": "src.research.research_pipeline",
-      "target": "src.analysis.preprocessor"
-    },
-    {
-      "source": "src.research.research_pipeline",
-      "target": "src.analysis.reasoning_engine"
-    },
-    {
-      "source": "src.research.research_pipeline",
-      "target": "src.analysis.semantic_graph"
     },
     {
       "source": "src.research.research_pipeline",
@@ -2342,30 +2314,6 @@
     {
       "source": "src.research.research_pipeline",
       "target": "src.core.module_factory"
-    },
-    {
-      "source": "src.research.research_pipeline",
-      "target": "src.generation.citation_manager"
-    },
-    {
-      "source": "src.research.research_pipeline",
-      "target": "src.generation.output_formatter"
-    },
-    {
-      "source": "src.research.research_pipeline",
-      "target": "src.generation.paper_writer"
-    },
-    {
-      "source": "src.research.research_pipeline",
-      "target": "src.generation.report_generator"
-    },
-    {
-      "source": "src.research.research_pipeline",
-      "target": "src.infra.llm_service"
-    },
-    {
-      "source": "src.research.research_pipeline",
-      "target": "src.llm.llm_engine"
     },
     {
       "source": "src.research.research_pipeline",
@@ -2410,46 +2358,6 @@
     {
       "source": "src.research.theoretical_framework",
       "target": "src.research.experiment_designer"
-    },
-    {
-      "source": "src.semantic_modeling.methods",
-      "target": "src.semantic_modeling.methods.classical_literature"
-    },
-    {
-      "source": "src.semantic_modeling.methods",
-      "target": "src.semantic_modeling.methods.complexity_science"
-    },
-    {
-      "source": "src.semantic_modeling.methods",
-      "target": "src.semantic_modeling.methods.formula_comparator"
-    },
-    {
-      "source": "src.semantic_modeling.methods",
-      "target": "src.semantic_modeling.methods.formula_structure"
-    },
-    {
-      "source": "src.semantic_modeling.methods",
-      "target": "src.semantic_modeling.methods.integrated_analyzer"
-    },
-    {
-      "source": "src.semantic_modeling.methods",
-      "target": "src.semantic_modeling.methods.network_pharmacology"
-    },
-    {
-      "source": "src.semantic_modeling.methods",
-      "target": "src.semantic_modeling.methods.pharmacology"
-    },
-    {
-      "source": "src.semantic_modeling.methods",
-      "target": "src.semantic_modeling.methods.scoring_panel"
-    },
-    {
-      "source": "src.semantic_modeling.methods",
-      "target": "src.semantic_modeling.methods.summary_engine"
-    },
-    {
-      "source": "src.semantic_modeling.methods",
-      "target": "src.semantic_modeling.methods.supramolecular"
     },
     {
       "source": "src.semantic_modeling.methods.classical_literature",
@@ -2592,6 +2500,10 @@
       "target": "src.storage.neo4j_driver"
     },
     {
+      "source": "src.storage.transaction",
+      "target": "src.storage.neo4j_driver"
+    },
+    {
       "source": "src.test",
       "target": "src.test.automated_tester"
     },
@@ -2616,8 +2528,8 @@
       "target": "src.core.phase_tracker"
     },
     {
-      "source": "src.visualization",
-      "target": "src.visualization.graph_renderer"
+      "source": "src.web.app",
+      "target": "src.infrastructure.persistence"
     },
     {
       "source": "src.web.app",
@@ -2773,7 +2685,7 @@
     },
     {
       "package": "src.analysis",
-      "in_degree": 7,
+      "in_degree": 6,
       "out_degree": 6
     },
     {
@@ -2784,7 +2696,7 @@
     {
       "package": "src.api",
       "in_degree": 1,
-      "out_degree": 6
+      "out_degree": 7
     },
     {
       "package": "src.collector",
@@ -2798,37 +2710,32 @@
     },
     {
       "package": "src.core",
-      "in_degree": 11,
+      "in_degree": 9,
       "out_degree": 1
     },
     {
       "package": "src.cycle",
-      "in_degree": 0,
-      "out_degree": 5
+      "in_degree": 1,
+      "out_degree": 4
     },
     {
       "package": "src.data",
-      "in_degree": 2,
+      "in_degree": 3,
       "out_degree": 1
     },
     {
       "package": "src.extraction",
       "in_degree": 2,
-      "out_degree": 2
-    },
-    {
-      "package": "src.extractors",
-      "in_degree": 0,
-      "out_degree": 1
+      "out_degree": 4
     },
     {
       "package": "src.generation",
-      "in_degree": 4,
-      "out_degree": 1
+      "in_degree": 3,
+      "out_degree": 2
     },
     {
       "package": "src.infra",
-      "in_degree": 3,
+      "in_degree": 2,
       "out_degree": 2
     },
     {
@@ -2849,7 +2756,7 @@
     {
       "package": "src.llm",
       "in_degree": 3,
-      "out_degree": 2
+      "out_degree": 1
     },
     {
       "package": "src.orchestration",
@@ -2857,24 +2764,14 @@
       "out_degree": 1
     },
     {
-      "package": "src.output",
-      "in_degree": 0,
-      "out_degree": 2
-    },
-    {
       "package": "src.quality",
       "in_degree": 1,
       "out_degree": 3
     },
     {
-      "package": "src.reasoning",
-      "in_degree": 0,
-      "out_degree": 1
-    },
-    {
       "package": "src.research",
-      "in_degree": 6,
-      "out_degree": 10
+      "in_degree": 9,
+      "out_degree": 11
     },
     {
       "package": "src.semantic_modeling",
@@ -2888,7 +2785,7 @@
     },
     {
       "package": "src.test",
-      "in_degree": 1,
+      "in_degree": 0,
       "out_degree": 1
     },
     {
@@ -2953,6 +2850,10 @@
     },
     {
       "source": "src.api",
+      "target": "src.research"
+    },
+    {
+      "source": "src.api",
       "target": "src.web"
     },
     {
@@ -2977,10 +2878,6 @@
     },
     {
       "source": "src.cycle",
-      "target": "src.core"
-    },
-    {
-      "source": "src.cycle",
       "target": "src.generation"
     },
     {
@@ -2989,11 +2886,19 @@
     },
     {
       "source": "src.cycle",
-      "target": "src.test"
+      "target": "src.research"
     },
     {
       "source": "src.data",
       "target": "src.infra"
+    },
+    {
+      "source": "src.extraction",
+      "target": "src.analysis"
+    },
+    {
+      "source": "src.extraction",
+      "target": "src.data"
     },
     {
       "source": "src.extraction",
@@ -3004,12 +2909,12 @@
       "target": "src.semantic_modeling"
     },
     {
-      "source": "src.extractors",
-      "target": "src.analysis"
+      "source": "src.generation",
+      "target": "src.core"
     },
     {
       "source": "src.generation",
-      "target": "src.core"
+      "target": "src.research"
     },
     {
       "source": "src.infra",
@@ -3037,23 +2942,11 @@
     },
     {
       "source": "src.llm",
-      "target": "src.infra"
-    },
-    {
-      "source": "src.llm",
       "target": "src.research"
     },
     {
       "source": "src.orchestration",
       "target": "src.research"
-    },
-    {
-      "source": "src.output",
-      "target": "src.core"
-    },
-    {
-      "source": "src.output",
-      "target": "src.generation"
     },
     {
       "source": "src.quality",
@@ -3066,10 +2959,6 @@
     {
       "source": "src.quality",
       "target": "src.research"
-    },
-    {
-      "source": "src.reasoning",
-      "target": "src.analysis"
     },
     {
       "source": "src.research",
@@ -3086,6 +2975,10 @@
     {
       "source": "src.research",
       "target": "src.core"
+    },
+    {
+      "source": "src.research",
+      "target": "src.cycle"
     },
     {
       "source": "src.research",

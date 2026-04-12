@@ -153,14 +153,23 @@ Secrets 管理
 - `literature_retrieval.source_credentials.lexicomp.api_key`
 - `literature_retrieval.source_credentials.clinicalkey.api_key`
 
-本地开发建议：
+运行建议默认使用本地 LLM。当前统一 LLM 工厂默认按 `mode=local` 加载本地 GGUF 模型，优先读取 `models.llm.path`；只有显式切到 API 模式时才需要 `api_url/api_key`。仓库当前默认模型文件为 `./models/qwen1_5-7b-chat-q8_0.gguf`。
+
+本地 LLM 基础配置建议：
+
+```yaml
+# config/development.yml 或 config.yml
+models:
+  llm:
+    mode: "local"
+    path: "./models/qwen1_5-7b-chat-q8_0.gguf"
+    cache_dir: "./cache/llm/development"
+```
+
+本地开发 secrets 建议：
 
 ```yaml
 # secrets/development.yml
-models:
-  llm:
-    api_key: "sk-local-xxx"
-
 literature_retrieval:
   pubmed_email: "developer@example.com"
   pubmed_api_key: "pubmed-local-key"
@@ -172,7 +181,7 @@ monitoring:
     webhook_url: "https://hooks.example.com/dev"
 ```
 
-CI 或 Kubernetes 建议直接注入环境变量，不落地明文文件：
+如果启用 API 模式或其他敏感外部源，CI 或 Kubernetes 建议直接注入环境变量，不落地明文文件：
 
 ```powershell
 $env:TCM_SECRET__MODELS__LLM__API_KEY = "sk-ci-xxx"
@@ -228,6 +237,8 @@ c:/Users/hgk/tcmautoresearch/venv310/Scripts/python.exe tools/diagnostics/run_re
 ```
 
 运行后会在 `output/real_observe_smoke/` 下生成 `latest.json`、`dossier.md` 和 `timeline.jsonl`。更完整的说明见 `docs/real_observe_smoke.md`。
+
+2026-04-11 已在恢复后的原始 historical corpus 上完成一次正式回归复核，结果见 `output/real_observe_smoke/recheck_historical_restored/latest.json`。关键锁定指标 `processed_document_count=20`、`record_count=16`、`p_value=0.029345`、`effect_size=0.5447`、`kg_path_count=50` 已与历史 baseline 一致。该 smoke gate 仍保持禁用 hypothesis/experiment LLM 生成以保证可复现；日常业务运行建议保持本地 GGUF LLM 开启。
 
 主仓库的 `python tools/quality_gate.py`、CI `quality-control` workflow，以及调用 `tools/quality_gate.py` 的 stage runner 现已默认包含这条真实 smoke 回归门。
 

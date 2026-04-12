@@ -236,11 +236,11 @@ class TestResearchPipelineQuality(unittest.TestCase):
         result = self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.ANALYZE, {})
 
         self.assertEqual(result["phase"], "analyze")
-        self.assertIn("reasoning_results", result)
-        self.assertIn("data_mining_result", result)
+        self.assertIn("reasoning_results", result["results"])
+        self.assertIn("data_mining_result", result["results"])
         self.assertIn("reasoning_engine", result["metadata"]["analysis_modules"])
         self.assertIn("statistical_data_miner", result["metadata"]["analysis_modules"])
-        self.assertIn("frequency_chi_square", result["data_mining_result"]["methods_executed"])
+        self.assertIn("frequency_chi_square", result["results"]["data_mining_result"]["methods_executed"])
 
         statistical_analysis = result["results"]["statistical_analysis"]
         self.assertTrue(statistical_analysis["statistical_significance"])
@@ -249,15 +249,27 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertNotEqual(statistical_analysis["p_value"], 0.003)
         self.assertGreater(statistical_analysis["effect_size"], 0.0)
         self.assertIn("桂枝", statistical_analysis["interpretation"])
+        for legacy_key in (
+            "statistical_significance",
+            "confidence_level",
+            "effect_size",
+            "p_value",
+            "interpretation",
+            "limitations",
+            "primary_association",
+        ):
+            self.assertNotIn(legacy_key, result["results"])
 
-        reasoning_payload = result["reasoning_results"]
+        reasoning_payload = result["results"]["reasoning_results"]
         self.assertTrue(reasoning_payload.get("kg_paths"))
         self.assertGreater(
             float((reasoning_payload.get("reasoning_results") or {}).get("inference_confidence") or 0.0),
             0.0,
         )
+        self.assertNotIn("reasoning_results", result)
+        self.assertNotIn("data_mining_result", result)
 
-    def test_publish_phase_exposes_primary_association_and_data_mining_aliases(self):
+    def test_publish_phase_keeps_nested_analysis_and_omits_publish_mining_aliases(self):
         cycle = self.pipeline.create_research_cycle(
             cycle_name="publish-analysis-alias-cycle",
             description="publish aliases",
@@ -339,50 +351,44 @@ class TestResearchPipelineQuality(unittest.TestCase):
             )
 
         self.assertEqual(publish_result["phase"], "publish")
-        analysis_results = publish_result["analysis_results"]
-        research_artifact = publish_result["research_artifact"]
+        self.assertNotIn("paper_draft", publish_result["results"])
+        self.assertNotIn("imrd_reports", publish_result["results"])
+        analysis_results = publish_result["results"]["analysis_results"]
+        research_artifact = publish_result["results"]["research_artifact"]
         statistical_analysis = analysis_results["statistical_analysis"]
 
         self.assertIsInstance(statistical_analysis.get("primary_association"), dict)
-        self.assertEqual(analysis_results["primary_association"], statistical_analysis["primary_association"])
         self.assertNotIn("statistical_analysis", statistical_analysis)
+        for removed_key in (
+            "primary_association",
+            "data_mining_summary",
+            "data_mining_methods",
+            "frequency_chi_square",
+            "association_rules",
+            "clustering",
+        ):
+            self.assertNotIn(removed_key, analysis_results)
+            self.assertNotIn(removed_key, research_artifact)
 
         self.assertIn("data_mining_result", analysis_results)
-        self.assertIn("data_mining_methods", analysis_results)
-        self.assertIn("data_mining_summary", analysis_results)
-        self.assertIn("frequency_chi_square", analysis_results)
-        self.assertIn("association_rules", analysis_results)
+        self.assertIn("frequency_chi_square", analysis_results["data_mining_result"])
+        self.assertIn("association_rules", analysis_results["data_mining_result"])
         self.assertEqual(
-            analysis_results["data_mining_methods"],
-            analysis_results["data_mining_result"]["methods_executed"],
-        )
-        self.assertEqual(
-            analysis_results["data_mining_summary"]["record_count"],
-            analysis_results["data_mining_result"]["record_count"],
-        )
-        self.assertEqual(
-            analysis_results["data_mining_summary"]["association_rule_count"],
-            len(analysis_results["data_mining_result"]["association_rules"]["rules"]),
-        )
-        self.assertEqual(
-            analysis_results["data_mining_summary"]["cluster_count"],
-            len(analysis_results["data_mining_result"].get("clustering", {}).get("cluster_summary", [])),
-        )
-        self.assertEqual(
-            analysis_results["data_mining_summary"]["frequency_signal_count"],
-            len(analysis_results["data_mining_result"]["frequency_chi_square"]["chi_square_top"]),
+            research_artifact["data_mining_result"],
+            analysis_results["data_mining_result"],
         )
 
-        self.assertEqual(research_artifact["primary_association"], statistical_analysis["primary_association"])
-        self.assertIn("data_mining_result", research_artifact)
-        self.assertIn("data_mining_methods", research_artifact)
-        self.assertIn("data_mining_summary", research_artifact)
-        self.assertIn("frequency_chi_square", research_artifact)
-        self.assertIn("association_rules", research_artifact)
         self.assertEqual(
-            research_artifact["data_mining_summary"]["association_rule_count"],
-            len(research_artifact["data_mining_result"]["association_rules"]["rules"]),
+            research_artifact["statistical_analysis"]["primary_association"],
+            statistical_analysis["primary_association"],
         )
+        self.assertIn("data_mining_result", research_artifact)
+        self.assertEqual(
+            research_artifact["data_mining_result"]["record_count"],
+            analysis_results["data_mining_result"]["record_count"],
+        )
+        self.assertNotIn("analysis_results", publish_result)
+        self.assertNotIn("research_artifact", publish_result)
 
     def test_collect_and_resolve_ctext_config(self):
         pipeline = ResearchPipeline(

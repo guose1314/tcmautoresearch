@@ -122,7 +122,7 @@ class QualityAssessor(PhaseTrackerMixin):
 
         # consistency — status 值合法性
         status = result.get("status", "")
-        valid_statuses = {"completed", "success", "ok", "done", "failed", "error", "pending"}
+        valid_statuses = {"completed", "success", "ok", "done", "failed", "error", "pending", "degraded", "blocked"}
         consistency = 1.0 if isinstance(status, str) and status.lower() in valid_statuses else 0.5
 
         # evidence_quality — 深度指标
@@ -222,7 +222,7 @@ class QualityAssessor(PhaseTrackerMixin):
 
         # status 值合规性
         status = result.get("status", "")
-        valid_terminal = {"completed", "failed", "success", "error"}
+        valid_terminal = {"completed", "failed", "success", "error", "degraded", "blocked"}
         if status and isinstance(status, str) and status.lower() not in valid_terminal:
             warnings.append(f"non-terminal status value: '{status}'")
 

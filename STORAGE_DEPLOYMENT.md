@@ -372,28 +372,58 @@ class OutputGenerator(BaseModule):
         return output_data
 ```
 
-### 2. 修改迭代循环
+### 2. 修改当前 cycle 运行时链路
 
-在 `src/cycle/iteration_cycle.py` 中初始化存储驱动：
+旧的 cycle 主循环子系统已删除。当前应在 `run_cycle_demo.py`、`src/cycle/cycle_runner.py` 或 `src/cycle/cycle_research_session.py` 接入存储驱动，例如：
 
 ```python
+from src.cycle.cycle_runner import execute_real_module_pipeline
 from src.storage import UnifiedStorageDriver
 
-class IterationCycle:
-    def __init__(self, config=None):
-        super().__init__(config)
-        
-        # 初始化存储驱动
-        if config.get('storage', {}).get('enabled', False):
-            pg_url = config['storage']['postgresql']['url']
-            neo4j_uri = config['storage']['neo4j']['uri']
-            neo4j_auth = (
-                config['storage']['neo4j']['user'],
-                config['storage']['neo4j']['password']
+
+def process_with_storage(source_file: str, raw_text: str, config: dict) -> list[dict]:
+    storage = None
+    if config.get("storage", {}).get("enabled", False):
+        pg_url = config["storage"]["postgresql"]["url"]
+        neo4j_uri = config["storage"]["neo4j"]["uri"]
+        neo4j_auth = (
+            config["storage"]["neo4j"]["user"],
+            config["storage"]["neo4j"]["password"],
+        )
+        storage = UnifiedStorageDriver(pg_url, neo4j_uri, neo4j_auth)
+        storage.initialize()
+
+    try:
+        if storage:
+            document_id = storage.save_document(
+                source_file=source_file,
+                objective="automatic_analysis",
+                raw_text_size=len(raw_text),
             )
-            
-            self.storage = UnifiedStorageDriver(pg_url, neo4j_uri, neo4j_auth)
-            self.storage.initialize()
+        else:
+            document_id = None
+
+        module_results = execute_real_module_pipeline(
+            {
+                "source_file": source_file,
+                "raw_text": raw_text,
+                "document_id": document_id,
+            }
+        )
+        final_context = module_results[-1]["input_data"] if module_results else {}
+
+        if storage and document_id:
+            storage.save_entities(document_id, final_context.get("entities", []))
+            storage.save_relationships(
+                document_id,
+                final_context.get("relationships", final_context.get("semantic_relationships", [])),
+            )
+            storage.save_statistics(document_id, final_context.get("statistics", {}))
+
+        return module_results
+    finally:
+        if storage:
+            storage.close()
 ```
 
 ---

@@ -268,6 +268,114 @@ class TestPaperWriter(unittest.TestCase):
         self.assertIn("后续建议优先关注：建议增加更多样本以提高准确性", markdown_text)
         self.assertIn("桂枝汤 与 桂麻各半汤", markdown_text)
 
+    def test_phase_result_context_does_not_fallback_to_legacy_top_level_reasoning_results(self):
+        resolved = self.writer._resolve_reasoning_results(
+            {
+                "phase": "analyze",
+                "status": "completed",
+                "results": {
+                    "reasoning_results": {
+                        "evidence_records": [{"evidence_id": "nested"}],
+                    }
+                },
+                "metadata": {},
+                "error": None,
+                "reasoning_results": {
+                    "evidence_records": [{"evidence_id": "legacy"}],
+                },
+            }
+        )
+
+        self.assertEqual(resolved["evidence_records"][0]["evidence_id"], "nested")
+
+    def test_phase_result_context_resolves_nested_contract_highlights(self):
+        context = {
+            "phase": "publish",
+            "status": "completed",
+            "results": {
+                "analysis_results": {
+                    "quality_metrics": {
+                        "confidence_score": 0.91,
+                        "completeness": 0.88,
+                    },
+                    "recommendations": ["补充外部验证"],
+                    "llm_analysis_context": {
+                        "analysis_modules": {
+                            "formula_comparisons": [
+                                {
+                                    "formula_a": "桂枝汤",
+                                    "formula_b": "桂麻各半汤",
+                                    "similarity": 0.87,
+                                }
+                            ]
+                        }
+                    },
+                },
+                "research_artifact": {
+                    "hypothesis": [{"title": "桂枝汤调和营卫假设"}],
+                    "hypothesis_audit_summary": {
+                        "selected_mechanism_completeness": 0.91,
+                        "merged_sources": ["知识图谱"],
+                        "relationship_count": 3,
+                    },
+                    "similar_formula_graph_evidence_summary": {
+                        "matches": [
+                            {
+                                "formula_name": "桂枝汤",
+                                "similar_formula_name": "桂麻各半汤",
+                            }
+                        ]
+                    },
+                },
+            },
+            "metadata": {},
+            "error": None,
+        }
+
+        self.assertEqual(self.writer._resolve_hypothesis(context), "桂枝汤调和营卫假设")
+        self.assertEqual(
+            self.writer._resolve_hypothesis_audit_summary(context)["selected_mechanism_completeness"],
+            0.91,
+        )
+        self.assertEqual(self.writer._resolve_quality_metrics(context)["confidence_score"], 0.91)
+        self.assertEqual(self.writer._resolve_recommendations(context), ["补充外部验证"])
+        self.assertIn(
+            "formula_comparisons",
+            self.writer._resolve_llm_analysis_context(context)["analysis_modules"],
+        )
+        self.assertEqual(
+            self.writer._resolve_similar_formula_graph_evidence_summary(context)["matches"][0]["formula_name"],
+            "桂枝汤",
+        )
+
+    def test_statistical_analysis_does_not_synthesize_legacy_root_mirror_fields(self):
+        resolved = self.writer._resolve_statistical_analysis(
+            {
+                "analysis_results": {
+                    "interpretation": "legacy interpretation",
+                    "p_value": 0.01,
+                    "limitations": ["legacy limitation"],
+                }
+            }
+        )
+
+        note = self.writer._build_analysis_result_note("zh", resolved, {"interpretation": "legacy interpretation"})
+        limitation_text = self.writer._resolve_limitations_text(
+            {
+                "analysis_results": {
+                    "statistical_analysis": {
+                        "limitations": ["nested limitation"],
+                    }
+                },
+                "limitations": ["legacy limitation"],
+            }
+        )
+
+        self.assertEqual(resolved, {})
+        self.assertEqual(note, "")
+        self.assertIn("nested limitation", limitation_text)
+        self.assertNotIn("legacy limitation", limitation_text)
+
     def test_sections_include_llm_analysis_context_modules(self):
         result = self.writer.execute(
             {

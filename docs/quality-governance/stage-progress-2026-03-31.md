@@ -380,15 +380,15 @@
 ### 19.1 精修目标
 
 - `src/research/multi_source_corpus.py`：`recognize_classical_format` 复杂度告警（16 > 12）。
-- `src/cycle/fixing_stage.py`：`_calculate_comprehensive_confidence` 复杂度告警（15 > 12）。
+- 旧 cycle 修复子系统：综合置信度计算复杂度告警（15 > 12）。
 
 ### 19.2 代码重构
 
 - `src/research/multi_source_corpus.py`
   - `recognize_classical_format` 拆分为 `_recognize_by_suffix` / `_recognize_by_media_type` / `_recognize_by_sample_text`，统一后缀、MIME 与文本内容三层判定流程。
 
-- `src/cycle/fixing_stage.py`
-  - `_calculate_comprehensive_confidence` 拆分为 `_calculate_repair_confidence` / `_calculate_success_rate` / `_calculate_academic_confidence` / `_priority_academic_score`。
+- 旧 cycle 修复子系统
+  - 综合置信度计算拆分为 repair / success / academic 三段 helper，并保留原权重规则。
   - 保持权重规则不变：repair 0.4、quality 0.3、academic 0.3。
 
 ### 19.3 测试与验证
@@ -403,14 +403,14 @@
 
 ### 20.1 精修目标
 
-- `src/cycle/iteration_cycle.py`：`execute_iteration` 过长告警（122 > 120）。
-- `src/cycle/iteration_cycle.py`：`get_cycle_summary` 复杂度告警（14 > 12）。
+- 旧 cycle 主循环子系统：`execute_iteration` 过长告警（122 > 120）。
+- 旧 cycle 主循环子系统：`get_cycle_summary` 复杂度告警（14 > 12）。
 
 ### 20.2 代码重构
 
-- `src/cycle/iteration_cycle.py`
+- 旧 cycle 主循环子系统
   - `execute_iteration` 清理非必要注释与空行，函数长度收敛至阈值内。
-  - `get_cycle_summary` 拆分为 `_build_average_metrics` 与 `_count_stable_iterations`，将平均指标计算与稳定轮次统计下沉到 helper。
+  - `get_cycle_summary` 拆分平均指标与稳定轮次统计 helper，保持摘要输出契约不变。
   - 保持摘要输出契约不变（字段名与含义保持一致）。
 
 ### 20.3 测试与验证
@@ -423,13 +423,13 @@
 
 ### 21.1 精修目标
 
-- `src/cycle/module_iteration.py`：`get_module_performance_report` 复杂度告警（13 > 12）。
+- 旧 cycle 模块循环子系统：`get_module_performance_report` 复杂度告警（13 > 12）。
 - `src/hypothesis/hypothesis_engine.py`：`_parse_llm_feedback_response` 复杂度告警（13 > 12）。
 
 ### 21.2 代码重构
 
-- `src/cycle/module_iteration.py`
-  - `get_module_performance_report` 拆分为 `_partition_iteration_history` / `_build_module_average_metrics` / `_build_module_report_analysis_summary`。
+- 旧 cycle 模块循环子系统
+  - `get_module_performance_report` 拆分历史分区、平均指标与报告摘要 helper。
   - 保持模块报告输出契约不变（统计字段与 analysis_summary 语义保持一致）。
 
 - `src/hypothesis/hypothesis_engine.py`
@@ -447,13 +447,13 @@
 
 ### 22.1 精修目标
 
-- `src/cycle/test_driven_iteration.py`：`get_test_performance_report` 复杂度告警（13 > 12）。
+- 旧 cycle 测试循环子系统：`get_test_performance_report` 复杂度告警（13 > 12）。
 - `src/hypothesis/hypothesis_engine.py`：`_run_llm_closed_loop` 复杂度告警（20 > 12）。
 
 ### 22.2 代码重构
 
-- `src/cycle/test_driven_iteration.py`
-  - `get_test_performance_report` 拆分为 `_partition_iterations` / `_average_execution_time` / `_average_confidence_score` / `_build_test_report_analysis_summary`。
+- 旧 cycle 测试循环子系统
+  - `get_test_performance_report` 拆分迭代分区、平均执行时间、平均置信度与报告摘要 helper。
 
 - `src/hypothesis/hypothesis_engine.py`
   - `_run_llm_closed_loop` 拆分为 `_can_run_llm_closed_loop` / `_run_single_hypothesis_closed_loop` / `_collect_feedback_metrics` / `_normalize_verification_score` / `_normalize_validation_action` / `_apply_feedback_revision`。
@@ -470,15 +470,14 @@
 
 ### 23.1 精修目标
 
-- `src/cycle/system_iteration.py`：`_build_analysis_results` 参数过多告警（8 > 7）。
+- 旧 cycle 系统循环子系统：`_build_analysis_results` 参数过多告警（8 > 7）。
 - `src/hypothesis/hypothesis_engine.py`：`_build_candidate` 参数过多告警（10 > 7）。
 
 ### 23.2 代码重构
 
-- `src/cycle/system_iteration.py`
+- 旧 cycle 系统循环子系统
   - `_analyze_system_results` 新增 `analysis_payload` 聚合对象。
-  - `_build_analysis_results` 改为接收 `analysis_payload`，将多个分析产物参数收敛为单入参。
-  - 同步清理未使用导入 `Enum`。
+  - `_build_analysis_results` 改为接收单个聚合入参，并同步清理未使用导入。
 
 - `src/hypothesis/hypothesis_engine.py`
   - 新增 `HypothesisCandidateInput` dataclass，统一候选假设构造输入。

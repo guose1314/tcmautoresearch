@@ -1,0 +1,91 @@
+{
+  "profile_name": "real_observe_available_workspace_20x3000",
+  "description": "Workspace-available real Observe comparison profile using 20 existing formula-oriented texts from output caches.",
+  "cycle_name": "real-observe-available-workspace",
+  "objective": "Compare real Observe -> Analyze -> Publish output on the same available 20-file local corpus before and after rebuilding the TCM lexicon.",
+  "scope": "real-observe-available-workspace",
+  "researchers": [
+    "copilot"
+  ],
+  "pipeline_config": {
+    "local_corpus": {
+      "enabled": true,
+      "data_dir": "output",
+      "recursive": true
+    },
+    "ctext_corpus": {
+      "enabled": false,
+      "whitelist": {
+        "enabled": false
+      }
+    },
+    "literature_retrieval": {
+      "enabled": false
+    },
+    "clinical_gap_analysis": {
+      "enabled": false
+    }
+  },
+  "phase_context": {
+    "data_source": "local",
+    "use_local_corpus": true,
+    "collect_local_corpus": true,
+    "local_data_dir": "output",
+    "local_recursive": true,
+    "semantic_builder_config": {
+      "enable_formula_embeddings": false
+    },
+    "max_texts": 20,
+    "max_chars_per_text": 3000,
+    "run_literature_retrieval": false,
+    "use_llm_generation": false,
+    "use_llm_protocol_generation": false,
+    "paper_output_formats": [
+      "markdown"
+    ],
+    "report_output_formats": [
+      "markdown"
+    ]
+  },
+  "include_paths": [
+    "output/tmp7l0gblea/伤寒论方剂(113种).txt",
+    "output/tmp7l0gblea/方剂歌诀(含组成药物及其克数).txt",
+    "output/tmp7l0gblea/方剂趣记大典(379种).txt",
+    "output/tmp7l0gblea/秘藏膏丹丸散方剂-清-.txt",
+    "output/tmpy4yavuke/008-汤液本草-元-王好古.txt",
+    "output/tmpy4yavuke/049-马王堆帛书五十二病方-汉-佚名.txt",
+    "output/tmpy4yavuke/051-千金翼方-唐-孙思邈.txt",
+    "output/tmpy4yavuke/052-孙真人海上方-唐-孙思邈.txt",
+    "output/tmpy4yavuke/054-医心方-日-丹波康赖.北宋时期.txt",
+    "output/tmpy4yavuke/055-太平圣惠方-宋-王怀隐.txt",
+    "output/tmpy4yavuke/056-苏沈良方-宋-沈括.txt",
+    "output/tmpy4yavuke/057-博济方-宋-王衮.txt",
+    "output/tmpy4yavuke/058-史载之方-宋-史堪.txt",
+    "output/tmpy4yavuke/059-太平惠民和剂局方-宋-陈承.txt",
+    "output/tmpy4yavuke/061-鸡峰普济方-宋-张锐.txt",
+    "output/tmpy4yavuke/062-洪氏集验方-宋-洪遵.txt",
+    "output/tmpy4yavuke/063-杨氏家藏方-宋-杨倓.txt",
+    "output/tmpy4yavuke/065-卫生易简方-明-胡荧.txt",
+    "output/tmpy4yavuke/066-全生指迷方-宋-王贶.txt",
+    "output/tmpy4yavuke/067-仁斋直指方论（附补遗）-宋-杨士瀛.txt"
+  ],
+  "thresholds": {
+    "processed_document_count": 20,
+    "min_total_entities": 0,
+    "min_semantic_graph_nodes": 0,
+    "min_semantic_graph_edges": 0,
+    "min_semantic_relationship_count": 0,
+    "min_record_count": 0,
+    "max_p_value": null,
+    "min_effect_size": 0.0,
+    "min_kg_path_count": 0,
+    "min_association_rule_count": 0,
+    "min_frequency_signal_count": 0,
+    "min_observe_reasoning_confidence": 0.0,
+    "min_reasoning_confidence": 0.0,
+    "require_statistical_significance": false,
+    "expect_llm_generation_disabled": true,
+    "expected_protocol_source": null,
+    "require_publish_aliases": []
+  }
+}

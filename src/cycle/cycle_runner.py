@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Collection, Dict, List, NamedTuple, Optional
 
+from src.research.phase_result import get_phase_value
+
 from .cycle_reporter import (
     DEFAULT_CYCLE_DEMO_GOVERNANCE,
     build_cycle_demo_analysis_summary,
@@ -153,13 +155,13 @@ def _extract_iteration_feedback(iteration_result: Dict[str, Any]) -> Dict[str, A
     for mod in modules:
         if isinstance(mod, dict) and mod.get("module") == "reflect":
             output = mod.get("output_data", {})
-            qa = output.get("quality_assessment", {})
+            qa = get_phase_value(output, "quality_assessment", {})
             if qa:
                 feedback["quality_assessment"] = qa
-            plan = output.get("improvement_plan", [])
+            plan = get_phase_value(output, "improvement_plan", [])
             if plan:
                 feedback["improvement_plan"] = plan
-            learning = output.get("learning_summary")
+            learning = get_phase_value(output, "learning_summary")
             if learning:
                 feedback["learning_summary"] = learning
             break

@@ -10,12 +10,8 @@ This repository now includes a fixed, validated real-corpus smoke profile for th
 - Literature retrieval: disabled
 - Hypothesis LLM generation: disabled
 - Experiment LLM protocol generation: disabled
-- Required publish aliases:
-  - primary_association
-  - data_mining_summary
-  - data_mining_methods
-  - frequency_chi_square
-  - association_rules
+
+Publish primary association and mining details are resolved from nested statistical_analysis and data_mining_result payloads. No publish-level mining aliases are required.
 
 ## Run The Smoke Validation
 
@@ -66,4 +62,35 @@ The fixed 20-file profile was re-validated locally with these results:
 - effect_size = 0.5447
 - statistical_significance = true
 - kg_path_count = 50
-- publish alias coverage = complete in analysis_results and research_artifact
+- publish contract uses nested statistical_analysis and data_mining_result payloads only
+
+## 2026-04-11 Regression Note
+
+The original historical profile was re-run after restoring the locked `data/` corpus and now passes again.
+
+- Official recheck summary: `output/real_observe_smoke/recheck_historical_restored/latest.json`
+- Official recheck dossier: `output/real_observe_smoke/recheck_historical_restored/dossier.md`
+
+The recheck matched the locked historical baseline on the key regression metrics:
+
+- processed_document_count = 20
+- record_count = 16
+- p_value = 0.029345
+- effect_size = 0.5447
+- kg_path_count = 50
+- association_rule_count = 20
+- frequency_signal_count = 15
+- validation_status = passed
+
+The offline blocker during the recheck was not missing corpus data anymore. It was the formula-similarity query path trying to initialize `SentenceTransformer` even when a persisted embedding index already existed. The current fix reuses cached vectors for exact formula-query matches, so the historical smoke profile can run offline again.
+
+## Operational LLM Note
+
+This smoke profile intentionally keeps Hypothesis and Experiment LLM generation disabled so the baseline stays deterministic.
+
+For normal application use, prefer the local GGUF runtime:
+
+- `models.llm.mode = local`
+- `models.llm.path = ./models/qwen1_5-7b-chat-q8_0.gguf`
+
+Use API mode only when an explicit external deployment requires it.

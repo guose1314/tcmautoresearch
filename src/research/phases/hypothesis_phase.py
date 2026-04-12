@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
+from src.research.phase_result import build_phase_result, get_phase_value
 from src.storage.graph_interface import IKnowledgeGraph
 from src.storage.neo4j_driver import create_knowledge_graph
 
@@ -47,17 +48,35 @@ class HypothesisPhaseMixin:
         metadata.setdefault("used_llm_generation", any(item.get("generation_mode") == "llm" for item in hypotheses))
         metadata.setdefault("used_llm_closed_loop", False)
         metadata.setdefault("llm_iteration_count", 0)
-        return result
+        phase_payload = dict(result)
+        return build_phase_result(
+            "hypothesis",
+            status=str(result.get("status") or ("completed" if hypotheses else "degraded")),
+            results={
+                "hypotheses": hypotheses,
+                "validation_iterations": result.get("validation_iterations") or [],
+                "domain": result.get("domain") or hypothesis_context.get("research_domain") or "integrative_research",
+                "selected_hypothesis_id": metadata.get("selected_hypothesis_id", ""),
+            },
+            artifacts=result.get("artifacts"),
+            metadata=metadata,
+            error=result.get("error"),
+            extra_fields=phase_payload,
+        )
 
     def _build_hypothesis_context(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
         observe_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.OBSERVE, {}).get("result", {})
-        existing_hypotheses = cycle.phase_executions.get(self.pipeline.ResearchPhase.HYPOTHESIS, {}).get("result", {}).get("hypotheses", [])
+        existing_hypotheses = get_phase_value(
+            cycle.phase_executions.get(self.pipeline.ResearchPhase.HYPOTHESIS, {}).get("result", {}),
+            "hypotheses",
+            [],
+        )
 
-        observations = observe_result.get("observations", [])
-        findings = observe_result.get("findings", [])
-        literature_pipeline = observe_result.get("literature_pipeline") or {}
-        corpus_collection = observe_result.get("corpus_collection") or {}
-        ingestion_pipeline = observe_result.get("ingestion_pipeline") or {}
+        observations = get_phase_value(observe_result, "observations", [])
+        findings = get_phase_value(observe_result, "findings", [])
+        literature_pipeline = get_phase_value(observe_result, "literature_pipeline", {}) or {}
+        corpus_collection = get_phase_value(observe_result, "corpus_collection", {}) or {}
+        ingestion_pipeline = get_phase_value(observe_result, "ingestion_pipeline", {}) or {}
 
         entities = context.get("entities") or ingestion_pipeline.get("entities") or corpus_collection.get("entities") or []
         contradictions = context.get("contradictions") or observe_result.get("contradictions") or []
@@ -311,7 +330,7 @@ class HypothesisPhaseMixin:
         context: Dict[str, Any],
     ) -> tuple[Dict[str, Any] | None, Dict[str, Any]]:
         hypothesis_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.HYPOTHESIS, {}).get("result", {})
-        hypotheses = hypothesis_result.get("hypotheses") or []
+        hypotheses = get_phase_value(hypothesis_result, "hypotheses", []) or []
         explicit_id = str(context.get("selected_hypothesis_id") or "").strip()
         selected_id = explicit_id or str((hypothesis_result.get("metadata") or {}).get("selected_hypothesis_id") or "").strip()
         selected = None

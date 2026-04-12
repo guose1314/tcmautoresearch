@@ -37,7 +37,7 @@
 | `learning/` | 自学习、自适应调参、模式识别 | 3 | ~770 |
 | `llm/` | 本地 LLM 推理（Qwen via llama-cpp） | 1 | 291 |
 | `research/` | 科研流程、文献检索、语料采集、多模态融合 | 7 | 3,696 |
-| `cycle/` | 迭代循环（模块级/系统级/测试驱动/修复） | 5 | 3,244 |
+| `cycle/` | 运行时编排（CLI/研究 session/pipeline bridge） | 13 | ~3,400 |
 | `test/` | 自动化测试框架 | 2 | 1,963 |
 
 ### 1.2 优点 ✅
@@ -49,7 +49,7 @@
 | 3 | **多源文献聚合** | `LiteratureRetriever` 支持 12+ 数据源（PubMed, Semantic Scholar, arXiv 等） |
 | 4 | **多模态融合** | `MultimodalFusionEngine` 实现 Softmax-Attention 等 4 种融合策略 |
 | 5 | **自学习闭环** | EWMA 平滑 + 模式识别 + 自适应调参，具备自我改进能力 |
-| 6 | **迭代循环机制** | 三级迭代（模块/系统/测试驱动）+ 自动修复，生成→测试→修复→分析→优化 |
+| 6 | **运行时编排机制** | CLI 路由 + 真实模块链 + research session + pipeline bridge 组成当前执行闭环 |
 | 7 | **研究方法丰富** | 覆盖方剂结构、类方比较、网络药理学、超分子化学、复杂性科学等 8+ 方法 |
 | 8 | **质量门控体系** | 7 层质量门 + 持续改进 + 创新激励 + 历史归档 |
 | 9 | **全局线程池** | `get_global_executor()` 避免线程池泄漏 |
@@ -126,7 +126,7 @@ graph LR
     end
 
     subgraph 迭代层
-        N[cycle/iteration_cycle.py]
+        N[cycle/cycle_runner.py]
     end
 
     subgraph 缺失模块
@@ -390,12 +390,12 @@ src/
 │   ├── adaptive_tuner.py
 │   └── pattern_recognizer.py
 │
-├── cycle/                       # BC5: 迭代循环 (保留)
-│   ├── iteration_cycle.py
-│   ├── module_iteration.py
-│   ├── system_iteration.py
-│   ├── test_driven_iteration.py
-│   └── fixing_stage.py
+├── cycle/                       # BC5: 运行时编排 (保留)
+│   ├── cycle_cli.py
+│   ├── cycle_command_executor.py
+│   ├── cycle_runner.py
+│   ├── cycle_research_session.py
+│   └── cycle_pipeline_bridge.py
 │
 ├── infrastructure/              # BC6: 平台基础 (新增包)
 │   ├── persistence.py           # 数据库 ORM (新增)

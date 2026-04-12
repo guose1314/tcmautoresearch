@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Tuple
 from src.research.phase_orchestrator import PhaseOrchestrator
 from src.research.pipeline_phase_handlers import ResearchPhaseHandlers
 from src.research.research_pipeline import ResearchPipeline
+from src.research.study_session_manager import ResearchCycle, ResearchPhase
 
 
 class _FakeEventBus:
@@ -163,6 +164,32 @@ def test_phase_orchestrator_publish_reflect_contract_uses_explicit_handlers() ->
     reflect_result = reflect_handler.execute_reflect_phase({}, {})
     assert publish_result["phase"] == "publish"
     assert reflect_result["phase"] == "reflect"
+
+
+def test_phase_orchestrator_publish_apply_phase_result_reads_standard_deliverables() -> None:
+    orchestrator = PhaseOrchestrator(_FakePipeline())
+    cycle = ResearchCycle(
+        cycle_id="cycle-contract",
+        cycle_name="contract",
+        description="contract",
+    )
+
+    orchestrator._apply_phase_result(
+        cycle,
+        ResearchPhase.PUBLISH,
+        {
+            "phase": "publish",
+            "status": "completed",
+            "results": {
+                "deliverables": ["研究报告", "数据集"],
+            },
+            "artifacts": [],
+            "metadata": {},
+            "error": None,
+        },
+    )
+
+    assert cycle.deliverables == ["研究报告", "数据集"]
 
 
 def test_phase_orchestrator_removes_phase_passthrough_bridge() -> None:

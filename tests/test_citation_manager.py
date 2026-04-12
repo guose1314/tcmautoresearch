@@ -342,8 +342,8 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
         result = self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.PUBLISH, {})
         self.assertEqual(result["phase"], "publish")
         self.assertEqual(result["metadata"]["citation_count"], 1)
-        self.assertIn("BibTeX 参考文献", result["deliverables"])
-        self.assertIn("@article{Lovelace2025Semantic", result["bibtex"])
+        self.assertIn("BibTeX 参考文献", result["results"]["deliverables"])
+        self.assertIn("@article{Lovelace2025Semantic", result["results"]["bibtex"])
 
     def test_publish_phase_builds_citations_from_local_observe_corpus(self):
         cycle = self.pipeline.create_research_cycle(
@@ -388,20 +388,24 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
 
         self.assertEqual(result["phase"], "publish")
         self.assertGreaterEqual(result["metadata"]["citation_count"], 1)
-        self.assertIn("本草纲目-明-李时珍", result["bibtex"])
-        citation_sources = {entry.get("source") for entry in result.get("citations", [])}
+        self.assertIn("本草纲目-明-李时珍", result["results"]["bibtex"])
+        citation_sources = {entry.get("source") for entry in result.get("results", {}).get("citations", [])}
         self.assertIn("local_corpus", citation_sources)
         self.assertNotIn("pipeline", citation_sources)
-        local_entries = [entry for entry in result.get("citations", []) if entry.get("source") == "local_corpus"]
+        local_entries = [
+            entry
+            for entry in result.get("results", {}).get("citations", [])
+            if entry.get("source") == "local_corpus"
+        ]
         self.assertTrue(local_entries)
         self.assertTrue(any(entry.get("source_ref") == "data/013-本草纲目-明-李时珍.txt" for entry in local_entries))
         self.assertTrue(any(entry.get("source_type") == "local" for entry in local_entries))
-        self.assertIn("source_type = {local}", result["bibtex"])
-        self.assertIn("source_ref = {data/013-本草纲目-明-李时珍.txt}", result["bibtex"])
-        self.assertIn("【结构化附注】", result["gbt7714"])
-        self.assertIn("source=local_corpus", result["gbt7714"])
-        self.assertIn("source_type=local", result["gbt7714"])
-        self.assertIn("source_ref=data/013-本草纲目-明-李时珍.txt", result["gbt7714"])
+        self.assertIn("source_type = {local}", result["results"]["bibtex"])
+        self.assertIn("source_ref = {data/013-本草纲目-明-李时珍.txt}", result["results"]["bibtex"])
+        self.assertIn("【结构化附注】", result["results"]["gbt7714"])
+        self.assertIn("source=local_corpus", result["results"]["gbt7714"])
+        self.assertIn("source_type=local", result["results"]["gbt7714"])
+        self.assertIn("source_ref=data/013-本草纲目-明-李时珍.txt", result["results"]["gbt7714"])
 
     def test_publish_phase_prefers_context_citation_records(self):
         cycle = self.pipeline.create_research_cycle(
@@ -427,7 +431,7 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
             },
         )
         self.assertEqual(result["metadata"]["citation_count"], 1)
-        self.assertIn("Custom Citation Record", result["bibtex"])
+        self.assertIn("Custom Citation Record", result["results"]["bibtex"])
 
     def test_publish_phase_includes_gbt_output(self):
         cycle = self.pipeline.create_research_cycle(
@@ -452,8 +456,8 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
                 ]
             },
         )
-        self.assertIn("GB/T 7714 参考文献", result["deliverables"])
-        self.assertIn("[1]", result["gbt7714"])
+        self.assertIn("GB/T 7714 参考文献", result["results"]["deliverables"])
+        self.assertIn("[1]", result["results"]["gbt7714"])
 
     def test_publish_phase_generates_real_paper_outputs(self):
         cycle = self.pipeline.create_research_cycle(
@@ -502,28 +506,30 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
         cycle.phase_executions[ResearchPhase.ANALYZE] = {
             "result": {
                 "results": {
-                    "statistical_significance": True,
-                    "confidence_level": 0.95,
-                    "effect_size": 0.76,
-                    "p_value": 0.003,
-                    "interpretation": "桂枝汤核心配伍与营卫调和证据之间存在稳定关联",
-                    "limitations": ["样本量有限"],
-                    "evidence_grade": {
-                        "overall_grade": "moderate",
-                        "overall_score": 0.67,
-                        "study_count": 1,
-                        "bias_risk_distribution": {"low": 1},
-                        "summary": [
-                            "纳入 1 项研究进行 GRADE 评估",
-                            "整体证据等级为 moderate，平均评分 0.67",
-                        ],
-                    },
-                    "evidence_grade_summary": {
-                        "overall_grade": "moderate",
-                        "overall_score": 0.67,
-                        "study_count": 1,
-                        "bias_risk_distribution": {"low": 1},
-                        "summary": ["纳入 1 项研究进行 GRADE 评估"],
+                    "statistical_analysis": {
+                        "statistical_significance": True,
+                        "confidence_level": 0.95,
+                        "effect_size": 0.76,
+                        "p_value": 0.003,
+                        "interpretation": "桂枝汤核心配伍与营卫调和证据之间存在稳定关联",
+                        "limitations": ["样本量有限"],
+                        "evidence_grade": {
+                            "overall_grade": "moderate",
+                            "overall_score": 0.67,
+                            "study_count": 1,
+                            "bias_risk_distribution": {"low": 1},
+                            "summary": [
+                                "纳入 1 项研究进行 GRADE 评估",
+                                "整体证据等级为 moderate，平均评分 0.67",
+                            ],
+                        },
+                        "evidence_grade_summary": {
+                            "overall_grade": "moderate",
+                            "overall_score": 0.67,
+                            "study_count": 1,
+                            "bias_risk_distribution": {"low": 1},
+                            "summary": ["纳入 1 项研究进行 GRADE 评估"],
+                        },
                     },
                     "data_mining_result": {
                         "methods_executed": ["association_rules", "clustering"],
@@ -609,12 +615,16 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
 
         result = self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.PUBLISH, {})
 
-        self.assertIn("paper_draft", result)
-        self.assertTrue(result["paper_draft"].get("sections"))
-        self.assertIn("output_files", result)
-        self.assertIn("markdown", result["output_files"])
-        self.assertTrue(os.path.exists(result["output_files"]["markdown"]))
-        markdown_text = open(result["output_files"]["markdown"], "r", encoding="utf-8").read()
+        self.assertNotIn("paper_language", result)
+        self.assertNotIn("paper_draft", result)
+        self.assertNotIn("report_generation_errors", result)
+        self.assertNotIn("report_session_result", result)
+        self.assertNotIn("paper_draft", result["results"])
+        self.assertIn("output_files", result["results"])
+        self.assertNotIn("output_files", result)
+        self.assertIn("markdown", result["results"]["output_files"])
+        self.assertTrue(os.path.exists(result["results"]["output_files"]["markdown"]))
+        markdown_text = open(result["results"]["output_files"]["markdown"], "r", encoding="utf-8").read()
         self.assertIn("统计分析提示当前结果具有稳定信号", markdown_text)
         self.assertIn("综合解释认为：桂枝汤核心配伍与营卫调和证据之间存在稳定关联", markdown_text)
         self.assertIn("GRADE 证据分级显示", markdown_text)
@@ -622,12 +632,14 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
         self.assertIn("LLM 分析上下文已覆盖", markdown_text)
         self.assertIn("类方图谱证据", markdown_text)
         self.assertIn("桂枝汤 与 桂麻各半汤", markdown_text)
-        self.assertEqual(result["analysis_results"]["evidence_grade_summary"]["overall_grade"], "moderate")
-        self.assertEqual(result["research_artifact"]["evidence_grade_summary"]["overall_grade"], "moderate")
-        llm_analysis_context = result["analysis_results"].get("llm_analysis_context") or {}
+        self.assertEqual(result["results"]["analysis_results"]["evidence_grade_summary"]["overall_grade"], "moderate")
+        self.assertEqual(result["results"]["research_artifact"]["evidence_grade_summary"]["overall_grade"], "moderate")
+        llm_analysis_context = result["results"]["analysis_results"].get("llm_analysis_context") or {}
+        self.assertNotIn("llm_analysis_context", result)
+        self.assertNotIn("analysis_results", result)
+        self.assertNotIn("research_artifact", result)
         self.assertEqual(llm_analysis_context.get("contract_version"), "llm-analysis-context-v1")
         self.assertEqual(llm_analysis_context.get("module_count"), 10)
-        self.assertEqual(result.get("llm_analysis_context", {}).get("contract_version"), "llm-analysis-context-v1")
         analysis_modules = llm_analysis_context.get("analysis_modules") or {}
         self.assertIn("network_pharmacology", analysis_modules)
         self.assertIn("complexity_dynamics", analysis_modules)
@@ -644,24 +656,33 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
             analysis_modules.get("research_scoring_panel", {}).get("桂枝汤", {}).get("total_score"),
             0.81,
         )
-        self.assertIn("Markdown 论文初稿", result["deliverables"])
-        self.assertIn("imrd_reports", result)
-        self.assertIn("report_output_files", result)
-        self.assertIn("imrd_markdown", result["report_output_files"])
-        self.assertTrue(os.path.exists(result["report_output_files"]["imrd_markdown"]))
-        imrd_markdown_text = open(result["report_output_files"]["imrd_markdown"], "r", encoding="utf-8").read()
+        self.assertIn("Markdown 论文初稿", result["results"]["deliverables"])
+        self.assertNotIn("imrd_reports", result["results"])
+        self.assertNotIn("imrd_reports", result)
+        self.assertNotIn("report_output_files", result)
+        main_publication = result["results"]["publications"][0]
+        self.assertEqual(main_publication["status"], "draft_generated")
+        self.assertGreaterEqual(int(main_publication.get("section_count") or 0), 1)
+        artifact_map = {
+            str(item.get("name") or ""): str(item.get("path") or "")
+            for item in result["artifacts"]
+            if isinstance(item, dict)
+        }
+        self.assertIn("imrd_markdown", artifact_map)
+        self.assertTrue(os.path.exists(artifact_map["imrd_markdown"]))
+        imrd_markdown_text = open(artifact_map["imrd_markdown"], "r", encoding="utf-8").read()
         self.assertIn("## Introduction", imrd_markdown_text)
         self.assertIn("## Methods", imrd_markdown_text)
         self.assertIn("## Results", imrd_markdown_text)
         self.assertIn("## Discussion", imrd_markdown_text)
-        self.assertIn("Markdown IMRD 报告", result["deliverables"])
+        self.assertIn("Markdown IMRD 报告", result["results"]["deliverables"])
         if DOCX_AVAILABLE:
-            self.assertIn("docx", result["output_files"])
-            self.assertTrue(os.path.exists(result["output_files"]["docx"]))
-            self.assertIn("DOCX 论文初稿", result["deliverables"])
-            self.assertIn("imrd_docx", result["report_output_files"])
-            self.assertTrue(os.path.exists(result["report_output_files"]["imrd_docx"]))
-            self.assertIn("DOCX IMRD 报告", result["deliverables"])
+            self.assertIn("docx", result["results"]["output_files"])
+            self.assertTrue(os.path.exists(result["results"]["output_files"]["docx"]))
+            self.assertIn("DOCX 论文初稿", result["results"]["deliverables"])
+            self.assertIn("imrd_docx", artifact_map)
+            self.assertTrue(os.path.exists(artifact_map["imrd_docx"]))
+            self.assertIn("DOCX IMRD 报告", result["results"]["deliverables"])
 
     def test_publish_phase_llm_context_adapter_supports_mock_generator_contract(self):
 
@@ -786,14 +807,16 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
             0.42,
         )
         self.assertIn("formula_comparisons", analysis_modules)
-        sections = result.get("paper_draft", {}).get("sections") or []
-        self.assertTrue(
-            any(
-                "mock-consumed-target-count=2" in str(section.get("content", ""))
-                for section in sections
-                if isinstance(section, dict)
-            )
+        publications = (result.get("results") or {}).get("publications") or []
+        main_publication = next(
+            (
+                item
+                for item in publications
+                if isinstance(item, dict) and item.get("status") in {"draft_generated", "draft_empty"}
+            ),
+            {},
         )
+        self.assertEqual(int(main_publication.get("section_count") or 0), 3)
 
     def test_output_port_create_paper_writer_auto_wraps_llm_context_adapter(self):
 
@@ -891,21 +914,13 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
         )
 
         self.assertEqual(result["phase"], "publish")
-        draft = result.get("paper_draft") or {}
-        metadata = draft.get("metadata") if isinstance(draft, dict) else {}
-        self.assertIsInstance(metadata, dict)
-
-        review_summary = metadata.get("review_summary") if isinstance(metadata, dict) else {}
+        review_summary = result.get("metadata", {}).get("paper_review_summary") or {}
         self.assertIsInstance(review_summary, dict)
         self.assertTrue(review_summary.get("enabled"))
         self.assertEqual(review_summary.get("max_rounds"), 2)
         self.assertEqual(review_summary.get("score_threshold"), 0.95)
         self.assertGreaterEqual(int(review_summary.get("rounds_completed") or 0), 1)
         self.assertLessEqual(int(review_summary.get("rounds_completed") or 0), 2)
-
-        iteration_history = metadata.get("iteration_history") if isinstance(metadata, dict) else None
-        self.assertIsInstance(iteration_history, list)
-        self.assertEqual(len(iteration_history), int(review_summary.get("rounds_completed") or 0))
 
     def test_publish_phase_prefers_prefixed_iteration_aliases_on_conflict(self):
         cycle = self.pipeline.create_research_cycle(
@@ -941,20 +956,12 @@ class TestCitationManagerPipelineIntegration(unittest.TestCase):
         )
 
         self.assertEqual(result["phase"], "publish")
-        draft = result.get("paper_draft") or {}
-        metadata = draft.get("metadata") if isinstance(draft, dict) else {}
-        self.assertIsInstance(metadata, dict)
-
-        review_summary = metadata.get("review_summary") if isinstance(metadata, dict) else {}
+        review_summary = result.get("metadata", {}).get("paper_review_summary") or {}
         self.assertIsInstance(review_summary, dict)
         self.assertTrue(review_summary.get("enabled"))
         self.assertEqual(review_summary.get("max_rounds"), 1)
         self.assertEqual(review_summary.get("score_threshold"), 0.99)
         self.assertEqual(int(review_summary.get("rounds_completed") or 0), 1)
-
-        iteration_history = metadata.get("iteration_history") if isinstance(metadata, dict) else None
-        self.assertIsInstance(iteration_history, list)
-        self.assertEqual(len(iteration_history), 1)
 
 
 if __name__ == "__main__":

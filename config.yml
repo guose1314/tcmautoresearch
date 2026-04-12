@@ -168,8 +168,9 @@ modules:
 models:
   # Large language model configuration
   llm:
+    mode: "local"                   # local | api
     name: "Qwen1.5-7B-Chat"
-    path: "./models/qwen1.5-7b-chat-q8_0.gguf"
+    path: "./models/qwen1_5-7b-chat-q8_0.gguf"
     temperature: 0.7
     max_tokens: 2048
     top_p: 0.9

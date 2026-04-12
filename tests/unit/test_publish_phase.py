@@ -142,9 +142,34 @@ class TestPublishPhaseContract(unittest.TestCase):
         handler = _make_handler()
         cycle = _FakeCycle(phase_executions=_minimal_phase_executions())
         result = handler.execute(cycle, {"citation_records": [{"title": "test"}]})
-        for key in ("phase", "publications", "deliverables", "citations",
-                     "bibtex", "gbt7714", "paper_draft", "metadata"):
+        for key in ("phase", "metadata"):
             self.assertIn(key, result, f"missing key: {key}")
+        self.assertIn("publications", result["results"])
+        self.assertIn("citations", result["results"])
+        self.assertIn("bibtex", result["results"])
+        self.assertIn("gbt7714", result["results"])
+        self.assertIn("formatted_references", result["results"])
+        self.assertIn("deliverables", result["results"])
+        self.assertIn("output_files", result["results"])
+        self.assertIn("analysis_results", result["results"])
+        self.assertIn("research_artifact", result["results"])
+        self.assertNotIn("publications", result)
+        self.assertNotIn("citations", result)
+        self.assertNotIn("bibtex", result)
+        self.assertNotIn("gbt7714", result)
+        self.assertNotIn("formatted_references", result)
+        self.assertNotIn("deliverables", result)
+        self.assertNotIn("output_files", result)
+        self.assertNotIn("paper_draft", result)
+        self.assertNotIn("imrd_reports", result)
+        self.assertNotIn("paper_draft", result["results"])
+        self.assertNotIn("imrd_reports", result["results"])
+        self.assertNotIn("analysis_results", result)
+        self.assertNotIn("research_artifact", result)
+        self.assertNotIn("llm_analysis_context", result)
+        self.assertNotIn("paper_language", result)
+        self.assertNotIn("report_generation_errors", result)
+        self.assertNotIn("report_session_result", result)
         self.assertEqual(result["phase"], "publish")
 
     def test_metadata_has_required_fields(self):
@@ -167,22 +192,208 @@ class TestPublishNormalPath(unittest.TestCase):
         handler = _make_handler()
         cycle = _FakeCycle(phase_executions=_minimal_phase_executions())
         result = handler.execute(cycle, {"citation_records": [{"title": "test"}]})
-        self.assertGreater(len(result["citations"]), 0)
-        self.assertIn("bibtex", result)
+        self.assertGreater(len(result["results"]["citations"]), 0)
+        self.assertIn("bibtex", result["results"])
 
-    def test_paper_draft_populated(self):
+    def test_publications_capture_generated_paper_summary(self):
         handler = _make_handler()
         cycle = _FakeCycle(phase_executions=_minimal_phase_executions())
         result = handler.execute(cycle, {"citation_records": []})
-        self.assertIsInstance(result["paper_draft"], dict)
-        self.assertIn("title", result["paper_draft"])
+        publications = result["results"]["publications"]
+        main_publication = publications[0]
+        self.assertEqual(main_publication["title"], "Test Paper")
+        self.assertEqual(main_publication["section_count"], 1)
+        self.assertEqual(main_publication["status"], "draft_generated")
 
     def test_deliverables_contains_base_items(self):
         handler = _make_handler()
         cycle = _FakeCycle(phase_executions=_minimal_phase_executions())
         result = handler.execute(cycle, {"citation_records": []})
-        self.assertIn("研究报告", result["deliverables"])
-        self.assertIn("数据集", result["deliverables"])
+        self.assertIn("研究报告", result["results"]["deliverables"])
+        self.assertIn("数据集", result["results"]["deliverables"])
+
+    def test_publish_prefers_selected_hypothesis_id_over_experiment_legacy_field(self):
+        pipeline = _FakePipeline()
+        handler = _make_handler(pipeline)
+        cycle = _FakeCycle(
+            phase_executions={
+                _Phase.OBSERVE: {"result": {}},
+                _Phase.HYPOTHESIS: {
+                    "result": {
+                        "results": {
+                            "hypotheses": [
+                                {"hypothesis_id": "hyp-1", "title": "候选 1", "keywords": ["A"]},
+                                {"hypothesis_id": "hyp-2", "title": "候选 2", "keywords": ["B"]},
+                            ]
+                        },
+                        "metadata": {"selected_hypothesis_id": "hyp-2"},
+                    }
+                },
+                _Phase.EXPERIMENT: {
+                    "result": {
+                        "metadata": {"selected_hypothesis_id": "hyp-2"},
+                        "selected_hypothesis": {"hypothesis_id": "legacy", "title": "旧顶层假设"},
+                    }
+                },
+                _Phase.ANALYZE: {"result": {}},
+            }
+        )
+
+        result = handler.execute(cycle, {"citation_records": []})
+
+        self.assertEqual(result["phase"], "publish")
+        paper_context = pipeline.output_port.create_paper_writer.return_value.execute.call_args.args[0]
+        self.assertEqual(paper_context["hypothesis"].get("hypothesis_id"), "hyp-2")
+        self.assertEqual(paper_context["hypothesis"].get("title"), "候选 2")
+
+    def test_publish_ignores_legacy_top_level_reasoning_results_from_phase_result_context(self):
+        pipeline = _FakePipeline()
+        handler = _make_handler(pipeline)
+        cycle = _FakeCycle(
+            phase_executions={
+                _Phase.OBSERVE: {"result": {}},
+                _Phase.HYPOTHESIS: {"result": {"results": {"hypotheses": []}, "metadata": {}, "error": None}},
+                _Phase.EXPERIMENT: {"result": {"results": {}, "metadata": {}, "error": None}},
+                _Phase.ANALYZE: {
+                    "result": {
+                        "phase": "analyze",
+                        "status": "completed",
+                        "results": {
+                            "reasoning_results": {
+                                "evidence_records": [{"evidence_id": "nested"}],
+                            }
+                        },
+                        "metadata": {},
+                        "error": None,
+                        "reasoning_results": {
+                            "evidence_records": [{"evidence_id": "legacy-analyze"}],
+                        },
+                    }
+                },
+            }
+        )
+
+        handler.execute(
+            cycle,
+            {
+                "phase": "analyze",
+                "status": "completed",
+                "results": {},
+                "metadata": {},
+                "error": None,
+                "reasoning_results": {
+                    "evidence_records": [{"evidence_id": "legacy-context"}],
+                },
+            },
+        )
+
+        paper_context = pipeline.output_port.create_paper_writer.return_value.execute.call_args.args[0]
+        self.assertEqual(paper_context["reasoning_results"]["evidence_records"][0]["evidence_id"], "nested")
+
+    def test_publish_prefers_nested_statistical_analysis_over_legacy_result_root_mirrors(self):
+        pipeline = _FakePipeline()
+        handler = _make_handler(pipeline)
+        analyze_result = {
+            "phase": "analyze",
+            "status": "completed",
+            "results": {
+                "confidence_level": 0.11,
+                "limitations": ["legacy limitation"],
+                "statistical_analysis": {
+                    "confidence_level": 0.93,
+                    "limitations": ["nested limitation"],
+                },
+            },
+            "metadata": {},
+            "error": None,
+        }
+        analyze_results = analyze_result["results"]
+
+        statistical_analysis = handler._resolve_publish_statistical_analysis({}, analyze_result, analyze_results)
+        limitations = handler._resolve_publish_limitations({}, analyze_results, {"statistical_analysis": statistical_analysis})
+
+        self.assertEqual(statistical_analysis["confidence_level"], 0.93)
+        self.assertEqual(limitations, ["nested limitation"])
+
+    def test_publish_external_payloads_remove_publish_mining_aliases(self):
+        pipeline = _FakePipeline()
+        handler = _make_handler(pipeline)
+        cycle = _FakeCycle(
+            phase_executions={
+                _Phase.OBSERVE: {"result": {}},
+                _Phase.HYPOTHESIS: {"result": {"results": {"hypotheses": []}, "metadata": {}, "error": None}},
+                _Phase.EXPERIMENT: {"result": {"results": {}, "metadata": {}, "error": None}},
+                _Phase.ANALYZE: {
+                    "result": {
+                        "phase": "analyze",
+                        "status": "completed",
+                        "results": {
+                            "statistical_analysis": {
+                                "primary_association": {
+                                    "herb": "桂枝",
+                                    "syndrome": "营卫不和",
+                                    "p_value": 0.004,
+                                }
+                            },
+                            "data_mining_result": {
+                                "record_count": 24,
+                                "transaction_count": 24,
+                                "item_count": 8,
+                                "methods_executed": ["frequency_chi_square", "association_rules", "clustering"],
+                                "frequency_chi_square": {
+                                    "chi_square_top": [{"herb": "桂枝", "syndrome": "营卫不和"}],
+                                    "herb_frequency": [{"herb": "桂枝", "count": 10}],
+                                },
+                                "association_rules": {
+                                    "rules": [{"rule_id": "r-1", "support": 0.42}],
+                                },
+                                "clustering": {
+                                    "cluster_summary": [{"cluster": 0, "size": 24}],
+                                },
+                            },
+                            "reasoning_results": {"evidence_records": []},
+                        },
+                        "metadata": {},
+                        "error": None,
+                    }
+                },
+            }
+        )
+
+        result = handler.execute(cycle, {"citation_records": []})
+        analysis_results = result["results"]["analysis_results"]
+        research_artifact = result["results"]["research_artifact"]
+
+        for payload in (analysis_results, research_artifact):
+            self.assertNotIn("primary_association", payload)
+            self.assertNotIn("data_mining_summary", payload)
+            self.assertNotIn("data_mining_methods", payload)
+            self.assertNotIn("frequency_chi_square", payload)
+            self.assertNotIn("association_rules", payload)
+            self.assertNotIn("clustering", payload)
+
+        self.assertEqual(
+            analysis_results["statistical_analysis"]["primary_association"]["herb"],
+            "桂枝",
+        )
+        self.assertEqual(
+            analysis_results["data_mining_result"]["frequency_chi_square"]["chi_square_top"][0]["herb"],
+            "桂枝",
+        )
+        self.assertEqual(
+            analysis_results["data_mining_result"]["association_rules"]["rules"][0]["rule_id"],
+            "r-1",
+        )
+        self.assertEqual(
+            analysis_results["data_mining_result"]["clustering"]["cluster_summary"][0]["cluster"],
+            0,
+        )
+        self.assertEqual(
+            research_artifact["statistical_analysis"]["primary_association"]["syndrome"],
+            "营卫不和",
+        )
+        self.assertNotIn("analysis_results", result)
+        self.assertNotIn("research_artifact", result)
 
 
 # ---------------------------------------------------------------------------
@@ -210,15 +421,16 @@ class TestPublishDegradation(unittest.TestCase):
         """ReportGenerator 失败时不阻塞发布。"""
         pipeline = _FakePipeline()
         rg = MagicMock()
-        rg.execute.side_effect = RuntimeError("report boom")
+        rg.initialize.return_value = True
+        rg.generate_report.side_effect = RuntimeError("report boom")
         pipeline.output_port.create_report_generator.return_value = rg
         handler = _make_handler(pipeline)
         cycle = _FakeCycle(phase_executions=_minimal_phase_executions())
-        try:
-            result = handler.execute(cycle, {"citation_records": []})
-            self.assertEqual(result["phase"], "publish")
-        except RuntimeError:
-            pass  # 可接受
+        result = handler.execute(cycle, {"citation_records": []})
+        self.assertEqual(result["phase"], "publish")
+        self.assertEqual(result["status"], "degraded")
+        self.assertEqual(result["metadata"].get("report_error_count"), 2)
+        self.assertNotIn("report_generation_errors", result)
 
     def test_citation_manager_creation_fails(self):
         """output_port + module fallback 均失败时应抛 RuntimeError。"""
@@ -282,8 +494,8 @@ class TestPublishDeliverablesDynamic(unittest.TestCase):
         handler = _make_handler(pipeline)
         cycle = _FakeCycle(phase_executions=_minimal_phase_executions())
         result = handler.execute(cycle, {"citation_records": [{"title": "t"}]})
-        self.assertIn("BibTeX 参考文献", result["deliverables"])
-        self.assertNotIn("GB/T 7714 参考文献", result["deliverables"])
+        self.assertIn("BibTeX 参考文献", result["results"]["deliverables"])
+        self.assertNotIn("GB/T 7714 参考文献", result["results"]["deliverables"])
 
     def test_markdown_output_adds_deliverable(self):
         pipeline = _FakePipeline()
@@ -299,7 +511,7 @@ class TestPublishDeliverablesDynamic(unittest.TestCase):
         handler = _make_handler(pipeline)
         cycle = _FakeCycle(phase_executions=_minimal_phase_executions())
         result = handler.execute(cycle, {"citation_records": []})
-        self.assertIn("Markdown 论文初稿", result["deliverables"])
+        self.assertIn("Markdown 论文初稿", result["results"]["deliverables"])
 
 
 if __name__ == "__main__":

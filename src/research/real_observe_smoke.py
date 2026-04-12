@@ -8,15 +8,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
+from src.research.phase_result import get_phase_results, get_phase_value
 from src.research.research_pipeline import ResearchPhase, ResearchPipeline
 
-REQUIRED_PUBLISH_ALIAS_FIELDS = [
-    "primary_association",
-    "data_mining_summary",
-    "data_mining_methods",
-    "frequency_chi_square",
-    "association_rules",
-]
+REQUIRED_PUBLISH_ALIAS_FIELDS: List[str] = []
 
 
 def repo_root() -> Path:
@@ -228,15 +223,47 @@ def build_smoke_summary(
     reflect: Dict[str, Any],
     started_at: str,
 ) -> Dict[str, Any]:
-    observe_ingestion = observe.get("ingestion_pipeline") or {}
+    observe_ingestion = get_phase_value(observe, "ingestion_pipeline", {}) or {}
     observe_aggregate = observe_ingestion.get("aggregate") or {}
     analyze_metadata = analyze.get("metadata") or {}
-    analyze_results = analyze.get("results") or {}
+    analyze_results = get_phase_results(analyze)
     statistical_analysis = analyze_results.get("statistical_analysis") or {}
-    reasoning_results = analyze.get("reasoning_results") or {}
+    reasoning_results = analyze_results.get("reasoning_results") if isinstance(analyze_results.get("reasoning_results"), dict) else {}
     reasoning_payload = reasoning_results.get("reasoning_results") or {}
-    publish_analysis = publish.get("analysis_results") or {}
-    publish_artifact = publish.get("research_artifact") or {}
+    publish_analysis = get_phase_value(publish, "analysis_results", {}) or {}
+    publish_artifact = get_phase_value(publish, "research_artifact", {}) or {}
+    experiment_study_protocol = get_phase_value(experiment, "study_protocol", {}) or {}
+    publish_statistical_analysis = (
+        publish_analysis.get("statistical_analysis")
+        if isinstance(publish_analysis.get("statistical_analysis"), dict)
+        else {}
+    )
+    artifact_statistical_analysis = (
+        publish_artifact.get("statistical_analysis")
+        if isinstance(publish_artifact.get("statistical_analysis"), dict)
+        else {}
+    )
+    publish_data_mining_result = (
+        publish_analysis.get("data_mining_result")
+        if isinstance(publish_analysis.get("data_mining_result"), dict)
+        else {}
+    )
+    if not publish_data_mining_result and isinstance(publish_artifact.get("data_mining_result"), dict):
+        publish_data_mining_result = publish_artifact.get("data_mining_result") or {}
+
+    frequency_chi_square = publish_data_mining_result.get("frequency_chi_square") or {}
+    if not isinstance(frequency_chi_square, dict):
+        frequency_chi_square = {}
+
+    association_rules = publish_data_mining_result.get("association_rules") or {}
+    if not isinstance(association_rules, dict):
+        association_rules = {}
+
+    primary_association = publish_statistical_analysis.get("primary_association")
+    if not isinstance(primary_association, dict) or not primary_association:
+        primary_association = artifact_statistical_analysis.get("primary_association") or {}
+    if not isinstance(primary_association, dict):
+        primary_association = {}
 
     alias_fields = list(profile.thresholds.require_publish_aliases)
     analysis_alias_fields = {
@@ -246,7 +273,7 @@ def build_smoke_summary(
         field_name: field_name in publish_artifact for field_name in alias_fields
     }
 
-    return {
+    summary = {
         "profile_name": profile.profile_name,
         "description": profile.description,
         "generated_at": datetime.now().isoformat(),
@@ -278,29 +305,31 @@ def build_smoke_summary(
         ),
         "reasoning_confidence": _safe_float(reasoning_payload.get("inference_confidence")),
         "kg_path_count": len(reasoning_results.get("kg_paths") or []),
-        "association_rule_count": len(
-            ((publish_analysis.get("association_rules") or {}).get("rules") or [])
-        ),
-        "frequency_signal_count": len(
-            ((publish_analysis.get("frequency_chi_square") or {}).get("chi_square_top") or [])
-        ),
-        "publish_alias_fields": {
-            "analysis_results": analysis_alias_fields,
-            "research_artifact": artifact_alias_fields,
-        },
-        "publish_aliases_present": {
-            "analysis_results": all(analysis_alias_fields.values()),
-            "research_artifact": all(artifact_alias_fields.values()),
-        },
-        "primary_association": publish_analysis.get("primary_association") or {},
+        "association_rule_count": len((association_rules.get("rules") or [])),
+        "frequency_signal_count": len((frequency_chi_square.get("chi_square_top") or [])),
+        "primary_association": primary_association,
         "used_llm_generation": bool(
             (hypothesis.get("metadata") or {}).get("used_llm_generation")
         ),
         "experiment_protocol_source": str(
-            (experiment.get("study_protocol") or {}).get("protocol_source") or ""
+            (experiment_study_protocol or {}).get("protocol_source")
+            or (experiment.get("metadata") or {}).get("protocol_source")
+            or ""
         ),
         "reflect_count": int((reflect.get("metadata") or {}).get("reflection_count") or 0),
     }
+
+    if alias_fields:
+        summary["publish_alias_fields"] = {
+            "analysis_results": analysis_alias_fields,
+            "research_artifact": artifact_alias_fields,
+        }
+        summary["publish_aliases_present"] = {
+            "analysis_results": all(analysis_alias_fields.values()),
+            "research_artifact": all(artifact_alias_fields.values()),
+        }
+
+    return summary
 
 
 def validate_smoke_summary(
@@ -406,18 +435,19 @@ def validate_smoke_summary(
                 f"experiment_protocol_source expected '{thresholds.expected_protocol_source}' but got '{protocol_source}'"
             )
 
-    publish_alias_fields = summary.get("publish_alias_fields") or {}
-    for container_name in ("analysis_results", "research_artifact"):
-        field_map = publish_alias_fields.get(container_name) or {}
-        missing = [
-            field_name
-            for field_name in thresholds.require_publish_aliases
-            if not bool(field_map.get(field_name))
-        ]
-        if missing:
-            violations.append(
-                f"{container_name} missing publish aliases: {', '.join(missing)}"
-            )
+    if thresholds.require_publish_aliases:
+        publish_alias_fields = summary.get("publish_alias_fields") or {}
+        for container_name in ("analysis_results", "research_artifact"):
+            field_map = publish_alias_fields.get(container_name) or {}
+            missing = [
+                field_name
+                for field_name in thresholds.require_publish_aliases
+                if not bool(field_map.get(field_name))
+            ]
+            if missing:
+                violations.append(
+                    f"{container_name} missing publish aliases: {', '.join(missing)}"
+                )
 
     return violations
 
@@ -500,14 +530,17 @@ def _build_dossier(summary: Dict[str, Any]) -> str:
         lines.extend(f"- {item}" for item in violations)
     else:
         lines.append("- none")
-    lines.extend([
-        "",
-        "## Publish Alias Coverage",
-        "",
-        "```json",
-        json.dumps(summary.get("publish_alias_fields") or {}, ensure_ascii=False, indent=2),
-        "```",
-    ])
+
+    publish_alias_fields = summary.get("publish_alias_fields")
+    if isinstance(publish_alias_fields, dict):
+        lines.extend([
+            "",
+            "## Publish Alias Coverage",
+            "",
+            "```json",
+            json.dumps(publish_alias_fields, ensure_ascii=False, indent=2),
+            "```",
+        ])
     return "\n".join(lines) + "\n"
 
 

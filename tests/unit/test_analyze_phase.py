@@ -17,6 +17,7 @@ from enum import Enum
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
+from src.research.phase_result import get_phase_deprecated_fallbacks, get_phase_value
 from src.research.phases.analyze_phase import AnalyzePhaseMixin
 
 # ---------------------------------------------------------------------------
@@ -91,7 +92,7 @@ class TestAnalyzePhaseContract(unittest.TestCase):
     def test_return_has_required_keys(self):
         mixin = _AnalyzeMixin(_FakePipeline())
         result = mixin.execute_analyze_phase(_FakeCycle(), {"analysis_records": _sample_records()})
-        for key in ("phase", "results", "reasoning_results", "data_mining_result", "metadata"):
+        for key in ("phase", "results", "metadata"):
             self.assertIn(key, result, f"missing key: {key}")
         self.assertEqual(result["phase"], "analyze")
 
@@ -101,6 +102,20 @@ class TestAnalyzePhaseContract(unittest.TestCase):
         md = result["metadata"]
         for key in ("analysis_type", "significance_level", "record_count", "reasoning_engine_used"):
             self.assertIn(key, md, f"missing metadata key: {key}")
+
+    def test_results_include_reasoning_results_and_data_mining(self):
+        mixin = _AnalyzeMixin(_FakePipeline())
+        result = mixin.execute_analyze_phase(_FakeCycle(), {"analysis_records": _sample_records()})
+        self.assertIn("reasoning_results", result["results"])
+        self.assertIn("data_mining_result", result["results"])
+        self.assertNotIn("reasoning_results", result)
+        self.assertNotIn("data_mining_result", result)
+
+    def test_reasoning_results_read_from_standard_results_without_fallback(self):
+        mixin = _AnalyzeMixin(_FakePipeline())
+        result = mixin.execute_analyze_phase(_FakeCycle(), {"analysis_records": _sample_records()})
+        self.assertEqual(get_phase_value(result, "reasoning_results", {}), result["results"]["reasoning_results"])
+        self.assertEqual(get_phase_deprecated_fallbacks(result), [])
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +128,7 @@ class TestAnalyzeWithRecords(unittest.TestCase):
     def test_records_produce_data_mining_output(self):
         mixin = _AnalyzeMixin(_FakePipeline())
         result = mixin.execute_analyze_phase(_FakeCycle(), {"analysis_records": _sample_records()})
-        dm = result["data_mining_result"]
+        dm = result["results"]["data_mining_result"]
         self.assertEqual(dm["record_count"], 3)
         self.assertGreater(dm["item_count"], 0)
         self.assertIn("frequency_chi_square", dm)
@@ -126,11 +141,73 @@ class TestAnalyzeWithRecords(unittest.TestCase):
         self.assertIn("statistical_significance", sa)
         self.assertIn("confidence_level", sa)
         self.assertIn("limitations", sa)
+        for legacy_key in (
+            "statistical_significance",
+            "confidence_level",
+            "effect_size",
+            "p_value",
+            "interpretation",
+            "limitations",
+            "primary_association",
+        ):
+            self.assertNotIn(legacy_key, result["results"])
 
     def test_record_count_in_metadata(self):
         mixin = _AnalyzeMixin(_FakePipeline())
         result = mixin.execute_analyze_phase(_FakeCycle(), {"analysis_records": _sample_records()})
         self.assertEqual(result["metadata"]["record_count"], 3)
+
+    def test_document_record_prefers_middle_for_fire_hemp(self):
+        mixin = _AnalyzeMixin(_FakePipeline())
+        document = {
+            "title": "麻子仁丸证治片段",
+            "semantic_relationships": [
+                {
+                    "source": "麻子仁丸",
+                    "source_type": "formula",
+                    "target": "火麻仁",
+                    "target_type": "herb",
+                },
+                {
+                    "source": "火麻仁",
+                    "source_type": "herb",
+                    "target": "伤寒",
+                    "target_type": "syndrome",
+                },
+                {
+                    "source": "火麻仁",
+                    "source_type": "herb",
+                    "target": "中风",
+                    "target_type": "syndrome",
+                },
+            ],
+        }
+
+        record = mixin._build_analyze_record_from_document(document, 0)
+
+        self.assertEqual(record["formula"], "麻子仁丸")
+        self.assertEqual(record["syndrome"], "中风")
+        self.assertIn("火麻仁", record["herbs"])
+
+    def test_primary_statistical_finding_skips_zero_support_candidates(self):
+        mixin = _AnalyzeMixin(_FakePipeline())
+        records = [
+            {"formula": "方1", "syndrome": "中风", "herbs": ["火麻仁", "桃仁"]},
+            {"formula": "方2", "syndrome": "中风", "herbs": ["火麻仁"]},
+            {"formula": "方3", "syndrome": "伤寒", "herbs": ["桂枝"]},
+            {"formula": "方4", "syndrome": "伤寒", "herbs": ["麻黄"]},
+        ]
+        chi_square_items = [
+            {"herb": "桃仁", "syndrome": "伤寒", "chi2": 999.0},
+            {"herb": "火麻仁", "syndrome": "中风", "chi2": 1.0},
+        ]
+
+        finding = mixin._select_primary_statistical_finding(records, chi_square_items)
+
+        self.assertEqual(finding["herb"], "火麻仁")
+        self.assertEqual(finding["syndrome"], "中风")
+        self.assertEqual(finding["contingency_table"]["a"], 2)
+        self.assertGreater(finding["chi2"], 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +226,7 @@ class TestAnalyzeReasoningDegradation(unittest.TestCase):
             _FakeCycle(),
             {"analysis_records": _sample_records(), "relationships": _sample_relationships()},
         )
-        self.assertEqual(result["reasoning_results"], {})
+        self.assertEqual(result["results"]["reasoning_results"], {})
         self.assertFalse(result["metadata"]["reasoning_engine_used"])
 
     def test_reasoning_engine_init_fails_gracefully(self):
@@ -164,7 +241,7 @@ class TestAnalyzeReasoningDegradation(unittest.TestCase):
             _FakeCycle(),
             {"analysis_records": _sample_records(), "relationships": _sample_relationships()},
         )
-        self.assertEqual(result["reasoning_results"], {})
+        self.assertEqual(result["results"]["reasoning_results"], {})
 
     def test_reasoning_engine_execute_raises(self):
         """ReasoningEngine.execute() 抛异常时降级。"""
@@ -179,7 +256,7 @@ class TestAnalyzeReasoningDegradation(unittest.TestCase):
             _FakeCycle(),
             {"analysis_records": _sample_records(), "relationships": _sample_relationships()},
         )
-        self.assertEqual(result["reasoning_results"], {})
+        self.assertEqual(result["results"]["reasoning_results"], {})
         mock_engine.cleanup.assert_called_once()
 
 
@@ -196,7 +273,7 @@ class TestAnalyzeEmptyInput(unittest.TestCase):
         result = mixin.execute_analyze_phase(_FakeCycle(), {})
         self.assertEqual(result["phase"], "analyze")
         self.assertEqual(result["metadata"]["record_count"], 0)
-        self.assertEqual(result["data_mining_result"]["record_count"], 0)
+        self.assertEqual(result["results"]["data_mining_result"]["record_count"], 0)
 
     def test_none_context(self):
         """context=None 时不崩溃（内部自动 fallback）。"""

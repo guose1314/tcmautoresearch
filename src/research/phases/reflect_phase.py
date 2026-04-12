@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
+from src.research.phase_result import build_phase_result
+
 logger = logging.getLogger(__name__)
 
 # LLM 系统提示词
@@ -62,26 +64,37 @@ class ReflectPhaseMixin:
         # ---- 5. SelfLearningEngine 反馈（可选） ----
         learning_summary = self._feed_self_learning(cycle_assessment)
 
-        return {
-            "phase": "reflect",
-            "reflections": reflections,
-            "improvement_plan": improvement_plan,
-            "quality_assessment": {
-                "overall_cycle_score": cycle_assessment["overall_cycle_score"],
-                "weaknesses": cycle_assessment["weaknesses"],
-                "strengths": cycle_assessment["strengths"],
-                "llm_diagnosis": cycle_assessment.get("llm_diagnosis"),
-            },
-            "learning_summary": learning_summary,
-            "metadata": {
-                "reflection_count": len(reflections),
-                "plan_items": len(improvement_plan),
-                "cycle_quality_score": cycle_assessment["overall_cycle_score"],
-                "llm_enhanced": llm_enhanced,
-                "assessed_phases": len(cycle_assessment["phase_assessments"]),
-                "learning_fed": learning_summary is not None,
-            },
+        quality_assessment = {
+            "overall_cycle_score": cycle_assessment["overall_cycle_score"],
+            "weaknesses": cycle_assessment["weaknesses"],
+            "strengths": cycle_assessment["strengths"],
+            "llm_diagnosis": cycle_assessment.get("llm_diagnosis"),
         }
+        metadata = {
+            "reflection_count": len(reflections),
+            "plan_items": len(improvement_plan),
+            "cycle_quality_score": cycle_assessment["overall_cycle_score"],
+            "llm_enhanced": llm_enhanced,
+            "assessed_phases": len(cycle_assessment["phase_assessments"]),
+            "learning_fed": learning_summary is not None,
+        }
+        return build_phase_result(
+            "reflect",
+            status="completed",
+            results={
+                "reflections": reflections,
+                "improvement_plan": improvement_plan,
+                "quality_assessment": quality_assessment,
+                "learning_summary": learning_summary,
+            },
+            metadata=metadata,
+            extra_fields={
+                "reflections": reflections,
+                "improvement_plan": improvement_plan,
+                "quality_assessment": quality_assessment,
+                "learning_summary": learning_summary,
+            },
+        )
 
     # ------------------------------------------------------------------
     # SelfLearningEngine 反馈

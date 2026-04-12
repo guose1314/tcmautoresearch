@@ -43,6 +43,13 @@ try:
 except Exception:
     EvidenceGrader = None
 
+from src.research.phase_result import (
+    build_phase_result,
+    get_phase_results,
+    get_phase_value,
+    is_phase_result_payload,
+)
+
 _PUBLISH_LLM_ANALYSIS_MODULE_ALIASES: Dict[str, tuple[str, ...]] = (
     dict(DEFAULT_LLM_ANALYSIS_MODULE_ALIASES)
     if DEFAULT_LLM_ANALYSIS_MODULE_ALIASES
@@ -58,6 +65,21 @@ _PUBLISH_LLM_ANALYSIS_MODULE_ALIASES: Dict[str, tuple[str, ...]] = (
         "research_scoring_panel": ("research_scoring_panel",),
         "summary_analysis": ("summary_analysis",),
     }
+)
+
+_REMOVED_PUBLISH_ANALYSIS_ALIAS_FIELDS: tuple[str, ...] = (
+    "primary_association",
+    "data_mining_summary",
+    "data_mining_methods",
+)
+
+_REMOVED_PUBLISH_DATA_MINING_ALIAS_FIELDS: tuple[str, ...] = (
+    "frequent_itemsets",
+    "association_rules",
+    "clustering",
+    "latent_topics",
+    "frequency_chi_square",
+    "predictive_modeling",
 )
 
 
@@ -76,7 +98,7 @@ class PublishPhaseMixin:
         hypothesis_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.HYPOTHESIS, {}).get("result", {})
         experiment_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.EXPERIMENT, {}).get("result", {})
         analyze_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.ANALYZE, {}).get("result", {})
-        literature_pipeline = observe_result.get("literature_pipeline") or {}
+        literature_pipeline = get_phase_value(observe_result, "literature_pipeline", {}) or {}
         citation_records = self._collect_citation_records(cycle, context, literature_pipeline)
 
         citation_manager = self._create_citation_manager()
@@ -101,7 +123,7 @@ class PublishPhaseMixin:
             paper_output_files if isinstance(paper_output_files, dict) else {},
             citation_output_files if isinstance(citation_output_files, dict) else {},
         )
-        report_session_result = self._build_publish_report_session_result(
+        report_session_payload = self._build_publish_report_session_payload(
             cycle,
             context,
             observe_result,
@@ -113,7 +135,7 @@ class PublishPhaseMixin:
             citation_result,
             merged_output_files,
         )
-        report_generation_result = self._generate_publish_reports(report_session_result, context)
+        report_generation_result = self._generate_publish_reports(report_session_payload, context)
         report_output_files = report_generation_result.get("output_files") if isinstance(report_generation_result, dict) else {}
         merged_output_files = self._merge_publish_output_files(
             merged_output_files,
@@ -143,34 +165,35 @@ class PublishPhaseMixin:
         if merged_output_files.get("imrd_docx"):
             deliverables.append("DOCX IMRD 报告")
 
-        return {
-            "phase": "publish",
-            "publications": publications,
-            "deliverables": deliverables,
-            "citations": citation_result.get("entries", []),
-            "bibtex": citation_result.get("bibtex", ""),
-            "gbt7714": citation_result.get("gbt7714", ""),
-            "formatted_references": citation_result.get("formatted_references", ""),
-            "paper_draft": paper_result.get("paper_draft", {}) if isinstance(paper_result, dict) else {},
-            "paper_language": paper_result.get("language", "") if isinstance(paper_result, dict) else "",
-            "imrd_reports": report_generation_result.get("reports", {}) if isinstance(report_generation_result, dict) else {},
-            "report_output_files": report_output_files if isinstance(report_output_files, dict) else {},
-            "report_session_result": report_session_result,
-            "report_generation_errors": report_generation_result.get("errors", []) if isinstance(report_generation_result, dict) else [],
-            "analysis_results": paper_context.get("analysis_results", {}),
-            "research_artifact": paper_context.get("research_artifact", {}),
-            "llm_analysis_context": paper_context.get("llm_analysis_context", {}),
-            "output_files": merged_output_files,
-            "metadata": {
-                "publication_count": len(publications),
-                "deliverable_count": len(deliverables),
-                "citation_count": citation_result.get("citation_count", 0),
-                "paper_section_count": paper_result.get("section_count", 0) if isinstance(paper_result, dict) else 0,
-                "paper_reference_count": paper_result.get("reference_count", 0) if isinstance(paper_result, dict) else 0,
-                "report_count": len(report_generation_result.get("reports", {})) if isinstance(report_generation_result, dict) else 0,
-                "report_error_count": len(report_generation_result.get("errors", [])) if isinstance(report_generation_result, dict) else 0,
-            },
+        metadata = {
+            "publication_count": len(publications),
+            "deliverable_count": len(deliverables),
+            "citation_count": citation_result.get("citation_count", 0),
+            "paper_section_count": paper_result.get("section_count", 0) if isinstance(paper_result, dict) else 0,
+            "paper_reference_count": paper_result.get("reference_count", 0) if isinstance(paper_result, dict) else 0,
+            "paper_review_summary": copy.deepcopy(paper_result.get("review_summary", {})) if isinstance(paper_result, dict) and isinstance(paper_result.get("review_summary"), dict) else {},
+            "report_count": len(report_generation_result.get("reports", {})) if isinstance(report_generation_result, dict) else 0,
+            "report_error_count": len(report_generation_result.get("errors", [])) if isinstance(report_generation_result, dict) else 0,
         }
+        report_errors = report_generation_result.get("errors", []) if isinstance(report_generation_result, dict) else []
+        status = "degraded" if report_errors else "completed"
+        return build_phase_result(
+            "publish",
+            status=status,
+            results={
+                "publications": publications,
+                "deliverables": deliverables,
+                "citations": citation_result.get("entries", []),
+                "bibtex": citation_result.get("bibtex", ""),
+                "gbt7714": citation_result.get("gbt7714", ""),
+                "formatted_references": citation_result.get("formatted_references", ""),
+                "output_files": merged_output_files,
+                "analysis_results": paper_context.get("analysis_results", {}),
+                "research_artifact": paper_context.get("research_artifact", {}),
+            },
+            artifacts=merged_output_files,
+            metadata=metadata,
+        )
 
     def collect_citation_records(
         self,
@@ -213,7 +236,7 @@ class PublishPhaseMixin:
         if not isinstance(observe_result, dict):
             return []
 
-        corpus_result = observe_result.get("corpus_collection")
+        corpus_result = get_phase_value(observe_result, "corpus_collection")
         if not isinstance(corpus_result, dict) or corpus_result.get("error"):
             return []
 
@@ -400,16 +423,14 @@ class PublishPhaseMixin:
         citation_records: List[Dict[str, Any]],
         citation_result: Dict[str, Any],
     ) -> Dict[str, Any]:
-        hypothesis_candidates = hypothesis_result.get("hypotheses") or []
-        selected_hypothesis = experiment_result.get("selected_hypothesis") or {}
-        if not isinstance(selected_hypothesis, dict):
-            selected_hypothesis = {}
-        if not selected_hypothesis and isinstance(hypothesis_candidates, list) and hypothesis_candidates:
-            first_hypothesis = hypothesis_candidates[0]
-            if isinstance(first_hypothesis, dict):
-                selected_hypothesis = first_hypothesis
+        hypothesis_candidates = get_phase_value(hypothesis_result, "hypotheses", []) or []
+        selected_hypothesis = self._resolve_publish_selected_hypothesis(
+            hypothesis_result,
+            experiment_result,
+            hypothesis_candidates,
+        )
 
-        ingestion_pipeline = observe_result.get("ingestion_pipeline") or {}
+        ingestion_pipeline = get_phase_value(observe_result, "ingestion_pipeline", {}) or {}
 
         publish_hypotheses = self._build_publish_hypothesis_entries(
             hypothesis_result,
@@ -441,8 +462,7 @@ class PublishPhaseMixin:
             if selected_hypothesis
             else {}
         )
-        analyze_results_raw = analyze_result.get("results") if isinstance(analyze_result, dict) else None
-        analyze_results = analyze_results_raw if isinstance(analyze_results_raw, dict) else {}
+        analyze_results = get_phase_results(analyze_result)
         statistical_analysis = self._resolve_publish_statistical_analysis(context, analyze_result, analyze_results)
         observe_entities = self._extract_publish_entities(observe_result, context)
         reasoning_results = self._build_publish_reasoning_results(
@@ -495,8 +515,10 @@ class PublishPhaseMixin:
                 "data_mining_result": data_mining_result,
                 "similar_formula_graph_evidence_summary": similar_formula_graph_evidence_summary,
             }
-        elif evidence_grade_summary and not isinstance(research_artifact.get("evidence_grade_summary"), dict):
-            research_artifact["evidence_grade_summary"] = evidence_grade_summary
+        elif evidence_grade_summary:
+            existing_evidence_grade_summary = research_artifact.get("evidence_grade_summary")
+            if not isinstance(existing_evidence_grade_summary, dict) or not existing_evidence_grade_summary:
+                research_artifact["evidence_grade_summary"] = evidence_grade_summary
         research_artifact = self._enrich_publish_research_artifact(
             research_artifact,
             statistical_analysis,
@@ -570,7 +592,50 @@ class PublishPhaseMixin:
             paper_context["figure_paths"] = context.get("figure_paths")
         return paper_context
 
-    def _build_publish_report_session_result(
+    def _resolve_publish_selected_hypothesis(
+        self,
+        hypothesis_result: Dict[str, Any],
+        experiment_result: Dict[str, Any],
+        hypothesis_candidates: Any,
+    ) -> Dict[str, Any]:
+        experiment_results = get_phase_results(experiment_result)
+        selected_hypothesis = experiment_results.get("selected_hypothesis")
+        if isinstance(selected_hypothesis, dict) and selected_hypothesis:
+            return selected_hypothesis
+
+        selected_hypothesis_id = ""
+        for source in (experiment_result, hypothesis_result):
+            if not isinstance(source, dict):
+                continue
+            metadata = source.get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            candidate_id = str(metadata.get("selected_hypothesis_id") or "").strip()
+            if candidate_id:
+                selected_hypothesis_id = candidate_id
+                break
+
+        if isinstance(hypothesis_candidates, list):
+            if selected_hypothesis_id:
+                matched_hypothesis = next(
+                    (
+                        item
+                        for item in hypothesis_candidates
+                        if isinstance(item, dict)
+                        and str(item.get("hypothesis_id") or "").strip() == selected_hypothesis_id
+                    ),
+                    None,
+                )
+                if matched_hypothesis is not None:
+                    return matched_hypothesis
+
+            first_hypothesis = next((item for item in hypothesis_candidates if isinstance(item, dict)), None)
+            if first_hypothesis is not None:
+                return first_hypothesis
+
+        return {}
+
+    def _build_publish_report_session_payload(
         self,
         cycle: "ResearchCycle",
         context: Dict[str, Any],
@@ -636,7 +701,7 @@ class PublishPhaseMixin:
 
     def _generate_publish_reports(
         self,
-        session_result: Dict[str, Any],
+        report_session_payload: Dict[str, Any],
         context: Dict[str, Any],
     ) -> Dict[str, Any]:
         report_formats = self._resolve_publish_report_formats(context)
@@ -662,7 +727,7 @@ class PublishPhaseMixin:
 
             for report_format in report_formats:
                 try:
-                    report = report_generator.generate_report(session_result, report_format)
+                    report = report_generator.generate_report(report_session_payload, report_format)
                     reports[str(report_format)] = report.to_dict()
                     if report.output_path:
                         output_files[f"imrd_{report.format}"] = report.output_path
@@ -724,12 +789,14 @@ class PublishPhaseMixin:
             [context, analyze_result, analyze_results],
             ("statistics",),
         )
+        raw_statistical_analysis = analyze_results.get("statistical_analysis")
+        statistical_analysis = raw_statistical_analysis if isinstance(raw_statistical_analysis, dict) else {}
         return {
             "source_file": str(context.get("source_file") or cycle.cycle_name or cycle.cycle_id),
             "objective": cycle.research_objective or context.get("objective") or cycle.description,
             "entities": observe_entities,
             "statistics": statistics,
-            "hypothesis": hypothesis_result.get("hypotheses") or ([selected_hypothesis] if selected_hypothesis else []),
+            "hypothesis": get_phase_value(hypothesis_result, "hypotheses", []) or ([selected_hypothesis] if selected_hypothesis else []),
             "hypothesis_result": hypothesis_result,
             "hypothesis_audit_summary": hypothesis_audit_summary,
             "reasoning_results": reasoning_results,
@@ -739,7 +806,7 @@ class PublishPhaseMixin:
             "semantic_graph": semantic_graph,
             "temporal_analysis": temporal_analysis,
             "pattern_recognition": pattern_recognition,
-            "confidence_score": context.get("confidence_score") or analyze_results.get("confidence_level") or 0.5,
+            "confidence_score": context.get("confidence_score") or statistical_analysis.get("confidence_level") or 0.5,
         }
 
     def _build_publish_hypothesis_entries(
@@ -749,7 +816,7 @@ class PublishPhaseMixin:
         context: Dict[str, Any],
         selected_hypothesis: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
-        raw_hypotheses = hypothesis_result.get("hypotheses") or ([selected_hypothesis] if selected_hypothesis else [])
+        raw_hypotheses = get_phase_value(hypothesis_result, "hypotheses", []) or ([selected_hypothesis] if selected_hypothesis else [])
         if not isinstance(raw_hypotheses, list):
             return []
 
@@ -930,7 +997,6 @@ class PublishPhaseMixin:
                 "p_value",
                 "interpretation",
                 "limitations",
-                "primary_association",
                 "evidence_grade",
                 "evidence_grade_summary",
             ):
@@ -955,6 +1021,9 @@ class PublishPhaseMixin:
                 for module_name, module_value in analysis_modules.items():
                     if module_name not in composed:
                         composed[module_name] = module_value
+        for alias_field in _REMOVED_PUBLISH_ANALYSIS_ALIAS_FIELDS:
+            composed.pop(alias_field, None)
+        self._strip_publish_data_mining_aliases(composed, data_mining_result)
         return composed
 
     def _build_publish_llm_analysis_context(
@@ -1036,10 +1105,10 @@ class PublishPhaseMixin:
         analyze_results: Dict[str, Any],
     ) -> Dict[str, Any]:
         candidates = [
-            context.get("reasoning_results"),
-            analyze_result.get("reasoning_results") if isinstance(analyze_result, dict) else None,
+            self._resolve_publish_context_reasoning_results(context) or None,
+            get_phase_results(analyze_result).get("reasoning_results") if isinstance(analyze_result, dict) else None,
             analyze_results.get("reasoning_results") if isinstance(analyze_results, dict) else None,
-            experiment_result.get("reasoning_results") if isinstance(experiment_result, dict) else None,
+            get_phase_results(experiment_result).get("reasoning_results") if isinstance(experiment_result, dict) else None,
         ]
         reasoning_results: Dict[str, Any] = {}
         for candidate in candidates:
@@ -1059,6 +1128,19 @@ class PublishPhaseMixin:
                 reasoning_results["evidence_summary"] = evidence_profile
         return reasoning_results
 
+    def _resolve_publish_context_reasoning_results(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        nested_reasoning = get_phase_results(context).get("reasoning_results")
+        if isinstance(nested_reasoning, dict):
+            return dict(nested_reasoning)
+
+        if is_phase_result_payload(context):
+            return {}
+
+        direct_reasoning = context.get("reasoning_results")
+        if isinstance(direct_reasoning, dict):
+            return dict(direct_reasoning)
+        return {}
+
     def _resolve_publish_data_mining_result(
         self,
         context: Dict[str, Any],
@@ -1070,7 +1152,7 @@ class PublishPhaseMixin:
         if value:
             return value
 
-        research_artifact = context.get("research_artifact")
+        research_artifact = get_phase_value(context, "research_artifact")
         if isinstance(research_artifact, dict):
             nested = research_artifact.get("data_mining_result")
             if isinstance(nested, dict):
@@ -1087,65 +1169,10 @@ class PublishPhaseMixin:
         direct = self._resolve_publish_dict_field(containers, ("statistical_analysis",))
         if direct:
             return direct
-
-        resolved: Dict[str, Any] = {}
-        for field_name in (
-            "statistical_significance",
-            "confidence_level",
-            "effect_size",
-            "p_value",
-            "interpretation",
-            "limitations",
-            "primary_association",
-            "evidence_grade",
-            "evidence_grade_summary",
-        ):
-            value = self._resolve_publish_field(containers, (field_name,))
-            if value is not None:
-                resolved[field_name] = value
-        return resolved
+        return {}
 
     def _build_publish_data_mining_aliases(self, data_mining_result: Dict[str, Any]) -> Dict[str, Any]:
-        if not isinstance(data_mining_result, dict) or not data_mining_result:
-            return {}
-
-        aliases: Dict[str, Any] = {}
-        methods_executed = data_mining_result.get("methods_executed")
-        if isinstance(methods_executed, list) and methods_executed:
-            aliases["data_mining_methods"] = list(methods_executed)
-
-        summary: Dict[str, Any] = {}
-        for field_name in ("record_count", "transaction_count", "item_count"):
-            if data_mining_result.get(field_name) is not None:
-                summary[field_name] = data_mining_result.get(field_name)
-        if isinstance(methods_executed, list) and methods_executed:
-            summary["methods_executed"] = list(methods_executed)
-            summary["method_count"] = len(methods_executed)
-
-        association_rules = data_mining_result.get("association_rules") or {}
-        if isinstance(association_rules, dict):
-            summary["association_rule_count"] = len(association_rules.get("rules") or [])
-
-        clustering = data_mining_result.get("clustering") or {}
-        if isinstance(clustering, dict):
-            summary["cluster_count"] = len(clustering.get("cluster_summary") or [])
-
-        frequency_chi_square = data_mining_result.get("frequency_chi_square") or {}
-        if isinstance(frequency_chi_square, dict):
-            summary["frequency_signal_count"] = len(frequency_chi_square.get("chi_square_top") or [])
-            summary["high_frequency_herb_count"] = len(frequency_chi_square.get("herb_frequency") or [])
-
-        if summary:
-            aliases["data_mining_summary"] = summary
-
-        for field_name, value in data_mining_result.items():
-            if field_name in {"record_count", "transaction_count", "item_count", "methods_executed"}:
-                continue
-            if isinstance(value, dict) and value:
-                aliases[field_name] = copy.deepcopy(value)
-            elif isinstance(value, list) and value:
-                aliases[field_name] = copy.deepcopy(value)
-        return aliases
+        return {}
 
     def _enrich_publish_research_artifact(
         self,
@@ -1156,6 +1183,8 @@ class PublishPhaseMixin:
         similar_formula_graph_evidence_summary: Dict[str, Any],
     ) -> Dict[str, Any]:
         enriched = dict(research_artifact) if isinstance(research_artifact, dict) else {}
+        for alias_field in _REMOVED_PUBLISH_ANALYSIS_ALIAS_FIELDS:
+            enriched.pop(alias_field, None)
         if data_mining_result and not isinstance(enriched.get("data_mining_result"), dict):
             enriched["data_mining_result"] = copy.deepcopy(data_mining_result)
         if statistical_analysis and not isinstance(enriched.get("statistical_analysis"), dict):
@@ -1168,17 +1197,22 @@ class PublishPhaseMixin:
                 similar_formula_graph_evidence_summary
             )
 
-        primary_association = statistical_analysis.get("primary_association") if isinstance(statistical_analysis, dict) else None
-        if isinstance(primary_association, dict) and primary_association and not isinstance(
-            enriched.get("primary_association"),
-            dict,
-        ):
-            enriched["primary_association"] = copy.deepcopy(primary_association)
-
         for alias_key, alias_value in data_mining_aliases.items():
             if alias_key not in enriched:
                 enriched[alias_key] = copy.deepcopy(alias_value)
+        self._strip_publish_data_mining_aliases(enriched, data_mining_result)
         return enriched
+
+    def _strip_publish_data_mining_aliases(
+        self,
+        payload: Dict[str, Any],
+        data_mining_result: Dict[str, Any],
+    ) -> None:
+        if not isinstance(payload, dict) or not isinstance(data_mining_result, dict):
+            return
+
+        for alias_field in _REMOVED_PUBLISH_DATA_MINING_ALIAS_FIELDS:
+            payload.pop(alias_field, None)
 
     def _resolve_publish_research_perspectives(
         self,
@@ -1229,6 +1263,20 @@ class PublishPhaseMixin:
         if evidence_grade:
             return self._build_evidence_grade_summary(evidence_grade)
 
+        for container in containers:
+            if not isinstance(container, dict):
+                continue
+            statistical_analysis = container.get("statistical_analysis")
+            if not isinstance(statistical_analysis, dict):
+                continue
+            nested_summary = statistical_analysis.get("evidence_grade_summary")
+            if isinstance(nested_summary, dict):
+                return dict(nested_summary)
+
+            nested_evidence_grade = statistical_analysis.get("evidence_grade")
+            if isinstance(nested_evidence_grade, dict):
+                return self._build_evidence_grade_summary(nested_evidence_grade)
+
         if isinstance(research_artifact, dict):
             nested = research_artifact.get("evidence_grade_summary")
             if isinstance(nested, dict):
@@ -1241,13 +1289,11 @@ class PublishPhaseMixin:
         analyze_results: Dict[str, Any],
         analysis_results_payload: Dict[str, Any],
     ) -> Any:
-        if context.get("limitations"):
-            return context.get("limitations")
-        if analyze_results.get("limitations"):
-            return analyze_results.get("limitations")
         statistical_analysis = analysis_results_payload.get("statistical_analysis")
         if isinstance(statistical_analysis, dict) and statistical_analysis.get("limitations"):
             return statistical_analysis.get("limitations")
+        if context.get("limitations"):
+            return context.get("limitations")
         return []
 
     def _resolve_publish_paper_iteration_settings(
@@ -1329,7 +1375,7 @@ class PublishPhaseMixin:
         if isinstance(entities, list) and entities:
             return [item for item in entities if isinstance(item, dict)]
 
-        ingestion_pipeline = observe_result.get("ingestion_pipeline") or {}
+        ingestion_pipeline = get_phase_value(observe_result, "ingestion_pipeline", {}) or {}
         documents = ingestion_pipeline.get("documents") or []
         derived: List[Dict[str, Any]] = []
         for document in documents[:5]:

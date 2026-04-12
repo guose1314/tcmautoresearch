@@ -81,12 +81,6 @@
     "require_statistical_significance": true,
     "expect_llm_generation_disabled": true,
     "expected_protocol_source": "template",
-    "require_publish_aliases": [
-      "primary_association",
-      "data_mining_summary",
-      "data_mining_methods",
-      "frequency_chi_square",
-      "association_rules"
-    ]
+    "require_publish_aliases": []
   }
 }

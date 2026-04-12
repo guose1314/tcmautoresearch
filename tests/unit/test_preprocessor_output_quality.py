@@ -168,6 +168,27 @@ class TestOutputGeneratorQuality(unittest.TestCase):
         self.assertIsInstance(unsafe_value, str)
         self.assertLessEqual(len(unsafe_value), 16)
 
+    def test_output_generator_ignores_legacy_phase_result_top_level_reasoning_results(self):
+        module = OutputGenerator({"max_entities": 10})
+        self.assertTrue(module.initialize())
+
+        result = module.execute(
+            {
+                "phase": "analyze",
+                "status": "completed",
+                "results": {},
+                "metadata": {},
+                "error": None,
+                "reasoning_results": {
+                    "evidence_records": [{"evidence_id": "legacy"}],
+                },
+            }
+        )
+
+        output_data = result["output_data"]
+        self.assertEqual(output_data["analysis_results"]["reasoning_results"], {})
+        self.assertEqual(output_data["research_artifact"]["evidence"], [])
+
     def test_output_recommendations_and_cleanup(self):
         module = OutputGenerator({"max_recommendations": 1})
         self.assertTrue(module.initialize())

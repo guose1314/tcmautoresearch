@@ -320,39 +320,23 @@ write_md("docs/quality-archive/entry-xxx.md", entry)
 
 ## 26. D30 修复阶段二次治理补充检查项
 
-- [ ] fixing_stage 使用 d30.v1 合同，并统一从 governance_config 读取阈值与导出版本
-- [ ] stage 级 failed_operations 使用 operation、error、timestamp、duration_seconds 稳定结构
-- [ ] analysis_summary 在 run_fixing_stage 完成后回填 final_status、failed_phase、failed_operation_count
-- [ ] get_repair_performance_report 同时输出 analysis_summary、metadata、failed_operations
-- [ ] export_repair_data 输出 failed_operations、metadata，并保证 RepairAction/FixingStageResult JSON 安全序列化
-- [ ] cleanup 重置 repair_history、failed_stages、failed_operations、performance_metrics，并将 final_status 标记为 cleaned
+- [ ] 该组检查项对应的旧 cycle 修复子系统已于 2026-04-12 删除。
+- [ ] 如需回看治理细节，请查 git 历史，不再作为现行模板执行。
 
 ## 27. D31 模块迭代二次治理补充检查项
 
-- [ ] module_iteration 使用 d31.v1 合同，并统一从 governance_config 读取最小稳定质量阈值与导出版本
-- [ ] module 级 failed_operations 使用 operation、error、timestamp、duration_seconds 稳定字段
-- [ ] analysis_summary 在 execute_module_iteration 完成后回填 final_status、failed_phase、failed_operation_count
-- [ ] get_module_performance_report 输出 analysis_summary、metadata、failed_operations，避免只有 iteration_history 明细
-- [ ] export_module_data 输出 failed_operations、metadata，并保证 ModuleIterationResult 与知识图谱结构 JSON 安全序列化
-- [ ] cleanup 重置 failed_iterations、failed_operations、performance_metrics，并将 final_status 标记为 cleaned
+- [ ] 该组检查项对应的旧 cycle 模块循环子系统已于 2026-04-12 删除。
+- [ ] 如需回看治理细节，请查 git 历史，不再作为现行模板执行。
 
 ## 28. D32 系统级迭代三次治理补充检查项
 
-- [ ] system_iteration 使用 d32.v1 合同，消除与 d29-d31 子模块的版本倒挂
-- [ ] 每次 execute_system_iteration 开始前重置 system_metadata，避免多轮运行状态串味
-- [ ] analysis_summary 通过统一同步函数回填 final_status、failed_phase、failed_operation_count、last_completed_phase
-- [ ] report_metadata 输出 final_status，并与 get_system_performance_report 和 export_system_data 保持一致
-- [ ] export_system_data 顶层输出 metadata，便于机器侧直接消费系统运行态
-- [ ] cleanup 后 get_system_performance_report 仍返回空态消息，不残留上一轮系统状态
+- [ ] 该组检查项对应的旧 cycle 系统循环子系统已于 2026-04-12 删除。
+- [ ] 如需回看治理细节，请查 git 历史，不再作为现行模板执行。
 
 ## 29. D33 测试驱动迭代二次治理补充检查项
 
-- [ ] test_driven_iteration 使用 d33.v1 合同，并统一从 governance_config 读取稳定通过率阈值与导出版本
-- [ ] manager 级 failed_operations 使用 operation、error、timestamp、duration_seconds 稳定字段
-- [ ] analysis_summary 在 run_test_driven_iteration 成功/失败后统一回填 final_status、failed_phase、failed_operation_count
-- [ ] get_test_performance_report 输出 analysis_summary、metadata、failed_operations，而不只保留 iteration_history 明细
-- [ ] export_test_data 输出 failed_operations、metadata，并保证 TestResult/TestDrivenIteration/test_suite 的 JSON 安全序列化
-- [ ] cleanup 重置 test_suites、failed_iterations、failed_operations、performance_metrics，并将 final_status 标记为 cleaned
+- [ ] 该组检查项对应的旧 cycle 测试循环子系统已于 2026-04-12 删除。
+- [ ] 如需回看治理细节，请查 git 历史，不再作为现行模板执行。
 
 ## 30. D34 系统架构二次治理补充检查项
 

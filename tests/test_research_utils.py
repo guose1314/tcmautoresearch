@@ -4,6 +4,9 @@ from pathlib import Path
 
 from src.api.research_utils import (
     WORKSPACE_ROOT,
+    _resolve_dashboard_data_mining_methods,
+    _resolve_data_mining_summary,
+    _resolve_primary_association,
     build_markdown_report,
     build_research_dashboard_payload,
     iter_output_file_candidates,
@@ -120,7 +123,36 @@ class TestResearchUtils(unittest.TestCase):
                 json_path.resolve(),
             )
 
-    def test_build_research_dashboard_payload_uses_alias_fields_and_graph_summary(self):
+    def test_resolve_preferred_report_artifact_supports_phase_result_artifacts(self):
+        with tempfile.TemporaryDirectory(dir=WORKSPACE_ROOT) as temp_dir:
+            root = Path(temp_dir)
+            markdown_path = root / "publish-report.md"
+            docx_path = root / "publish-report.docx"
+            markdown_path.write_text("# publish report\n", encoding="utf-8")
+            docx_path.write_bytes(b"docx")
+
+            payload = {
+                "phase": "publish",
+                "status": "completed",
+                "results": {},
+                "artifacts": [
+                    {"name": "markdown", "path": str(markdown_path)},
+                    {"name": "docx", "path": str(docx_path)},
+                ],
+                "metadata": {},
+                "error": None,
+            }
+
+            self.assertEqual(
+                resolve_preferred_report_artifact(payload, "markdown"),
+                markdown_path.resolve(),
+            )
+            self.assertEqual(
+                resolve_preferred_report_artifact(payload, "auto"),
+                docx_path.resolve(),
+            )
+
+    def test_build_research_dashboard_payload_uses_standard_nested_fields_and_graph_summary(self):
         snapshot = {
             "job_id": "job-1",
             "topic": "桂枝汤 dashboard",
@@ -163,15 +195,24 @@ class TestResearchUtils(unittest.TestCase):
                         "evidence_records": [{"id": "ev-1"}],
                         "claims": [{"id": "claim-1"}, {"id": "claim-2"}],
                     },
-                    "data_mining_summary": {
-                        "association_rule_count": 3,
-                        "cluster_count": 1,
-                        "methods_executed": ["association_rules", "clustering"],
+                    "statistical_analysis": {
+                        "primary_association": {
+                            "herb": "桂枝",
+                            "syndrome": "营卫不和",
+                            "p_value": 0.004,
+                        }
                     },
-                    "primary_association": {
-                        "herb": "桂枝",
-                        "syndrome": "营卫不和",
-                        "p_value": 0.004,
+                    "data_mining_result": {
+                        "record_count": 9,
+                        "transaction_count": 9,
+                        "item_count": 4,
+                        "methods_executed": ["association_rules", "clustering"],
+                        "association_rules": {"rules": [{"rule_id": "r-1"}, {"rule_id": "r-2"}, {"rule_id": "r-3"}]},
+                        "clustering": {"cluster_summary": [{"cluster_id": "c-1"}]},
+                        "frequency_chi_square": {
+                            "chi_square_top": [{"herb": "桂枝", "chi2": 4.2}],
+                            "herb_frequency": [{"herb": "桂枝", "count": 5}],
+                        },
                     },
                     "relation_statistics": {"total_relations": 7},
                 },
@@ -216,6 +257,199 @@ class TestResearchUtils(unittest.TestCase):
             "桂枝汤 -> 桂枝加葛根汤",
         )
         self.assertEqual(payload["protocol_inputs"]["study_type"], "RCT")
+
+    def test_build_research_dashboard_payload_prefers_publish_phase_result_contract(self):
+        snapshot = {
+            "job_id": "job-1",
+            "topic": "桂枝汤 dashboard",
+            "status": "completed",
+            "progress": 100,
+            "current_phase": "publish",
+            "started_at": "2026-04-06T00:00:00",
+            "completed_at": "2026-04-06T00:10:00",
+            "result": {
+                "cycle_id": "cycle-1",
+                "total_duration_sec": 18.0,
+                "started_at": "2026-04-06T00:00:00",
+                "completed_at": "2026-04-06T00:10:00",
+                "phases": [
+                    {
+                        "phase": "observe",
+                        "status": "completed",
+                        "duration_sec": 8.0,
+                        "summary": {"observation_count": 4},
+                    },
+                    {
+                        "phase": "publish",
+                        "status": "completed",
+                        "duration_sec": 10.0,
+                        "summary": {"key_findings": ["桂枝", "白芍"]},
+                    },
+                ],
+                "pipeline_metadata": {
+                    "cycle_name": "demo",
+                    "protocol_inputs": {
+                        "study_type": "RCT",
+                        "primary_outcome": "症状改善",
+                        "intervention": "桂枝汤",
+                        "comparison": "常规治疗",
+                    },
+                },
+                "analysis_results": {
+                    "quality_metrics": {"confidence_score": 0.12, "completeness": 0.34},
+                },
+                "research_artifact": {
+                    "similar_formula_graph_evidence_summary": {"matches": []},
+                },
+                "phase_results": {
+                    "publish": {
+                        "phase": "publish",
+                        "status": "completed",
+                        "results": {
+                            "analysis_results": {
+                                "quality_metrics": {"confidence_score": 0.82, "completeness": 0.91},
+                                "evidence_protocol": {
+                                    "evidence_records": [{"id": "ev-1"}],
+                                    "claims": [{"id": "claim-1"}, {"id": "claim-2"}],
+                                },
+                                "statistical_analysis": {
+                                    "primary_association": {
+                                        "herb": "桂枝",
+                                        "syndrome": "营卫不和",
+                                        "p_value": 0.004,
+                                    }
+                                },
+                                "data_mining_result": {
+                                    "record_count": 9,
+                                    "transaction_count": 9,
+                                    "item_count": 4,
+                                    "methods_executed": ["association_rules", "clustering"],
+                                    "association_rules": {"rules": [{"rule_id": "r-1"}, {"rule_id": "r-2"}, {"rule_id": "r-3"}]},
+                                    "clustering": {"cluster_summary": [{"cluster_id": "c-1"}]},
+                                    "frequency_chi_square": {
+                                        "chi_square_top": [{"herb": "桂枝", "chi2": 4.2}],
+                                        "herb_frequency": [{"herb": "桂枝", "count": 5}],
+                                    },
+                                },
+                                "relation_statistics": {"total_relations": 7},
+                            },
+                            "research_artifact": {
+                                "similar_formula_graph_evidence_summary": {
+                                    "formula_count": 1,
+                                    "match_count": 1,
+                                    "matches": [
+                                        {
+                                            "formula_name": "桂枝汤",
+                                            "similar_formula_name": "桂枝加葛根汤",
+                                            "similarity_score": 0.84,
+                                            "evidence_score": 0.76,
+                                            "shared_herbs": ["桂枝", "白芍"],
+                                            "shared_syndromes": ["营卫不和"],
+                                            "retrieval_sources": ["kg"],
+                                        }
+                                    ],
+                                }
+                            },
+                        },
+                        "metadata": {},
+                        "error": None,
+                    }
+                },
+            },
+        }
+
+        payload = build_research_dashboard_payload(snapshot)
+
+        self.assertEqual(payload["quality_board"]["confidence_score"], 0.82)
+        self.assertEqual(payload["evidence_board"]["evidence_count"], 1)
+        self.assertEqual(payload["evidence_board"]["association_rule_count"], 3)
+        self.assertEqual(payload["knowledge_graph_board"]["stats"]["node_count"], 2)
+        self.assertEqual(payload["knowledge_graph_board"]["highlights"][0]["title"], "桂枝汤 -> 桂枝加葛根汤")
+
+    def test_dashboard_statistical_alias_helpers_require_standard_nested_fields(self):
+        analysis_results = {
+            "statistical_analysis": {
+                "primary_association": {
+                    "herb": "黄芪",
+                    "syndrome": "气虚证",
+                    "p_value": 0.01,
+                }
+            },
+            "primary_association": {
+                "herb": "legacy-herb",
+                "syndrome": "legacy-syndrome",
+                "p_value": 0.99,
+            },
+            "data_mining_result": {
+                "record_count": 12,
+                "transaction_count": 12,
+                "item_count": 4,
+                "methods_executed": ["frequency_chi_square"],
+                "association_rules": {"rules": [{"rule_id": "rule-1"}]},
+                "clustering": {"cluster_summary": [{"cluster_id": "c-1"}]},
+                "frequency_chi_square": {
+                    "chi_square_top": [{"herb": "黄芪", "chi2": 4.2}],
+                    "herb_frequency": [{"herb": "黄芪", "count": 6}],
+                },
+            },
+            "data_mining_summary": {
+                "record_count": 12,
+                "transaction_count": 12,
+                "item_count": 4,
+                "association_rule_count": 999,
+                "cluster_count": 999,
+                "frequency_signal_count": 999,
+                "methods_executed": ["legacy_method"],
+            },
+            "data_mining_methods": ["legacy_method"],
+        }
+
+        primary_association = _resolve_primary_association(analysis_results, {})
+        data_mining_summary = _resolve_data_mining_summary(analysis_results, {})
+        data_mining_methods = _resolve_dashboard_data_mining_methods(analysis_results, data_mining_summary)
+
+        self.assertEqual(primary_association["herb"], "黄芪")
+        self.assertEqual(primary_association["syndrome"], "气虚证")
+        self.assertEqual(data_mining_summary["record_count"], 12)
+        self.assertEqual(data_mining_summary["transaction_count"], 12)
+        self.assertEqual(data_mining_summary["item_count"], 4)
+        self.assertEqual(data_mining_summary["association_rule_count"], 1)
+        self.assertEqual(data_mining_summary["cluster_count"], 1)
+        self.assertEqual(data_mining_summary["frequency_signal_count"], 1)
+        self.assertEqual(data_mining_methods, ["frequency_chi_square"])
+
+    def test_dashboard_statistical_alias_helpers_ignore_alias_only_payloads(self):
+        analysis_results = {
+            "primary_association": {
+                "herb": "legacy-herb",
+                "syndrome": "legacy-syndrome",
+            },
+            "data_mining_summary": {
+                "record_count": 24,
+                "methods_executed": ["legacy_method"],
+            },
+            "data_mining_methods": ["legacy_method"],
+        }
+        research_artifact = {
+            "primary_association": {
+                "herb": "artifact-herb",
+                "syndrome": "artifact-syndrome",
+            },
+            "data_mining_summary": {
+                "record_count": 12,
+            },
+            "data_mining_result": {
+                "methods_executed": ["artifact_method"],
+            },
+        }
+
+        primary_association = _resolve_primary_association(analysis_results, research_artifact)
+        data_mining_summary = _resolve_data_mining_summary(analysis_results, research_artifact)
+        data_mining_methods = _resolve_dashboard_data_mining_methods(analysis_results, data_mining_summary)
+
+        self.assertEqual(primary_association, {})
+        self.assertEqual(data_mining_summary, {})
+        self.assertEqual(data_mining_methods, [])
 
 
 if __name__ == "__main__":

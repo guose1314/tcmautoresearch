@@ -373,30 +373,33 @@ storage.close()
 
 ```python
 from src.storage import UnifiedStorageDriver
-from src.cycle.iteration_cycle import IterationCycle
+from src.cycle.cycle_runner import execute_real_module_pipeline
 
 # 初始化存储
 storage = UnifiedStorageDriver(...)
 storage.initialize()
-
-# 初始化处理循环
-cycle = IterationCycle(config=config)
 
 # 处理文档
 doc_id = storage.save_document(source_file)
 storage.log_module_execution(doc_id, 'DocumentPreprocessor', 'start')
 
 try:
-    # ... 执行处理 ...
-    
-    result = cycle.execute(document_content)
+    module_results = execute_real_module_pipeline(
+        {
+            "source_file": source_file,
+            "raw_text": document_content,
+            "document_id": doc_id,
+        }
+    )
+    final_context = module_results[-1]["input_data"] if module_results else {}
     
     # 保存结果到存储
-    storage.save_entities(doc_id, result['entities'])
-    storage.save_relationships(doc_id, result['relationships'])
-    storage.save_statistics(doc_id, result['statistics'])
-    storage.save_quality_metrics(doc_id, result['quality_metrics'])
-    storage.save_research_analysis(doc_id, result['research_analysis'])
+    storage.save_entities(doc_id, final_context.get('entities', []))
+    storage.save_relationships(
+        doc_id,
+        final_context.get('relationships', final_context.get('semantic_relationships', [])),
+    )
+    storage.save_statistics(doc_id, final_context.get('statistics', {}))
     
     storage.log_module_execution(doc_id, 'Complete', 'success')
     storage.update_document_status(doc_id, 'completed')

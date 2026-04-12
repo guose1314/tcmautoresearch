@@ -40,11 +40,7 @@
 - src/core/module_base.py
 - src/core/module_interface.py
 - src/core/algorithm_optimizer.py
-- src/cycle/iteration_cycle.py
-- src/cycle/module_iteration.py
-- src/cycle/system_iteration.py
-- src/cycle/test_driven_iteration.py
-- src/cycle/fixing_stage.py
+- src/cycle/ 旧 iteration 子系统（已于 2026-04-12 清理）
 - src/research/research_pipeline.py
 - src/research/theoretical_framework.py
 - src/test/automated_tester.py

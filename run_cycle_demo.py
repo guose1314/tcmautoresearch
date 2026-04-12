@@ -37,6 +37,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 DEFAULT_CYCLE_DEMO_GOVERNANCE = dict(cycle_reporter.DEFAULT_CYCLE_DEMO_GOVERNANCE)
+CYCLE_DEMO_EXPORT_CONTRACT_FIELDS = (
+    'metadata',
+    'report_metadata',
+    'analysis_summary',
+    'failed_operations',
+)
+CYCLE_DEMO_EXPORT_CONTRACT_VERSION = DEFAULT_CYCLE_DEMO_GOVERNANCE['export_contract_version']
 os.makedirs('./output', exist_ok=True)
 os.makedirs('./logs', exist_ok=True)
 os.makedirs('./data', exist_ok=True)
@@ -57,6 +64,15 @@ _extract_research_phase_results = cycle_reporter.extract_research_phase_results
 summarize_module_quality = cycle_reporter.summarize_module_quality
 
 create_sample_data = cycle_runner.create_sample_data
+
+
+def describe_cycle_demo_export_contract() -> Dict[str, Any]:
+    """返回 cycle demo 统一导出合同摘要。"""
+    return {
+        'result_schema': 'cycle_demo_report',
+        'export_contract_version': CYCLE_DEMO_EXPORT_CONTRACT_VERSION,
+        'required_fields': list(CYCLE_DEMO_EXPORT_CONTRACT_FIELDS),
+    }
 
 
 def setup_signal_handlers() -> None:

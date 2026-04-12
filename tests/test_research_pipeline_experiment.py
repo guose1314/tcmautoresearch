@@ -61,13 +61,17 @@ class TestResearchPipelineExperimentPhase(unittest.TestCase):
 
         self.assertEqual(experiment_result["phase"], "experiment")
         self.assertEqual(experiment_result["metadata"]["selected_hypothesis_id"], selected_id)
-        self.assertEqual(len(experiment_result["experiments"]), 1)
-        self.assertEqual(experiment_result["experiments"][0]["hypothesis_id"], selected_id)
-        self.assertIn("study_protocol", experiment_result)
-        self.assertIn("sample_size", experiment_result["study_protocol"])
+        self.assertEqual(len(experiment_result["results"]["experiments"]), 1)
+        self.assertEqual(experiment_result["results"]["experiments"][0]["hypothesis_id"], selected_id)
+        self.assertIn("study_protocol", experiment_result["results"])
+        self.assertIn("sample_size", experiment_result["results"]["study_protocol"])
         self.assertIn("validation_plan", experiment_result["results"])
         self.assertIn("study_protocol", experiment_result["results"])
-        self.assertEqual(experiment_result["success_rate"], 1.0)
+        self.assertEqual(experiment_result["results"]["success_rate"], 1.0)
+        self.assertNotIn("experiments", experiment_result)
+        self.assertNotIn("study_protocol", experiment_result)
+        self.assertNotIn("success_rate", experiment_result)
+        self.assertNotIn("selected_hypothesis", experiment_result)
 
     def test_hypothesis_context_prefers_observe_semantic_relationships(self):
         cycle = self.pipeline.create_research_cycle(

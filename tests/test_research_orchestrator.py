@@ -373,6 +373,30 @@ class TestOrchestratorMisc(unittest.TestCase):
         serialized = json.dumps(d, ensure_ascii=False)
         self.assertIn("test", serialized)
 
+    def test_extract_publish_result_highlights_reads_standard_results(self):
+        publish_result = {
+            "phase": "publish",
+            "status": "completed",
+            "results": {
+                "analysis_results": {"statistical_analysis": {"p_value": 0.003}},
+                "research_artifact": {"hypothesis": [{"title": "桂枝汤调和营卫假设"}]},
+            },
+            "artifacts": [],
+            "metadata": {},
+            "error": None,
+        }
+        cycle = MagicMock()
+        cycle.phase_executions = {ResearchPhase.PUBLISH: {"result": publish_result}}
+        pipeline = MagicMock()
+        pipeline.ResearchPhase = ResearchPhase
+        pipeline.research_cycles = {"cycle-1": cycle}
+
+        highlights = ResearchOrchestrator._extract_publish_result_highlights(pipeline, "cycle-1")
+
+        self.assertEqual(highlights["analysis_results"], publish_result["results"]["analysis_results"])
+        self.assertEqual(highlights["research_artifact"], publish_result["results"]["research_artifact"])
+        self.assertEqual(publish_result["metadata"].get("deprecated_field_fallbacks"), None)
+
 
 class TestOrchestratorObserveHypothesisExperimentSummary(unittest.TestCase):
     @patch("src.research.research_pipeline.LiteratureRetriever.close")

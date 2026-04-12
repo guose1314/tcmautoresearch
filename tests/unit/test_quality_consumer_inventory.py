@@ -72,6 +72,15 @@ class TestQualityConsumerInventory(unittest.TestCase):
                 "(Path('output') / 'generic-report.json').write_text(json.dumps({'summary': storage.get('summary')}), encoding='utf-8')\n",
                 encoding="utf-8",
             )
+            (root / "_check_db.py").write_text(
+                "\"\"\"Quick DB content check.\"\"\"\n"
+                "import sqlite3\n"
+                "conn = sqlite3.connect('data/tcmautoresearch.db')\n"
+                "cur = conn.cursor()\n"
+                "cur.execute(\"SELECT name FROM sqlite_master WHERE type='table' ORDER BY name\")\n"
+                "cur.execute(\"SELECT COUNT(*) FROM sample\")\n",
+                encoding="utf-8",
+            )
             (root / "test_inventory_fixture.py").write_text(
                 "from pathlib import Path\n"
                 "Path('output').mkdir(exist_ok=True)\n",
@@ -98,13 +107,15 @@ class TestQualityConsumerInventory(unittest.TestCase):
         self.assertIn("autorresearch_report", inventory["aggregate_autorresearch.py"]["artifact_inputs"])
         self.assertEqual(report["analysis_summary"]["eligible_missing_contract_count"], 3)
         self.assertEqual(report["analysis_summary"]["scan_scope"], ["tools", "root_scripts"])
-        self.assertEqual(report["analysis_summary"]["root_script_observation_count"], 1)
-        self.assertEqual(report["analysis_summary"]["root_script_observation_category_counts"], {"non_governance_domain_script": 1})
+        self.assertEqual(report["analysis_summary"]["root_script_observation_count"], 2)
+        self.assertEqual(report["analysis_summary"]["root_script_observation_category_counts"], {"non_governance_domain_script": 2})
         observations = {item["path"]: item for item in report["root_script_observations"]}
         self.assertIn("generate_test_report.py", observations)
+        self.assertIn("_check_db.py", observations)
         self.assertEqual(observations["generate_test_report.py"]["observation_status"], "no_artifact_match")
         self.assertEqual(observations["generate_test_report.py"]["observation_category"], "non_governance_domain_script")
         self.assertEqual(observations["generate_test_report.py"]["observation_category_label"], "非治理域脚本")
+        self.assertEqual(observations["_check_db.py"]["observation_category"], "non_governance_domain_script")
         self.assertEqual(report["recommendation"]["recommended_path"], "tools/quality_sync.py")
         self.assertEqual(report["report_metadata"]["contract_version"], "d62.v1")
 

@@ -13,8 +13,17 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from src.core.module_base import BaseModule
+from src.research.phase_result import get_phase_value
 
 logger = logging.getLogger(__name__)
+
+
+_ANALYZE_METHOD_LABELS = {
+    "reasoning_engine": "规则/证据驱动推理",
+    "statistical_data_miner": "统计数据挖掘",
+    "frequency_chi_square": "频次与卡方检验",
+    "association_rules": "关联规则分析",
+}
 
 
 class ReportFormat(str, Enum):
@@ -154,9 +163,9 @@ class ReportGenerator(BaseModule):
     def _build_introduction(self, session_result: Dict[str, Any]) -> str:
         question = self._resolve_question(session_result)
         observe = self._phase_result(session_result, "observe")
-        literature = observe.get("literature_pipeline", {}) if isinstance(observe.get("literature_pipeline"), dict) else {}
-        observations = self._coerce_string_list(observe.get("observations"))
-        findings = self._coerce_string_list(observe.get("findings"))
+        literature = get_phase_value(observe, "literature_pipeline", {}) if isinstance(get_phase_value(observe, "literature_pipeline", {}), dict) else {}
+        observations = self._coerce_string_list(get_phase_value(observe, "observations", []))
+        findings = self._coerce_string_list(get_phase_value(observe, "findings", []))
         literature_summaries = self._extract_literature_summaries(literature)
         evidence_points = self._extract_evidence_points(literature)
 
@@ -276,8 +285,8 @@ class ReportGenerator(BaseModule):
         entities = self._extract_entities(session_result)
         graph_summary = self._extract_graph_summary(session_result)
         reasoning_points = self._extract_reasoning_points(session_result)
-        findings = self._coerce_string_list(observe.get("findings"))
-        analysis_points = self._coerce_string_list(analyze.get("analysis_results"))
+        findings = self._coerce_string_list(get_phase_value(observe, "findings", []))
+        analysis_points = self._extract_analysis_points(analyze)
 
         paragraphs = [
             (
@@ -328,11 +337,11 @@ class ReportGenerator(BaseModule):
         question = self._resolve_question(session_result)
         observe = self._phase_result(session_result, "observe")
         analyze = self._phase_result(session_result, "analyze")
-        literature = observe.get("literature_pipeline", {}) if isinstance(observe.get("literature_pipeline"), dict) else {}
+        literature = get_phase_value(observe, "literature_pipeline", {}) if isinstance(get_phase_value(observe, "literature_pipeline", {}), dict) else {}
         literature_summaries = self._extract_literature_summaries(literature)
         limitations = self._extract_limitations(session_result)
         future_directions = self._extract_future_directions(session_result)
-        comparison_points = self._coerce_string_list(analyze.get("comparison_with_literature"))
+        comparison_points = self._extract_comparison_points(analyze)
 
         paragraphs = [
             (
@@ -501,16 +510,23 @@ class ReportGenerator(BaseModule):
 
     def _extract_protocol(self, experiment: Dict[str, Any]) -> Dict[str, Any]:
         for key in ("study_protocol", "protocol", "experiment_protocol"):
-            candidate = experiment.get(key)
+            candidate = get_phase_value(experiment, key)
             if isinstance(candidate, dict):
                 return candidate
+        experiments = get_phase_value(experiment, "experiments", [])
+        if isinstance(experiments, list) and experiments:
+            first_experiment = experiments[0]
+            if isinstance(first_experiment, dict):
+                nested_protocol = first_experiment.get("study_protocol")
+                if isinstance(nested_protocol, dict):
+                    return nested_protocol
         return {}
 
     def _extract_data_sources(self, observe: Dict[str, Any]) -> List[str]:
         sources: List[str] = []
-        corpus = observe.get("corpus_collection") if isinstance(observe.get("corpus_collection"), dict) else {}
-        literature = observe.get("literature_pipeline") if isinstance(observe.get("literature_pipeline"), dict) else {}
-        ingestion = observe.get("ingestion_pipeline") if isinstance(observe.get("ingestion_pipeline"), dict) else {}
+        corpus = get_phase_value(observe, "corpus_collection", {}) if isinstance(get_phase_value(observe, "corpus_collection", {}), dict) else {}
+        literature = get_phase_value(observe, "literature_pipeline", {}) if isinstance(get_phase_value(observe, "literature_pipeline", {}), dict) else {}
+        ingestion = get_phase_value(observe, "ingestion_pipeline", {}) if isinstance(get_phase_value(observe, "ingestion_pipeline", {}), dict) else {}
 
         if corpus:
             sources.append("古籍/本地语料")
@@ -533,15 +549,50 @@ class ReportGenerator(BaseModule):
         return self._unique_strings(sources)
 
     def _extract_analysis_methods(self, analyze: Dict[str, Any]) -> List[str]:
-        methods = self._coerce_string_list(analyze.get("analysis_methods"))
+        methods = self._coerce_string_list(get_phase_value(analyze, "analysis_methods", []))
         if methods:
             return methods
+
+        metadata = analyze.get("metadata") if isinstance(analyze.get("metadata"), dict) else {}
+        collected = [
+            _ANALYZE_METHOD_LABELS.get(str(item), str(item))
+            for item in self._coerce_string_list(metadata.get("analysis_modules"))
+        ]
+        collected.extend(
+            _ANALYZE_METHOD_LABELS.get(str(item), str(item))
+            for item in self._coerce_string_list(metadata.get("data_mining_methods"))
+        )
+        if collected:
+            return self._unique_strings(collected)
+
         collected = []
         if analyze:
             collected.append("实体抽取与关系建模")
             collected.append("知识图谱统计")
             collected.append("规则/证据驱动推理")
         return self._unique_strings(collected)
+
+    def _extract_analysis_points(self, analyze: Dict[str, Any]) -> List[str]:
+        direct_points = self._coerce_string_list(get_phase_value(analyze, "analysis_results", []))
+        if direct_points:
+            return direct_points
+
+        statistical_analysis = get_phase_value(analyze, "statistical_analysis", {})
+        if not isinstance(statistical_analysis, dict):
+            return []
+
+        collected: List[str] = []
+        interpretation = self._resolve_string(statistical_analysis.get("interpretation"))
+        if interpretation:
+            collected.append(interpretation)
+
+        evidence_grade_summary = statistical_analysis.get("evidence_grade_summary")
+        if isinstance(evidence_grade_summary, dict):
+            collected.extend(self._coerce_string_list(evidence_grade_summary.get("summary")))
+        return self._unique_strings(collected)
+
+    def _extract_comparison_points(self, analyze: Dict[str, Any]) -> List[str]:
+        return self._coerce_string_list(get_phase_value(analyze, "comparison_with_literature", []))
 
     def _extract_entities(self, session_result: Dict[str, Any]) -> List[str]:
         raw_values = self._collect_by_keys(session_result, {"entities", "entity_list", "named_entities"})
@@ -617,17 +668,32 @@ class ReportGenerator(BaseModule):
     def _extract_limitations(self, session_result: Dict[str, Any]) -> List[str]:
         reflect = self._phase_result(session_result, "reflect")
         analyze = self._phase_result(session_result, "analyze")
-        limitations = self._coerce_string_list(reflect.get("limitations"))
-        limitations.extend(self._coerce_string_list(analyze.get("limitations")))
+        limitations = self._coerce_string_list(get_phase_value(reflect, "limitations", []))
+        limitations.extend(self._extract_analyze_limitations(analyze))
         return self._unique_strings(limitations)
 
     def _extract_future_directions(self, session_result: Dict[str, Any]) -> List[str]:
         reflect = self._phase_result(session_result, "reflect")
         publish = self._phase_result(session_result, "publish")
-        directions = self._coerce_string_list(reflect.get("future_directions"))
-        directions.extend(self._coerce_string_list(publish.get("future_directions")))
-        directions.extend(self._coerce_string_list(reflect.get("recommendations")))
+        directions = self._coerce_string_list(get_phase_value(reflect, "improvement_plan", []))
+        directions.extend(self._coerce_string_list(get_phase_value(reflect, "future_directions", [])))
+        directions.extend(self._coerce_string_list(get_phase_value(reflect, "recommendations", [])))
+
+        publish_analysis_results = get_phase_value(publish, "analysis_results", {})
+        if isinstance(publish_analysis_results, dict):
+            directions.extend(self._coerce_string_list(publish_analysis_results.get("recommendations")))
+        directions.extend(self._coerce_string_list(get_phase_value(publish, "recommendations", [])))
         return self._unique_strings(directions)
+
+    def _extract_analyze_limitations(self, analyze: Dict[str, Any]) -> List[str]:
+        direct_limitations = self._coerce_string_list(get_phase_value(analyze, "limitations", []))
+        if direct_limitations:
+            return direct_limitations
+
+        statistical_analysis = get_phase_value(analyze, "statistical_analysis", {})
+        if isinstance(statistical_analysis, dict):
+            return self._coerce_string_list(statistical_analysis.get("limitations"))
+        return []
 
     def _collect_by_keys(self, payload: Any, target_keys: set[str]) -> List[Any]:
         collected: List[Any] = []

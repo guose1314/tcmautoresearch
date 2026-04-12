@@ -1057,7 +1057,7 @@ function Get-RollbackTips {
         "& <python> -m unittest tests.unit.test_preprocessor_output_quality"
     )
     $tips["D8"] = @(
-        "git restore run_cycle_demo.py src/cycle/iteration_cycle.py",
+        "git restore run_cycle_demo.py",
         "& <python> tests/test_full_cycle.py"
     )
     $tips["D9"] = @(
@@ -1073,32 +1073,32 @@ function Get-RollbackTips {
         "& <python> tools/quality_gate.py"
     )
     $tips["D12"] = @(
-        "git restore src/cycle/iteration_cycle.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D13"] = @(
-        "git restore src/cycle/system_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D14"] = @(
-        "git restore src/cycle/iteration_cycle.py src/cycle/system_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D15"] = @(
-        "git restore src/cycle/iteration_cycle.py src/cycle/system_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D16"] = @(
-        "git restore src/cycle/module_iteration.py src/cycle/iteration_cycle.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D17"] = @(
-        "git restore src/cycle/test_driven_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D18"] = @(
-        "git restore src/cycle/fixing_stage.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py tests/unit/test_fixing_stage_classification.py",
-        "& <python> -m unittest tests.unit.test_architecture_cycle_quality tests.unit.test_fixing_stage_classification"
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D19"] = @(
         "git restore src/research/research_pipeline.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/test_research_pipeline_quality.py",
@@ -1137,27 +1137,27 @@ function Get-RollbackTips {
         "& <python> -m unittest tests.test_theoretical_framework_quality"
     )
     $tips["D28"] = @(
-        "git restore src/cycle/system_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D29"] = @(
-        "git restore src/cycle/iteration_cycle.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D30"] = @(
-        "git restore src/cycle/fixing_stage.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
-        "& <python> -m unittest tests.unit.test_architecture_cycle_quality tests.unit.test_fixing_stage_classification"
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D31"] = @(
-        "git restore src/cycle/module_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D32"] = @(
-        "git restore src/cycle/system_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D33"] = @(
-        "git restore src/cycle/test_driven_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D34"] = @(
@@ -1186,20 +1186,20 @@ function Get-RollbackTips {
     )
 
     $tips["D40"] = @(
-        "git restore src/cycle/iteration_cycle.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
 
     $tips["D41"] = @(
-        "git restore src/cycle/fixing_stage.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py tests/unit/test_fixing_stage_classification.py",
-        "& <python> -m unittest tests.unit.test_architecture_cycle_quality tests.unit.test_fixing_stage_classification"
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D42"] = @(
-        "git restore src/cycle/system_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D43"] = @(
-        "git restore src/cycle/module_iteration.py config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
+        "git restore config.yml tools/stage1_d1_d10_runner.ps1 docs/quality-governance/refactor-quality-templates.md tests/unit/test_architecture_cycle_quality.py",
         "& <python> -m unittest tests.unit.test_architecture_cycle_quality"
     )
     $tips["D44"] = @(

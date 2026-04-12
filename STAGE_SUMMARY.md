@@ -1,5 +1,73 @@
 # 阶段性推进摘要
 
+## 阶段性收口（2026-04-12）
+
+### 本轮收口目标
+- 完成 PhaseResult 统一契约从 producer 到 secondary consumer 的一轮收口，并清掉 publish 根级旧镜像字段。
+- 删除已不在生产路径中的 legacy cycle 迭代子系统，缩小 `src/cycle/` 到当前运行时入口。
+- 修复 quality consumer inventory 与真实 smoke/质量门联动，让全仓在当前契约下重新回到绿色基线。
+- 为后续断点续接补齐阶段摘要、只读盘点结论和诊断工具入口。
+
+### 当前已落地成果
+
+#### 1. PhaseResult 主契约已经成为研究主链基线
+- 新增 `src/research/phase_result.py`，统一提供 `PhaseResult` dataclass、`build_phase_result()`、`normalize_phase_result()`、`get_phase_value()`、`get_phase_results()`、`get_phase_artifact_map()`。
+- 六个研究阶段的返回值已统一到 `phase/status/results/artifacts/metadata/error`，并由 `src/research/pipeline_orchestrator.py` 在 event 路径、handler 路径和失败路径统一做 `normalize_phase_result()` 兜底。
+- `src/quality/quality_assessor.py` 已接受 `degraded`、`blocked` 为合法状态；`analyze` 记录为空时会显式落成 degraded，而不是只在 metadata 中隐含表达。
+
+#### 2. publish 根级旧镜像字段删除序列已经收完
+- `PHASE_RESULT_LEGACY_FIELD_REMOVAL_2026_04_08.md` 已记录完整删除轨迹；publish 根级的 `paper_draft`、`imrd_reports`、`paper_language`、`report_output_files`、`report_session_result`、`report_generation_errors`、`analysis_results`、`research_artifact` 等旧镜像已全部从根结果移除。
+- publish 对外标准承载位已收敛到 `results.*` 与 `artifacts`；`report_session_result` 内部命名也收敛为 `report_session_payload`，明确其只属于 ReportGenerator 输入，而不是对外 DTO。
+- 根 `phase_results` 的 `metadata.deprecated_field_fallbacks` 已清零，不再依赖旧顶层兼容回退。
+
+#### 3. secondary consumer 迁移已覆盖主要生成/摘要层
+- `src/api/research_utils.py` 已优先从 `phase_results.publish` 的标准 `analysis_results/research_artifact/artifacts` 读取 dashboard 高亮与报告产物。
+- `src/generation/paper_writer.py` 已改为 helper-based 解析 `output_data`、`research_artifact`、`quality_metrics`、`recommendations`、`llm_analysis_context`、图谱证据等，不再靠散落的 `context.get()`。
+- `src/generation/report_generator.py` 已改为 results-first 路径，Methods/Results/Discussion 中对 `study_protocol`、`analysis_results`、`comparison_with_literature`、`limitations`、`future directions` 的读取都已收敛。
+- `src/generation/llm_context_adapter.py` 已迁到 PhaseResult-aware 读取：当前 payload、`session_result.phase_results.publish/analyze`、`output_data`、`analysis_results`、`research_artifact` 都会走 helper 解析，同时保留对 wrapped generator 所需的顶层 `analysis_results/analysis_modules` 兼容输出。
+- 只读扫尾已经确认：生成层里没有新的真实 PhaseResult consumer 债务；`src/generation/output_formatter.py` 当前仍保留少量顶层读取，但这是 publish 通用生成上下文契约，不计入本轮统一契约阻塞项。
+
+#### 4. legacy cycle 子系统已经移出当前基线
+- 已删除 `src/cycle/fixing_stage.py`、`src/cycle/iteration_cycle.py`、`src/cycle/module_iteration.py`、`src/cycle/system_iteration.py`、`src/cycle/test_driven_iteration.py`。
+- `src/cycle/__init__.py` 现在只保留当前运行时入口：`build_cycle_demo_arg_parser`、`execute_cycle_demo_command`、`execute_real_module_pipeline`、`run_full_cycle_demo`、`run_research_session`。
+- 相关过时测试与文档引用已同步清理，`tests/unit/test_architecture_cycle_quality.py` 已改为验证当前 cycle 包导出与 core/architecture 契约，而不是继续锚定旧 iteration 子系统。
+
+#### 5. 质量门、inventory 和真实诊断基线已重新稳定
+- `run_cycle_demo.py` 已补显式 export contract 描述，满足 `quality_consumer_inventory` 对 root script 的契约识别。
+- `tools/quality_consumer_inventory.py` 已把 sqlite/DB 快速检查脚本归类为 `non_governance_domain_script`，不再作为未分类脚本打红质量门。
+- `src/research/real_observe_smoke.py` 与 `tools/diagnostics/real_observe_smoke_profile.json` 已对齐新契约，不再把 publish 旧 alias 字段当作强制要求。
+- `src/knowledge/embedding_service.py` 已对“查询文本与已索引条目完全相同”的情况复用缓存向量，避免离线 smoke/词典对比时重新触发 SentenceTransformer 初始化与 Hugging Face 重试。
+
+#### 6. 词典与真实运行诊断工具已补齐
+- 新增 `tools/diagnostics/rebuild_tcm_lexicon.py`，支持默认构建、`--audit-dir` 逐类别审计和可选 `--include-micang-clinical-terms`。
+- 新增 `tools/diagnostics/compare_real_cycle_lexicon_modes.py` 与 `tools/diagnostics/real_observe_available_workspace_profile.json`，可以在同一可用语料上对比“无词典/重建词典”两条真实运行链。
+- 当前词典审计基线已记录在 repo memory：默认构建不再把 `秘藏膏丹丸散方剂` 的高噪声临床条目直接混入 syndrome/efficacy，真实运行对比已证明重建词典显著提升实体、关系、记录数与 KG 路径数。
+
+### 关键验证记录
+- `tests/test_research_utils.py` + `tests/test_paper_writer.py`：47 passed。
+- `tests/unit/test_publish_phase.py`：34 passed（secondary consumer 迁移后回归）。
+- `tests/test_report_generator.py` + `tests/test_output_generator.py`：31 passed。
+- `tests/test_llm_context_adapter.py` + `tests/test_citation_manager.py` 相关选定用例：4 passed。
+- cycle legacy 删除后的定向回归：`tests/unit/test_architecture_cycle_quality.py`、`tests/unit/test_iteration_feedback_loop.py`、`tests/unit/test_cycle_demo_contract.py`、`tests/test_research_pipeline_quality.py` 已通过。
+- 全仓质量门：`tools/quality_gate.py --report output/quality-gate.json` 返回 `overall_success=True`，当前基线为 `overall_score=95.0`、`grade=A`、`quality_consumer_inventory.missing_contract_count=0`、`uncategorized_root_script_count=0`。
+
+### 当前续接锚点
+- 如果继续沿统一契约这条线推进，真正剩下的只是一类“风格一致性优化”：把 `src/generation/output_formatter.py` 的少量 reader 也改成 helper-based 解析；这不是当前阻塞项。
+- publish 根级兼容镜像删除已经结束，后续不要再恢复 `paper_draft`、`report_session_result`、`report_output_files` 这类根字段；对外读取应继续通过 `results.*`、`artifacts` 或 orchestrator/web DTO。
+- `src/cycle/` 已经完成一次硬收缩，后续不应再围绕被删除的 iteration/fixing/test-driven 子系统追加修复；下一步若继续清理，应只审视当前 runtime/demo 封装是否还能再合并。
+- 词典/真实运行诊断现已具备独立工具链，后续可以单独沿 `tools/diagnostics/rebuild_tcm_lexicon.py` 和 `compare_real_cycle_lexicon_modes.py` 继续演进，不必重新从主链编排里埋临时脚本。
+
+### 任意日期继续接手建议
+1. 先读本节“阶段性收口（2026-04-12）”，再读 `PHASE_RESULT_LEGACY_FIELD_REMOVAL_2026_04_08.md`，不要直接从更老的 Roadmap 重新判断当前完成度。
+2. 运行 `python tools/quality_gate.py --report output/quality-gate.json`，确认基线仍是 `overall_success=True`。
+3. 如果继续统一契约线，先决定是否做 `output_formatter.py` 的风格一致性 cleanup；如果不做，这条线可以视为阶段性完成。
+4. 如果继续真实研究质量线，优先从 real observe / 词典工具链切入，而不是回头改已稳定的 publish 根契约。
+5. 如果继续架构收口，优先审视当前 `src/cycle/` 和 web 入口的剩余边界，而不是恢复已删除的 legacy module。
+
+### 提交边界说明
+- 本次 checkpoint 提交覆盖当前工作树中的正式代码、测试、文档和诊断脚本变更。
+- 质量归档文档、架构审计文档、PhaseResult 删除清单、词典/真实运行对比工具均属于这轮推进的正式交付面，不再视作临时产物。
+
 ## 阶段性收口（2026-04-08）
 
 ### 本轮收口目标

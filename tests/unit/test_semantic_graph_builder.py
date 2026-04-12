@@ -243,7 +243,7 @@ class TestSemanticGraphBuilderRefactor(unittest.TestCase):
             finally:
                 first_builder.cleanup()
 
-            self.assertEqual(encoder.calls, 2)
+            self.assertEqual(encoder.calls, 1)
 
             second_builder = SemanticGraphBuilder(
                 {
@@ -261,8 +261,8 @@ class TestSemanticGraphBuilderRefactor(unittest.TestCase):
 
         self.assertEqual(
             encoder.calls,
-            3,
-            "第二次重启应只发生查询编码，不应重新构建整个向量索引",
+            1,
+            "重启后应直接复用持久化索引与已缓存查询向量，不应再次编码",
         )
 
 

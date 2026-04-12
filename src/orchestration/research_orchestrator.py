@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from src.research.phase_result import get_phase_artifact_map, get_phase_value
+
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchPhase, ResearchPipeline
 
@@ -432,26 +434,26 @@ class ResearchOrchestrator:
 
         if phase_name == "observe":
             return {
-                "observation_count": len(result.get("observations", [])),
-                "finding_count": len(result.get("findings", [])),
+                "observation_count": len(get_phase_value(result, "observations", [])),
+                "finding_count": len(get_phase_value(result, "findings", [])),
                 "data_source": (result.get("metadata") or {}).get("data_source", "unknown"),
                 "corpus_schema": (result.get("metadata") or {}).get("corpus_schema"),
-                "literature_records": (result.get("literature_pipeline") or {}).get("record_count", 0),
+                "literature_records": (get_phase_value(result, "literature_pipeline", {}) or {}).get("record_count", 0),
             }
         if phase_name == "hypothesis":
-            hyps = result.get("hypotheses") or []
+            hyps = get_phase_value(result, "hypotheses", []) or []
             return {
                 "hypothesis_count": len(hyps),
                 "validated_count": sum(1 for h in hyps if h.get("status") == "validated"),
-                "domain": result.get("domain", ""),
+                "domain": get_phase_value(result, "domain", ""),
             }
         if phase_name == "experiment":
             experiment_results = result.get("results") or {}
-            experiments = result.get("experiments") or []
+            experiments = get_phase_value(result, "experiments", []) or []
             first_experiment = experiments[0] if experiments else {}
             return {
                 "experiment_count": len(experiments),
-                "success_rate": result.get("success_rate", 0.0),
+                "success_rate": get_phase_value(result, "success_rate", 0.0),
                 "selected_hypothesis_id": (result.get("metadata") or {}).get("selected_hypothesis_id", ""),
                 "evidence_record_count": (result.get("metadata") or {}).get("evidence_record_count", 0),
                 "weighted_evidence_score": (result.get("metadata") or {}).get("weighted_evidence_score", 0.0),
@@ -466,16 +468,16 @@ class ResearchOrchestrator:
             }
         if phase_name == "publish":
             summary = {
-                "deliverable_count": len(result.get("deliverables", [])),
+                "deliverable_count": len(get_phase_value(result, "deliverables", [])),
                 "abstract_word_count": len(str(result.get("abstract", "")).split()),
             }
-            output_files = result.get("output_files")
-            if isinstance(output_files, dict) and output_files:
+            output_files = get_phase_artifact_map(result)
+            if output_files:
                 summary["output_files"] = output_files
             return summary
         if phase_name == "reflect":
             return {
-                "improvement_suggestions": result.get("improvements", [])[:3],
+                "improvement_suggestions": get_phase_value(result, "improvements", [])[:3],
                 "next_cycle_focus": result.get("next_cycle_focus", ""),
             }
         return {}
@@ -494,8 +496,8 @@ class ResearchOrchestrator:
             return {}
 
         highlights: Dict[str, Dict[str, Any]] = {}
-        analysis_results = publish_result.get("analysis_results")
-        research_artifact = publish_result.get("research_artifact")
+        analysis_results = get_phase_value(publish_result, "analysis_results")
+        research_artifact = get_phase_value(publish_result, "research_artifact")
         if isinstance(analysis_results, dict) and analysis_results:
             highlights["analysis_results"] = analysis_results
         if isinstance(research_artifact, dict) and research_artifact:

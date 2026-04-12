@@ -191,6 +191,17 @@ ROOT_OBSERVATION_RULES = [
             "性能测试报告",
         ],
         "reason": "Root script belongs to a separate reporting or validation domain and does not consume quality governance artifacts.",
+    },
+    {
+        "category": "non_governance_domain_script",
+        "label": "非治理域脚本",
+        "patterns": [
+            "quick db content check",
+            "sqlite3.connect",
+            "sqlite_master",
+            "select count(*)",
+        ],
+        "reason": "Root script performs ad hoc database inspection and does not consume quality governance artifacts.",
     }
 ]
 

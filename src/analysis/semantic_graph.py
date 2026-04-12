@@ -45,6 +45,7 @@ class SemanticGraphBuilder(BaseModule):
         self.ontology = OntologyManager()
         self._formula_similarity_top_k = int(cfg.get("formula_similarity_top_k", 3) or 3)
         self._formula_similarity_min_score = float(cfg.get("formula_similarity_min_score", 0.35) or 0.35)
+        self._enable_formula_embeddings = bool(cfg.get("enable_formula_embeddings", True))
         self._embedding_model_name = str(
             cfg.get("embedding_model_name")
             or "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
@@ -280,7 +281,9 @@ class SemanticGraphBuilder(BaseModule):
         results: List[Dict[str, Any]] = []
         seen_names = set()
 
-        if service is not None:
+        if service is not None and (
+            not self._formula_catalog_by_name or formula_name in self._formula_catalog_by_name
+        ):
             query_text = self._build_formula_query_text(formula_name)
             try:
                 matches = service.search_similar_formulas(
@@ -327,6 +330,8 @@ class SemanticGraphBuilder(BaseModule):
         return results
 
     def _get_formula_embedding_service(self) -> Optional[EmbeddingService]:
+        if not self._enable_formula_embeddings:
+            return None
         if self._formula_embedding_service is not None:
             return self._formula_embedding_service
 

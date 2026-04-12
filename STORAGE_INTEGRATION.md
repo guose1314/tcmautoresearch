@@ -125,7 +125,7 @@ from src.analysis.semantic_graph import SemanticGraphBuilder
 logger = logging.getLogger(__name__)
 
 
-class EnhancedIterationCycle:
+class EnhancedResearchRuntime:
     """
     增强的迭代循环 - 集成存储支持
     """
@@ -163,7 +163,7 @@ class EnhancedIterationCycle:
                 raw_text_size=len(raw_text)
             )
             self.storage.log_module_execution(
-                doc_id, 'IterationCycle', 'start',
+                doc_id, 'cycle_runner', 'start',
                 message=f"开始处理: {source_file}"
             )
         else:
@@ -415,13 +415,13 @@ def main():
         logger.info("存储驱动已初始化")
     
     # 创建处理循环
-    cycle = EnhancedIterationCycle(config, storage)
+    runtime = EnhancedResearchRuntime(config, storage)
     
     # 处理示例文件
     example_text = "小柴胡汤方：柴胡半斤，黄芩三两，人参三两，甘草三两，半夏半升，生姜三两，大枣十二枚。"
     
     try:
-        result = cycle.execute_with_storage('test_document.txt', example_text)
+        result = runtime.execute_with_storage('test_document.txt', example_text)
         logger.info(f"处理完成！结果包含 {len(result.get('entities', []))} 个实体")
         
         if storage:
@@ -478,7 +478,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.storage import UnifiedStorageDriver
-from run_cycle_demo import EnhancedIterationCycle
+
+# 复用上方示例中的 EnhancedResearchRuntime 封装
 
 def test_storage_integration():
     """测试存储集成"""
@@ -494,14 +495,14 @@ def test_storage_integration():
     
     # 创建处理循环
     config = {'storage': {'enabled': True}}
-    cycle = EnhancedIterationCycle(config, storage)
+    runtime = EnhancedResearchRuntime(config, storage)
     
     # 测试数据
     test_doc = "小柴胡汤由柴胡、黄芩、人参组成，主治少阳症。"
     
     # 执行处理
     print("执行处理流程...")
-    result = cycle.execute_with_storage('test_doc.txt', test_doc)
+    result = runtime.execute_with_storage('test_doc.txt', test_doc)
     
     # 验证结果
     print(f"实体数: {len(result.get('entities', []))}")

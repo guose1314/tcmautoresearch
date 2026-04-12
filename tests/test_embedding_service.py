@@ -326,6 +326,48 @@ class TestEmbeddingService(unittest.TestCase):
 
         self.assertEqual(counting_encoder.calls, 1)
 
+    def test_exact_text_query_reuses_cached_item_vector(self):
+        class _CountingEncoder(FakeEncoder):
+            def __init__(self, mapping):
+                super().__init__(mapping)
+                self.calls = 0
+
+            def encode(self, texts, normalize_embeddings=False, convert_to_numpy=True):
+                self.calls += 1
+                return super().encode(texts, normalize_embeddings=normalize_embeddings, convert_to_numpy=convert_to_numpy)
+
+        formulas = [
+            {
+                "formula_id": "f1",
+                "name": "四君子汤",
+                "herbs": ["人参", "白术", "茯苓", "甘草"],
+                "indications": ["脾虚", "气虚"],
+                "description": "补气健脾",
+            },
+            {
+                "formula_id": "f2",
+                "name": "六君子汤",
+                "herbs": ["人参", "白术", "茯苓", "甘草", "陈皮", "半夏"],
+                "indications": ["脾虚", "痰湿"],
+                "description": "补气化痰",
+            },
+        ]
+        counting_encoder = _CountingEncoder(
+            {
+                self.formula_a: [1.0, 0.0, 0.0],
+                self.formula_b: [0.9, 0.1, 0.0],
+            }
+        )
+        service = EmbeddingService(encoder=counting_encoder, use_faiss=False)
+
+        service.build_formula_index(formulas)
+        self.assertEqual(counting_encoder.calls, 1)
+
+        results = service.search_similar_formulas(self.formula_a, top_k=2, exclude_formula_id="f1")
+
+        self.assertEqual(counting_encoder.calls, 1)
+        self.assertEqual([item.item_id for item in results], ["f2"])
+
     def test_persisted_index_invalidates_when_corpus_version_changes(self):
         formulas = [
             {
