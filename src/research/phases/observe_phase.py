@@ -577,7 +577,10 @@ class ObservePhaseMixin:
                         "urn": entry.get("urn", ""),
                         "title": entry.get("title", ""),
                         "raw_text_preview": raw_text[:120],
+                        "raw_text_size": len(raw_text),
                         "processed_text_preview": preprocess_result.get("processed_text", "")[:120],
+                        "processed_text_size": len(str(preprocess_result.get("processed_text", "") or "")),
+                        "entities": self._deduplicate_entities(entities),
                         "entity_count": len(entities),
                         "entity_types": extraction_result.get("statistics", {}).get("by_type", {}),
                         "average_confidence": extraction_result.get("confidence_scores", {}).get("average_confidence", 0.0),
@@ -592,11 +595,22 @@ class ObservePhaseMixin:
                 )
 
             average_confidence = sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
+            aggregate_entities = self._deduplicate_entities(
+                [
+                    entity
+                    for document in document_results
+                    if isinstance(document, dict)
+                    for entity in (document.get("entities") or [])
+                    if isinstance(entity, dict)
+                ]
+            )
             return {
                 "processed_document_count": len(document_results),
                 "documents": document_results,
+                "entities": aggregate_entities,
                 "aggregate": {
                     "total_entities": total_entities,
+                    "entities": aggregate_entities,
                     "entity_type_counts": entity_type_counts,
                     "average_confidence": average_confidence,
                     "semantic_graph_nodes": total_semantic_nodes,
@@ -835,6 +849,26 @@ class ObservePhaseMixin:
             if isinstance(group, list):
                 merged.extend(group)
         return self._deduplicate_relationships(merged)
+
+    def _deduplicate_entities(self, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        deduplicated_map: Dict[tuple[str, str], Dict[str, Any]] = {}
+        for entity in entities:
+            if not isinstance(entity, dict):
+                continue
+            name = str(entity.get("name") or "").strip()
+            entity_type = str(entity.get("type") or entity.get("entity_type") or "other").strip().lower()
+            if not name:
+                continue
+            key = (name, entity_type or "other")
+            current = deduplicated_map.get(key)
+            if current is None:
+                deduplicated_map[key] = entity
+                continue
+            current_confidence = float(current.get("confidence") or 0.0)
+            candidate_confidence = float(entity.get("confidence") or 0.0)
+            if candidate_confidence >= current_confidence:
+                deduplicated_map[key] = entity
+        return list(deduplicated_map.values())
 
     def _deduplicate_relationships(self, relationships: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         deduplicated_map: Dict[tuple[str, str, str], Dict[str, Any]] = {}

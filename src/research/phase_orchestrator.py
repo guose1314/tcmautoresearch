@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 from datetime import datetime
@@ -11,13 +12,15 @@ from typing import Any, Dict, List, Optional
 from src.core.phase_tracker import PhaseTrackerMixin
 from src.research.audit_history import publish_audit_event
 from src.research.gap_analyzer import GapAnalyzer
-from src.research.phase_result import get_phase_value
+from src.research.phase_result import get_phase_artifact_map, get_phase_value
 from src.research.pipeline_events import publish_phase_lifecycle_event
 from src.research.study_session_manager import (
     ResearchCycle,
     ResearchCycleStatus,
     ResearchPhase,
 )
+
+_GRAPH_IDENTIFIER_PATTERN = re.compile(r"[^0-9A-Za-z_]+")
 
 # Keep a module-local symbol for lazy loading, mirroring research_pipeline behavior.
 try:
@@ -165,32 +168,47 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         phase_name: str,
         phase_entry: Dict[str, Any],
         start_time: float,
+        phase_status: str="completed",
+        error: Optional[str]=None,
     ) -> None:
         duration = time.perf_counter() - start_time
-        phase_entry["status"] = "completed"
+        normalized_status = str(phase_status or "completed").strip().lower() or "completed"
+        completed_like = normalized_status not in {"failed", "skipped", "blocked", "pending", "running"}
+        event_lifecycle_status = "completed" if normalized_status == "skipped" or completed_like else "failed"
+        audit_action = "phase_completed" if normalized_status == "skipped" or completed_like else "phase_lifecycle_failed"
+        phase_entry["status"] = normalized_status
         phase_entry["ended_at"] = datetime.now().isoformat()
         phase_entry["duration_seconds"] = round(duration, 6)
+        if error:
+            phase_entry["error"] = error
         metadata.setdefault("phase_timings", {})[phase_name] = round(duration, 6)
-        if phase_name not in metadata.setdefault("completed_phases", []):
+        if completed_like and phase_name not in metadata.setdefault("completed_phases", []):
             metadata["completed_phases"].append(phase_name)
-        metadata["last_completed_phase"] = phase_name
-        metadata["final_status"] = "completed"
+        if completed_like:
+            metadata["last_completed_phase"] = phase_name
+        if normalized_status in {"failed", "blocked"}:
+            metadata["failed_phase"] = phase_name
+        metadata["final_status"] = normalized_status
         publish_phase_lifecycle_event(
             self.pipeline.event_bus,
-            "completed",
+            event_lifecycle_status,
             {
                 "phase": phase_name,
+                "status": normalized_status,
                 "ended_at": phase_entry["ended_at"],
                 "duration_seconds": phase_entry["duration_seconds"],
+                "error": error,
             },
         )
         publish_audit_event(
             self.pipeline.event_bus,
-            "phase_completed",
+            audit_action,
             {
                 "phase": phase_name,
+                "status": normalized_status,
                 "ended_at": phase_entry["ended_at"],
                 "duration_seconds": phase_entry["duration_seconds"],
+                "error": error,
             },
         )
 
@@ -277,10 +295,10 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         phase_transitions = {
             ResearchPhase.OBSERVE: ResearchPhase.HYPOTHESIS,
             ResearchPhase.HYPOTHESIS: ResearchPhase.EXPERIMENT,
-            ResearchPhase.EXPERIMENT: ResearchPhase.ANALYZE,
+            ResearchPhase.EXPERIMENT: ResearchPhase.EXPERIMENT_EXECUTION,
+            ResearchPhase.EXPERIMENT_EXECUTION: ResearchPhase.ANALYZE,
             ResearchPhase.ANALYZE: ResearchPhase.PUBLISH,
             ResearchPhase.PUBLISH: ResearchPhase.REFLECT,
-            ResearchPhase.REFLECT: ResearchPhase.OBSERVE,
         }
         research_cycle.current_phase = phase_transitions.get(phase, research_cycle.current_phase)
 
@@ -294,11 +312,13 @@ class PhaseOrchestrator(PhaseTrackerMixin):
     ) -> Dict[str, Any]:
         return {
             "phase": phase.value,
+            "status": str(phase_result.get("status") or "completed").strip().lower() or "completed",
             "started_at": started_at,
             "completed_at": datetime.now().isoformat(),
             "duration": time.perf_counter() - start_time,
             "context": phase_context,
             "result": phase_result,
+            "error": phase_result.get("error"),
         }
 
     def _sync_phase_history_entry(
@@ -307,8 +327,11 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         phase_execution: Dict[str, Any],
         phase_result: Dict[str, Any],
     ) -> None:
+        phase_entry["status"] = phase_execution.get("status") or phase_entry.get("status")
         phase_entry["completed_at"] = phase_execution["completed_at"]
         phase_entry["duration"] = phase_execution["duration"]
+        if phase_execution.get("error"):
+            phase_entry["error"] = phase_execution.get("error")
         phase_entry["result"] = self._serialize_value(phase_result)
 
     def _apply_phase_result(
@@ -647,7 +670,528 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             self.pipeline.logger.error(f"流程数据导出失败: {e}")
             return False
 
-    def _persist_result(self, cycle: ResearchCycle) -> bool:
+    def _should_use_structured_result_persistence(self) -> bool:
+        database_config = self.pipeline.config.get("database")
+        neo4j_config = self.pipeline.config.get("neo4j") or {}
+        return bool(isinstance(database_config, dict) and database_config) or bool(neo4j_config.get("enabled"))
+
+    def _normalize_repository_phase_status(self, phase_result: Dict[str, Any]) -> str:
+        status = str(phase_result.get("status") or "").strip().lower()
+        if phase_result.get("error"):
+            return "failed"
+        if status in {"failed", "skipped", "pending", "running"}:
+            return status
+        if status in {"blocked"}:
+            return "failed"
+        return "completed"
+
+    def _normalize_graph_identifier(self, value: Any, default: str) -> str:
+        text = _GRAPH_IDENTIFIER_PATTERN.sub("_", str(value or "").strip())
+        text = text.strip("_")
+        if not text:
+            text = default
+        if text[0].isdigit():
+            text = f"{default}_{text}"
+        return text
+
+    def _normalize_graph_label(self, value: Any, default: str = "Entity") -> str:
+        normalized = self._normalize_graph_identifier(value, default)
+        parts = [part for part in normalized.split("_") if part]
+        if not parts:
+            return default
+        return "".join(part[:1].upper() + part[1:] for part in parts)
+
+    def _normalize_graph_relationship_type(self, value: Any, default: str = "RELATED_TO") -> str:
+        return self._normalize_graph_identifier(value, default).upper()
+
+    def _normalize_graph_properties(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        normalized: Dict[str, Any] = {}
+        for key, value in payload.items():
+            if value in (None, "", [], {}):
+                continue
+            safe_key = self._normalize_graph_identifier(key, "prop")
+            if isinstance(value, bool):
+                normalized[safe_key] = value
+                continue
+            if isinstance(value, (int, float, str)):
+                normalized[safe_key] = value
+                continue
+            if isinstance(value, list) and all(isinstance(item, (bool, int, float, str)) for item in value):
+                normalized[safe_key] = value
+                continue
+            normalized[safe_key] = json.dumps(self._serialize_value(value), ensure_ascii=False)
+        return normalized
+
+    def _infer_artifact_type(self, phase_name: str, artifact_name: str, file_path: str) -> str:
+        name = artifact_name.lower()
+        path = file_path.lower()
+        if any(token in name for token in ("bibtex", "gbt7714", "citation", "reference")):
+            return "reference"
+        if any(token in name for token in ("imrd", "report")):
+            return "report"
+        if phase_name == "publish" and path.endswith((".md", ".docx")):
+            return "paper"
+        if phase_name == "analyze":
+            return "analysis"
+        if phase_name == "experiment":
+            return "dataset"
+        return "other"
+
+    def _infer_mime_type(self, file_path: str) -> Optional[str]:
+        path = str(file_path or "").lower()
+        if path.endswith(".md"):
+            return "text/markdown"
+        if path.endswith(".json"):
+            return "application/json"
+        if path.endswith(".docx"):
+            return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        if path.endswith(".txt"):
+            return "text/plain"
+        if path.endswith(".html"):
+            return "text/html"
+        return None
+
+    def _resolve_artifact_size(self, file_path: str) -> int:
+        path = str(file_path or "").strip()
+        if not path or not os.path.exists(path):
+            return 0
+        try:
+            return int(os.path.getsize(path))
+        except OSError:
+            return 0
+
+    def _collect_phase_artifacts(self, phase_name: str, phase_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        raw_artifacts = phase_result.get("artifacts") or []
+        artifacts: List[Dict[str, Any]] = []
+        if isinstance(raw_artifacts, list):
+            artifacts.extend(item for item in raw_artifacts if isinstance(item, dict))
+
+        if not artifacts:
+            for name, path in get_phase_artifact_map(phase_result).items():
+                artifacts.append({"name": name, "path": path, "type": "file"})
+
+        deduplicated: Dict[tuple[str, str], Dict[str, Any]] = {}
+        for artifact in artifacts:
+            name = str(artifact.get("name") or artifact.get("type") or f"{phase_name}_artifact").strip()
+            path = str(artifact.get("path") or artifact.get("value") or "").strip()
+            key = (name, path)
+            if key not in deduplicated:
+                deduplicated[key] = artifact
+        return list(deduplicated.values())
+
+    def _collect_observe_semantic_relationships(self, cycle: ResearchCycle) -> List[Dict[str, Any]]:
+        observe_execution = cycle.phase_executions.get(ResearchPhase.OBSERVE, {})
+        observe_result = observe_execution.get("result") if isinstance(observe_execution, dict) else {}
+        if not isinstance(observe_result, dict):
+            return []
+
+        ingestion_pipeline = get_phase_value(observe_result, "ingestion_pipeline", {}) or {}
+        aggregate = ingestion_pipeline.get("aggregate") if isinstance(ingestion_pipeline, dict) else {}
+        aggregate_relationships = aggregate.get("semantic_relationships") if isinstance(aggregate, dict) else None
+        if isinstance(aggregate_relationships, list) and aggregate_relationships:
+            return [item for item in aggregate_relationships if isinstance(item, dict)]
+
+        relationships: List[Dict[str, Any]] = []
+        documents = ingestion_pipeline.get("documents") if isinstance(ingestion_pipeline, dict) else []
+        if not isinstance(documents, list):
+            return relationships
+        for document in documents:
+            if not isinstance(document, dict):
+                continue
+            document_relationships = document.get("semantic_relationships") or []
+            if isinstance(document_relationships, list):
+                relationships.extend(item for item in document_relationships if isinstance(item, dict))
+        return relationships
+
+    def _persist_cycle_phase_executions(
+        self,
+        repository: Any,
+        cycle: ResearchCycle,
+        session: Any = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        phase_records: Dict[str, Dict[str, Any]] = {}
+        for phase, execution in cycle.phase_executions.items():
+            if not isinstance(execution, dict):
+                continue
+            phase_name = getattr(phase, "value", str(phase))
+            phase_result = execution.get("result") if isinstance(execution.get("result"), dict) else {}
+            record = repository.add_phase_execution(
+                cycle.cycle_id,
+                {
+                    "phase": phase_name,
+                    "status": self._normalize_repository_phase_status(phase_result),
+                    "started_at": execution.get("started_at") or cycle.started_at,
+                    "completed_at": execution.get("completed_at") or cycle.completed_at,
+                    "duration": execution.get("duration") or 0.0,
+                    "input": self._serialize_value(execution.get("context") or {}),
+                    "output": self._serialize_value(phase_result),
+                    "error_detail": phase_result.get("error"),
+                },
+                session=session,
+            )
+            if isinstance(record, dict):
+                phase_records[phase_name] = record
+        return phase_records
+
+    def _persist_cycle_artifacts(
+        self,
+        repository: Any,
+        cycle: ResearchCycle,
+        phase_records: Dict[str, Dict[str, Any]],
+        session: Any = None,
+    ) -> List[Dict[str, Any]]:
+        artifact_records: List[Dict[str, Any]] = []
+        for phase, execution in cycle.phase_executions.items():
+            if not isinstance(execution, dict):
+                continue
+            phase_name = getattr(phase, "value", str(phase))
+            phase_result = execution.get("result") if isinstance(execution.get("result"), dict) else {}
+            phase_record = phase_records.get(phase_name) or {}
+            phase_execution_id = phase_record.get("id")
+
+            for artifact in self._collect_phase_artifacts(phase_name, phase_result):
+                artifact_name = str(artifact.get("name") or artifact.get("type") or f"{phase_name}_artifact").strip()
+                file_path = str(artifact.get("path") or artifact.get("value") or "").strip()
+                saved = repository.add_artifact(
+                    cycle.cycle_id,
+                    {
+                        "phase_execution_id": phase_execution_id,
+                        "artifact_type": self._infer_artifact_type(phase_name, artifact_name, file_path),
+                        "name": artifact_name,
+                        "description": str(artifact.get("description") or artifact.get("label") or "").strip(),
+                        "content": self._serialize_value(artifact),
+                        "file_path": file_path or None,
+                        "mime_type": self._infer_mime_type(file_path),
+                        "size_bytes": self._resolve_artifact_size(file_path),
+                        "metadata": {
+                            "phase": phase_name,
+                            "phase_status": phase_result.get("status"),
+                        },
+                    },
+                    session=session,
+                )
+                if isinstance(saved, dict):
+                    artifact_records.append(saved)
+        return artifact_records
+
+    def _persist_cycle_observe_documents(
+        self,
+        repository: Any,
+        cycle: ResearchCycle,
+        phase_records: Dict[str, Dict[str, Any]],
+        session: Any = None,
+    ) -> List[Dict[str, Any]]:
+        observe_execution = cycle.phase_executions.get(ResearchPhase.OBSERVE)
+        if not isinstance(observe_execution, dict):
+            return []
+        phase_result = observe_execution.get("result") if isinstance(observe_execution.get("result"), dict) else {}
+        if not isinstance(phase_result, dict):
+            return []
+        ingestion_pipeline = get_phase_value(phase_result, "ingestion_pipeline", {}) or {}
+        if not isinstance(ingestion_pipeline, dict):
+            return []
+        documents = [item for item in (ingestion_pipeline.get("documents") or []) if isinstance(item, dict)]
+        if not documents:
+            return []
+        persisted = repository.replace_observe_document_graphs(
+            cycle.cycle_id,
+            str((phase_records.get("observe") or {}).get("id") or "").strip() or None,
+            documents,
+            session=session,
+        )
+        return persisted if isinstance(persisted, list) else []
+
+    def _project_cycle_to_neo4j(
+        self,
+        neo4j_driver: Any,
+        cycle: ResearchCycle,
+        session_record: Dict[str, Any],
+        phase_records: Dict[str, Dict[str, Any]],
+        artifact_records: List[Dict[str, Any]],
+        observe_documents: List[Dict[str, Any]],
+        transaction: Any = None,
+    ) -> Dict[str, Any]:
+        if neo4j_driver is None:
+            return {"status": "skipped", "enabled": False, "node_count": 0, "edge_count": 0}
+
+        try:
+            from src.research.research_session_graph_backfill import (
+                build_observe_entity_graph_nodes,
+                build_observe_graph_edges,
+                build_research_artifact_graph_properties,
+                build_research_phase_execution_graph_properties,
+                build_research_session_graph_properties,
+            )
+            from src.storage.neo4j_driver import Neo4jEdge, Neo4jNode
+
+            node_map: Dict[tuple[str, str], Any] = {}
+            edge_map: Dict[tuple[str, str, str, str, str], Any] = {}
+
+            def _add_node(label: str, node_id: str, properties: Dict[str, Any]) -> None:
+                key = (label, node_id)
+                if key not in node_map:
+                    node_map[key] = Neo4jNode(
+                        id=node_id,
+                        label=label,
+                        properties=self._normalize_graph_properties(properties),
+                    )
+
+            def _add_edge(
+                source_id: str,
+                target_id: str,
+                relationship_type: str,
+                source_label: str,
+                target_label: str,
+                properties: Dict[str, Any],
+            ) -> None:
+                rel_type = self._normalize_graph_relationship_type(relationship_type)
+                key = (source_label, source_id, rel_type, target_label, target_id)
+                if key not in edge_map:
+                    edge_map[key] = (
+                        Neo4jEdge(
+                            source_id=source_id,
+                            target_id=target_id,
+                            relationship_type=rel_type,
+                            properties=self._normalize_graph_properties(properties),
+                        ),
+                        source_label,
+                        target_label,
+                    )
+
+            _add_node(
+                "ResearchSession",
+                cycle.cycle_id,
+                build_research_session_graph_properties(
+                    {
+                        "cycle_id": cycle.cycle_id,
+                        "cycle_name": cycle.cycle_name,
+                        "status": cycle.status.value,
+                        "current_phase": session_record.get("current_phase"),
+                        "research_objective": cycle.research_objective,
+                        "research_scope": cycle.research_scope,
+                        "created_at": session_record.get("created_at"),
+                        "updated_at": session_record.get("updated_at"),
+                        "started_at": cycle.started_at,
+                        "completed_at": cycle.completed_at,
+                        "duration": cycle.duration,
+                    }
+                ),
+            )
+
+            for phase_name, record in phase_records.items():
+                phase_id = str(record.get("id") or f"{cycle.cycle_id}:{phase_name}")
+                _add_node(
+                    "ResearchPhaseExecution",
+                    phase_id,
+                    build_research_phase_execution_graph_properties(
+                        {
+                            **record,
+                            "phase": phase_name,
+                            "cycle_id": cycle.cycle_id,
+                        }
+                    ),
+                )
+                _add_edge(
+                    cycle.cycle_id,
+                    phase_id,
+                    "HAS_PHASE",
+                    "ResearchSession",
+                    "ResearchPhaseExecution",
+                    {"cycle_id": cycle.cycle_id, "phase": phase_name},
+                )
+
+            for artifact in artifact_records:
+                artifact_id = str(artifact.get("id") or "")
+                if not artifact_id:
+                    continue
+                _add_node(
+                    "ResearchArtifact",
+                    artifact_id,
+                    build_research_artifact_graph_properties(
+                        {
+                            **artifact,
+                            "cycle_id": cycle.cycle_id,
+                        }
+                    ),
+                )
+                phase_execution_id = str(artifact.get("phase_execution_id") or "").strip()
+                if phase_execution_id:
+                    _add_edge(
+                        phase_execution_id,
+                        artifact_id,
+                        "GENERATED",
+                        "ResearchPhaseExecution",
+                        "ResearchArtifact",
+                        {"cycle_id": cycle.cycle_id},
+                    )
+                else:
+                    _add_edge(
+                        cycle.cycle_id,
+                        artifact_id,
+                        "HAS_ARTIFACT",
+                        "ResearchSession",
+                        "ResearchArtifact",
+                        {"cycle_id": cycle.cycle_id},
+                    )
+
+            observe_phase_id = str((phase_records.get("observe") or {}).get("id") or "").strip()
+            observe_document_records = [item for item in observe_documents if isinstance(item, dict)] if isinstance(observe_documents, list) else []
+            if observe_document_records:
+                for node in build_observe_entity_graph_nodes(observe_document_records):
+                    _add_node(node.label, node.id, node.properties)
+                for edge, source_label, target_label in build_observe_graph_edges(
+                    cycle.cycle_id,
+                    observe_phase_id,
+                    observe_document_records,
+                ):
+                    _add_edge(
+                        edge.source_id,
+                        edge.target_id,
+                        edge.relationship_type,
+                        source_label,
+                        target_label,
+                        edge.properties,
+                    )
+            else:
+                for relation in self._collect_observe_semantic_relationships(cycle):
+                    source_name = str(relation.get("source") or "").strip()
+                    target_name = str(relation.get("target") or "").strip()
+                    if not source_name or not target_name:
+                        continue
+                    source_type = self._normalize_graph_label(relation.get("source_type") or "Entity", "Entity")
+                    target_type = self._normalize_graph_label(relation.get("target_type") or "Entity", "Entity")
+                    source_id = f"entity::{source_name}"
+                    target_id = f"entity::{target_name}"
+                    _add_node(source_type, source_id, {"name": source_name, "entity_type": relation.get("source_type") or source_type})
+                    _add_node(target_type, target_id, {"name": target_name, "entity_type": relation.get("target_type") or target_type})
+                    _add_edge(
+                        source_id,
+                        target_id,
+                        relation.get("type") or "RELATED_TO",
+                        source_type,
+                        target_type,
+                        {
+                            **(relation.get("metadata") if isinstance(relation.get("metadata"), dict) else {}),
+                            "cycle_id": cycle.cycle_id,
+                            "phase": "observe",
+                        },
+                    )
+                    if observe_phase_id:
+                        _add_edge(
+                            observe_phase_id,
+                            source_id,
+                            "CAPTURED",
+                            "ResearchPhaseExecution",
+                            source_type,
+                            {"cycle_id": cycle.cycle_id, "phase": "observe"},
+                        )
+                        _add_edge(
+                            observe_phase_id,
+                            target_id,
+                            "CAPTURED",
+                            "ResearchPhaseExecution",
+                            target_type,
+                            {"cycle_id": cycle.cycle_id, "phase": "observe"},
+                        )
+
+            nodes = list(node_map.values())
+            edges = list(edge_map.values())
+            if transaction is not None:
+                if nodes:
+                    transaction.neo4j_batch_nodes(nodes)
+                if edges:
+                    transaction.neo4j_batch_edges(edges)
+                return {
+                    "status": "active",
+                    "enabled": True,
+                    "node_count": len(nodes),
+                    "edge_count": len(edges),
+                }
+            node_status = neo4j_driver.batch_create_nodes(nodes)
+            edge_status = neo4j_driver.batch_create_relationships(edges)
+            if node_status is False or edge_status is False:
+                return {
+                    "status": "degraded",
+                    "enabled": True,
+                    "node_count": len(nodes),
+                    "edge_count": len(edges),
+                }
+            return {
+                "status": "active",
+                "enabled": True,
+                "node_count": len(nodes),
+                "edge_count": len(edges),
+            }
+        except Exception as exc:
+            if transaction is not None:
+                raise RuntimeError(f"Neo4j 研究资产投影失败: {exc}") from exc
+            self.pipeline.logger.warning("Neo4j 研究资产投影失败，已降级为仅 PG 持久化: %s", exc)
+            return {
+                "status": "error",
+                "enabled": True,
+                "error": str(exc),
+                "node_count": 0,
+                "edge_count": 0,
+            }
+
+    def _persist_result_structured(self, cycle: ResearchCycle) -> bool:
+        from src.infrastructure.research_session_repo import ResearchSessionRepository
+        from src.storage import StorageBackendFactory
+
+        factory = StorageBackendFactory(self.pipeline.config)
+        try:
+            persistence_report = factory.initialize()
+            repository = ResearchSessionRepository(factory.db_manager)
+            session_record: Dict[str, Any] = {}
+            phase_records: Dict[str, Dict[str, Any]] = {}
+            observe_documents: List[Dict[str, Any]] = []
+            artifact_records: List[Dict[str, Any]] = []
+            graph_report: Dict[str, Any] = {
+                "status": persistence_report.get("neo4j_status") if persistence_report.get("neo4j_status") != "active" else "skipped",
+                "enabled": bool(factory.neo4j_driver),
+                "node_count": 0,
+                "edge_count": 0,
+            }
+
+            with factory.transaction() as txn:
+                pg_session = txn.pg_session
+                if repository.get_session(cycle.cycle_id, session=pg_session):
+                    repository.delete_session(cycle.cycle_id, session=pg_session)
+                session_record = repository.save_from_cycle(cycle, session=pg_session)
+                phase_records = self._persist_cycle_phase_executions(repository, cycle, session=pg_session)
+                observe_documents = self._persist_cycle_observe_documents(repository, cycle, phase_records, session=pg_session)
+                artifact_records = self._persist_cycle_artifacts(repository, cycle, phase_records, session=pg_session)
+                graph_report = self._project_cycle_to_neo4j(
+                    factory.neo4j_driver,
+                    cycle,
+                    session_record if isinstance(session_record, dict) else {},
+                    phase_records,
+                    artifact_records,
+                    observe_documents,
+                    transaction=txn,
+                )
+
+                cycle.metadata["storage_persistence"] = {
+                    "mode": "structured",
+                    "db_type": persistence_report.get("db_type"),
+                    "pg_status": persistence_report.get("pg_status"),
+                    "neo4j_status": graph_report.get("status") if graph_report.get("enabled") else persistence_report.get("neo4j_status"),
+                    "phase_execution_count": len(phase_records),
+                    "artifact_count": len(artifact_records),
+                    "observe_document_count": len(observe_documents),
+                    "observe_entity_count": sum(int(item.get("entity_count") or 0) for item in observe_documents if isinstance(item, dict)),
+                    "observe_relationship_count": sum(int(item.get("relationship_count") or 0) for item in observe_documents if isinstance(item, dict)),
+                    "graph_node_count": graph_report.get("node_count", 0),
+                    "graph_edge_count": graph_report.get("edge_count", 0),
+                }
+                repository.update_session(cycle.cycle_id, {"metadata": cycle.metadata}, session=pg_session)
+
+            self.pipeline.logger.info("研究结果已持久化到结构化存储: %s", cycle.cycle_id)
+            return True
+        finally:
+            factory.close()
+
+    def _persist_result_legacy_sqlite(self, cycle: ResearchCycle) -> bool:
         db_path = self.pipeline.config.get(
             "result_store_path",
             os.path.join("output", "research_results.db"),
@@ -701,3 +1245,12 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         except Exception as exc:  # pragma: no cover
             self.pipeline.logger.warning(f"研究结果持久化失败，已跳过: {exc}")
             return False
+
+    def _persist_result(self, cycle: ResearchCycle) -> bool:
+        if self._should_use_structured_result_persistence():
+            try:
+                if self._persist_result_structured(cycle):
+                    return True
+            except Exception as exc:  # pragma: no cover
+                self.pipeline.logger.warning("结构化研究结果持久化失败，回退 legacy sqlite: %s", exc)
+        return self._persist_result_legacy_sqlite(cycle)

@@ -68,7 +68,8 @@ class ResearchPipelineOrchestrator:
         try:
             advisors = cycle_options.get("advisors") or []
             resources = cycle_options.get("resources") or {}
-            cycle_id = f"cycle_{int(time.time())}_{hashlib.md5(cycle_name.encode()).hexdigest()[:8]}"
+            requested_cycle_id = str(cycle_options.get("cycle_id") or "").strip()
+            cycle_id = requested_cycle_id or f"cycle_{int(time.time())}_{hashlib.md5(cycle_name.encode()).hexdigest()[:8]}"
 
             research_cycle = ResearchCycle(
                 cycle_id=cycle_id,
@@ -207,7 +208,10 @@ class ResearchPipelineOrchestrator:
                 phase_name,
                 self.pipeline._execute_phase_internal(phase, research_cycle, phase_context_payload),
             )
-            self.pipeline._advance_research_cycle_phase(research_cycle, phase)
+            raw_phase_status = str(phase_result.get("status") or "completed").strip().lower() or "completed"
+            control_status = self._resolve_phase_control_status(phase_result)
+            if control_status != "failed":
+                self.pipeline._advance_research_cycle_phase(research_cycle, phase)
             phase_execution = self.pipeline._build_phase_execution(
                 phase=phase,
                 started_at=phase_entry["started_at"],
@@ -216,13 +220,21 @@ class ResearchPipelineOrchestrator:
                 phase_result=phase_result,
             )
             research_cycle.phase_executions[phase] = phase_execution
-            self.pipeline._complete_phase(research_cycle.metadata, phase.value, phase_entry, start_time)
+            self.pipeline._complete_phase(
+                research_cycle.metadata,
+                phase.value,
+                phase_entry,
+                start_time,
+                phase_status=raw_phase_status,
+                error=phase_result.get("error"),
+            )
             self.pipeline._sync_phase_history_entry(phase_entry, phase_execution, phase_result)
             self.pipeline._apply_phase_result(research_cycle, phase, phase_result)
             research_cycle.metadata["analysis_summary"] = self.pipeline._build_cycle_analysis_summary(research_cycle)
-            self.pipeline._record_phase_success(cycle_id, phase, start_time)
+            if raw_phase_status not in {"failed", "skipped", "blocked", "pending", "running"}:
+                self.pipeline._record_phase_success(cycle_id, phase, start_time)
 
-            if phase == ResearchPhase.ANALYZE:
+            if control_status != "failed" and phase == ResearchPhase.ANALYZE:
                 findings_count = (phase_result.get("metadata") or {}).get("record_count", 0)
                 if findings_count == 0:
                     phase_entry["status"] = "degraded"
@@ -237,6 +249,17 @@ class ResearchPipelineOrchestrator:
             return phase_result
         except Exception as exc:
             return self.pipeline._handle_phase_execution_failure(cycle_id, phase, start_time, exc)
+
+    @staticmethod
+    def _resolve_phase_control_status(phase_result: Dict[str, Any]) -> str:
+        status = str(phase_result.get("status") or "completed").strip().lower() or "completed"
+        if phase_result.get("error"):
+            return "failed"
+        if status == "skipped":
+            return "skipped"
+        if status in {"failed", "blocked", "pending", "running"}:
+            return "failed"
+        return "completed"
 
     def complete_research_cycle(self, cycle_id: str) -> bool:
         event_result = self.pipeline.event_bus.request("cycle.complete.requested", {"cycle_id": cycle_id})

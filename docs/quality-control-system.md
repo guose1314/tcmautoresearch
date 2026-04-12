@@ -110,6 +110,11 @@ The CI workflow runs the unified quality gate on pull requests and pushes to `ma
 If the gate fails, the workflow fails.
 The uploaded workflow artifacts now also include the real Observe smoke outputs so failed regressions can be inspected without rerunning locally.
 
+The same workflow now also includes two drift guards for operational entrypoints and top-level docs:
+
+- README markdownlint: validates `README.md` and `deploy/helm/tcmautoresearch/README.md` with the repository-level `.markdownlint.json` policy.
+- Helm template render: installs Helm in CI and runs `helm template tcmautoresearch ./deploy/helm/tcmautoresearch`, uploading the rendered manifest as `output/ci/helm-template.yaml` for inspection.
+
 ## Extension Rules
 
 Add new quality gates only when they are:

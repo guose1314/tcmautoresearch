@@ -35,6 +35,8 @@ def execute_cycle_demo_command(
         logging.getLogger().setLevel(logging.DEBUG)
 
     logger.info("中医古籍全自动研究系统迭代循环演示启动")
+    logger.info("配置文件: %s", args.config_path)
+    logger.info("目标环境: %s", args.environment or "<auto>")
     logger.info("演示类型: %s", args.demo_type)
     logger.info("迭代次数: %s", args.iterations)
     logger.info("AutoResearch 启用: %s", args.enable_autorresearch)

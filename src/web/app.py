@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """TCMAutoResearch Web 应用入口 — FastAPI 应用构建与中间件配置。"""
 
+from __future__ import annotations
+
 import logging
 import os
 from pathlib import Path
@@ -10,6 +12,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
+from src.infrastructure.config_loader import AppSettings
+from src.infrastructure.runtime_config_assembler import build_runtime_assembly
 
 _BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = _BASE_DIR / "static"
@@ -26,10 +31,13 @@ _DEFAULT_CORS_ORIGINS: List[str] = [
 
 def create_app(
     *,
-    title: str = "TCMAutoResearch",
-    version: str = "2.0.0",
+    title: Optional[str] = None,
+    version: Optional[str] = None,
     cors_origins: Optional[List[str]] = None,
     extra_config: Optional[Dict[str, Any]] = None,
+    settings: Optional[AppSettings] = None,
+    config_path: Optional[str | Path] = None,
+    environment: Optional[str] = None,
 ) -> FastAPI:
     """构建并返回 FastAPI 应用实例。
 
@@ -44,15 +52,29 @@ def create_app(
     extra_config : dict | None
         额外配置，存入 ``app.state.config``。
     """
-    app = FastAPI(title=title, version=version)
+    runtime_assembly = None
+    if settings is not None or config_path is not None or environment is not None:
+        runtime_assembly = build_runtime_assembly(
+            settings=settings,
+            config_path=config_path,
+            environment=environment,
+        )
+    resolved_settings = runtime_assembly.settings if runtime_assembly is not None else None
+    resolved_title = title or (resolved_settings.api_title if resolved_settings is not None else "TCMAutoResearch")
+    resolved_version = version or (resolved_settings.api_version if resolved_settings is not None else "2.0.0")
+    resolved_extra_config = dict(runtime_assembly.runtime_config) if runtime_assembly is not None else {}
+    if extra_config:
+        resolved_extra_config.update(extra_config)
+
+    app = FastAPI(title=resolved_title, version=resolved_version)
 
     # ---- CORS 中间件 ----
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cors_origins or _DEFAULT_CORS_ORIGINS,
+        allow_origins=cors_origins or (resolved_settings.web_console_cors_origins if resolved_settings is not None else _DEFAULT_CORS_ORIGINS),
         allow_credentials=True,
-        allow_methods=extra_config.get("cors_methods", ["*"]) if extra_config else ["*"],
-        allow_headers=extra_config.get("cors_headers", ["*"]) if extra_config else ["*"],
+        allow_methods=resolved_extra_config.get("cors_methods", ["*"]),
+        allow_headers=resolved_extra_config.get("cors_headers", ["*"]),
     )
 
     # ---- 静态文件 ----
@@ -64,13 +86,15 @@ def create_app(
         app.state.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
     # ---- 额外配置 ----
-    app.state.config = extra_config or {}
+    app.state.config = resolved_extra_config
+    if resolved_settings is not None:
+        app.state.settings = resolved_settings
 
     # ---- 数据库初始化 ----
     try:
         from src.infrastructure.persistence import DatabaseManager
 
-        _db_cfg = extra_config.get("database", {}) if extra_config else {}
+        _db_cfg = resolved_extra_config.get("database", {}) if resolved_extra_config else {}
         _db_type = str(_db_cfg.get("type", "sqlite")).strip().lower()
         _db_path = str(
             _db_cfg.get("path")
@@ -79,7 +103,12 @@ def create_app(
         if _db_type == "sqlite":
             _conn_str = f"sqlite:///{os.path.abspath(_db_path)}"
         else:
-            _conn_str = str(_db_cfg.get("connection_string", "")).strip()
+            _conn_str = str(
+                _db_cfg.get("connection_string")
+                or _db_cfg.get("database_url")
+                or _db_cfg.get("url")
+                or (resolved_settings.database_url if resolved_settings is not None else "")
+            ).strip()
 
         if _conn_str:
             db_manager = DatabaseManager(
@@ -113,7 +142,10 @@ def create_app(
     # ---- 健康检查 ----
     @app.get("/health", tags=["system"])
     async def health_check() -> Dict[str, str]:
-        return {"status": "ok", "version": version}
+        payload = {"status": "ok", "version": resolved_version}
+        if resolved_settings is not None:
+            payload["environment"] = resolved_settings.environment
+        return payload
 
     # ---- 关闭时清理数据库连接 ----
     @app.on_event("shutdown")

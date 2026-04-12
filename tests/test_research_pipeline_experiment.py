@@ -61,17 +61,136 @@ class TestResearchPipelineExperimentPhase(unittest.TestCase):
 
         self.assertEqual(experiment_result["phase"], "experiment")
         self.assertEqual(experiment_result["metadata"]["selected_hypothesis_id"], selected_id)
+        self.assertEqual(experiment_result["metadata"]["phase_semantics"], "protocol_design")
+        self.assertEqual(experiment_result["metadata"]["phase_display_name"], "实验方案阶段")
+        self.assertTrue(experiment_result["metadata"]["protocol_design_only"])
+        self.assertEqual(experiment_result["metadata"]["execution_status"], "not_executed")
+        self.assertEqual(experiment_result["metadata"]["real_world_validation_status"], "not_started")
         self.assertEqual(len(experiment_result["results"]["experiments"]), 1)
         self.assertEqual(experiment_result["results"]["experiments"][0]["hypothesis_id"], selected_id)
+        self.assertEqual(len(experiment_result["results"]["protocol_designs"]), 1)
+        self.assertEqual(experiment_result["results"]["protocol_design"]["hypothesis_id"], selected_id)
+        self.assertEqual(experiment_result["results"]["protocol_design"]["execution_status"], "not_executed")
         self.assertIn("study_protocol", experiment_result["results"])
         self.assertIn("sample_size", experiment_result["results"]["study_protocol"])
         self.assertIn("validation_plan", experiment_result["results"])
         self.assertIn("study_protocol", experiment_result["results"])
-        self.assertEqual(experiment_result["results"]["success_rate"], 1.0)
+        self.assertEqual(experiment_result["results"]["design_completion_rate"], 1.0)
         self.assertNotIn("experiments", experiment_result)
         self.assertNotIn("study_protocol", experiment_result)
-        self.assertNotIn("success_rate", experiment_result)
+        self.assertNotIn("design_completion_rate", experiment_result)
         self.assertNotIn("selected_hypothesis", experiment_result)
+
+    def test_experiment_execution_phase_is_skipped_without_external_inputs(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="experiment-execution-skip-cycle",
+            description="experiment execution skip integration",
+            objective="验证方剂配伍与证候关联",
+            scope="中医古籍方剂研究",
+            researchers=["tester"],
+        )
+        self.assertTrue(self.pipeline.start_research_cycle(cycle.cycle_id))
+
+        self.pipeline.execute_research_phase(
+            cycle.cycle_id,
+            ResearchPhase.OBSERVE,
+            {
+                "run_literature_retrieval": False,
+                "run_preprocess_and_extract": False,
+                "use_ctext_whitelist": False,
+                "data_source": "manual",
+            },
+        )
+        self.pipeline.execute_research_phase(
+            cycle.cycle_id,
+            ResearchPhase.HYPOTHESIS,
+            {
+                "entities": [
+                    {"name": "四君子汤", "type": "formula", "confidence": 0.95},
+                    {"name": "脾气虚证", "type": "syndrome", "confidence": 0.88},
+                ],
+            },
+        )
+        self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.EXPERIMENT, {})
+
+        execution_result = self.pipeline.execute_research_phase(
+            cycle.cycle_id,
+            ResearchPhase.EXPERIMENT_EXECUTION,
+            {},
+        )
+
+        self.assertEqual(execution_result["phase"], "experiment_execution")
+        self.assertEqual(execution_result["status"], "skipped")
+        self.assertEqual(execution_result["metadata"]["phase_semantics"], "experiment_execution")
+        self.assertEqual(execution_result["metadata"]["phase_display_name"], "实验执行阶段")
+        self.assertEqual(execution_result["metadata"]["execution_status"], "not_executed")
+        self.assertEqual(execution_result["results"]["analysis_records"], [])
+        self.assertEqual(execution_result["results"]["analysis_relationships"], [])
+
+    def test_experiment_execution_phase_imports_records_for_analyze(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="experiment-execution-import-cycle",
+            description="experiment execution import integration",
+            objective="验证方剂配伍与证候关联",
+            scope="中医古籍方剂研究",
+            researchers=["tester"],
+        )
+        self.assertTrue(self.pipeline.start_research_cycle(cycle.cycle_id))
+
+        self.pipeline.execute_research_phase(
+            cycle.cycle_id,
+            ResearchPhase.OBSERVE,
+            {
+                "run_literature_retrieval": False,
+                "run_preprocess_and_extract": False,
+                "use_ctext_whitelist": False,
+                "data_source": "manual",
+            },
+        )
+        self.pipeline.execute_research_phase(
+            cycle.cycle_id,
+            ResearchPhase.HYPOTHESIS,
+            {
+                "entities": [
+                    {"name": "四君子汤", "type": "formula", "confidence": 0.95},
+                    {"name": "脾气虚证", "type": "syndrome", "confidence": 0.88},
+                ],
+            },
+        )
+        self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.EXPERIMENT, {})
+
+        execution_result = self.pipeline.execute_research_phase(
+            cycle.cycle_id,
+            ResearchPhase.EXPERIMENT_EXECUTION,
+            {
+                "analysis_records": [
+                    {
+                        "formula": "四君子汤",
+                        "syndrome": "脾气虚证",
+                        "herbs": ["党参", "白术", "茯苓", "甘草"],
+                    }
+                ],
+                "analysis_relationships": [
+                    {
+                        "source": "四君子汤",
+                        "target": "党参",
+                        "type": "contains",
+                        "source_type": "formula",
+                        "target_type": "herb",
+                        "metadata": {"confidence": 0.92, "source": "observe_semantic_graph"},
+                    }
+                ],
+                "sampling_events": [{"batch": "batch-1", "size": 24}],
+                "output_files": {"csv": "output/experiment_execution.csv"},
+            },
+        )
+        analyze_result = self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.ANALYZE, {})
+
+        self.assertEqual(execution_result["status"], "completed")
+        self.assertEqual(execution_result["metadata"]["imported_record_count"], 1)
+        self.assertEqual(execution_result["metadata"]["imported_relationship_count"], 1)
+        self.assertEqual(execution_result["metadata"]["sampling_event_count"], 1)
+        self.assertEqual(analyze_result["metadata"]["record_count"], 1)
 
     def test_hypothesis_context_prefers_observe_semantic_relationships(self):
         cycle = self.pipeline.create_research_cycle(

@@ -35,12 +35,52 @@ docker build -t tcmautoresearch:local .
 docker compose up -d --build
 ```
 
+说明：当前镜像和 compose 应用服务都会显式启动独立 REST API 入口：
+
+```bash
+python -m src.api.main --config config.yml --environment production --host 0.0.0.0 --port 8000
+```
+
+这样容器内的 `/health`、`/liveness`、`/readiness` 与本地 API 调试入口保持一致，不再依赖 legacy web 启动路径。
+
 ### 2.4 验证探针
 
 ```bash
 curl http://127.0.0.1:8000/liveness
 curl http://127.0.0.1:8000/readiness
 ```
+
+### 2.5 容器内执行数据库迁移（Alembic）
+
+统一约定：不要进入容器后手工修改 `alembic.ini` 的 `sqlalchemy.url`。容器运维也沿用主仓库的两条统一路径。
+
+```bash
+# 推荐：按环境走配置中心
+docker compose exec tcmautoresearch \
+   alembic -x environment=production upgrade head
+```
+
+```bash
+# 定向：显式指定目标库，适合一次性排障或历史库处理
+docker compose exec tcmautoresearch \
+   alembic -x url=postgresql://tcm:your_password@postgres:5432/tcmautoresearch upgrade head
+```
+
+说明：
+
+- `docker-compose.yml` 里的应用服务已经注入了 `TCM_ENV=production`、`TCM_DB_PASSWORD` 和 `TCM_NEO4J_PASSWORD`，所以常规场景优先使用 `-x environment=production`。
+- 容器内如果显式写 PostgreSQL URL，主机名必须使用 Compose 服务名 `postgres`，不要写 `localhost`；在容器里 `localhost` 指向的是应用容器本身。
+- 如果目标库是早期通过 ORM `create_all()` 初始化、还没有 `alembic_version`，先基线标记再升级：
+
+```bash
+docker compose exec tcmautoresearch \
+   alembic -x url=postgresql://tcm:your_password@postgres:5432/tcmautoresearch stamp 3e5089f32f9a
+
+docker compose exec tcmautoresearch \
+   alembic -x url=postgresql://tcm:your_password@postgres:5432/tcmautoresearch upgrade head
+```
+
+- 当前 `head` 已包含 legacy enum -> varchar，以及字符串列表列 -> `varchar[]` 的 PostgreSQL 契约迁移。
 
 ## 3. CI 注入 secrets（推荐）
 
@@ -71,6 +111,7 @@ kubectl apply -f deploy/k8s/tcmautoresearch-deployment.example.yaml
 ```
 
 说明：
+
 - readinessProbe: /readiness
 - livenessProbe: /liveness
 - 使用 envFrom 引入 Secret，符合统一 secrets 命名规范

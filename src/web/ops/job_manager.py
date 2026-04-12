@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import json
 import threading
-import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
-from src.orchestration.research_orchestrator import (
-    OrchestrationResult,
-    PhaseOutcome,
-    ResearchOrchestrator,
-    _slug_topic,
+from src.infrastructure.config_loader import AppSettings
+from src.infrastructure.runtime_config_assembler import (
+    RuntimeAssembly,
+    build_runtime_assembly,
 )
-from src.research.research_pipeline import ResearchPipeline
+from src.orchestration.research_orchestrator import OrchestrationResult
+from src.orchestration.research_runtime_service import ResearchRuntimeService
 from src.web.ops.job_store import PersistentJobStore
 
 TerminalStatus = {"completed", "partial", "failed"}
@@ -99,7 +99,7 @@ class StreamingResearchRunner:
     """按阶段驱动 ResearchPipeline，并对外发射进度事件。"""
 
     def __init__(self, orchestrator_config: Optional[Dict[str, Any]] = None):
-        self.orchestrator = ResearchOrchestrator(orchestrator_config or {})
+        self.runtime_service = ResearchRuntimeService(orchestrator_config or {})
 
     def run(
         self,
@@ -114,164 +114,19 @@ class StreamingResearchRunner:
         if not topic:
             raise ValueError("topic 不能为空")
 
-        phase_contexts = payload.get("phase_contexts") or {}
-        cycle_name = payload.get("cycle_name") or _slug_topic(topic)
-        description = payload.get("description") or topic
-        scope = payload.get("scope") or self.orchestrator._infer_scope(topic)
-        study_type = _optional_text(payload.get("study_type"))
-        primary_outcome = _optional_text(payload.get("primary_outcome"))
-        intervention = _optional_text(payload.get("intervention"))
-        comparison = _optional_text(payload.get("comparison"))
-
-        started_at = _utc_now()
-        started_perf = time.perf_counter()
-
-        pipeline = ResearchPipeline(self.orchestrator.pipeline_config)
-        cycle = pipeline.create_research_cycle(
-            cycle_name=cycle_name,
-            description=description,
-            objective=topic,
-            scope=scope,
-            researchers=self.orchestrator.researchers,
+        runtime_result = self.runtime_service.run(
+            topic,
+            phase_contexts=payload.get("phase_contexts") or {},
+            cycle_name=payload.get("cycle_name"),
+            description=payload.get("description"),
+            scope=payload.get("scope"),
+            study_type=_optional_text(payload.get("study_type")),
+            primary_outcome=_optional_text(payload.get("primary_outcome")),
+            intervention=_optional_text(payload.get("intervention")),
+            comparison=_optional_text(payload.get("comparison")),
+            emit=emit,
         )
-        cycle_id = cycle.cycle_id
-
-        self._emit(
-            emit,
-            "cycle_created",
-            {
-                "topic": topic,
-                "cycle_id": cycle_id,
-                "cycle_name": cycle_name,
-                "scope": scope,
-            },
-        )
-
-        if not pipeline.start_research_cycle(cycle_id):
-            result = OrchestrationResult(
-                topic=topic,
-                cycle_id=cycle_id,
-                status="failed",
-                started_at=started_at,
-                completed_at=_utc_now(),
-                total_duration_sec=time.perf_counter() - started_perf,
-                phases=[],
-                pipeline_metadata={"error": "研究周期启动失败"},
-            )
-            self._emit(emit, "job_completed", {"status": result.status, "result": result.to_dict()})
-            return result
-
-        total_phases = len(self.orchestrator._phases)
-        phase_outcomes: List[PhaseOutcome] = []
-        overall_status = "completed"
-        publish_highlights: Dict[str, Dict[str, Any]] = {}
-
-        try:
-            for index, phase in enumerate(self.orchestrator._phases, start=1):
-                progress_before = ((index - 1) / total_phases) * 100.0
-                ctx = self.orchestrator._build_phase_context(
-                    topic,
-                    phase,
-                    phase_contexts,
-                    study_type=study_type,
-                    primary_outcome=primary_outcome,
-                    intervention=intervention,
-                    comparison=comparison,
-                )
-                self._emit(
-                    emit,
-                    "phase_started",
-                    {
-                        "phase": phase.value,
-                        "index": index,
-                        "total": total_phases,
-                        "progress": round(progress_before, 3),
-                    },
-                )
-                outcome = self.orchestrator._run_single_phase(pipeline, cycle_id, phase, ctx)
-                phase_outcomes.append(outcome)
-                progress_after = (index / total_phases) * 100.0
-                self._emit(
-                    emit,
-                    "phase_completed",
-                    {
-                        "phase": outcome.phase,
-                        "status": outcome.status,
-                        "duration_sec": round(outcome.duration_sec, 3),
-                        "error": outcome.error,
-                        "summary": outcome.summary,
-                        "index": index,
-                        "total": total_phases,
-                        "progress": round(progress_after, 3),
-                    },
-                )
-
-                if outcome.status == "failed":
-                    if self.orchestrator.stop_on_failure:
-                        overall_status = "partial"
-                        remaining = self.orchestrator._phases[index:]
-                        for remaining_phase in remaining:
-                            skipped = PhaseOutcome(
-                                phase=remaining_phase.value,
-                                status="skipped",
-                                duration_sec=0.0,
-                                summary={"reason": f"前置阶段 {phase.value} 失败"},
-                            )
-                            phase_outcomes.append(skipped)
-                            self._emit(
-                                emit,
-                                "phase_skipped",
-                                {
-                                    "phase": skipped.phase,
-                                    "status": skipped.status,
-                                    "summary": skipped.summary,
-                                    "progress": round(progress_after, 3),
-                                },
-                            )
-                        break
-                    overall_status = "partial"
-            publish_highlights = self.orchestrator._extract_publish_result_highlights(pipeline, cycle_id)
-        finally:
-            pipeline.cleanup()
-
-        non_skipped = [item for item in phase_outcomes if item.status != "skipped"]
-        if non_skipped and overall_status != "partial" and all(item.status == "failed" for item in non_skipped):
-            overall_status = "failed"
-
-        result = OrchestrationResult(
-            topic=topic,
-            cycle_id=cycle_id,
-            status=overall_status,
-            started_at=started_at,
-            completed_at=_utc_now(),
-            total_duration_sec=time.perf_counter() - started_perf,
-            phases=phase_outcomes,
-            pipeline_metadata={
-                "cycle_name": cycle_name,
-                "description": description,
-                "scope": scope,
-                "phases_requested": [phase.value for phase in self.orchestrator._phases],
-                "protocol_inputs": {
-                    "study_type": study_type,
-                    "primary_outcome": primary_outcome,
-                    "intervention": intervention,
-                    "comparison": comparison,
-                },
-            },
-            analysis_results=publish_highlights.get("analysis_results") or {},
-            research_artifact=publish_highlights.get("research_artifact") or {},
-        )
-        self._emit(emit, "job_completed", {"status": result.status, "result": result.to_dict()})
-        return result
-
-    @staticmethod
-    def _emit(
-        emit: Optional[Callable[[str, Dict[str, Any]], None]],
-        event_type: str,
-        payload: Dict[str, Any],
-    ) -> None:
-        if emit is not None:
-            emit(event_type, payload)
+        return runtime_result.orchestration_result
 
 
 class ResearchJobManager:
@@ -282,10 +137,29 @@ class ResearchJobManager:
         runner_factory: Optional[Callable[[Dict[str, Any]], StreamingResearchRunner]] = None,
         storage_dir: str | Path | None = None,
         default_orchestrator_config: Optional[Dict[str, Any]] = None,
+        runtime_assembly: Optional[RuntimeAssembly] = None,
+        settings: Optional[AppSettings] = None,
+        config_path: str | Path | None = None,
+        environment: Optional[str] = None,
     ):
+        resolved_runtime_assembly = runtime_assembly
+        if resolved_runtime_assembly is None and default_orchestrator_config is None:
+            if settings is not None or config_path is not None or environment is not None:
+                resolved_runtime_assembly = build_runtime_assembly(
+                    settings=settings,
+                    config_path=config_path,
+                    environment=environment,
+                )
+
+        resolved_storage_dir = storage_dir
+        if resolved_storage_dir is None and resolved_runtime_assembly is not None:
+            resolved_storage_dir = resolved_runtime_assembly.settings.job_storage_dir
+        if default_orchestrator_config is None and resolved_runtime_assembly is not None:
+            default_orchestrator_config = resolved_runtime_assembly.orchestrator_config
+
         self._runner_factory = runner_factory or (lambda config: StreamingResearchRunner(config))
-        self._default_orchestrator_config = dict(default_orchestrator_config or {})
-        self._store = PersistentJobStore(storage_dir or DEFAULT_JOB_STORAGE_DIR)
+        self._default_orchestrator_config = deepcopy(default_orchestrator_config or {})
+        self._store = PersistentJobStore(resolved_storage_dir or DEFAULT_JOB_STORAGE_DIR)
         self._jobs: Dict[str, ResearchJob] = self._load_persisted_jobs()
         self._lock = threading.Lock()
         self._workers: List[threading.Thread] = []
@@ -475,8 +349,8 @@ class ResearchJobManager:
     def _resolve_orchestrator_config(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         payload_config = payload.get("orchestrator_config") if isinstance(payload.get("orchestrator_config"), dict) else {}
         return {
-            **self._default_orchestrator_config,
-            **payload_config,
+            **deepcopy(self._default_orchestrator_config),
+            **deepcopy(payload_config),
         }
 
     def _run_job(self, job: ResearchJob, payload: Dict[str, Any]) -> None:

@@ -17,8 +17,9 @@ from src.api.dependencies import (
     get_console_auth_service_from_state,
     verify_management_api_key,
 )
-from src.infrastructure.config_loader import AppSettings, load_settings
+from src.infrastructure.config_loader import AppSettings
 from src.infrastructure.monitoring import MonitoringService
+from src.infrastructure.runtime_config_assembler import build_runtime_assembly
 from web_console.job_manager import ResearchJobManager
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -30,10 +31,22 @@ _WEB_STATIC_DIR = Path(__file__).resolve().parent.parent / "src" / "web" / "stat
 def create_app(
     job_manager: Optional[ResearchJobManager] = None,
     settings: Optional[AppSettings] = None,
+    config_path: Optional[str | Path] = None,
+    environment: Optional[str] = None,
 ) -> FastAPI:
-    resolved_settings = settings or load_settings()
+    runtime_assembly = build_runtime_assembly(
+        settings=settings,
+        config_path=config_path,
+        environment=environment,
+    )
+    resolved_settings = runtime_assembly.settings
     app = FastAPI(title=resolved_settings.web_console_title, version=resolved_settings.web_console_version)
-    manager = configure_api_services(app, job_manager=job_manager, settings=resolved_settings)
+    manager = configure_api_services(
+        app,
+        job_manager=job_manager,
+        settings=resolved_settings,
+        runtime_assembly=runtime_assembly,
+    )
 
     app.add_middleware(
         CORSMiddleware,
@@ -54,6 +67,8 @@ def create_app(
     with db_manager.session_scope() as _s:
         DatabaseManager.create_default_relationships(_s)
     app.state.db_manager = db_manager
+    monitoring_service: MonitoringService = app.state.monitoring_service
+    monitoring_service.bind_db_manager(db_manager)
 
     # 先注册 Architecture API 路由，避免被后续 Web 路由的动态路径抢占
     include_api_routers(app, base_prefix="/api")

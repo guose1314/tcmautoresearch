@@ -20,6 +20,7 @@ import glob
 import json
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -27,6 +28,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from src.web.auth import get_current_user
+from src.web.ops.legacy_research_runtime import get_legacy_research_store
 
 logger = logging.getLogger(__name__)
 
@@ -84,13 +86,98 @@ def _section_header(title: str, subtitle: str = "") -> str:
     )
 
 
+def _session_mtime(session: Dict[str, Any]) -> float:
+    for key in ("updated_at", "created_at", "completed_at", "started_at"):
+        raw_value = session.get(key)
+        if not raw_value:
+            continue
+        try:
+            return datetime.fromisoformat(str(raw_value).replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            continue
+    return 0.0
+
+
+def _session_phases(session: Dict[str, Any]) -> List[str]:
+    phase_executions = session.get("phase_executions") or {}
+    if isinstance(phase_executions, dict):
+        phases = [str(name).strip() for name in phase_executions.keys() if str(name).strip()]
+        if phases:
+            return phases
+    if isinstance(phase_executions, list):
+        phases = [
+            str(item.get("phase") or "").strip()
+            for item in phase_executions
+            if isinstance(item, dict) and str(item.get("phase") or "").strip()
+        ]
+        if phases:
+            return phases
+
+    analysis_summary = session.get("analysis_summary") or (session.get("metadata") or {}).get("analysis_summary") or {}
+    completed = analysis_summary.get("completed_phases") if isinstance(analysis_summary, dict) else []
+    if isinstance(completed, list):
+        return [str(phase).strip() for phase in completed if str(phase).strip()]
+    return []
+
+
+def _build_session_summary(session: Dict[str, Any]) -> Dict[str, Any]:
+    deliverables = session.get("deliverables") or []
+    artifacts = session.get("artifacts") or []
+    has_reports = bool(deliverables) or any(
+        isinstance(item, dict)
+        and str(item.get("artifact_type") or "").strip().lower() in {"paper", "report"}
+        for item in artifacts
+    )
+    title = str(
+        session.get("cycle_name")
+        or session.get("title")
+        or session.get("description")
+        or session.get("research_objective")
+        or session.get("question")
+        or "无标题"
+    ).strip() or "无标题"
+    question = str(
+        session.get("research_objective")
+        or session.get("question")
+        or session.get("description")
+        or ""
+    ).strip()
+    return {
+        "file": str(session.get("file") or ""),
+        "title": title[:80],
+        "question": question,
+        "status": str(session.get("status") or "unknown"),
+        "cycle_id": str(session.get("cycle_id") or ""),
+        "phases": _session_phases(session),
+        "has_reports": has_reports,
+        "mtime": _session_mtime(session),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Helpers – research output scanning
 # ---------------------------------------------------------------------------
 
 
-def _scan_research_sessions() -> List[Dict[str, Any]]:
-    """扫描 output/ 下的 research_session_*.json，返回各会话摘要（按时间倒序）。"""
+def _scan_research_sessions(request: Request | None = None) -> List[Dict[str, Any]]:
+    """优先从结构化存储读取研究会话，失败时回退扫描 output/ 导出文件。"""
+    if request is not None:
+        try:
+            store = get_legacy_research_store(request.app)
+            summaries = store.list_sessions()
+            if summaries:
+                results: List[Dict[str, Any]] = []
+                for item in summaries[:50]:
+                    cycle_id = str(item.get("cycle_id") or "").strip()
+                    session = store.get_session(cycle_id) if cycle_id else None
+                    source = session if isinstance(session, dict) else item
+                    if isinstance(source, dict):
+                        results.append(_build_session_summary(source))
+                results.sort(key=lambda item: item["mtime"], reverse=True)
+                return results
+        except Exception as exc:
+            logger.warning("dashboard structured session read failed, falling back to output scan: %s", exc)
+
     files = sorted(
         glob.glob(str(_OUTPUT_DIR / "research_session_*.json")),
         key=os.path.getmtime,
@@ -136,7 +223,7 @@ async def dashboard_stats(
     corpus = _count_corpus_files()
     outputs = _count_output_files()
     imrd = _count_imrd_reports()
-    sessions = _scan_research_sessions()
+    sessions = _scan_research_sessions(request)
 
     # 知识实体 (ORM)
     orm_entities = 0
@@ -178,7 +265,7 @@ async def dashboard_stats(
     <!-- 第一行: 核心指标 -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         {_card("📚 古籍文献", str(corpus), "gray-800")}
-        {_card("🔬 研究课题", str(total_sessions), "blue-600")}
+        {_card("🔬 研究任务", str(total_sessions), "blue-600")}
         {_card("📝 已生成论文", str(imrd["total"]), "purple-600")}
         {_card("✅ 系统状态", "运行中", "emerald-600")}
     </div>
@@ -231,7 +318,7 @@ async def dashboard_quality(
 
     # 根据实际数据计算质量分
     corpus = _count_corpus_files()
-    sessions = _scan_research_sessions()
+    sessions = _scan_research_sessions(request)
     completed_sessions = sum(1 for s in sessions if s["status"] == "completed")
     imrd = _count_imrd_reports()
 
@@ -267,11 +354,11 @@ async def dashboard_quality(
                    <span class="text-xs ml-1 text-teal-600">({density})</span></p>
                 <p>论文产出 <span class="text-gray-700 font-medium">{imrd["total"]}</span> 份
                    <span class="text-xs ml-1 text-purple-600">({paper_rate})</span></p>
-                <p>研究课题完成 <span class="text-gray-700 font-medium">{completed_sessions}</span> / {len(sessions)}</p>
+                <p>研究任务完成 <span class="text-gray-700 font-medium">{completed_sessions}</span> / {len(sessions)}</p>
             </div>
         </div>
         <p class="text-xs text-gray-400 mt-4">
-            动态评估 · 基于知识实体、关系、论文产出、课题完成度综合加权
+            动态评估 · 基于知识实体、关系、论文产出、任务完成度综合加权
         </p>
     </div>
     """
@@ -383,10 +470,11 @@ async def dashboard_smoke_health(
 
 @router.get("/api/dashboard/research-workflow", response_class=HTMLResponse)
 async def dashboard_research_workflow(
+    request: Request,
     user: Dict[str, Any] = Depends(get_current_user),
 ) -> HTMLResponse:
     """科研论文生成管线流程可视化面板。"""
-    sessions = _scan_research_sessions()
+    sessions = _scan_research_sessions(request)
     imrd = _count_imrd_reports()
     total = len(sessions)
     completed = sum(1 for s in sessions if s["status"] == "completed")
@@ -458,7 +546,7 @@ async def dashboard_research_workflow(
         <div class="flex items-center justify-between mb-4">
             <h2 class="font-semibold text-gray-800">🔬 科研论文书写流程</h2>
             <div class="flex gap-3 text-xs text-gray-500">
-                <span>课题 <strong class="text-blue-600">{total}</strong></span>
+                <span>任务 <strong class="text-blue-600">{total}</strong></span>
                 <span>完成 <strong class="text-emerald-600">{completed}</strong></span>
                 <span>论文 <strong class="text-purple-600">{imrd['total']}</strong></span>
             </div>
@@ -478,8 +566,8 @@ async def dashboard_research_workflow(
             <div>
                 <h3 class="text-sm font-semibold text-gray-600 mb-2">📈 流程统计</h3>
                 <div class="space-y-2 text-sm">
-                    <div class="flex justify-between"><span class="text-gray-500">总研究课题</span><span class="font-medium text-gray-800">{total}</span></div>
-                    <div class="flex justify-between"><span class="text-gray-500">已完成课题</span><span class="font-medium text-emerald-600">{completed}</span></div>
+                    <div class="flex justify-between"><span class="text-gray-500">总研究任务</span><span class="font-medium text-gray-800">{total}</span></div>
+                    <div class="flex justify-between"><span class="text-gray-500">已完成任务</span><span class="font-medium text-emerald-600">{completed}</span></div>
                     <div class="flex justify-between"><span class="text-gray-500">已生成论文</span><span class="font-medium text-purple-600">{with_papers}</span></div>
                     <div class="flex justify-between"><span class="text-gray-500">IMRD 报告 (MD)</span><span class="font-medium">{imrd['md']}</span></div>
                     <div class="flex justify-between"><span class="text-gray-500">IMRD 报告 (DOCX)</span><span class="font-medium">{imrd['docx']}</span></div>
@@ -498,13 +586,14 @@ async def dashboard_research_workflow(
 
 @router.get("/api/projects/recent", response_class=HTMLResponse)
 async def projects_recent(
+    request: Request,
     user: Dict[str, Any] = Depends(get_current_user),
 ) -> HTMLResponse:
-    sessions = _scan_research_sessions()[:8]  # 最近 8 条
+    sessions = _scan_research_sessions(request)[:8]  # 最近 8 条
     if not sessions:
         return HTMLResponse(
             '<div class="px-5 py-8 text-center text-sm text-gray-400">'
-            '暂无研究记录 — 通过 API 或 AI 助手启动研究课题</div>'
+            '暂无研究记录 — 可通过 POST /api/research/run 直接运行，或 POST /api/research/jobs 创建异步任务</div>'
         )
 
     _STATUS_MAP = {
@@ -540,9 +629,10 @@ async def projects_recent(
 
 @router.get("/api/projects", response_class=HTMLResponse)
 async def projects_page(
+    request: Request,
     user: Dict[str, Any] = Depends(get_current_user),
 ) -> HTMLResponse:
-    sessions = _scan_research_sessions()
+    sessions = _scan_research_sessions(request)
     imrd = _count_imrd_reports()
     total = len(sessions)
     completed = sum(1 for s in sessions if s["status"] == "completed")
@@ -575,13 +665,16 @@ async def projects_page(
         </div>"""
 
     if not project_cards:
-        project_cards = _empty_state("🔬", "暂无研究课题",
-            "使用 AI 助手或 POST /api/research/create 接口创建研究课题")
+        project_cards = _empty_state(
+            "🔬",
+            "暂无研究任务",
+            "使用 AI 助手，或 POST /api/research/run 直接运行研究；如需异步跟踪，请 POST /api/research/jobs",
+        )
 
     html = f"""
-    {_section_header("科研项目", f"共 {total} 个研究课题 · 已完成 {completed} · 论文产出 {imrd['total']} 份")}
+    {_section_header("研究任务", f"共 {total} 个研究任务 · 已完成 {completed} · 论文产出 {imrd['total']} 份")}
     <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-        {_card("🔬 研究课题", str(total), "blue-600")}
+        {_card("🔬 研究任务", str(total), "blue-600")}
         {_card("✅ 已完成", str(completed), "emerald-600")}
         {_card("📝 论文输出", str(imrd["total"]), "purple-600")}
     </div>
@@ -616,6 +709,9 @@ async def ai_assistant_panel(
                         <li>论文写作辅助</li>
                         <li>中医理论问答</li>
                     </ul>
+                    <p class="mt-3 text-xs text-emerald-600">
+                        研究执行入口已统一为 POST /api/research/run；如需异步跟踪，请使用 POST /api/research/jobs。
+                    </p>
                 </div>
             </div>
         </div>

@@ -10,11 +10,20 @@ class TestCycleCliParser(unittest.TestCase):
         parser = build_cycle_demo_arg_parser()
         args = parser.parse_args([])
 
+        self.assertEqual(args.config_path, "config.yml")
+        self.assertIsNone(args.environment)
         self.assertEqual(args.mode, "demo")
         self.assertEqual(args.demo_type, "full")
         self.assertEqual(args.iterations, 3)
         self.assertEqual(args.report_output_dir, "./output/research_reports")
         self.assertEqual(args.scholar_max_papers, 20)
+
+    def test_parser_accepts_explicit_config_and_environment(self):
+        parser = build_cycle_demo_arg_parser()
+        args = parser.parse_args(["--config", "./config/custom.yml", "--environment", "production"])
+
+        self.assertEqual(args.config_path, "./config/custom.yml")
+        self.assertEqual(args.environment, "production")
 
     def test_parser_repeated_report_format(self):
         parser = build_cycle_demo_arg_parser()

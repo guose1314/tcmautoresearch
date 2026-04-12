@@ -3,6 +3,7 @@ import importlib as _importlib
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "AnalyzePhaseHandler": ("src.research.phase_handlers.analyze_handler", "AnalyzePhaseHandler"),
     "ExperimentPhaseHandler": ("src.research.phase_handlers.experiment_handler", "ExperimentPhaseHandler"),
+    "ExperimentExecutionPhaseHandler": ("src.research.phase_handlers.experiment_execution_handler", "ExperimentExecutionPhaseHandler"),
     "HypothesisPhaseHandler": ("src.research.phase_handlers.hypothesis_handler", "HypothesisPhaseHandler"),
     "ObservePhaseHandler": ("src.research.phase_handlers.observe_handler", "ObservePhaseHandler"),
     "PublishPhaseHandler": ("src.research.phase_handlers.publish_handler", "PublishPhaseHandler"),

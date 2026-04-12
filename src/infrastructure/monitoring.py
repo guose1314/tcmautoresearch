@@ -11,7 +11,7 @@ import time
 from datetime import datetime
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
 
 from prometheus_client import CollectorRegistry, Gauge, generate_latest
 from prometheus_client.exposition import CONTENT_TYPE_LATEST
@@ -28,6 +28,7 @@ except Exception:  # pragma: no cover - 依赖缺失时降级
 
 from src.core.architecture import SystemArchitecture
 from src.infrastructure.config_loader import AppSettings
+from src.infrastructure.persistence import DatabaseManager
 from web_console.job_manager import ResearchJobManager
 
 
@@ -43,10 +44,12 @@ class MonitoringService:
         settings: AppSettings,
         architecture: SystemArchitecture,
         job_manager: ResearchJobManager,
+        db_manager: Optional[DatabaseManager] = None,
     ):
         self.settings = settings
         self.architecture = architecture
         self.job_manager = job_manager
+        self._db_manager = db_manager
         self.monitoring_config = settings.get_section("monitoring", "system_management.monitoring", default={})
         self.health_check_config = settings.get_section("health_check", "system_management.health_check", default={})
         self._lock = threading.Lock()
@@ -54,6 +57,11 @@ class MonitoringService:
         self._alert_history: Dict[str, float] = {}
         self._registry = CollectorRegistry(auto_describe=True)
         self._gauges = self._create_gauges()
+        self._structured_storage_summary = self._build_structured_storage_summary()
+
+    def bind_db_manager(self, db_manager: DatabaseManager) -> None:
+        self._db_manager = db_manager
+        self._structured_storage_summary = self._build_structured_storage_summary()
 
     @property
     def prometheus_content_type(self) -> str:
@@ -62,7 +70,7 @@ class MonitoringService:
     def collect_metrics(self) -> Dict[str, Any]:
         host_metrics = self._collect_host_metrics()
         job_metrics = self._collect_job_metrics()
-        persistence_summary = self.job_manager.get_storage_summary()
+        persistence_summary = self._build_persistence_summary()
         health_report = self._build_health_report(host_metrics, job_metrics, persistence_summary)
         alerts = self._build_alerts(host_metrics, job_metrics, health_report)
         self._dispatch_alerts(alerts)
@@ -87,7 +95,7 @@ class MonitoringService:
     def get_health_report(self) -> Dict[str, Any]:
         host_metrics = self._collect_host_metrics()
         job_metrics = self._collect_job_metrics()
-        persistence_summary = self.job_manager.get_storage_summary()
+        persistence_summary = self._build_persistence_summary()
         health_report = self._build_health_report(host_metrics, job_metrics, persistence_summary)
         self._refresh_architecture_status(host_metrics, job_metrics, health_report)
         return health_report
@@ -95,7 +103,7 @@ class MonitoringService:
     def get_system_status_snapshot(self) -> Dict[str, Any]:
         host_metrics = self._collect_host_metrics()
         job_metrics = self._collect_job_metrics()
-        persistence_summary = self.job_manager.get_storage_summary()
+        persistence_summary = self._build_persistence_summary()
         health_report = self._build_health_report(host_metrics, job_metrics, persistence_summary)
         status = self._refresh_architecture_status(host_metrics, job_metrics, health_report)
         system_info = status.get("system_info") if isinstance(status.get("system_info"), dict) else {}
@@ -123,7 +131,7 @@ class MonitoringService:
 
     def get_readiness_report(self) -> Dict[str, Any]:
         host_metrics = self._collect_host_metrics()
-        persistence_summary = self.job_manager.get_storage_summary()
+        persistence_summary = self._build_persistence_summary()
         checks = [
             self._resolve_named_check(name, host_metrics, persistence_summary)
             for name in self._get_enabled_readiness_checks()
@@ -263,6 +271,60 @@ class MonitoringService:
         metrics["events_per_job"] = (float(metrics.get("total_events", 0) or 0.0) / total_jobs) if total_jobs else 0.0
         metrics["throughput_jobs_per_hour"] = (terminal_jobs / (uptime_seconds / 3600.0)) if uptime_seconds > 0 else 0.0
         return metrics
+
+    def _build_persistence_summary(self) -> Dict[str, Any]:
+        summary = dict(self.job_manager.get_storage_summary())
+        summary["structured_storage"] = dict(self._structured_storage_summary)
+        return summary
+
+    def _build_structured_storage_summary(self) -> Dict[str, Any]:
+        db_type = self.settings.database_type
+        summary: Dict[str, Any] = {
+            "configured": bool(self.settings.database_config),
+            "db_type": db_type,
+            "db_healthy": None,
+            "neo4j_enabled": self.settings.neo4j_enabled,
+            "schema_drift": {
+                "status": "skip",
+                "checked_at": _utc_now(),
+                "database_type": db_type,
+                "legacy_enum_count": 0,
+                "incompatible_drift_count": 0,
+                "compatibility_variant_count": 0,
+                "issues": [],
+                "compatibility_variants": [],
+                "normalization_report": {},
+                "message": "未配置结构化 PostgreSQL 存储或当前环境无需 drift 检查",
+            },
+        }
+        if not summary["configured"]:
+            return summary
+
+        if db_type != "postgresql":
+            database_path = self.settings.get("database.path")
+            if database_path:
+                database_file = self._resolve_path(database_path)
+                summary["db_path"] = str(database_file)
+                summary["db_healthy"] = database_file.parent.exists()
+            summary["schema_drift"]["message"] = "当前非 PostgreSQL 环境，schema drift 检查已跳过"
+            return summary
+
+        manager = self._db_manager or DatabaseManager(
+            self.settings.database_url,
+            echo=bool(self.settings.database_config.get("echo", False)),
+            connection_timeout=self.settings.database_config.get("connection_timeout"),
+            pool_size=self.settings.database_config.get("connection_pool_size"),
+            max_overflow=self.settings.database_config.get("max_overflow"),
+        )
+        owns_manager = self._db_manager is None
+        try:
+            summary["db_healthy"] = manager.health_check()
+            summary["schema_drift"] = manager.inspect_schema_drift()
+            summary["schema_normalization"] = manager.get_schema_normalization_report()
+        finally:
+            if owns_manager:
+                manager.close()
+        return summary
 
     def _refresh_architecture_status(
         self,
@@ -489,6 +551,7 @@ class MonitoringService:
             self._check_config_loaded(),
             self._check_job_manager(),
             self._check_storage_writable(persistence_summary),
+            self._build_database_schema_check(persistence_summary),
         ]
 
     def _resolve_named_check(
@@ -501,7 +564,9 @@ class MonitoringService:
             "config_loaded": self._check_config_loaded,
             "job_manager": self._check_job_manager,
             "job_storage": lambda: self._check_storage_writable(persistence_summary),
-            "database_connection": self._build_database_check,
+            "database_connection": lambda: self._build_database_check(persistence_summary),
+            "database_schema_drift": lambda: self._build_database_schema_check(persistence_summary),
+            "schema_drift": lambda: self._build_database_schema_check(persistence_summary),
             "model_loading": self._build_model_check,
             "cpu_usage": lambda: self._build_metric_health_check("cpu_usage", host_metrics),
             "memory_usage": lambda: self._build_metric_health_check("memory_usage", host_metrics),
@@ -544,7 +609,7 @@ class MonitoringService:
                 "磁盘使用率过高",
             ),
             "network_connectivity": lambda: self._build_network_check(host_metrics),
-            "database_connection": self._build_database_check,
+            "database_connection": lambda: self._build_database_check(self._build_persistence_summary()),
             "model_loading": self._build_model_check,
         }
         builder = builders.get(metric_name)
@@ -597,7 +662,22 @@ class MonitoringService:
             "message": "网络接口可用" if healthy else "未检测到可用网络接口",
         }
 
-    def _build_database_check(self) -> Dict[str, Any]:
+    def _build_database_check(self, persistence_summary: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        structured_storage = (
+            dict((persistence_summary or {}).get("structured_storage") or {})
+            if isinstance((persistence_summary or {}).get("structured_storage"), dict)
+            else dict(self._structured_storage_summary)
+        )
+        if structured_storage.get("db_type") == "postgresql":
+            healthy = bool(structured_storage.get("db_healthy"))
+            return {
+                "name": "database_connection",
+                "status": "pass" if healthy else "fail",
+                "critical": False,
+                "database_type": "postgresql",
+                "message": "PostgreSQL 连接可用" if healthy else "PostgreSQL 连接不可用",
+            }
+
         database_path = self.settings.get("database.path")
         if not database_path:
             return {
@@ -619,6 +699,75 @@ class MonitoringService:
             "critical": False,
             "path": str(database_file),
             "message": "数据库路径可访问" if healthy else "数据库路径不可访问",
+        }
+
+    def _build_database_schema_check(self, persistence_summary: Dict[str, Any]) -> Dict[str, Any]:
+        structured_storage = (
+            dict(persistence_summary.get("structured_storage") or {})
+            if isinstance(persistence_summary.get("structured_storage"), dict)
+            else {}
+        )
+        schema_drift = (
+            dict(structured_storage.get("schema_drift") or {})
+            if isinstance(structured_storage.get("schema_drift"), dict)
+            else {}
+        )
+        if not schema_drift:
+            return {
+                "name": "database_schema_drift",
+                "status": "skip",
+                "critical": False,
+                "message": "未提供 schema drift 诊断信息",
+            }
+
+        drift_status = str(schema_drift.get("status") or "skip")
+        if drift_status == "skip":
+            return {
+                "name": "database_schema_drift",
+                "status": "skip",
+                "critical": False,
+                "details": schema_drift,
+                "message": str(schema_drift.get("message") or "schema drift 检查已跳过"),
+            }
+
+        incompatible_count = int(schema_drift.get("incompatible_drift_count") or 0)
+        legacy_enum_count = int(schema_drift.get("legacy_enum_count") or 0)
+        compatibility_variant_count = int(schema_drift.get("compatibility_variant_count") or 0)
+        normalization_report = (
+            dict(schema_drift.get("normalization_report") or {})
+            if isinstance(schema_drift.get("normalization_report"), dict)
+            else {}
+        )
+        normalized_enum_count = int(normalization_report.get("normalized_enum_count") or 0)
+
+        if incompatible_count > 0 or drift_status == "error":
+            status = "fail"
+        elif legacy_enum_count > 0:
+            status = "degraded"
+        else:
+            status = "pass"
+
+        if status == "fail":
+            message = f"检测到 {incompatible_count} 个不兼容 schema drift"
+        elif status == "degraded":
+            message = f"检测到 {legacy_enum_count} 个 legacy enum drift；启动期已自动规范 {normalized_enum_count} 组标签"
+        elif compatibility_variant_count > 0:
+            message = f"未检测到不兼容 drift；发现 {compatibility_variant_count} 个兼容存储差异"
+        else:
+            message = "未检测到 schema drift"
+
+        return {
+            "name": "database_schema_drift",
+            "status": status,
+            "critical": False,
+            "observed_value": {
+                "legacy_enum_count": legacy_enum_count,
+                "incompatible_drift_count": incompatible_count,
+                "compatibility_variant_count": compatibility_variant_count,
+                "normalized_enum_count": normalized_enum_count,
+            },
+            "details": schema_drift,
+            "message": message,
         }
 
     def _build_model_check(self) -> Dict[str, Any]:

@@ -50,6 +50,10 @@ class TestResearchPipelineQuality(unittest.TestCase):
             "experiment",
         )
         self.assertEqual(
+            self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.EXPERIMENT_EXECUTION)["phase"],
+            "experiment_execution",
+        )
+        self.assertEqual(
             self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.ANALYZE)["phase"],
             "analyze",
         )
@@ -71,6 +75,7 @@ class TestResearchPipelineQuality(unittest.TestCase):
                 ResearchPhase.OBSERVE.value,
                 ResearchPhase.HYPOTHESIS.value,
                 ResearchPhase.EXPERIMENT.value,
+                ResearchPhase.EXPERIMENT_EXECUTION.value,
                 ResearchPhase.ANALYZE.value,
                 ResearchPhase.PUBLISH.value,
                 ResearchPhase.REFLECT.value,
@@ -89,6 +94,112 @@ class TestResearchPipelineQuality(unittest.TestCase):
         self.assertEqual(summary["metadata"]["final_status"], "completed")
         all_cycles = self.pipeline.get_all_cycles()
         self.assertEqual(len(all_cycles), 1)
+
+    def test_completed_six_phase_cycle_keeps_reflect_as_current_phase(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="quality-cycle-current-phase",
+            description="quality current phase regression",
+            objective="full phase current phase regression",
+            scope="src/research",
+            researchers=["tester"],
+        )
+        self.assertTrue(self.pipeline.start_research_cycle(cycle.cycle_id))
+
+        self.assertEqual(
+            self.pipeline.execute_research_phase(
+                cycle.cycle_id,
+                ResearchPhase.OBSERVE,
+                {
+                    "run_literature_retrieval": False,
+                    "run_preprocess_and_extract": False,
+                    "use_ctext_whitelist": False,
+                    "data_source": "manual",
+                },
+            )["phase"],
+            "observe",
+        )
+        self.assertEqual(
+            self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.HYPOTHESIS)["phase"],
+            "hypothesis",
+        )
+        self.assertEqual(
+            self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.EXPERIMENT)["phase"],
+            "experiment",
+        )
+        self.assertEqual(
+            self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.EXPERIMENT_EXECUTION)["phase"],
+            "experiment_execution",
+        )
+        self.assertEqual(
+            self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.ANALYZE)["phase"],
+            "analyze",
+        )
+        self.assertEqual(
+            self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.PUBLISH)["phase"],
+            "publish",
+        )
+        self.assertEqual(
+            self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.REFLECT)["phase"],
+            "reflect",
+        )
+
+        self.assertTrue(self.pipeline.complete_research_cycle(cycle.cycle_id))
+
+        status = self.pipeline.get_cycle_status(cycle.cycle_id)
+        snapshot = self.pipeline._serialize_cycle(self.pipeline.research_cycles[cycle.cycle_id])
+        all_cycles = self.pipeline.get_all_cycles()
+
+        self.assertEqual(status["status"], ResearchCycleStatus.COMPLETED.value)
+        self.assertEqual(status["current_phase"], ResearchPhase.REFLECT.value)
+        self.assertEqual(status["metadata"]["last_completed_phase"], ResearchPhase.REFLECT.value)
+        self.assertEqual(
+            status["metadata"]["analysis_summary"]["last_phase"],
+            ResearchPhase.REFLECT.value,
+        )
+        self.assertEqual(snapshot["current_phase"], ResearchPhase.REFLECT.value)
+        self.assertEqual(snapshot["metadata"]["last_completed_phase"], ResearchPhase.REFLECT.value)
+        self.assertEqual(all_cycles[0]["current_phase"], ResearchPhase.REFLECT.value)
+
+    def test_skipped_experiment_execution_advances_to_analyze_without_marking_completed(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="quality-cycle-skipped-execution",
+            description="skipped execution regression",
+            objective="phase status regression",
+            scope="src/research",
+            researchers=["tester"],
+        )
+        self.assertTrue(self.pipeline.start_research_cycle(cycle.cycle_id))
+
+        self.pipeline.execute_research_phase(
+            cycle.cycle_id,
+            ResearchPhase.OBSERVE,
+            {
+                "run_literature_retrieval": False,
+                "run_preprocess_and_extract": False,
+                "use_ctext_whitelist": False,
+                "data_source": "manual",
+            },
+        )
+        self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.HYPOTHESIS)
+        self.pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.EXPERIMENT)
+
+        execution_result = self.pipeline.execute_research_phase(
+            cycle.cycle_id,
+            ResearchPhase.EXPERIMENT_EXECUTION,
+            {},
+        )
+        status = self.pipeline.get_cycle_status(cycle.cycle_id)
+
+        self.assertEqual(execution_result["status"], "skipped")
+        self.assertEqual(status["current_phase"], ResearchPhase.ANALYZE.value)
+        self.assertNotIn(
+            ResearchPhase.EXPERIMENT_EXECUTION.value,
+            status["metadata"]["completed_phases"],
+        )
+        self.assertEqual(
+            status["metadata"]["last_completed_phase"],
+            ResearchPhase.EXPERIMENT.value,
+        )
 
     def test_invalid_cycle_paths_and_suspend_resume(self):
         self.assertFalse(self.pipeline.start_research_cycle("missing"))

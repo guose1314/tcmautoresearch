@@ -21,12 +21,16 @@ except Exception:
 
 from src.research.phase_result import build_phase_result, get_phase_value
 
+_PROTOCOL_DESIGN_DISPLAY_NAME = "实验方案阶段"
+_PROTOCOL_DESIGN_BOUNDARY_NOTICE = "当前阶段仅生成研究协议与验证计划，不执行真实实验、临床试验或外部验证。"
+
 
 class ExperimentPhaseMixin:
     """Mixin: experiment 阶段处理方法。
 
     由 ResearchPhaseHandlers 通过多重继承组合使用。
     运行时 ``self.pipeline`` 由 ResearchPhaseHandlers.__init__ 设置。
+    当前阶段语义收口为 protocol design，而不是实验执行。
     """
 
     pipeline: "ResearchPipeline"  # provided by ResearchPhaseHandlers
@@ -36,6 +40,12 @@ class ExperimentPhaseMixin:
         selected_hypothesis, selection_metadata = self._resolve_selected_hypothesis(cycle, context)
         if selected_hypothesis is None:
             blocked_metadata = {
+                "phase_semantics": "protocol_design",
+                "phase_display_name": _PROTOCOL_DESIGN_DISPLAY_NAME,
+                "protocol_design_only": True,
+                "execution_boundary": _PROTOCOL_DESIGN_BOUNDARY_NOTICE,
+                "execution_status": "not_executed",
+                "real_world_validation_status": "not_started",
                 "validation_status": "blocked",
                 "reason": "missing_hypothesis_selection",
                 **selection_metadata,
@@ -44,10 +54,14 @@ class ExperimentPhaseMixin:
                 "experiment",
                 status="blocked",
                 results={
+                    "protocol_designs": [],
                     "experiments": [],
+                    "protocol_design": {},
                     "study_protocol": {},
                     "selected_hypothesis": None,
-                    "success_rate": 0.0,
+                    "design_completion_rate": 0.0,
+                    "execution_status": "not_executed",
+                    "real_world_validation_status": "not_started",
                 },
                 metadata=blocked_metadata,
             )
@@ -59,8 +73,20 @@ class ExperimentPhaseMixin:
 
         experiment_payload = experiment.to_dict()
         study_protocol = experiment_payload.get("study_protocol") if isinstance(experiment_payload.get("study_protocol"), dict) else {}
+        protocol_design_payload = {
+            **experiment_payload,
+            "phase_semantics": "protocol_design",
+            "phase_display_name": _PROTOCOL_DESIGN_DISPLAY_NAME,
+            "protocol_design_only": True,
+            "execution_boundary": _PROTOCOL_DESIGN_BOUNDARY_NOTICE,
+            "execution_status": "not_executed",
+            "real_world_validation_status": "not_started",
+            "human_execution_required": True,
+        }
         experiment_results = {
-            "experiments": [experiment_payload],
+            "protocol_designs": [protocol_design_payload],
+            "experiments": [protocol_design_payload],
+            "protocol_design": protocol_design_payload,
             "study_design": experiment.experimental_design,
             "sample_size": experiment.sample_size,
             "duration_days": experiment.duration,
@@ -78,13 +104,24 @@ class ExperimentPhaseMixin:
             "gap_priority_summary": experiment_context.get("gap_priority_summary", {}),
             "study_protocol": study_protocol,
             "selected_hypothesis": selected_hypothesis,
-            "success_rate": 1.0,
+            "design_completion_rate": 1.0,
+            "phase_focus": "protocol_design",
+            "execution_boundary": _PROTOCOL_DESIGN_BOUNDARY_NOTICE,
+            "execution_status": "not_executed",
+            "real_world_validation_status": "not_started",
         }
         metadata = {
             "study_type": experiment.experimental_design,
             "protocol_study_type": study_protocol.get("study_type", ""),
             "protocol_source": study_protocol.get("protocol_source", ""),
-            "validation_status": "approved",
+            "phase_semantics": "protocol_design",
+            "phase_display_name": _PROTOCOL_DESIGN_DISPLAY_NAME,
+            "protocol_design_only": True,
+            "execution_boundary": _PROTOCOL_DESIGN_BOUNDARY_NOTICE,
+            "execution_status": "not_executed",
+            "real_world_validation_status": "not_started",
+            "human_execution_required": True,
+            "validation_status": "protocol_defined",
             "evidence_record_count": experiment_context.get("evidence_profile", {}).get("record_count", 0),
             "weighted_evidence_score": experiment_context.get("evidence_profile", {}).get("weighted_evidence_score", 0.0),
             "clinical_gap_available": experiment_context.get("evidence_profile", {}).get("clinical_gap_available", False),

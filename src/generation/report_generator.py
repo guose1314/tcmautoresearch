@@ -261,6 +261,13 @@ class ReportGenerator(BaseModule):
                 "这种模板化设计能够降低研究方案撰写时的遗漏风险，并提高伦理申报与统计分析计划书之间的一致性。"
             )
 
+        if protocol:
+            paragraphs.append(
+                "需要说明的是，当前研究链中的 Experiment 阶段承担的是研究方案与验证协议设计职责，"
+                "并不代表已经完成真实实验执行、临床入组或外部验证。"
+                "因此，PICO、样本量、纳排标准与预期结局应被视为待执行 protocol 草案，后续仍需由研究者或外部执行系统落地。"
+            )
+
         if analysis_methods:
             paragraphs.append(
                 "分析方法方面，系统当前采用的核心路径包括："

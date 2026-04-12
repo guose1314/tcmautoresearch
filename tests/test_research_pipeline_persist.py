@@ -8,7 +8,7 @@ import sqlite3
 import tempfile
 import unittest
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from src.research.research_pipeline import (
     ResearchCycle,
@@ -34,6 +34,25 @@ def _make_cycle(
     cycle.duration = 42.0
     cycle.outcomes = [{"phase": "observe", "result": {"observations": ["obs1"]}}]
     return cycle
+
+
+def _make_phase_execution(
+    phase_name: str,
+    result: dict,
+    *,
+    context: dict | None = None,
+    started_at: str = "2026-01-01T00:00:00",
+    completed_at: str = "2026-01-01T00:00:05",
+    duration: float = 5.0,
+) -> dict:
+    return {
+        "phase": phase_name,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "duration": duration,
+        "context": context or {},
+        "result": result,
+    }
 
 
 class TestPersistResultBasic(unittest.TestCase):
@@ -203,6 +222,442 @@ class TestPersistResultIntegration(unittest.TestCase):
         conn.close()
         self.assertIsNotNone(row)
         self.assertEqual(row[0], "completed")
+
+
+class TestStructuredPersistResult(unittest.TestCase):
+    def _make_structured_cycle(self) -> ResearchCycle:
+        cycle = _make_cycle("cycle_structured")
+        cycle.phase_executions = {
+            ResearchPhase.OBSERVE: _make_phase_execution(
+                "observe",
+                {
+                    "phase": "observe",
+                    "status": "completed",
+                    "ingestion_pipeline": {
+                        "documents": [
+                            {
+                                "urn": "doc:observe:1",
+                                "title": "桂枝汤观察文档",
+                                "raw_text_size": 128,
+                                "processed_text_size": 120,
+                                "entity_count": 2,
+                                "entities": [
+                                    {"name": "桂枝汤", "type": "formula", "confidence": 0.95, "position": 0, "length": 3},
+                                    {"name": "桂枝", "type": "herb", "confidence": 0.93, "position": 4, "length": 2},
+                                ],
+                                "semantic_relationships": [
+                                    {
+                                        "source": "桂枝汤",
+                                        "target": "桂枝",
+                                        "type": "contains",
+                                        "source_type": "formula",
+                                        "target_type": "herb",
+                                        "confidence": 0.95,
+                                    }
+                                ],
+                            }
+                        ],
+                        "aggregate": {
+                            "semantic_relationships": [
+                                {
+                                    "source": "桂枝汤",
+                                    "target": "桂枝",
+                                    "type": "contains",
+                                    "source_type": "formula",
+                                    "target_type": "herb",
+                                    "metadata": {"confidence": 0.95},
+                                }
+                            ]
+                        },
+                    },
+                    "results": {
+                        "ingestion_pipeline": {
+                            "documents": [
+                                {
+                                    "urn": "doc:observe:1",
+                                    "title": "桂枝汤观察文档",
+                                    "raw_text_size": 128,
+                                    "processed_text_size": 120,
+                                    "entity_count": 2,
+                                    "entities": [
+                                        {"name": "桂枝汤", "type": "formula", "confidence": 0.95, "position": 0, "length": 3},
+                                        {"name": "桂枝", "type": "herb", "confidence": 0.93, "position": 4, "length": 2},
+                                    ],
+                                    "semantic_relationships": [
+                                        {
+                                            "source": "桂枝汤",
+                                            "target": "桂枝",
+                                            "type": "contains",
+                                            "source_type": "formula",
+                                            "target_type": "herb",
+                                            "confidence": 0.95,
+                                        }
+                                    ],
+                                }
+                            ],
+                            "aggregate": {
+                                "semantic_relationships": [
+                                    {
+                                        "source": "桂枝汤",
+                                        "target": "桂枝",
+                                        "type": "contains",
+                                        "source_type": "formula",
+                                        "target_type": "herb",
+                                        "metadata": {"confidence": 0.95},
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "artifacts": [],
+                    "metadata": {},
+                    "error": None,
+                },
+                context={"question": "桂枝汤调和营卫机制"},
+            ),
+            ResearchPhase.PUBLISH: _make_phase_execution(
+                "publish",
+                {
+                    "phase": "publish",
+                    "status": "completed",
+                    "results": {
+                        "deliverables": ["Markdown 论文初稿"],
+                    },
+                    "artifacts": [
+                        {
+                            "name": "markdown",
+                            "path": "./output/research_report.md",
+                            "type": "file",
+                        }
+                    ],
+                    "metadata": {},
+                    "error": None,
+                },
+                duration=12.0,
+            ),
+        }
+        return cycle
+
+    def test_prefers_structured_storage_when_database_config_present(self):
+        pipeline = ResearchPipeline(
+            {
+                "database": {"type": "postgresql", "host": "postgres", "name": "tcmautoresearch"},
+                "neo4j": {"enabled": False},
+            }
+        )
+        cycle = self._make_structured_cycle()
+
+        fake_factory = MagicMock()
+        fake_factory.initialize.return_value = {
+            "db_type": "postgresql",
+            "pg_status": "active",
+            "neo4j_status": "skipped",
+        }
+        fake_factory.db_manager = object()
+        fake_factory.neo4j_driver = None
+        fake_txn = MagicMock()
+        fake_txn.pg_session = object()
+        fake_factory.transaction.return_value.__enter__.return_value = fake_txn
+        fake_factory.transaction.return_value.__exit__.return_value = False
+
+        fake_repo = MagicMock()
+        fake_repo.get_session.return_value = None
+        fake_repo.save_from_cycle.return_value = {
+            "id": "session-1",
+            "cycle_id": cycle.cycle_id,
+            "created_at": "2026-04-12T16:41:00",
+        }
+        fake_repo.add_phase_execution.side_effect = [
+            {"id": "phase-observe", "phase": "observe", "status": "completed"},
+            {"id": "phase-publish", "phase": "publish", "status": "completed"},
+        ]
+        fake_repo.add_artifact.return_value = {
+            "id": "artifact-1",
+            "phase_execution_id": "phase-publish",
+            "name": "markdown",
+            "artifact_type": "paper",
+        }
+        fake_repo.replace_observe_document_graphs.return_value = []
+
+        with patch("src.storage.StorageBackendFactory", return_value=fake_factory), patch(
+            "src.infrastructure.research_session_repo.ResearchSessionRepository",
+            return_value=fake_repo,
+        ), patch(
+            "src.research.phase_orchestrator.sqlite3.connect",
+            side_effect=AssertionError("structured path should not fall back to sqlite"),
+        ):
+            result = pipeline._persist_result(cycle)
+
+        self.assertTrue(result)
+        fake_factory.initialize.assert_called_once()
+        fake_factory.transaction.assert_called_once()
+        fake_repo.save_from_cycle.assert_called_once()
+        self.assertEqual(fake_repo.add_phase_execution.call_count, 2)
+        fake_repo.replace_observe_document_graphs.assert_called_once()
+        fake_repo.add_artifact.assert_called_once()
+        fake_repo.update_session.assert_called_once()
+        self.assertIs(fake_repo.save_from_cycle.call_args.kwargs["session"], fake_txn.pg_session)
+        self.assertTrue(all(call.kwargs["session"] is fake_txn.pg_session for call in fake_repo.add_phase_execution.call_args_list))
+        self.assertIs(fake_repo.replace_observe_document_graphs.call_args.kwargs["session"], fake_txn.pg_session)
+        self.assertIs(fake_repo.add_artifact.call_args.kwargs["session"], fake_txn.pg_session)
+        self.assertIs(fake_repo.update_session.call_args.kwargs["session"], fake_txn.pg_session)
+        fake_factory.close.assert_called_once()
+
+    def test_projects_research_assets_to_neo4j_when_enabled(self):
+        pipeline = ResearchPipeline(
+            {
+                "database": {"type": "postgresql", "host": "postgres", "name": "tcmautoresearch"},
+                "neo4j": {"enabled": True},
+            }
+        )
+        cycle = self._make_structured_cycle()
+
+        fake_factory = MagicMock()
+        fake_factory.initialize.return_value = {
+            "db_type": "postgresql",
+            "pg_status": "active",
+            "neo4j_status": "active",
+        }
+        fake_factory.db_manager = object()
+        fake_factory.neo4j_driver = object()
+        fake_txn = MagicMock()
+        fake_txn.pg_session = object()
+        fake_factory.transaction.return_value.__enter__.return_value = fake_txn
+        fake_factory.transaction.return_value.__exit__.return_value = False
+
+        fake_repo = MagicMock()
+        fake_repo.get_session.return_value = None
+        fake_repo.save_from_cycle.return_value = {
+            "id": "session-1",
+            "cycle_id": cycle.cycle_id,
+            "created_at": "2026-04-12T16:41:00",
+        }
+        fake_repo.add_phase_execution.side_effect = [
+            {
+                "id": "phase-observe",
+                "phase": "observe",
+                "status": "completed",
+                "created_at": "2026-04-12T16:41:01",
+            },
+            {
+                "id": "phase-publish",
+                "phase": "publish",
+                "status": "completed",
+                "created_at": "2026-04-12T16:41:02",
+            },
+        ]
+        fake_repo.add_artifact.return_value = {
+            "id": "artifact-1",
+            "phase_execution_id": "phase-publish",
+            "name": "markdown",
+            "artifact_type": "paper",
+            "description": "研究报告输出",
+            "file_path": "./output/research_report.md",
+            "mime_type": "text/markdown",
+            "size_bytes": 0,
+            "created_at": "2026-04-12T16:41:03",
+            "updated_at": "2026-04-12T16:41:04",
+        }
+        fake_repo.replace_observe_document_graphs.return_value = [
+            {
+                "id": "observe-doc-1",
+                "phase_execution_id": "phase-observe",
+                "urn": "doc:observe:1",
+                "title": "桂枝汤观察文档",
+                "entity_count": 2,
+                "relationship_count": 1,
+                "entities": [
+                    {
+                        "id": "entity-formula-1",
+                        "document_id": "observe-doc-1",
+                        "name": "桂枝汤",
+                        "type": "other",
+                        "confidence": 0.95,
+                        "position": 0,
+                        "length": 3,
+                        "alternative_names": [],
+                        "description": "",
+                        "entity_metadata": {
+                            "raw_type": "formula",
+                            "cycle_id": cycle.cycle_id,
+                            "phase_execution_id": "phase-observe",
+                            "document_urn": "doc:observe:1",
+                            "document_title": "桂枝汤观察文档",
+                        },
+                        "created_at": "2026-04-12T16:41:05",
+                        "updated_at": "2026-04-12T16:41:06",
+                    },
+                    {
+                        "id": "entity-herb-1",
+                        "document_id": "observe-doc-1",
+                        "name": "桂枝",
+                        "type": "herb",
+                        "confidence": 0.93,
+                        "position": 4,
+                        "length": 2,
+                        "alternative_names": [],
+                        "description": "",
+                        "entity_metadata": {
+                            "raw_type": "herb",
+                            "cycle_id": cycle.cycle_id,
+                            "phase_execution_id": "phase-observe",
+                            "document_urn": "doc:observe:1",
+                            "document_title": "桂枝汤观察文档",
+                        },
+                        "created_at": "2026-04-12T16:41:07",
+                        "updated_at": "2026-04-12T16:41:08",
+                    },
+                ],
+                "semantic_relationships": [
+                    {
+                        "id": "observe-rel-1",
+                        "source_entity_name": "桂枝汤",
+                        "target_entity_name": "桂枝",
+                        "source_entity_type": "formula",
+                        "target_entity_type": "herb",
+                        "relationship_type": "CONTAINS",
+                        "relationship_name": "包含",
+                        "confidence": 0.95,
+                        "created_by_module": "observe_phase",
+                        "evidence": "桂枝汤包含桂枝",
+                        "relationship_metadata": {
+                            "cycle_id": cycle.cycle_id,
+                            "phase_execution_id": "phase-observe",
+                            "document_id": "observe-doc-1",
+                            "document_urn": "doc:observe:1",
+                            "document_title": "桂枝汤观察文档",
+                        },
+                        "created_at": "2026-04-12T16:41:09",
+                    }
+                ],
+            }
+        ]
+
+        with patch("src.storage.StorageBackendFactory", return_value=fake_factory), patch(
+            "src.infrastructure.research_session_repo.ResearchSessionRepository",
+            return_value=fake_repo,
+        ):
+            result = pipeline._persist_result(cycle)
+
+        self.assertTrue(result)
+        fake_factory.transaction.assert_called_once()
+        fake_repo.replace_observe_document_graphs.assert_called_once()
+        fake_txn.neo4j_batch_nodes.assert_called_once()
+        fake_txn.neo4j_batch_edges.assert_called_once()
+
+        nodes = fake_txn.neo4j_batch_nodes.call_args.args[0]
+        labels = {node.label for node in nodes}
+        self.assertIn("ResearchSession", labels)
+        self.assertIn("ResearchPhaseExecution", labels)
+        self.assertIn("ResearchArtifact", labels)
+        self.assertIn("Formula", labels)
+        self.assertIn("Herb", labels)
+
+        session_nodes = [node for node in nodes if node.label == "ResearchSession"]
+        self.assertEqual(len(session_nodes), 1)
+        self.assertEqual(session_nodes[0].properties["cycle_id"], cycle.cycle_id)
+        self.assertEqual(session_nodes[0].properties["created_at"], "2026-04-12T16:41:00")
+
+        phase_nodes = {node.id: node for node in nodes if node.label == "ResearchPhaseExecution"}
+        self.assertEqual(phase_nodes["phase-publish"].properties["created_at"], "2026-04-12T16:41:02")
+        self.assertEqual(phase_nodes["phase-publish"].properties["cycle_id"], cycle.cycle_id)
+
+        artifact_nodes = {node.id: node for node in nodes if node.label == "ResearchArtifact"}
+        self.assertEqual(artifact_nodes["artifact-1"].properties["created_at"], "2026-04-12T16:41:03")
+        self.assertEqual(artifact_nodes["artifact-1"].properties["updated_at"], "2026-04-12T16:41:04")
+        self.assertEqual(artifact_nodes["artifact-1"].properties["description"], "研究报告输出")
+
+        formula_nodes = [node for node in nodes if node.label == "Formula"]
+        herb_nodes = [node for node in nodes if node.label == "Herb"]
+        self.assertEqual(len(formula_nodes), 1)
+        self.assertEqual(len(herb_nodes), 1)
+        self.assertEqual(formula_nodes[0].properties["entity_id"], "entity-formula-1")
+        self.assertEqual(herb_nodes[0].properties["entity_id"], "entity-herb-1")
+
+        edges = fake_txn.neo4j_batch_edges.call_args.args[0]
+        relationship_types = {edge.relationship_type for edge, _, _ in edges}
+        self.assertIn("HAS_PHASE", relationship_types)
+        self.assertIn("GENERATED", relationship_types)
+        self.assertIn("CONTAINS", relationship_types)
+        self.assertIn("CAPTURED", relationship_types)
+
+    def test_projects_session_phase_nodes_to_neo4j_without_observe_documents(self):
+        pipeline = ResearchPipeline(
+            {
+                "database": {"type": "postgresql", "host": "postgres", "name": "tcmautoresearch"},
+                "neo4j": {"enabled": True},
+            }
+        )
+        cycle = _make_cycle("cycle_structured_no_docs")
+        cycle.phase_executions = {
+            ResearchPhase.OBSERVE: _make_phase_execution(
+                "observe",
+                {
+                    "phase": "observe",
+                    "status": "completed",
+                    "ingestion_pipeline": {
+                        "aggregate": {},
+                    },
+                    "results": {
+                        "ingestion_pipeline": {
+                            "aggregate": {},
+                        },
+                    },
+                    "artifacts": [],
+                    "metadata": {},
+                    "error": None,
+                },
+                context={"question": "无文档 observe Neo4j 投影"},
+            ),
+        }
+
+        fake_factory = MagicMock()
+        fake_factory.initialize.return_value = {
+            "db_type": "postgresql",
+            "pg_status": "active",
+            "neo4j_status": "active",
+        }
+        fake_factory.db_manager = object()
+        fake_factory.neo4j_driver = object()
+        fake_txn = MagicMock()
+        fake_txn.pg_session = object()
+        fake_factory.transaction.return_value.__enter__.return_value = fake_txn
+        fake_factory.transaction.return_value.__exit__.return_value = False
+
+        fake_repo = MagicMock()
+        fake_repo.get_session.return_value = None
+        fake_repo.save_from_cycle.return_value = {
+            "id": "session-no-docs",
+            "cycle_id": cycle.cycle_id,
+            "created_at": "2026-04-12T16:50:00",
+        }
+        fake_repo.add_phase_execution.return_value = {
+            "id": "phase-observe-no-docs",
+            "phase": "observe",
+            "status": "completed",
+            "created_at": "2026-04-12T16:50:01",
+        }
+        fake_repo.replace_observe_document_graphs.return_value = []
+
+        with patch("src.storage.StorageBackendFactory", return_value=fake_factory), patch(
+            "src.infrastructure.research_session_repo.ResearchSessionRepository",
+            return_value=fake_repo,
+        ):
+            result = pipeline._persist_result(cycle)
+
+        self.assertTrue(result)
+        fake_repo.replace_observe_document_graphs.assert_not_called()
+        fake_txn.neo4j_batch_nodes.assert_called_once()
+        fake_txn.neo4j_batch_edges.assert_called_once()
+        fake_repo.add_artifact.assert_not_called()
+
+        nodes = fake_txn.neo4j_batch_nodes.call_args.args[0]
+        labels = {node.label for node in nodes}
+        self.assertEqual(labels, {"ResearchSession", "ResearchPhaseExecution"})
+
+        edges = fake_txn.neo4j_batch_edges.call_args.args[0]
+        relationship_types = {edge.relationship_type for edge, _, _ in edges}
+        self.assertEqual(relationship_types, {"HAS_PHASE"})
 
 
 if __name__ == "__main__":

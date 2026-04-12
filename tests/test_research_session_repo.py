@@ -27,6 +27,43 @@ from src.infrastructure.research_session_repo import (
     _to_phase_status,
     _to_session_status,
 )
+from src.storage.neo4j_driver import Neo4jDriver, Neo4jEdge
+from src.storage.transaction import TransactionCoordinator
+
+
+class _RecordingNeo4jTx:
+    def __init__(self, backend):
+        self._backend = backend
+
+    def run(self, query, **params):
+        self._backend.executed_queries.append((query, params))
+        if query in self._backend.fail_on_queries:
+            raise RuntimeError(f"blocked: {query}")
+
+
+class _RecordingNeo4jSession:
+    def __init__(self, backend):
+        self._backend = backend
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+    def execute_write(self, callback):
+        return callback(_RecordingNeo4jTx(self._backend))
+
+
+class _RecordingNeo4jDriver:
+    def __init__(self, fail_on_queries=None):
+        self.driver = self
+        self.database = "neo4j"
+        self.fail_on_queries = set(fail_on_queries or [])
+        self.executed_queries = []
+
+    def session(self, database=None):
+        return _RecordingNeo4jSession(self)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -341,6 +378,246 @@ class TestArtifact:
 
     def test_delete_artifact_not_found(self, repo):
         assert repo.delete_artifact(uuid.uuid4()) is False
+
+
+# ---------------------------------------------------------------------------
+# Observe 文档图谱
+# ---------------------------------------------------------------------------
+
+class TestObserveDocumentGraph:
+    def test_replace_observe_document_graphs_persists_entities_and_relationships(self, repo):
+        session_payload = _make_payload(cycle_id="observe-cycle")
+        repo.create_session(session_payload)
+        phase = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "observe", "status": "completed"})
+
+        snapshots = repo.replace_observe_document_graphs(
+            session_payload["cycle_id"],
+            phase["id"],
+            [
+                {
+                    "urn": "doc:observe:1",
+                    "title": "观察文档一",
+                    "raw_text_size": 128,
+                    "processed_text_size": 120,
+                    "entity_count": 2,
+                    "entities": [
+                        {"name": "桂枝汤", "type": "formula", "confidence": 0.95, "position": 0, "length": 3},
+                        {"name": "桂枝", "type": "herb", "confidence": 0.93, "position": 4, "length": 2},
+                    ],
+                    "semantic_relationships": [
+                        {
+                            "source": "桂枝汤",
+                            "target": "桂枝",
+                            "type": "contains",
+                            "source_type": "formula",
+                            "target_type": "herb",
+                            "confidence": 0.95,
+                        }
+                    ],
+                    "output_generation": {"quality_metrics": {"confidence_score": 0.91}},
+                }
+            ],
+        )
+
+        assert len(snapshots) == 1
+        snapshot = snapshots[0]
+        assert snapshot["phase_execution_id"] == phase["id"]
+        assert snapshot["entity_count"] == 2
+        assert snapshot["relationship_count"] == 1
+        assert snapshot["entities"][0]["entity_metadata"]["cycle_id"] == session_payload["cycle_id"]
+        assert snapshot["semantic_relationships"][0]["relationship_type"] == "CONTAINS"
+        assert snapshot["semantic_relationships"][0]["source_entity_type"] == "formula"
+
+    def test_get_full_snapshot_includes_observe_documents(self, repo):
+        session_payload = _make_payload(cycle_id="observe-snapshot")
+        repo.create_session(session_payload)
+        phase = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "observe", "status": "completed"})
+        repo.replace_observe_document_graphs(
+            session_payload["cycle_id"],
+            phase["id"],
+            [
+                {
+                    "urn": "doc:observe:1",
+                    "title": "观察文档一",
+                    "raw_text_size": 128,
+                    "entity_count": 1,
+                    "entities": [
+                        {"name": "桂枝汤", "type": "formula", "confidence": 0.95, "position": 0, "length": 3},
+                    ],
+                    "semantic_relationships": [],
+                }
+            ],
+        )
+
+        snapshot = repo.get_full_snapshot(session_payload["cycle_id"])
+
+        assert snapshot is not None
+        assert len(snapshot["observe_documents"]) == 1
+        assert snapshot["observe_documents"][0]["entity_count"] == 1
+        assert snapshot["observe_documents"][0]["title"] == "观察文档一"
+
+    def test_external_transaction_rolls_back_observe_graph_on_neo4j_failure(self, db_manager, repo):
+        session_payload = _make_payload(cycle_id="observe-txn-rollback")
+        neo4j_driver = _RecordingNeo4jDriver(fail_on_queries={"CREATE second"})
+        session = db_manager.get_session()
+
+        with pytest.raises(RuntimeError, match="事务提交失败"):
+            with TransactionCoordinator(session, neo4j_driver) as txn:
+                repo.create_session(session_payload, session=txn.pg_session)
+                phase = repo.add_phase_execution(
+                    session_payload["cycle_id"],
+                    {"phase": "observe", "status": "completed"},
+                    session=txn.pg_session,
+                )
+                repo.replace_observe_document_graphs(
+                    session_payload["cycle_id"],
+                    phase["id"],
+                    [
+                        {
+                            "urn": "doc:observe:rollback",
+                            "title": "事务回滚观察文档",
+                            "entity_count": 1,
+                            "entities": [
+                                {"name": "麻黄汤", "type": "formula", "confidence": 0.95, "position": 0, "length": 3},
+                            ],
+                            "semantic_relationships": [],
+                        }
+                    ],
+                    session=txn.pg_session,
+                )
+                txn.neo4j_write("CREATE first", compensate_cypher="DELETE first", id=1)
+                txn.neo4j_write("CREATE second", compensate_cypher="DELETE second", id=2)
+
+        session.close()
+        db_manager.remove_session()
+
+        assert repo.get_session(session_payload["cycle_id"]) is None
+        assert repo.list_observe_document_graphs(session_payload["cycle_id"]) == []
+        assert neo4j_driver.executed_queries == [
+            ("CREATE first", {"id": 1}),
+            ("CREATE second", {"id": 2}),
+            ("DELETE first", {"id": 1}),
+        ]
+
+    def test_transaction_batch_edges_uses_split_match_clauses(self, db_manager):
+        neo4j_driver = _RecordingNeo4jDriver()
+        session = db_manager.get_session()
+
+        try:
+            with TransactionCoordinator(session, neo4j_driver) as txn:
+                txn.neo4j_batch_edges(
+                    [
+                        (
+                            Neo4jEdge(
+                                source_id="session-1",
+                                target_id="phase-1",
+                                relationship_type="HAS_PHASE",
+                                properties={"cycle_id": "session-1", "phase": "observe"},
+                            ),
+                            "ResearchSession",
+                            "ResearchPhaseExecution",
+                        ),
+                        (
+                            Neo4jEdge(
+                                source_id="phase-1",
+                                target_id="artifact-1",
+                                relationship_type="GENERATED",
+                                properties={"cycle_id": "session-1"},
+                            ),
+                            "ResearchPhaseExecution",
+                            "ResearchArtifact",
+                        ),
+                    ],
+                    compensate=False,
+                )
+        finally:
+            session.close()
+            db_manager.remove_session()
+
+        assert len(neo4j_driver.executed_queries) == 2
+        first_query, first_params = neo4j_driver.executed_queries[0]
+        second_query, second_params = neo4j_driver.executed_queries[1]
+
+        assert "MATCH (a:ResearchSession {id: $src_id}) MATCH (b:ResearchPhaseExecution {id: $tgt_id})" in first_query
+        assert ", (b:ResearchPhaseExecution {id: $tgt_id})" not in first_query
+        assert "MERGE (a)-[r:HAS_PHASE]->(b)" in first_query
+        assert first_params == {
+            "src_id": "session-1",
+            "tgt_id": "phase-1",
+            "props": {"cycle_id": "session-1", "phase": "observe"},
+        }
+
+        assert "MATCH (a:ResearchPhaseExecution {id: $src_id}) MATCH (b:ResearchArtifact {id: $tgt_id})" in second_query
+        assert ", (b:ResearchArtifact {id: $tgt_id})" not in second_query
+        assert "MERGE (a)-[r:GENERATED]->(b)" in second_query
+        assert second_params == {
+            "src_id": "phase-1",
+            "tgt_id": "artifact-1",
+            "props": {"cycle_id": "session-1"},
+        }
+
+    def test_neo4j_driver_relationship_writes_use_split_match_clauses(self):
+        backend = _RecordingNeo4jDriver()
+        driver = Neo4jDriver("neo4j://unit-test", ("neo4j", "password"))
+        driver.driver = backend
+
+        single_edge = Neo4jEdge(
+            source_id="session-1",
+            target_id="phase-1",
+            relationship_type="HAS_PHASE",
+            properties={"phase": "observe"},
+        )
+
+        assert driver.create_relationship(
+            single_edge,
+            "ResearchSession",
+            "ResearchPhaseExecution",
+        ) is True
+
+        single_query, single_params = backend.executed_queries[0]
+        assert "MATCH (source:ResearchSession {id: $source_id})" in single_query
+        assert "MATCH (target:ResearchPhaseExecution {id: $target_id})" in single_query
+        assert ", (target:ResearchPhaseExecution {id: $target_id})" not in single_query
+        assert "MERGE (source)-[r:HAS_PHASE]->(target)" in single_query
+        assert single_params == {
+            "source_id": "session-1",
+            "target_id": "phase-1",
+            "properties": {"phase": "observe"},
+        }
+
+        backend.executed_queries.clear()
+
+        batch_edge = Neo4jEdge(
+            source_id="phase-1",
+            target_id="artifact-1",
+            relationship_type="GENERATED",
+            properties={"cycle_id": "session-1"},
+        )
+
+        assert driver.batch_create_relationships(
+            [
+                (
+                    batch_edge,
+                    "ResearchPhaseExecution",
+                    "ResearchArtifact",
+                )
+            ]
+        ) is True
+
+        batch_query, batch_params = backend.executed_queries[0]
+        assert "MATCH (source:ResearchPhaseExecution {id: row.source_id})" in batch_query
+        assert "MATCH (target:ResearchArtifact {id: row.target_id})" in batch_query
+        assert ", (target:ResearchArtifact {id: row.target_id})" not in batch_query
+        assert "MERGE (source)-[r:GENERATED]->(target)" in batch_query
+        assert batch_params == {
+            "rows": [
+                {
+                    "source_id": "phase-1",
+                    "target_id": "artifact-1",
+                    "properties": {"cycle_id": "session-1"},
+                }
+            ]
+        }
 
 
 # ---------------------------------------------------------------------------

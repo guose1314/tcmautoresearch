@@ -139,9 +139,71 @@ class TestMonitoringService(unittest.TestCase):
         self.assertEqual(metrics["health"]["status"], "ok")
         self.assertEqual(metrics["health"]["summary"]["failed"], 0)
         self.assertEqual(metrics["health"]["summary"]["health_status"], "ok")
+        self.assertIn("structured_storage", metrics["persistence"])
         self.assertIn("cpu_usage_percent", metrics["host"])
         self.assertEqual(metrics["jobs"]["total_jobs"], 0)
         self.assertTrue(str(metrics["persistence"]["storage_dir"]).endswith("output\\jobs") or str(metrics["persistence"]["storage_dir"]).endswith("output/jobs"))
+
+    def test_health_report_surfaces_schema_drift_details(self) -> None:
+        self.settings.config["database"] = {
+            "type": "postgresql",
+            "host": "localhost",
+            "port": 5432,
+            "name": "tcm_autoresearch",
+            "user": "tcm_user",
+        }
+        fake_db_manager = MagicMock()
+        fake_db_manager.health_check.return_value = True
+        fake_db_manager.get_schema_normalization_report.return_value = {
+            "status": "normalized",
+            "normalized_enum_count": 1,
+            "normalized_label_count": 4,
+            "normalized_enums": [
+                {
+                    "table": "documents",
+                    "column": "process_status",
+                    "enum_name": "processstatusenum",
+                }
+            ],
+        }
+        fake_db_manager.inspect_schema_drift.return_value = {
+            "status": "degraded",
+            "checked_at": "2026-04-12T18:00:00",
+            "database_type": "postgresql",
+            "legacy_enum_count": 1,
+            "incompatible_drift_count": 0,
+            "compatibility_variant_count": 2,
+            "issues": [
+                {
+                    "kind": "legacy_enum",
+                    "status": "degraded",
+                    "table": "documents",
+                    "column": "process_status",
+                }
+            ],
+            "compatibility_variants": [
+                {
+                    "kind": "string_list_array",
+                    "table": "entities",
+                    "column": "alternative_names",
+                }
+            ],
+            "normalization_report": {
+                "status": "normalized",
+                "normalized_enum_count": 1,
+            },
+            "message": "检测到 1 个 legacy enum drift，当前依赖兼容层运行",
+        }
+
+        self.service.bind_db_manager(fake_db_manager)
+        health = self.service.get_health_report()
+
+        schema_check = next(item for item in health["checks"] if item["name"] == "database_schema_drift")
+        self.assertEqual(schema_check["status"], "degraded")
+        self.assertEqual(schema_check["observed_value"]["legacy_enum_count"], 1)
+        self.assertEqual(schema_check["observed_value"]["compatibility_variant_count"], 2)
+        self.assertEqual(schema_check["details"]["normalization_report"]["normalized_enum_count"], 1)
+        self.assertIn("legacy enum drift", schema_check["message"])
 
     def test_prometheus_export_contains_core_metrics(self) -> None:
         payload = self.service.export_prometheus_metrics()

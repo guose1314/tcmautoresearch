@@ -95,6 +95,11 @@ class TransactionCoordinator:
                 raise RuntimeError(f"事务提交失败: {result.error}")
         return False
 
+    @property
+    def pg_session(self) -> Any:
+        """暴露当前 PG session，供同一事务边界内的仓储层复用。"""
+        return self._pg
+
     # ── PostgreSQL 操作 ──────────────────────────────────────────────────
 
     def pg_add(self, instance: Any) -> None:
@@ -175,7 +180,8 @@ class TransactionCoordinator:
             safe_tgt = _safe_cypher_label(tgt_label)
             safe_rel = _safe_cypher_label(edge.relationship_type)
             cypher = (
-                f"MATCH (a:{safe_src} {{id: $src_id}}), (b:{safe_tgt} {{id: $tgt_id}}) "
+                f"MATCH (a:{safe_src} {{id: $src_id}}) "
+                f"MATCH (b:{safe_tgt} {{id: $tgt_id}}) "
                 f"MERGE (a)-[r:{safe_rel}]->(b) "
                 f"SET r += $props"
             )

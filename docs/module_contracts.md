@@ -13,6 +13,7 @@
 - L5 测试层: tests, integration_tests
 
 依赖规则:
+
 - 低层不能反向依赖高层。
 - 业务代码 (src/) 不强依赖测试框架。
 - 重量级依赖 (如 llama-cpp-python) 必须延迟导入。
@@ -20,7 +21,7 @@
 ## 2. 模块职责与接口
 
 | 模块 | 主要职责 | 输入 | 输出 | 关键依赖 | 安全与性能约束 |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | src/core/module_base.py | 统一生命周期与执行指标 | context(dict) | result(dict) | logging, concurrent.futures | 全局线程池复用，避免资源泄漏 |
 | src/core/architecture.py | 模块注册、依赖图、健康状态 | ModuleInfo | registry state | networkx | 只维护架构与注册，不重复定义接口类型 |
 | src/core/module_interface.py | 标准接口与上下文/输出数据结构 | ModuleContext | ModuleOutput | dataclasses | 作为接口单一事实来源 |
@@ -43,13 +44,14 @@
 | src/web/main.py | FastAPI 入口（路由注册+静态资源） | — | ASGI app | fastapi, uvicorn, Jinja2 | EXPOSE 8000；模板渲染用 Jinja2 |
 | src/web/routes/ | 研究/分析/助手 API 路由 | HTTP request | JSON response | web.auth | 所有写操作需 JWT 鉴权 |
 | src/ai_assistant/assistant_engine.py | AI 对话引擎（意图识别+多轮会话） | message/session_id/context | reply/suggestions/references/intent | LLMEngine（惰性加载） | 无 LLM 时返回占位回复；历史上限截断 |
-| src/ai_assistant/research_advisor.py | 假说/实验/新颖性评估顾问 | question/context | hypothesis/experiment/novelty | LLMEngine | 纯 LLM 驱动，不依赖外部 API |
+| src/ai_assistant/research_advisor.py | 假说/实验方案/新颖性评估顾问 | question/context | hypothesis/protocol_design/novelty | LLMEngine | 纯 LLM 驱动，不依赖外部 API |
 | src/ai_assistant/writing_helper.py | IMRD 论文写作 + DOCX 导出 | sections/context | markdown/docx | python-docx | 生成文件写入 output/ |
 | src/visualization/graph_renderer.py | 知识图谱→ECharts/Cytoscape JSON | networkx.Graph/entities | echarts_option/cytoscape_elements | networkx | 纯数据转换，不含渲染依赖 |
 
 ## 3. 流程规范
 
 标准流水线:
+
 1. 输入校验
 2. 预处理
 3. 抽取
@@ -59,6 +61,7 @@
 7. 质量指标计算
 
 约束:
+
 - 每一阶段必须返回结构化 dict。
 - 异常必须记录日志并保留最小可诊断信息。
 - 关键路径必须可在无 GPU 环境下完成基础流程。

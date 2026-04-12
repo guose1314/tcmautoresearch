@@ -90,23 +90,39 @@ def run_full_cycle_demo(
     max_iterations: int = 3,
     sample_data: Optional[List[str]] = None,
     config_path: Optional[str] = 'config.yml',
+    environment: Optional[str] = None,
     output_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     return cycle_runner.run_full_cycle_demo(
         max_iterations=max_iterations,
         sample_data=sample_data,
         config_path=config_path,
+        environment=environment,
         output_path=output_path,
         governance_config_loader=_load_cycle_demo_governance_config,
     )
 
 
-def run_academic_demo() -> Dict[str, Any]:
-    return cycle_runner.run_academic_demo(run_full_demo=run_full_cycle_demo)
+def run_academic_demo(
+    config_path: Optional[str] = 'config.yml',
+    environment: Optional[str] = None,
+) -> Dict[str, Any]:
+    return cycle_runner.run_academic_demo(
+        run_full_demo=run_full_cycle_demo,
+        config_path=config_path,
+        environment=environment,
+    )
 
 
-def run_performance_demo() -> Dict[str, Any]:
-    return cycle_runner.run_performance_demo(run_full_demo=run_full_cycle_demo)
+def run_performance_demo(
+    config_path: Optional[str] = 'config.yml',
+    environment: Optional[str] = None,
+) -> Dict[str, Any]:
+    return cycle_runner.run_performance_demo(
+        run_full_demo=run_full_cycle_demo,
+        config_path=config_path,
+        environment=environment,
+    )
 
 
 def main() -> int:

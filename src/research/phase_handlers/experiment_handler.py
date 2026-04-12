@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 
 class ExperimentPhaseHandler(BasePhaseHandler, ExperimentPhaseMixin, HypothesisPhaseMixin):
-    """Independent experiment phase handler.
+    """Independent protocol-design phase handler.
 
     Mixes hypothesis helpers to reuse hypothesis selection logic.
     """

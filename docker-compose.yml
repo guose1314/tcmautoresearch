@@ -54,6 +54,18 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
+    command:
+      - python
+      - -m
+      - src.api.main
+      - --config
+      - config.yml
+      - --environment
+      - production
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
     environment:
       TCM_ENV: production
       TCM_LOG_LEVEL: WARNING

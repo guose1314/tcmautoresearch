@@ -2,12 +2,13 @@
 
 import logging
 import time
+from copy import deepcopy
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-_ALL_PIPELINE_PHASES = ["observe", "hypothesis", "experiment", "analyze", "publish", "reflect"]
+_ALL_PIPELINE_PHASES = ["observe", "hypothesis", "experiment", "experiment_execution", "analyze", "publish", "reflect"]
 
 
 def run_pipeline_iteration(
@@ -17,8 +18,9 @@ def run_pipeline_iteration(
     summarize_module_quality_fn: Callable[[str, Dict[str, Any]], Dict[str, float]],
     max_iterations: int = 5,
     governance_config: Optional[Dict[str, Any]] = None,
+    runtime_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """通过 6 阶段 ResearchPipeline 执行单次迭代。"""
+    """通过 7 阶段 ResearchPipeline 执行单次迭代。"""
     start_time = time.time()
     question = input_data.get("objective", "")
     if not question:
@@ -27,7 +29,7 @@ def run_pipeline_iteration(
     question = question or "中医方剂组成规律分析"
 
     try:
-        pipeline_config: Dict[str, Any] = {}
+        pipeline_config: Dict[str, Any] = deepcopy(runtime_config) if runtime_config else {}
         previous_feedback = input_data.get("previous_feedback")
         if previous_feedback:
             pipeline_config["previous_iteration_feedback"] = previous_feedback

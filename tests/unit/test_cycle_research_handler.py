@@ -1,5 +1,6 @@
 import logging
 import unittest
+from unittest.mock import patch
 
 from src.cycle.cycle_cli import build_cycle_demo_arg_parser
 from src.cycle.cycle_research_handler import execute_research_branch
@@ -29,6 +30,10 @@ class TestCycleResearchHandler(unittest.TestCase):
         parser = build_cycle_demo_arg_parser()
         args = parser.parse_args(
             [
+                "--config",
+                "./config/production.yml",
+                "--environment",
+                "production",
                 "--mode",
                 "research",
                 "--question",
@@ -49,16 +54,44 @@ class TestCycleResearchHandler(unittest.TestCase):
             captured.update(kwargs)
             return {"status": "completed"}
 
-        rc = execute_research_branch(
-            args=args,
-            logger=logging.getLogger("test.cycle.research"),
-            run_research_session_fn=fake_research,
-        )
+        with patch(
+            "src.cycle.cycle_research_handler.build_cycle_runtime_config",
+            return_value={"runtime": {"environment": "production"}},
+        ) as runtime_builder:
+            rc = execute_research_branch(
+                args=args,
+                logger=logging.getLogger("test.cycle.research"),
+                run_research_session_fn=fake_research,
+            )
 
         self.assertEqual(rc, 0)
         self.assertEqual(captured["question"], "测试问题")
+        self.assertEqual(captured["config"], {"runtime": {"environment": "production"}})
         self.assertEqual(captured["phase_names"], ["observe", "publish"])
         self.assertEqual(captured["export_report_formats"], ["markdown", "docx"])
+        runtime_builder.assert_called_once_with(
+            config_path="./config/production.yml",
+            environment="production",
+        )
+
+    def test_partial_status_returns_non_zero(self):
+        parser = build_cycle_demo_arg_parser()
+        args = parser.parse_args(
+            [
+                "--mode",
+                "research",
+                "--question",
+                "测试问题",
+            ]
+        )
+
+        rc = execute_research_branch(
+            args=args,
+            logger=logging.getLogger("test.cycle.research"),
+            run_research_session_fn=lambda **_kwargs: {"status": "partial"},
+        )
+
+        self.assertEqual(rc, 1)
 
 
 if __name__ == "__main__":

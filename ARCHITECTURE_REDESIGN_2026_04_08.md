@@ -5,7 +5,7 @@
 本次评估基于两类证据：
 
 1. 静态代码遍历：重点阅读入口、编排、存储、Web、配置与质量评估模块。
-2. 真实运行验证：使用本地 Qwen GGUF 模型执行一次完整 6 阶段研究流程。
+2. 真实运行验证：使用本地 Qwen GGUF 模型执行一次当时的完整历史研究流程。
 
 关键阅读入口：
 
@@ -30,6 +30,13 @@
 - `output/research_session_1775649228.json`
 - `output/research_reports/cycle_1775649228_d5645170_imrd_report.md`
 
+同步说明（2026-04-12）：
+
+- 本文的真实运行证据来自 2026-04-08，当时主链尚未拆出 `experiment_execution`。
+- 当前主链已经演进为 Observe → Hypothesis → Experiment → ExperimentExecution → Analyze → Publish → Reflect。
+- 当前阶段边界应理解为：`experiment = protocol design`，`experiment_execution = external execution import`。
+- 若按当前主链复跑研究流程，`--research-phases` 中应显式包含 `experiment_execution`。
+
 ## 2. 执行结论
 
 结论先行：系统已经具备“可启动、可登录、可跑通、可出报告”的工程能力，但距离“真实科研闭环平台”还有明显差距。目前更准确的定位是：**一个具备多种科研能力原型的研究编排平台**，而不是已经完成收敛的统一科研操作系统。
@@ -46,7 +53,7 @@
    SQLite、PostgreSQL、Neo4j 的后端工厂和降级策略说明系统已经在向“多后端能力平台”演进，而不是把数据写死在单一实现中。
 
 4. 研究流程已形成阶段化语义。
-   Observe、Hypothesis、Experiment、Analyze、Publish、Reflect 的边界已经存在，适合继续演化为真正的领域流水线。
+   历史基线已经形成不含 `experiment_execution` 的前置阶段边界；当前主链则进一步演进为 Observe、Hypothesis、Experiment、ExperimentExecution、Analyze、Publish、Reflect，其中 Experiment 负责方案设计，ExperimentExecution 负责外部执行结果导入。
 
 5. 发布与报告产出能力可用。
    本次真实运行虽然科研证据薄弱，但仍成功产出 IMRD 报告与论文草稿，说明下游写作链路可复用。
@@ -75,7 +82,7 @@
 
 ### 3.1 实际跑通情况
 
-本次 6 阶段流程全部执行完成：
+本次历史基线运行完成了当时启用的 6 个阶段：
 
 - observe
 - hypothesis
@@ -83,6 +90,8 @@
 - analyze
 - publish
 - reflect
+
+按当前主链语义，应将这组样本理解为“`experiment_execution` 尚未拆出前的历史运行基线”；当前默认主链已在 `experiment` 与 `analyze` 之间新增 `experiment_execution`。
 
 同时生成了：
 
@@ -116,11 +125,13 @@
 
 ### 4.1 现状架构图
 
+> 历史基线图（2026-04-08）：以下 mermaid 图反映的是重构设计时观察到的系统快照，用于保留当时的问题上下文；当前实现状态应以较新的架构审计与真实运行/持久化回归为准。
+
 ```mermaid
 flowchart LR
     CLI[run_cycle_demo.py] --> Cycle[cycle_runner / cycle_research_session]
     Cycle --> Pipeline[research_pipeline]
-    Pipeline --> Phases[observe/hypothesis/experiment/analyze/publish/reflect]
+   Pipeline --> Phases[observe/hypothesis/experiment/experiment_execution/analyze/publish/reflect]
 
     Pipeline --> Quality[quality_assessor]
     Pipeline --> Storage[backend_factory]
@@ -212,7 +223,7 @@ flowchart LR
 建议：至少拆成四层：
 
 1. `src/research/core/`：研究会话、阶段契约、编排器。
-2. `src/research/phases/`：六阶段实现。
+2. `src/research/phases/`：当前七阶段实现（含 `experiment_execution`）。
 3. `src/research/connectors/`：Scholar、arXiv、外部 API 适配。
 4. `src/research/tools/`：翻译、导出、论文辅助等工具。
 
@@ -308,9 +319,10 @@ flowchart LR
 
 1. Observe 无有效文献/数据时，Hypothesis 默认不能进入正式模式。
 2. Hypothesis 必须带证据引用列表和证据密度指标。
-3. Experiment 必须声明其直接对应的 hypothesis ID。
-4. Analyze 必须输出证据等级、统计假设和失败原因。
-5. Publish 必须区分“研究草稿”“工程草稿”“可发表结果”三种状态。
+3. Experiment 必须声明其直接对应的 hypothesis ID，且默认只承担 protocol design。
+4. ExperimentExecution 必须记录外部执行来源、采样事件与导入证据，不得伪装为系统内自动实证。
+5. Analyze 必须输出证据等级、统计假设和失败原因。
+6. Publish 必须区分“研究草稿”“工程草稿”“可发表结果”三种状态。
 
 ## 8. 目标架构
 
@@ -324,6 +336,8 @@ flowchart LR
 
 ### 8.2 目标架构图
 
+> 历史设计目标图（2026-04-08）：以下 mermaid 图表达的是当时的目标收口方向，而不是当前默认实现完成度；其中阶段边界应结合最新口径理解为 experiment = protocol design、experiment_execution = external execution import。
+
 ```mermaid
 flowchart TB
     UI[Unified FastAPI App] --> API[Application Services]
@@ -335,6 +349,7 @@ flowchart TB
     Orchestrator --> Observe[Observe Phase]
     Orchestrator --> Hypothesis[Hypothesis Phase]
     Orchestrator --> Experiment[Experiment Phase]
+   Orchestrator --> ExperimentExecution[ExperimentExecution Phase]
     Orchestrator --> Analyze[Analyze Phase]
     Orchestrator --> Publish[Publish Phase]
     Orchestrator --> Reflect[Reflect Phase]
@@ -342,6 +357,7 @@ flowchart TB
     Observe --> Contract[PhaseResult Contract]
     Hypothesis --> Contract
     Experiment --> Contract
+   ExperimentExecution --> Contract
     Analyze --> Contract
     Publish --> Contract
     Reflect --> Contract
@@ -357,6 +373,8 @@ flowchart TB
 ```
 
 ### 8.3 部署视角图
+
+> 历史设计目标图（2026-04-08）：以下 mermaid 图是当时的目标部署视角，用于说明设计意图，不应替代当前真实部署拓扑与接线状态。
 
 ```mermaid
 flowchart LR
@@ -374,7 +392,7 @@ flowchart LR
 建议内容：
 
 - 新增统一返回结构，例如：`status`、`phase`、`results`、`artifacts`、`metadata`、`error`、`metrics`
-- 六个 phase 全部强制返回该结构
+- 七个科研 phase 全部强制返回该结构
 - `Publish` 与 `Reflect` 不再各自猜测上游字段
 
 理由：这是当前最根本的问题，能一次性解决质量评估低分、下游兜底过多、测试不稳定三类问题。
@@ -448,7 +466,7 @@ flowchart LR
 实施项：
 
 1. 新增 `PhaseResult` 模型。
-2. 六阶段统一返回结构。
+2. 七阶段统一返回结构。
 3. 修正 `Reflect` 与 `QualityAssessor` 的字段读取逻辑。
 4. 为每个阶段补契约级单元测试。
 
@@ -491,7 +509,7 @@ flowchart LR
 实施项：
 
 1. Observe 证据不足 fail-fast。
-2. Hypothesis 与 Experiment 建立显式引用关系。
+2. Hypothesis 与 Experiment 建立显式引用关系，并让 ExperimentExecution 记录外部执行来源与导入证据。
 3. Analyze 增加证据等级与统计约束。
 4. Publish 引入结果状态分级。
 

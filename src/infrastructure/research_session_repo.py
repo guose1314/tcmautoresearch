@@ -9,16 +9,29 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from src.infrastructure.persistence import (
     ArtifactTypeEnum,
     DatabaseManager,
+    Document,
+    Entity,
+    EntityRelationship,
+    EntityTypeEnum,
     PhaseExecution,
     PhaseStatusEnum,
+    ProcessingLog,
+    ProcessingStatistics,
+    ProcessStatusEnum,
+    QualityMetrics,
+    RelationshipCategoryEnum,
+    RelationshipType,
+    ResearchAnalysis,
     ResearchArtifact,
     ResearchSession,
     SessionStatusEnum,
@@ -63,6 +76,16 @@ def _to_artifact_type(value: Any) -> ArtifactTypeEnum:
         return ArtifactTypeEnum.OTHER
 
 
+def _to_entity_type(value: Any) -> EntityTypeEnum:
+    if isinstance(value, EntityTypeEnum):
+        return value
+    raw = str(getattr(value, "value", value)).strip().lower()
+    try:
+        return EntityTypeEnum(raw)
+    except ValueError:
+        return EntityTypeEnum.OTHER
+
+
 def _parse_datetime(value: Any) -> Optional[datetime]:
     if value is None:
         return None
@@ -84,11 +107,24 @@ class ResearchSessionRepository:
     def __init__(self, db_manager: DatabaseManager):
         self._db = db_manager
 
+    @contextmanager
+    def _session_scope(self, session: Optional[Session] = None):
+        if session is not None:
+            yield session
+            return
+        with self._db.session_scope() as managed_session:
+            yield managed_session
+
     # ---- 会话 CRUD -------------------------------------------------------
 
-    def create_session(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    def create_session(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        session: Optional[Session] = None,
+    ) -> Dict[str, Any]:
         """创建研究会话，返回序列化字典。"""
-        with self._db.session_scope() as session:
+        with self._session_scope(session) as db_session:
             rs = ResearchSession(
                 cycle_id=str(payload.get("cycle_id") or uuid.uuid4()),
                 cycle_name=str(payload["cycle_name"]),
@@ -113,44 +149,66 @@ class ResearchSessionRepository:
                 completed_at=_parse_datetime(payload.get("completed_at")),
                 duration=float(payload.get("duration") or 0.0),
             )
-            session.add(rs)
-            session.flush()
+            db_session.add(rs)
+            db_session.flush()
             return self._session_to_dict(rs)
 
-    def get_session(self, cycle_id: str) -> Optional[Dict[str, Any]]:
+    def get_session(
+        self,
+        cycle_id: str,
+        *,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
         """按 cycle_id 查询，返回 None 表示不存在。"""
-        with self._db.session_scope() as session:
-            rs = session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+        with self._session_scope(session) as db_session:
+            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
             if rs is None:
                 return None
             return self._session_to_dict(rs)
 
-    def get_session_by_id(self, session_id: uuid.UUID) -> Optional[Dict[str, Any]]:
+    def get_session_by_id(
+        self,
+        session_id: uuid.UUID,
+        *,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
         """按主键 id 查询。"""
-        with self._db.session_scope() as session:
-            rs = session.get(ResearchSession, session_id)
+        with self._session_scope(session) as db_session:
+            rs = db_session.get(ResearchSession, session_id)
             if rs is None:
                 return None
             return self._session_to_dict(rs)
 
-    def update_session(self, cycle_id: str, updates: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    def update_session(
+        self,
+        cycle_id: str,
+        updates: Mapping[str, Any],
+        *,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
         """部分更新会话字段，返回更新后的字典。"""
-        with self._db.session_scope() as session:
-            rs = session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+        with self._session_scope(session) as db_session:
+            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
             if rs is None:
                 return None
             self._apply_session_updates(rs, updates)
-            session.flush()
+            db_session.flush()
             return self._session_to_dict(rs)
 
-    def delete_session(self, cycle_id: str) -> bool:
+    def delete_session(
+        self,
+        cycle_id: str,
+        *,
+        session: Optional[Session] = None,
+    ) -> bool:
         """删除会话及其级联的阶段/工件记录。"""
-        with self._db.session_scope() as session:
-            rs = session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+        with self._session_scope(session) as db_session:
+            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
             if rs is None:
                 return False
-            session.delete(rs)
-            session.flush()
+            self._delete_observe_document_graphs(db_session, cycle_id)
+            db_session.delete(rs)
+            db_session.flush()
             return True
 
     def list_sessions(
@@ -176,32 +234,56 @@ class ResearchSessionRepository:
 
     # ---- 状态转换 ---------------------------------------------------------
 
-    def start_session(self, cycle_id: str) -> Optional[Dict[str, Any]]:
+    def start_session(
+        self,
+        cycle_id: str,
+        *,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
         return self.update_session(cycle_id, {
             "status": "active",
             "started_at": datetime.utcnow().isoformat(),
-        })
+        }, session=session)
 
-    def complete_session(self, cycle_id: str) -> Optional[Dict[str, Any]]:
+    def complete_session(
+        self,
+        cycle_id: str,
+        *,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
         return self.update_session(cycle_id, {
             "status": "completed",
             "completed_at": datetime.utcnow().isoformat(),
-        })
+        }, session=session)
 
-    def fail_session(self, cycle_id: str) -> Optional[Dict[str, Any]]:
-        return self.update_session(cycle_id, {"status": "failed"})
+    def fail_session(
+        self,
+        cycle_id: str,
+        *,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        return self.update_session(cycle_id, {"status": "failed"}, session=session)
 
-    def suspend_session(self, cycle_id: str) -> Optional[Dict[str, Any]]:
-        return self.update_session(cycle_id, {"status": "suspended"})
+    def suspend_session(
+        self,
+        cycle_id: str,
+        *,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        return self.update_session(cycle_id, {"status": "suspended"}, session=session)
 
     # ---- 阶段执行 CRUD ---------------------------------------------------
 
     def add_phase_execution(
-        self, cycle_id: str, payload: Mapping[str, Any],
+        self,
+        cycle_id: str,
+        payload: Mapping[str, Any],
+        *,
+        session: Optional[Session] = None,
     ) -> Optional[Dict[str, Any]]:
         """为指定会话添加阶段执行记录。"""
-        with self._db.session_scope() as session:
-            rs = session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+        with self._session_scope(session) as db_session:
+            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
             if rs is None:
                 return None
             pe = PhaseExecution(
@@ -215,15 +297,19 @@ class ResearchSessionRepository:
                 output_json=_json_dumps(payload.get("output"), "{}"),
                 error_detail=str(payload.get("error_detail") or "") or None,
             )
-            session.add(pe)
-            session.flush()
+            db_session.add(pe)
+            db_session.flush()
             return self._phase_to_dict(pe)
 
     def update_phase_execution(
-        self, phase_id: uuid.UUID, updates: Mapping[str, Any],
+        self,
+        phase_id: uuid.UUID,
+        updates: Mapping[str, Any],
+        *,
+        session: Optional[Session] = None,
     ) -> Optional[Dict[str, Any]]:
-        with self._db.session_scope() as session:
-            pe = session.get(PhaseExecution, phase_id)
+        with self._session_scope(session) as db_session:
+            pe = db_session.get(PhaseExecution, phase_id)
             if pe is None:
                 return None
             if "status" in updates:
@@ -238,7 +324,7 @@ class ResearchSessionRepository:
                 pe.output_json = _json_dumps(updates["output"], "{}")
             if "error_detail" in updates:
                 pe.error_detail = str(updates["error_detail"]) or None
-            session.flush()
+            db_session.flush()
             return self._phase_to_dict(pe)
 
     def list_phase_executions(self, cycle_id: str) -> List[Dict[str, Any]]:
@@ -257,10 +343,14 @@ class ResearchSessionRepository:
     # ---- 工件 CRUD -------------------------------------------------------
 
     def add_artifact(
-        self, cycle_id: str, payload: Mapping[str, Any],
+        self,
+        cycle_id: str,
+        payload: Mapping[str, Any],
+        *,
+        session: Optional[Session] = None,
     ) -> Optional[Dict[str, Any]]:
-        with self._db.session_scope() as session:
-            rs = session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+        with self._session_scope(session) as db_session:
+            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
             if rs is None:
                 return None
             phase_execution_id = payload.get("phase_execution_id")
@@ -282,8 +372,8 @@ class ResearchSessionRepository:
                 size_bytes=int(payload.get("size_bytes") or 0),
                 metadata_json=_json_dumps(payload.get("metadata"), "{}"),
             )
-            session.add(artifact)
-            session.flush()
+            db_session.add(artifact)
+            db_session.flush()
             return self._artifact_to_dict(artifact)
 
     def list_artifacts(
@@ -316,6 +406,71 @@ class ResearchSessionRepository:
             session.flush()
             return True
 
+    # ---- Observe 文档图谱 CRUD ------------------------------------------
+
+    def replace_observe_document_graphs(
+        self,
+        cycle_id: str,
+        phase_execution_id: Optional[str],
+        payloads: Sequence[Mapping[str, Any]],
+        *,
+        session: Optional[Session] = None,
+    ) -> List[Dict[str, Any]]:
+        with self._session_scope(session) as db_session:
+            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            if rs is None:
+                return []
+
+            DatabaseManager.create_default_relationships(db_session)
+            self._delete_observe_document_graphs(db_session, cycle_id)
+            relationship_type_cache = self._relationship_type_cache(db_session)
+            snapshots: List[Dict[str, Any]] = []
+
+            for document_index, payload in enumerate(payloads):
+                if not isinstance(payload, Mapping):
+                    continue
+                document = self._create_observe_document(
+                    db_session,
+                    rs,
+                    cycle_id,
+                    phase_execution_id,
+                    document_index,
+                    payload,
+                )
+                entities = self._persist_observe_entities(
+                    db_session,
+                    document,
+                    cycle_id,
+                    phase_execution_id,
+                    payload,
+                )
+                relationships = self._persist_observe_relationships(
+                    db_session,
+                    relationship_type_cache,
+                    document,
+                    cycle_id,
+                    phase_execution_id,
+                    payload,
+                    entities,
+                )
+                document.entities_extracted_count = len(entities)
+                document.process_status = ProcessStatusEnum.COMPLETED
+                quality_metrics = ((payload.get("output_generation") or {}) if isinstance(payload.get("output_generation"), dict) else {}).get("quality_metrics") or {}
+                document.quality_score = float(
+                    (quality_metrics.get("confidence_score") if isinstance(quality_metrics, dict) else 0.0)
+                    or payload.get("average_confidence")
+                    or document.quality_score
+                    or 0.0
+                )
+                db_session.flush()
+                snapshots.append(self._observe_document_to_dict(document, entities, relationships))
+
+            return snapshots
+
+    def list_observe_document_graphs(self, cycle_id: str) -> List[Dict[str, Any]]:
+        with self._db.session_scope() as session:
+            return self._list_observe_document_graphs(session, cycle_id)
+
     # ---- 快照（含阶段 + 工件） -------------------------------------------
 
     def get_full_snapshot(self, cycle_id: str) -> Optional[Dict[str, Any]]:
@@ -331,11 +486,17 @@ class ResearchSessionRepository:
             result["artifacts"] = [
                 self._artifact_to_dict(a) for a in rs.artifacts
             ]
+            result["observe_documents"] = self._list_observe_document_graphs(session, cycle_id)
             return result
 
     # ---- ResearchCycle dataclass 互转 ------------------------------------
 
-    def save_from_cycle(self, cycle: Any) -> Dict[str, Any]:
+    def save_from_cycle(
+        self,
+        cycle: Any,
+        *,
+        session: Optional[Session] = None,
+    ) -> Dict[str, Any]:
         """从 ResearchCycle dataclass 保存/更新会话。"""
         payload = {
             "cycle_id": cycle.cycle_id,
@@ -361,10 +522,10 @@ class ResearchSessionRepository:
             "completed_at": cycle.completed_at,
             "duration": cycle.duration,
         }
-        existing = self.get_session(cycle.cycle_id)
+        existing = self.get_session(cycle.cycle_id, session=session)
         if existing:
-            return self.update_session(cycle.cycle_id, payload)  # type: ignore[return-value]
-        return self.create_session(payload)
+            return self.update_session(cycle.cycle_id, payload, session=session)  # type: ignore[return-value]
+        return self.create_session(payload, session=session)
 
     # ---- 序列化 ----------------------------------------------------------
 
@@ -432,7 +593,377 @@ class ResearchSessionRepository:
             "updated_at": a.updated_at.isoformat() if a.updated_at else None,
         }
 
+    @staticmethod
+    def _entity_to_dict(entity: Entity) -> Dict[str, Any]:
+        return {
+            "id": str(entity.id),
+            "document_id": str(entity.document_id),
+            "name": entity.name,
+            "type": entity.type.value if isinstance(entity.type, EntityTypeEnum) else str(entity.type),
+            "confidence": entity.confidence,
+            "position": entity.position,
+            "length": entity.length,
+            "alternative_names": list(entity.alternative_names or []),
+            "description": entity.description or "",
+            "entity_metadata": dict(entity.entity_metadata or {}),
+            "created_at": entity.created_at.isoformat() if entity.created_at else None,
+            "updated_at": entity.updated_at.isoformat() if entity.updated_at else None,
+        }
+
+    @staticmethod
+    def _relationship_to_dict(relationship: EntityRelationship) -> Dict[str, Any]:
+        source_entity = relationship.source_entity
+        target_entity = relationship.target_entity
+        source_metadata = dict(getattr(source_entity, "entity_metadata", {}) or {}) if source_entity is not None else {}
+        target_metadata = dict(getattr(target_entity, "entity_metadata", {}) or {}) if target_entity is not None else {}
+        return {
+            "id": str(relationship.id),
+            "source_entity_id": str(relationship.source_entity_id),
+            "target_entity_id": str(relationship.target_entity_id),
+            "source_entity_name": getattr(source_entity, "name", "") if source_entity is not None else "",
+            "target_entity_name": getattr(target_entity, "name", "") if target_entity is not None else "",
+            "source_entity_type": str(source_metadata.get("raw_type") or getattr(getattr(source_entity, "type", None), "value", getattr(source_entity, "type", "other")) or "other"),
+            "target_entity_type": str(target_metadata.get("raw_type") or getattr(getattr(target_entity, "type", None), "value", getattr(target_entity, "type", "other")) or "other"),
+            "relationship_type": relationship.type.relationship_type if relationship.type else None,
+            "relationship_name": relationship.type.relationship_name if relationship.type else None,
+            "confidence": relationship.confidence,
+            "created_by_module": relationship.created_by_module,
+            "evidence": relationship.evidence,
+            "relationship_metadata": dict(relationship.relationship_metadata or {}),
+            "created_at": relationship.created_at.isoformat() if relationship.created_at else None,
+        }
+
     # ---- 内部 ------------------------------------------------------------
+
+    @staticmethod
+    def _observe_document_source_prefix(cycle_id: str) -> str:
+        return f"research://{cycle_id}/observe/"
+
+    @staticmethod
+    def _observe_document_source_file(cycle_id: str, document_index: int, payload: Mapping[str, Any]) -> str:
+        source_ref = str(payload.get("urn") or payload.get("title") or f"document_{document_index + 1}").strip()
+        stable_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{cycle_id}:observe:{document_index}:{source_ref}")
+        return f"{ResearchSessionRepository._observe_document_source_prefix(cycle_id)}{stable_id}"
+
+    @staticmethod
+    def _build_observe_document_notes(
+        cycle_id: str,
+        phase_execution_id: Optional[str],
+        document_index: int,
+        payload: Mapping[str, Any],
+    ) -> str:
+        note_payload = {
+            "cycle_id": cycle_id,
+            "phase": "observe",
+            "phase_execution_id": str(phase_execution_id or "").strip() or None,
+            "document_index": document_index,
+            "urn": str(payload.get("urn") or "").strip(),
+            "title": str(payload.get("title") or "").strip(),
+            "raw_text_preview": str(payload.get("raw_text_preview") or "")[:240],
+            "processed_text_preview": str(payload.get("processed_text_preview") or "")[:240],
+            "processed_text_size": int(payload.get("processed_text_size") or 0),
+            "output_generation": payload.get("output_generation") if isinstance(payload.get("output_generation"), dict) else {},
+        }
+        return _json_dumps(note_payload, "{}")
+
+    @staticmethod
+    def _parse_observe_document_notes(notes: Optional[str]) -> Dict[str, Any]:
+        parsed = _json_loads(notes, {})
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _create_observe_document(
+        self,
+        session: Session,
+        research_session: ResearchSession,
+        cycle_id: str,
+        phase_execution_id: Optional[str],
+        document_index: int,
+        payload: Mapping[str, Any],
+    ) -> Document:
+        document = Document(
+            source_file=self._observe_document_source_file(cycle_id, document_index, payload),
+            processing_timestamp=_parse_datetime(payload.get("processing_timestamp")) or datetime.utcnow(),
+            objective=research_session.research_objective or research_session.description or None,
+            raw_text_size=int(payload.get("raw_text_size") or 0),
+            entities_extracted_count=int(payload.get("entity_count") or 0),
+            process_status=ProcessStatusEnum.COMPLETED,
+            quality_score=0.0,
+            notes=self._build_observe_document_notes(cycle_id, phase_execution_id, document_index, payload),
+        )
+        session.add(document)
+        session.flush()
+        return document
+
+    def _persist_observe_entities(
+        self,
+        session: Session,
+        document: Document,
+        cycle_id: str,
+        phase_execution_id: Optional[str],
+        payload: Mapping[str, Any],
+    ) -> List[Entity]:
+        document_notes = self._parse_observe_document_notes(document.notes)
+        entities: List[Entity] = []
+        for entity_payload in payload.get("entities") or []:
+            if not isinstance(entity_payload, Mapping):
+                continue
+            name = str(entity_payload.get("name") or "").strip()
+            if not name:
+                continue
+            raw_type = str(entity_payload.get("type") or entity_payload.get("entity_type") or "other").strip().lower()
+            metadata = dict(entity_payload.get("metadata") or entity_payload.get("entity_metadata") or {})
+            metadata.update(
+                {
+                    "cycle_id": cycle_id,
+                    "phase": "observe",
+                    "phase_execution_id": str(phase_execution_id or "").strip() or None,
+                    "document_urn": document_notes.get("urn"),
+                    "document_title": document_notes.get("title"),
+                    "document_index": document_notes.get("document_index"),
+                    "raw_type": raw_type or "other",
+                }
+            )
+            entity = Entity(
+                document_id=document.id,
+                name=name,
+                type=_to_entity_type(raw_type),
+                confidence=float(entity_payload.get("confidence") or 0.5),
+                position=int(entity_payload.get("position") or 0),
+                length=int(entity_payload.get("length") or len(name)),
+                alternative_names=list(entity_payload.get("alternative_names") or entity_payload.get("aliases") or []),
+                description=str(entity_payload.get("description") or "").strip() or None,
+                entity_metadata=metadata,
+            )
+            session.add(entity)
+            entities.append(entity)
+        session.flush()
+        return entities
+
+    def _persist_observe_relationships(
+        self,
+        session: Session,
+        relationship_type_cache: Dict[str, Dict[str, Any]],
+        document: Document,
+        cycle_id: str,
+        phase_execution_id: Optional[str],
+        payload: Mapping[str, Any],
+        entities: Sequence[Entity],
+    ) -> List[EntityRelationship]:
+        document_notes = self._parse_observe_document_notes(document.notes)
+        entity_lookup = self._build_observe_entity_lookup(entities)
+        relationships: List[EntityRelationship] = []
+        for relationship_payload in payload.get("semantic_relationships") or []:
+            if not isinstance(relationship_payload, Mapping):
+                continue
+            source_entity = self._resolve_observe_entity(relationship_payload, entity_lookup, "source")
+            target_entity = self._resolve_observe_entity(relationship_payload, entity_lookup, "target")
+            if source_entity is None or target_entity is None:
+                continue
+            relationship_type = self._resolve_relationship_type(
+                session,
+                relationship_type_cache,
+                str(
+                    relationship_payload.get("relationship_type")
+                    or relationship_payload.get("type")
+                    or relationship_payload.get("relationship_name")
+                    or ""
+                ).strip(),
+            )
+            relationship_metadata = dict(relationship_payload.get("metadata") or relationship_payload.get("relationship_metadata") or {})
+            relationship_metadata.update(
+                {
+                    "cycle_id": cycle_id,
+                    "phase": "observe",
+                    "phase_execution_id": str(phase_execution_id or "").strip() or None,
+                    "document_id": str(document.id),
+                    "document_urn": document_notes.get("urn"),
+                    "document_title": document_notes.get("title"),
+                    "source_type": str(relationship_payload.get("source_type") or self._entity_raw_type(source_entity) or "entity"),
+                    "target_type": str(relationship_payload.get("target_type") or self._entity_raw_type(target_entity) or "entity"),
+                }
+            )
+            relationship = EntityRelationship(
+                source_entity_id=source_entity.id,
+                target_entity_id=target_entity.id,
+                relationship_type_id=relationship_type["id"],
+                confidence=float(relationship_payload.get("confidence") or relationship_metadata.get("confidence") or 0.5),
+                created_by_module=str(relationship_payload.get("created_by_module") or relationship_metadata.get("source") or "observe_phase").strip() or None,
+                evidence=str(relationship_payload.get("evidence") or relationship_metadata.get("description") or "").strip() or None,
+                relationship_metadata=relationship_metadata,
+            )
+            session.add(relationship)
+            relationships.append(relationship)
+        session.flush()
+        return relationships
+
+    def _list_observe_document_graphs(self, session: Session, cycle_id: str) -> List[Dict[str, Any]]:
+        prefix = f"{self._observe_document_source_prefix(cycle_id)}%"
+        documents = (
+            session.query(Document)
+            .filter(Document.source_file.like(prefix))
+            .order_by(Document.processing_timestamp.asc(), Document.created_at.asc())
+            .all()
+        )
+        snapshots: List[Dict[str, Any]] = []
+        for document in documents:
+            entities = session.query(Entity).filter_by(document_id=document.id).order_by(Entity.created_at.asc()).all()
+            entity_ids = [entity.id for entity in entities]
+            relationships: List[EntityRelationship] = []
+            if entity_ids:
+                relationships = (
+                    session.query(EntityRelationship)
+                    .filter(EntityRelationship.source_entity_id.in_(entity_ids))
+                    .order_by(EntityRelationship.created_at.asc())
+                    .all()
+                )
+            snapshots.append(self._observe_document_to_dict(document, entities, relationships))
+        return snapshots
+
+    def _observe_document_to_dict(
+        self,
+        document: Document,
+        entities: Sequence[Entity],
+        relationships: Sequence[EntityRelationship],
+    ) -> Dict[str, Any]:
+        notes = self._parse_observe_document_notes(document.notes)
+        entity_dicts = [self._entity_to_dict(entity) for entity in entities]
+        relationship_dicts = [self._relationship_to_dict(relationship) for relationship in relationships]
+        return {
+            "id": str(document.id),
+            "source_file": document.source_file,
+            "processing_timestamp": document.processing_timestamp.isoformat() if document.processing_timestamp else None,
+            "objective": document.objective,
+            "raw_text_size": document.raw_text_size,
+            "entities_extracted_count": document.entities_extracted_count,
+            "process_status": document.process_status.value if isinstance(document.process_status, ProcessStatusEnum) else str(document.process_status),
+            "quality_score": document.quality_score,
+            "cycle_id": notes.get("cycle_id"),
+            "phase": notes.get("phase"),
+            "phase_execution_id": notes.get("phase_execution_id"),
+            "document_index": notes.get("document_index"),
+            "urn": notes.get("urn"),
+            "title": notes.get("title"),
+            "raw_text_preview": notes.get("raw_text_preview"),
+            "processed_text_preview": notes.get("processed_text_preview"),
+            "processed_text_size": notes.get("processed_text_size"),
+            "output_generation": notes.get("output_generation") if isinstance(notes.get("output_generation"), dict) else {},
+            "entities": entity_dicts,
+            "semantic_relationships": relationship_dicts,
+            "entity_count": len(entity_dicts),
+            "relationship_count": len(relationship_dicts),
+        }
+
+    def _delete_observe_document_graphs(self, session: Session, cycle_id: str) -> None:
+        prefix = f"{self._observe_document_source_prefix(cycle_id)}%"
+        document_ids = [row[0] for row in session.query(Document.id).filter(Document.source_file.like(prefix)).all()]
+        if not document_ids:
+            return
+
+        entity_ids = [row[0] for row in session.query(Entity.id).filter(Entity.document_id.in_(document_ids)).all()]
+        if entity_ids:
+            session.query(EntityRelationship).filter(
+                (EntityRelationship.source_entity_id.in_(entity_ids))
+                | (EntityRelationship.target_entity_id.in_(entity_ids))
+            ).delete(synchronize_session=False)
+        session.query(Entity).filter(Entity.document_id.in_(document_ids)).delete(synchronize_session=False)
+        session.query(ProcessingLog).filter(ProcessingLog.document_id.in_(document_ids)).delete(synchronize_session=False)
+        session.query(ProcessingStatistics).filter(ProcessingStatistics.document_id.in_(document_ids)).delete(synchronize_session=False)
+        session.query(QualityMetrics).filter(QualityMetrics.document_id.in_(document_ids)).delete(synchronize_session=False)
+        session.query(ResearchAnalysis).filter(ResearchAnalysis.document_id.in_(document_ids)).delete(synchronize_session=False)
+        session.query(Document).filter(Document.id.in_(document_ids)).delete(synchronize_session=False)
+        session.flush()
+
+    def _relationship_type_cache(self, session: Session) -> Dict[str, Dict[str, Any]]:
+        cache: Dict[str, Dict[str, Any]] = {}
+        rows = session.execute(
+            text(
+                """
+                SELECT id, relationship_name, relationship_type
+                FROM relationship_types
+                """
+            )
+        ).fetchall()
+        for row in rows:
+            entry = {
+                "id": row[0],
+                "relationship_name": str(row[1] or "").strip(),
+                "relationship_type": str(row[2] or "").strip(),
+            }
+            if entry["relationship_type"]:
+                cache[entry["relationship_type"].upper()] = entry
+            if entry["relationship_name"]:
+                cache[entry["relationship_name"]] = entry
+        return cache
+
+    def _resolve_relationship_type(
+        self,
+        session: Session,
+        cache: Dict[str, Dict[str, Any]],
+        raw_value: str,
+    ) -> Dict[str, Any]:
+        normalized = raw_value.strip()
+        if not normalized:
+            normalized = "RELATED"
+        cached = cache.get(normalized) or cache.get(normalized.upper())
+        if cached is not None:
+            return cached
+        relationship_type = RelationshipType(
+            relationship_name=normalized,
+            relationship_type=normalized.upper().replace(" ", "_"),
+            description=f"自定义关系: {normalized}",
+            category=None,
+            confidence_baseline=0.5,
+        )
+        session.add(relationship_type)
+        session.flush()
+        entry = {
+            "id": relationship_type.id,
+            "relationship_name": relationship_type.relationship_name,
+            "relationship_type": relationship_type.relationship_type,
+        }
+        cache[normalized] = entry
+        cache[relationship_type.relationship_type] = entry
+        return entry
+
+    def _build_observe_entity_lookup(self, entities: Sequence[Entity]) -> Dict[str, Entity]:
+        lookup: Dict[str, Entity] = {}
+        for entity in entities:
+            lookup[str(entity.id)] = entity
+            if entity.name not in lookup:
+                lookup[entity.name] = entity
+            raw_type = self._entity_raw_type(entity)
+            if raw_type:
+                lookup[f"{entity.name}::{raw_type.lower()}"] = entity
+        return lookup
+
+    def _resolve_observe_entity(
+        self,
+        payload: Mapping[str, Any],
+        lookup: Mapping[str, Entity],
+        prefix: str,
+    ) -> Optional[Entity]:
+        direct_id = str(payload.get(f"{prefix}_entity_id") or payload.get(f"{prefix}_id") or "").strip()
+        if direct_id and direct_id in lookup:
+            return lookup[direct_id]
+        entity_name = str(
+            payload.get(f"{prefix}_entity_name")
+            or payload.get(f"{prefix}_name")
+            or payload.get(prefix)
+            or ""
+        ).strip()
+        entity_type = str(payload.get(f"{prefix}_type") or "").strip().lower()
+        if entity_name and entity_type:
+            typed_key = f"{entity_name}::{entity_type}"
+            if typed_key in lookup:
+                return lookup[typed_key]
+        if entity_name:
+            return lookup.get(entity_name)
+        return None
+
+    @staticmethod
+    def _entity_raw_type(entity: Entity) -> str:
+        metadata = dict(entity.entity_metadata or {})
+        return str(metadata.get("raw_type") or (entity.type.value if isinstance(entity.type, EntityTypeEnum) else str(entity.type)) or "other")
 
     @staticmethod
     def _apply_session_updates(rs: ResearchSession, updates: Mapping[str, Any]) -> None:

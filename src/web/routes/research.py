@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """科研路由 — 研究课题的创建、查询、阶段执行与 WebSocket 实时推送。"""
 
-import dataclasses
+import asyncio
 import json
 import logging
 from typing import Any, Dict, List, Optional
@@ -10,6 +10,7 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Request,
     WebSocket,
     WebSocketDisconnect,
     status,
@@ -17,6 +18,7 @@ from fastapi import (
 from pydantic import BaseModel, Field
 
 from src.web.auth import get_current_user, verify_token
+from src.web.ops.legacy_research_runtime import get_legacy_research_store
 
 logger = logging.getLogger(__name__)
 
@@ -47,40 +49,29 @@ class ExecutePhaseRequest(BaseModel):
     phase_context: Optional[Dict[str, Any]] = None
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def _build_ws_emit(cycle_id: str):
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
 
-_pipeline_instance = None
+    from src.web.ws_manager import get_manager
 
+    manager = get_manager()
+    room = f"research:{cycle_id}"
+    event_name_map = {
+        "job_completed": "research_done",
+    }
 
-def _get_pipeline():
-    """惰性获取 ResearchPipeline 单例。"""
-    global _pipeline_instance  # noqa: PLW0603
-    if _pipeline_instance is None:
-        from src.research.research_pipeline import ResearchPipeline
+    def emit(event_type: str, payload: Dict[str, Any]) -> None:
+        wire_type = event_name_map.get(event_type, event_type)
+        wire_payload = dict(payload)
+        wire_payload["cycle_id"] = cycle_id
+        loop.create_task(
+            manager.broadcast({"type": wire_type, "data": wire_payload}, room)
+        )
 
-        _pipeline_instance = ResearchPipeline()
-    return _pipeline_instance
-
-
-def _cycle_to_dict(cycle) -> Dict[str, Any]:
-    """将 ResearchCycle dataclass 转为可序列化字典。"""
-    if dataclasses.is_dataclass(cycle) and not isinstance(cycle, type):
-        data = dataclasses.asdict(cycle)
-        # Enum 值转字符串
-        for key, val in data.items():
-            if hasattr(val, "value"):
-                data[key] = val.value
-            elif isinstance(val, dict):
-                data[key] = {
-                    (k.value if hasattr(k, "value") else k): v
-                    for k, v in val.items()
-                }
-        return data
-    if isinstance(cycle, dict):
-        return cycle
-    return {"data": str(cycle)}
+    return emit
 
 
 # ---------------------------------------------------------------------------
@@ -90,13 +81,14 @@ def _cycle_to_dict(cycle) -> Dict[str, Any]:
 
 @router.post("/create", status_code=status.HTTP_201_CREATED)
 async def create_research(
+    request: Request,
     body: CreateResearchRequest,
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     """创建研究课题。"""
     try:
-        pipeline = _get_pipeline()
-        cycle = pipeline.create_research_cycle(
+        store = get_legacy_research_store(request.app)
+        cycle = store.create_session(
             cycle_name=body.cycle_name,
             description=body.description,
             objective=body.objective,
@@ -104,7 +96,7 @@ async def create_research(
             researchers=body.researchers,
         )
         logger.info("用户 %s 创建研究课题: %s", user.get("user_id"), body.cycle_name)
-        return {"message": "研究课题创建成功", "cycle": _cycle_to_dict(cycle)}
+        return {"message": "研究课题创建成功", "cycle": cycle}
     except Exception as exc:
         logger.exception("创建研究课题失败")
         raise HTTPException(
@@ -113,27 +105,40 @@ async def create_research(
         ) from exc
 
 
+@router.get("/list", name="research_list")
+async def list_research(
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """获取所有研究项目列表。"""
+    try:
+        store = get_legacy_research_store(request.app)
+        cycles = store.list_sessions()
+        return {"cycles": cycles, "total": len(cycles)}
+    except Exception as exc:
+        logger.exception("获取研究列表失败")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取研究列表失败: {exc}",
+        ) from exc
+
+
 @router.get("/{cycle_id}")
 async def get_research_detail(
+    request: Request,
     cycle_id: str,
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取研究课题详情。"""
     try:
-        pipeline = _get_pipeline()
-        cycles = getattr(pipeline, "research_cycles", None)
-        if cycles is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="研究编排器未初始化",
-            )
-        cycle = cycles.get(cycle_id)
+        store = get_legacy_research_store(request.app)
+        cycle = store.get_session(cycle_id)
         if cycle is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"未找到研究课题: {cycle_id}",
             )
-        return {"cycle": _cycle_to_dict(cycle)}
+        return {"cycle": cycle}
     except HTTPException:
         raise
     except Exception as exc:
@@ -146,6 +151,7 @@ async def get_research_detail(
 
 @router.post("/{cycle_id}/execute")
 async def execute_research_phase(
+    request: Request,
     cycle_id: str,
     body: ExecutePhaseRequest,
     user: Dict[str, Any] = Depends(get_current_user),
@@ -164,11 +170,12 @@ async def execute_research_phase(
         )
 
     try:
-        pipeline = _get_pipeline()
-        result = pipeline.execute_research_phase(
-            cycle_id=cycle_id,
-            phase=phase_enum,
+        store = get_legacy_research_store(request.app)
+        execution = store.execute_phase(
+            cycle_id,
+            phase_enum.value,
             phase_context=body.phase_context,
+            emit=_build_ws_emit(cycle_id),
         )
         logger.info(
             "用户 %s 执行阶段 %s (cycle=%s)",
@@ -176,7 +183,16 @@ async def execute_research_phase(
             body.phase,
             cycle_id,
         )
-        return {"message": f"阶段 '{body.phase}' 执行完成", "result": result}
+        return {
+            "message": f"阶段 '{body.phase}' 执行完成",
+            "result": execution["phase_result"],
+            "cycle": execution["cycle"],
+        }
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"未找到研究课题: {cycle_id}",
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -184,35 +200,6 @@ async def execute_research_phase(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"执行研究阶段失败: {exc}",
-        ) from exc
-
-
-@router.get("/list", name="research_list")
-async def list_research(
-    user: Dict[str, Any] = Depends(get_current_user),
-):
-    """获取所有研究项目列表。"""
-    try:
-        pipeline = _get_pipeline()
-        orchestrator = getattr(pipeline, "orchestrator", None)
-        if orchestrator is None:
-            return {"cycles": []}
-
-        # orchestrator 可能提供 list / get_all 方法
-        cycles_raw = []
-        for method_name in ("list_research_cycles", "get_all_cycles", "list_cycles"):
-            fn = getattr(orchestrator, method_name, None)
-            if callable(fn):
-                cycles_raw = fn()
-                break
-
-        cycles = [_cycle_to_dict(c) for c in cycles_raw] if cycles_raw else []
-        return {"cycles": cycles, "total": len(cycles)}
-    except Exception as exc:
-        logger.exception("获取研究列表失败")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取研究列表失败: {exc}",
         ) from exc
 
 

@@ -24,6 +24,21 @@ service:
   port: 80
   targetPort: 8000
 
+app:
+  command:
+    - python
+    - -m
+    - src.api.main
+  args:
+    - --config
+    - config.yml
+    - --environment
+    - production
+    - --host
+    - 0.0.0.0
+    - --port
+    - "8000"
+
 ingress:
   enabled: false
   className: ""
@@ -55,6 +70,40 @@ affinity: {}
 
 env:
   TCM_ENV: production
+
+migrations:
+  # -- Enable a dedicated migration Job for Alembic upgrades.
+  enabled: false
+  # -- Prefer true for Helm-managed installs. For a standalone Job, use deploy/k8s/tcmautoresearch-migrate-job.example.yaml.
+  useHook: true
+  hook:
+    events:
+      - pre-install
+      - pre-upgrade
+    deletePolicy:
+      - before-hook-creation
+      - hook-succeeded
+    weight: 0
+  backoffLimit: 1
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 600
+  annotations: {}
+  podAnnotations: {}
+  env: {}
+  command:
+    - alembic
+  args:
+    - -x
+    - environment=production
+    - upgrade
+    - head
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 probes:
   readiness:

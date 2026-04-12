@@ -164,6 +164,11 @@ def execute_real_observe_smoke(
             ResearchPhase.EXPERIMENT,
             dict(phase_context),
         )
+        experiment_execution = pipeline.execute_research_phase(
+            cycle.cycle_id,
+            ResearchPhase.EXPERIMENT_EXECUTION,
+            dict(phase_context),
+        )
         analyze = pipeline.execute_research_phase(
             cycle.cycle_id,
             ResearchPhase.ANALYZE,
@@ -195,6 +200,7 @@ def execute_real_observe_smoke(
             observe,
             hypothesis,
             experiment,
+            experiment_execution,
             analyze,
             publish,
             reflect,
@@ -218,6 +224,7 @@ def build_smoke_summary(
     observe: Dict[str, Any],
     hypothesis: Dict[str, Any],
     experiment: Dict[str, Any],
+    experiment_execution: Dict[str, Any],
     analyze: Dict[str, Any],
     publish: Dict[str, Any],
     reflect: Dict[str, Any],
@@ -315,6 +322,14 @@ def build_smoke_summary(
             (experiment_study_protocol or {}).get("protocol_source")
             or (experiment.get("metadata") or {}).get("protocol_source")
             or ""
+        ),
+        "experiment_execution_status": str(
+            get_phase_value(experiment_execution, "execution_status", "")
+            or (experiment_execution.get("metadata") or {}).get("execution_status")
+            or ""
+        ),
+        "experiment_execution_imported_record_count": int(
+            (experiment_execution.get("metadata") or {}).get("imported_record_count") or 0
         ),
         "reflect_count": int((reflect.get("metadata") or {}).get("reflection_count") or 0),
     }

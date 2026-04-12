@@ -12,6 +12,7 @@ import logging
 import os
 import uuid
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence
 
@@ -79,6 +80,48 @@ class GUID(TypeDecorator):
         return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
 
 
+class StringListType(TypeDecorator):
+    """跨 SQLite/PostgreSQL 的字符串列表类型。"""
+
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):  # type: ignore[override]
+        if dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import ARRAY
+
+            return dialect.type_descriptor(ARRAY(String()))
+        return dialect.type_descriptor(JSON())
+
+    def process_bind_param(self, value, dialect):  # type: ignore[override]
+        if value is None:
+            return []
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except Exception:
+                parsed = [value]
+            value = parsed
+        if isinstance(value, (list, tuple, set)):
+            return [str(item) for item in value if item is not None]
+        return [str(value)]
+
+    def process_result_value(self, value, dialect):  # type: ignore[override]
+        if value is None:
+            return []
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except Exception:
+                return [value]
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed if item is not None]
+            return [str(parsed)]
+        if isinstance(value, (list, tuple, set)):
+            return [str(item) for item in value if item is not None]
+        return [str(value)]
+
+
 class ProcessStatusEnum(str, enum.Enum):
     """文档处理状态。"""
 
@@ -118,6 +161,18 @@ class LogStatusEnum(str, enum.Enum):
     SUCCESS = "success"
     FAILURE = "failure"
     WARNING = "warning"
+
+
+LEGACY_POSTGRES_ENUM_COLUMNS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("documents", "process_status", tuple(_enum_values(ProcessStatusEnum))),
+    ("entities", "type", tuple(_enum_values(EntityTypeEnum))),
+    ("relationship_types", "category", tuple(_enum_values(RelationshipCategoryEnum))),
+)
+
+POSTGRES_STRING_LIST_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("entities", "alternative_names", "varchar[]"),
+    ("processing_statistics", "source_modules", "varchar[]"),
+)
 
 
 def _enum_column(enum_cls: type[enum.Enum], **kwargs: Any) -> SQLEnum:
@@ -192,7 +247,7 @@ class Entity(Base):
     confidence = Column(Float, default=0.5, nullable=False)
     position = Column(Integer, default=0, nullable=False)
     length = Column(Integer, default=0, nullable=False)
-    alternative_names = Column(JSON, default=list, nullable=False)
+    alternative_names = Column(StringListType(), default=list, nullable=False)
     description = Column(Text, nullable=True)
     entity_metadata = Column(JSON, default=dict, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -313,7 +368,7 @@ class ProcessingStatistics(Base):
     graph_edges_count = Column(Integer, default=0, nullable=False)
     graph_density = Column(Float, default=0.0, nullable=False)
     connected_components = Column(Integer, default=0, nullable=False)
-    source_modules = Column(JSON, default=list, nullable=False)
+    source_modules = Column(StringListType(), default=list, nullable=False)
     processing_time_ms = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -610,6 +665,15 @@ class DatabaseManager:
         self.max_overflow = max_overflow
         self.engine = None
         self.Session = None
+        self._last_schema_normalization_report: Dict[str, Any] = {
+            "status": "pending",
+            "checked_at": None,
+            "database_type": make_url(self.connection_string).get_backend_name(),
+            "normalized_enum_count": 0,
+            "normalized_label_count": 0,
+            "normalized_enums": [],
+            "message": "数据库尚未初始化",
+        }
 
     def _build_engine_kwargs(self) -> Dict[str, Any]:
         url = make_url(self.connection_string)
@@ -639,6 +703,346 @@ class DatabaseManager:
         session_factory = sessionmaker(bind=self.engine, autoflush=False, expire_on_commit=False)
         self.Session = scoped_session(session_factory)
         Base.metadata.create_all(self.engine)
+        self._last_schema_normalization_report = self._normalize_legacy_postgres_enums()
+
+    def _normalize_legacy_postgres_enums(self) -> Dict[str, Any]:
+        report: Dict[str, Any] = {
+            "status": "skip",
+            "checked_at": datetime.utcnow().isoformat(),
+            "database_type": self.engine.dialect.name if self.engine is not None else make_url(self.connection_string).get_backend_name(),
+            "normalized_enum_count": 0,
+            "normalized_label_count": 0,
+            "normalized_enums": [],
+            "message": "仅 PostgreSQL 执行旧枚举规范化",
+        }
+        if self.engine is None or self.engine.dialect.name != "postgresql":
+            return report
+
+        normalized_enum_names: set[str] = set()
+        normalized_entries: List[Dict[str, Any]] = []
+        with self.engine.begin() as connection:
+            for table_name, column_name, expected_labels in LEGACY_POSTGRES_ENUM_COLUMNS:
+                enum_name = self._resolve_postgres_enum_name(connection, table_name, column_name)
+                if not enum_name or enum_name in normalized_enum_names:
+                    continue
+
+                enum_labels = self._fetch_postgres_enum_labels(connection, enum_name)
+                rename_map = self._build_legacy_enum_label_map(enum_labels, expected_labels)
+                if not rename_map:
+                    continue
+
+                quoted_enum_name = self._quote_postgres_identifier(enum_name)
+                for old_label, new_label in rename_map.items():
+                    connection.execute(
+                        text(f"ALTER TYPE {quoted_enum_name} RENAME VALUE :old_label TO :new_label"),
+                        {"old_label": old_label, "new_label": new_label},
+                    )
+                normalized_enum_names.add(enum_name)
+                normalized_entries.append(
+                    {
+                        "enum_name": enum_name,
+                        "table": table_name,
+                        "column": column_name,
+                        "renamed_labels": [
+                            {"from": old_label, "to": new_label}
+                            for old_label, new_label in rename_map.items()
+                        ],
+                    }
+                )
+                logger.info(
+                    "已规范 PostgreSQL 旧枚举标签: %s (%s.%s)",
+                    enum_name,
+                    table_name,
+                    column_name,
+                )
+        report["normalized_enums"] = normalized_entries
+        report["normalized_enum_count"] = len(normalized_entries)
+        report["normalized_label_count"] = sum(
+            len(entry.get("renamed_labels") or []) for entry in normalized_entries
+        )
+        if normalized_entries:
+            report["status"] = "normalized"
+            report["message"] = f"已规范 {len(normalized_entries)} 个 PostgreSQL 旧枚举定义"
+        else:
+            report["status"] = "ok"
+            report["message"] = "未检测到需要规范化的 PostgreSQL 旧枚举标签"
+        return report
+
+    def get_schema_normalization_report(self) -> Dict[str, Any]:
+        return deepcopy(self._last_schema_normalization_report)
+
+    def inspect_schema_drift(self) -> Dict[str, Any]:
+        backend_name = make_url(self.connection_string).get_backend_name()
+        if backend_name != "postgresql":
+            return {
+                "status": "skip",
+                "checked_at": datetime.utcnow().isoformat(),
+                "database_type": backend_name,
+                "legacy_enum_count": 0,
+                "incompatible_drift_count": 0,
+                "compatibility_variant_count": 0,
+                "issues": [],
+                "compatibility_variants": [],
+                "normalization_report": self.get_schema_normalization_report(),
+                "message": "仅 PostgreSQL 执行 schema drift 检查",
+            }
+
+        engine = self.engine
+        owns_engine = False
+        if engine is None:
+            engine = create_engine(self.connection_string, **self._build_engine_kwargs())
+            owns_engine = True
+
+        try:
+            with engine.connect() as connection:
+                return self._inspect_postgres_schema_drift(connection)
+        except Exception as exc:
+            return {
+                "status": "error",
+                "checked_at": datetime.utcnow().isoformat(),
+                "database_type": backend_name,
+                "legacy_enum_count": 0,
+                "incompatible_drift_count": 1,
+                "compatibility_variant_count": 0,
+                "issues": [
+                    {
+                        "kind": "inspection_error",
+                        "status": "fail",
+                        "message": str(exc),
+                    }
+                ],
+                "compatibility_variants": [],
+                "normalization_report": self.get_schema_normalization_report(),
+                "message": f"schema drift 检查失败: {exc}",
+            }
+        finally:
+            if owns_engine:
+                engine.dispose()
+
+    def _inspect_postgres_schema_drift(self, connection: Any) -> Dict[str, Any]:
+        checked_at = datetime.utcnow().isoformat()
+        issues: List[Dict[str, Any]] = []
+        compatibility_variants: List[Dict[str, Any]] = []
+        normalization_report = self.get_schema_normalization_report()
+
+        for table_name, column_name, expected_labels in LEGACY_POSTGRES_ENUM_COLUMNS:
+            column = self._fetch_postgres_column_metadata(connection, table_name, column_name)
+            if column is None:
+                issues.append(
+                    {
+                        "kind": "missing_column",
+                        "status": "fail",
+                        "table": table_name,
+                        "column": column_name,
+                        "message": "缺少预期的枚举列",
+                    }
+                )
+                continue
+
+            data_type = str(column[0]).upper()
+            udt_name = str(column[1] or "").strip()
+            if data_type == "USER-DEFINED":
+                enum_labels = self._fetch_postgres_enum_labels(connection, udt_name)
+                expected_lower = {str(label).lower() for label in expected_labels}
+                label_lower = {str(label).lower() for label in enum_labels}
+                normalization_entry = next(
+                    (
+                        entry
+                        for entry in normalization_report.get("normalized_enums") or []
+                        if entry.get("table") == table_name and entry.get("column") == column_name
+                    ),
+                    None,
+                )
+                issues.append(
+                    {
+                        "kind": "legacy_enum",
+                        "status": "degraded" if label_lower == expected_lower else "fail",
+                        "table": table_name,
+                        "column": column_name,
+                        "enum_name": udt_name,
+                        "expected_labels": list(expected_labels),
+                        "actual_labels": enum_labels,
+                        "compatibility": "auto_normalized" if normalization_entry else "legacy_compatible",
+                        "message": "检测到 PostgreSQL 原生枚举列，仍处于 legacy schema 兼容模式"
+                        if label_lower == expected_lower
+                        else "PostgreSQL 原生枚举标签与当前运行时契约不兼容",
+                    }
+                )
+                continue
+
+            if data_type not in {"CHARACTER VARYING", "TEXT"}:
+                issues.append(
+                    {
+                        "kind": "unexpected_column_type",
+                        "status": "fail",
+                        "table": table_name,
+                        "column": column_name,
+                        "actual_type": f"{column[0]}:{column[1]}",
+                        "message": "枚举兼容列类型与当前运行时契约不匹配",
+                    }
+                )
+
+        for table_name, column_name, display_type in POSTGRES_STRING_LIST_COLUMNS:
+            column = self._fetch_postgres_column_metadata(connection, table_name, column_name)
+            if column is None:
+                issues.append(
+                    {
+                        "kind": "missing_column",
+                        "status": "fail",
+                        "table": table_name,
+                        "column": column_name,
+                        "message": "缺少预期的字符串列表列",
+                    }
+                )
+                continue
+
+            if self._is_expected_postgres_string_list_column(column):
+                continue
+
+            if self._is_legacy_postgres_json_string_list_column(column):
+                issues.append(
+                    {
+                        "kind": "legacy_string_list_json",
+                        "status": "fail",
+                        "table": table_name,
+                        "column": column_name,
+                        "actual_type": f"{column[0]}:{column[1]}",
+                        "expected_type": display_type,
+                        "message": "字符串列表列仍是 legacy JSON 存储，尚未迁移到当前 PostgreSQL varchar[] 合同",
+                    }
+                )
+                continue
+
+            issues.append(
+                {
+                    "kind": "unexpected_column_type",
+                    "status": "fail",
+                    "table": table_name,
+                    "column": column_name,
+                    "actual_type": f"{column[0]}:{column[1]}",
+                    "message": "字符串列表列类型与兼容层约定不匹配",
+                }
+            )
+
+        legacy_enum_count = sum(1 for item in issues if item.get("kind") == "legacy_enum")
+        incompatible_drift_count = sum(1 for item in issues if item.get("status") == "fail")
+        compatibility_variant_count = len(compatibility_variants)
+
+        if incompatible_drift_count > 0:
+            status = "error"
+            message = f"检测到 {incompatible_drift_count} 个不兼容 schema drift"
+        elif legacy_enum_count > 0:
+            status = "degraded"
+            message = f"检测到 {legacy_enum_count} 个 legacy enum drift，当前依赖兼容层运行"
+        elif compatibility_variant_count > 0:
+            status = "ok"
+            message = f"未检测到不兼容 drift；发现 {compatibility_variant_count} 个 PostgreSQL 列存储兼容变体"
+        else:
+            status = "ok"
+            message = "未检测到 schema drift"
+
+        return {
+            "status": status,
+            "checked_at": checked_at,
+            "database_type": "postgresql",
+            "legacy_enum_count": legacy_enum_count,
+            "incompatible_drift_count": incompatible_drift_count,
+            "compatibility_variant_count": compatibility_variant_count,
+            "issues": issues,
+            "compatibility_variants": compatibility_variants,
+            "normalization_report": normalization_report,
+            "message": message,
+        }
+
+    @staticmethod
+    def _fetch_postgres_column_metadata(connection: Any, table_name: str, column_name: str) -> Optional[tuple[Any, Any]]:
+        row = connection.execute(
+            text(
+                """
+                SELECT data_type, udt_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = :table_name
+                  AND column_name = :column_name
+                """
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        ).fetchone()
+        if row is None:
+            return None
+        return row[0], row[1]
+
+    @staticmethod
+    def _resolve_postgres_enum_name(connection: Any, table_name: str, column_name: str) -> Optional[str]:
+        column = connection.execute(
+            text(
+                """
+                SELECT data_type, udt_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = :table_name
+                  AND column_name = :column_name
+                """
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        ).fetchone()
+        if not column or str(column[0]).upper() != "USER-DEFINED":
+            return None
+        enum_name = str(column[1]).strip()
+        return enum_name or None
+
+    @staticmethod
+    def _fetch_postgres_enum_labels(connection: Any, enum_name: str) -> List[str]:
+        return [
+            str(row[0])
+            for row in connection.execute(
+                text(
+                    """
+                    SELECT e.enumlabel
+                    FROM pg_type t
+                    JOIN pg_enum e ON e.enumtypid = t.oid
+                    WHERE t.typname = :enum_name
+                    ORDER BY e.enumsortorder
+                    """
+                ),
+                {"enum_name": enum_name},
+            ).fetchall()
+        ]
+
+    @staticmethod
+    def _build_legacy_enum_label_map(
+        enum_labels: Sequence[str],
+        expected_labels: Sequence[str],
+    ) -> Dict[str, str]:
+        if not enum_labels:
+            return {}
+
+        expected_by_lower = {str(label).lower(): str(label) for label in expected_labels}
+        if {str(label).lower() for label in enum_labels} != set(expected_by_lower):
+            return {}
+
+        rename_map: Dict[str, str] = {}
+        for label in enum_labels:
+            normalized = expected_by_lower[str(label).lower()]
+            if label != normalized:
+                rename_map[str(label)] = normalized
+        return rename_map
+
+    @staticmethod
+    def _is_expected_postgres_string_list_column(column: Optional[tuple[Any, Any]]) -> bool:
+        if column is None:
+            return False
+        return str(column[0]).upper() == "ARRAY" and str(column[1] or "").strip() == "_varchar"
+
+    @staticmethod
+    def _is_legacy_postgres_json_string_list_column(column: Optional[tuple[Any, Any]]) -> bool:
+        if column is None:
+            return False
+        return str(column[0]).upper() in {"JSON", "JSONB"}
+
+    @staticmethod
+    def _quote_postgres_identifier(identifier: str) -> str:
+        return '"' + str(identifier).replace('"', '""') + '"'
 
     def get_session(self) -> Session:
         if self.Session is None:
@@ -663,14 +1067,20 @@ class DatabaseManager:
             self.Session.remove()
 
     def health_check(self) -> bool:
-        if self.engine is None:
-            return False
+        engine = self.engine
+        owns_engine = False
+        if engine is None:
+            engine = create_engine(self.connection_string, **self._build_engine_kwargs())
+            owns_engine = True
         try:
-            with self.engine.connect() as connection:
+            with engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
             return True
         except Exception:
             return False
+        finally:
+            if owns_engine:
+                engine.dispose()
 
     def close(self) -> None:
         if self.Session is not None:
@@ -690,22 +1100,77 @@ class DatabaseManager:
             ("类似", "SIMILAR_TO", "两个方剂或中药成分相似", RelationshipCategoryEnum.SIMILARITY, 0.70),
             ("包含", "CONTAINS", "方剂包含特定中药", RelationshipCategoryEnum.COMPOSITION, 0.99),
         ]
+        # Legacy PostgreSQL deployments may still store this column as a native enum
+        # with uppercase labels. Avoid ORM materialization for existing rows so startup
+        # remains compatible with both legacy and current schemas.
         existing = {
-            row.relationship_type: row
-            for row in session.query(RelationshipType).all()
+            str(row[0]): True
+            for row in session.execute(text("SELECT relationship_type FROM relationship_types"))
         }
+        legacy_uppercase_pg_enum = False
+        bind = session.get_bind()
+        if bind is not None and bind.dialect.name == "postgresql":
+            category_column = session.execute(
+                text(
+                    """
+                    SELECT data_type, udt_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'relationship_types'
+                      AND column_name = 'category'
+                    """
+                )
+            ).fetchone()
+            if category_column and str(category_column[0]).upper() == "USER-DEFINED":
+                enum_labels = [
+                    str(row[0])
+                    for row in session.execute(
+                        text(
+                            """
+                            SELECT e.enumlabel
+                            FROM pg_type t
+                            JOIN pg_enum e ON e.enumtypid = t.oid
+                            WHERE t.typname = :enum_name
+                            ORDER BY e.enumsortorder
+                            """
+                        ),
+                        {"enum_name": str(category_column[1])},
+                    ).fetchall()
+                ]
+                legacy_uppercase_pg_enum = bool(enum_labels) and all(label == label.upper() for label in enum_labels)
         for name, rel_type, desc, category, confidence_base in default_rels:
             if rel_type in existing:
                 continue
-            session.add(
-                RelationshipType(
-                    relationship_name=name,
-                    relationship_type=rel_type,
-                    description=desc,
-                    category=category,
-                    confidence_baseline=confidence_base,
+            if legacy_uppercase_pg_enum:
+                session.execute(
+                    text(
+                        """
+                        INSERT INTO relationship_types
+                            (id, relationship_name, relationship_type, description, category, confidence_baseline, created_at)
+                        VALUES
+                            (:id, :relationship_name, :relationship_type, :description, :category, :confidence_baseline, :created_at)
+                        """
+                    ),
+                    {
+                        "id": uuid.uuid4(),
+                        "relationship_name": name,
+                        "relationship_type": rel_type,
+                        "description": desc,
+                        "category": category.value.upper(),
+                        "confidence_baseline": confidence_base,
+                        "created_at": datetime.utcnow(),
+                    },
                 )
-            )
+            else:
+                session.add(
+                    RelationshipType(
+                        relationship_name=name,
+                        relationship_type=rel_type,
+                        description=desc,
+                        category=category,
+                        confidence_baseline=confidence_base,
+                    )
+                )
         session.flush()
 
 

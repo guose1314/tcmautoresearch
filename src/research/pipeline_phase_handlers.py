@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 
 from src.research.phase_handlers import (
     AnalyzePhaseHandler,
+    ExperimentExecutionPhaseHandler,
     ExperimentPhaseHandler,
     HypothesisPhaseHandler,
     ObservePhaseHandler,
@@ -42,6 +43,7 @@ class ResearchPhaseHandlers:
             "observe": ObservePhaseHandler(pipeline),
             "hypothesis": HypothesisPhaseHandler(pipeline),
             "experiment": ExperimentPhaseHandler(pipeline),
+            "experiment_execution": ExperimentExecutionPhaseHandler(pipeline),
             "analyze": AnalyzePhaseHandler(pipeline),
             "publish": PublishPhaseHandler(pipeline),
             "reflect": ReflectPhaseHandler(pipeline),
@@ -64,6 +66,9 @@ class ResearchPhaseHandlers:
 
     def get_experiment_handler(self) -> ExperimentPhaseHandler:
         return self._get_required_handler("experiment")
+
+    def get_experiment_execution_handler(self) -> ExperimentExecutionPhaseHandler:
+        return self._get_required_handler("experiment_execution")
 
     def get_analyze_handler(self) -> AnalyzePhaseHandler:
         return self._get_required_handler("analyze")
@@ -93,6 +98,9 @@ class ResearchPhaseHandlers:
 
     def execute_experiment_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
         return self.get_experiment_handler().execute_experiment_phase(cycle, context or {})
+
+    def execute_experiment_execution_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
+        return self.get_experiment_execution_handler().execute_experiment_execution_phase(cycle, context or {})
 
     def execute_analyze_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
         return self.get_analyze_handler().execute_analyze_phase(cycle, context or {})

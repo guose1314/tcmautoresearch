@@ -1,8 +1,11 @@
 from logging.config import fileConfig
+from pathlib import Path
 
 from sqlalchemy import engine_from_config, pool
+from sqlalchemy.engine.url import make_url
 
 from alembic import context
+from src.infrastructure.alembic_runtime import resolve_alembic_database_target
 from src.infrastructure.persistence import Base  # noqa: E402 — ORM metadata
 
 # this is the Alembic Config object, which provides
@@ -24,6 +27,29 @@ target_metadata = Base.metadata
 # ... etc.
 
 
+def _resolve_sqlalchemy_url() -> str:
+    resolved_target = resolve_alembic_database_target(
+        config.get_main_option("sqlalchemy.url"),
+        x_arguments=context.get_x_argument(as_dictionary=True),
+        default_root_path=Path(__file__).resolve().parents[1],
+    )
+    config.set_main_option("sqlalchemy.url", resolved_target.sqlalchemy_url)
+
+    alembic_logger = context.config.attributes.get("logger")
+    if alembic_logger is None:
+        import logging
+
+        alembic_logger = logging.getLogger("alembic.env")
+
+    sanitized_url = make_url(resolved_target.sqlalchemy_url).render_as_string(hide_password=True)
+    alembic_logger.info(
+        "Alembic database target resolved from %s: %s",
+        resolved_target.source,
+        sanitized_url,
+    )
+    return resolved_target.sqlalchemy_url
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -36,7 +62,7 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
+    url = _resolve_sqlalchemy_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -55,6 +81,7 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    _resolve_sqlalchemy_url()
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

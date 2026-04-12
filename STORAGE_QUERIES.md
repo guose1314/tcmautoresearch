@@ -189,19 +189,21 @@ MATCH ()-[r]->() RETURN type(r) as relationship, count(*) as count;
 ```cypher
 -- 查询特定方剂的完整组成
 MATCH (f:Formula {name: '小柴胡汤'})
-OPTIONAL MATCH (f)-[r:SOVEREIGN]->(s:Herb)
-OPTIONAL MATCH (f)-[r:MINISTER]->(m:Herb)
-OPTIONAL MATCH (f)-[r:ASSISTANT]->(a:Herb)
-OPTIONAL MATCH (f)-[r:ENVOY]->(e:Herb)
-RETURN f, collect(distinct s.name) as sovereign_herbs,
-       collect(distinct m.name) as minister_herbs,
-       collect(distinct a.name) as assistant_herbs,
-       collect(distinct e.name) as envoy_herbs;
+OPTIONAL MATCH (f)-[r]->(h:Herb)
+WHERE type(r) IN ['SOVEREIGN', 'MINISTER', 'ASSISTANT', 'ENVOY']
+WITH f, collect(DISTINCT {role: type(r), herb: h.name}) AS role_pairs
+RETURN f,
+       [pair IN role_pairs WHERE pair.role = 'SOVEREIGN' AND pair.herb IS NOT NULL | pair.herb] AS sovereign_herbs,
+       [pair IN role_pairs WHERE pair.role = 'MINISTER' AND pair.herb IS NOT NULL | pair.herb] AS minister_herbs,
+       [pair IN role_pairs WHERE pair.role = 'ASSISTANT' AND pair.herb IS NOT NULL | pair.herb] AS assistant_herbs,
+       [pair IN role_pairs WHERE pair.role = 'ENVOY' AND pair.herb IS NOT NULL | pair.herb] AS envoy_herbs;
 
 -- 查询包含特定中药的所有方剂
 MATCH (h:Herb {name: '柴胡'})<-[:SOVEREIGN|MINISTER|ASSISTANT|ENVOY]-(f:Formula)
 RETURN f.name as formula, count(*) as formulas;
 ```
+
+说明：这里推荐使用“单次 OPTIONAL MATCH + type(r) 过滤”的写法，避免像旧版四段式 OPTIONAL MATCH 那样在图中缺少某个关系类型时产生无意义的 Neo4j 通知噪音。
 
 ### 3. 症候查询
 

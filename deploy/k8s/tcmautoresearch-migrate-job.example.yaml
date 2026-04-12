@@ -1,0 +1,42 @@
+# 可选：独立的数据库迁移 Job。
+# 推荐场景：原生 Kubernetes 部署，不使用 Helm hook，但又希望避免手工 exec 进应用 Pod。
+# 默认命令会走统一配置中心：
+#   alembic -x environment=production upgrade head
+# 如需定向排障，可把 args 改成：
+#   ["-x", "url=postgresql://tcm:<password>@<postgres-service>:5432/tcmautoresearch", "upgrade", "head"]
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tcmautoresearch-db-migrate
+  labels:
+    app: tcmautoresearch-db-migrate
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: tcmautoresearch-db-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: db-migrate
+          image: ghcr.io/guose1314/tcmautoresearch:latest
+          imagePullPolicy: IfNotPresent
+          command: ["alembic"]
+          args: ["-x", "environment=production", "upgrade", "head"]
+          env:
+            - name: TCM_ENV
+              value: "production"
+          envFrom:
+            - secretRef:
+                name: tcmautoresearch-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

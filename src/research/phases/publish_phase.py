@@ -97,6 +97,7 @@ class PublishPhaseMixin:
         observe_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.OBSERVE, {}).get("result", {})
         hypothesis_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.HYPOTHESIS, {}).get("result", {})
         experiment_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.EXPERIMENT, {}).get("result", {})
+        experiment_execution_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.EXPERIMENT_EXECUTION, {}).get("result", {})
         analyze_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.ANALYZE, {}).get("result", {})
         literature_pipeline = get_phase_value(observe_result, "literature_pipeline", {}) or {}
         citation_records = self._collect_citation_records(cycle, context, literature_pipeline)
@@ -129,6 +130,7 @@ class PublishPhaseMixin:
             observe_result,
             hypothesis_result,
             experiment_result,
+            experiment_execution_result,
             analyze_result,
             paper_context,
             paper_result if isinstance(paper_result, dict) else {},
@@ -642,6 +644,7 @@ class PublishPhaseMixin:
         observe_result: Dict[str, Any],
         hypothesis_result: Dict[str, Any],
         experiment_result: Dict[str, Any],
+        experiment_execution_result: Dict[str, Any],
         analyze_result: Dict[str, Any],
         paper_context: Dict[str, Any],
         paper_result: Dict[str, Any],
@@ -662,6 +665,7 @@ class PublishPhaseMixin:
             "observe": self._normalize_report_phase_result("observe", observe_result),
             "hypothesis": self._normalize_report_phase_result("hypothesis", hypothesis_result),
             "experiment": self._normalize_report_phase_result("experiment", experiment_result),
+            "experiment_execution": self._normalize_report_phase_result("experiment_execution", experiment_execution_result),
             "analyze": self._normalize_report_phase_result("analyze", analyze_result),
             "publish": self._normalize_report_phase_result("publish", publish_payload),
         }

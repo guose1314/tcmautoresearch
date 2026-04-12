@@ -1,11 +1,17 @@
 # PhaseResult 旧顶层字段删除清单（2026-04-08）
 
+同步说明（2026-04-12）：
+
+- 本文最初基于当时的六阶段研究主链样本整理。
+- 当前主链已经演进为 Observe → Hypothesis → Experiment → ExperimentExecution → Analyze → Publish → Reflect。
+- 下文中出现的“六阶段”若无额外说明，均指不含 `experiment_execution` 的历史基线样本，而不是当前默认主链口径。
+
 ## 审计基线
 
 - 运行样本：output/research_session_1775654329.json
-- 运行命令：run_cycle_demo.py research 六阶段全流程
+- 运行命令：run_cycle_demo.py research 当时主链全流程
 - 审计方法：
-  - 先读取根 phase_results 下六个阶段的 metadata.deprecated_field_fallbacks
+  - 先读取根 phase_results 下当时主链阶段的 metadata.deprecated_field_fallbacks
   - 再回读命中上下文，区分根阶段结果与 publish/report/cycle_snapshot 中的镜像快照
   - 最后交叉核对 src 下 helper 调用点与剩余直读点
 
@@ -86,7 +92,7 @@
 
 1. 先迁移 experiment.selected_hypothesis 的最后入口
 2. 再迁移 analyze.reasoning_results 的最后入口
-3. 运行六阶段真流程，要求根 phase_results.metadata.deprecated_field_fallbacks 为空
+3. 运行当前真实研究流程，要求根 phase_results.metadata.deprecated_field_fallbacks 为空
 4. 删除 PhaseResult 输出中的对应顶层兼容字段
 5. 最后处理 publish.output_files、publish.deliverables、observe/hypothesis 顶层镜像字段
 
@@ -94,7 +100,7 @@
 
 满足以下条件后，才适合真正移除旧顶层字段：
 
-- 六阶段真实运行生成的根 phase_results 不再出现 deprecated_field_fallbacks
+- 当前真实运行生成的根 phase_results 不再出现 deprecated_field_fallbacks
 - tests/test_phase_result_contract.py 中标准契约路径测试保持通过
 - publish/report/API 摘要链路不再依赖顶层散装字段
 - session JSON 仍能被现有展示与摘要模块正常消费
@@ -398,7 +404,7 @@
 
 真实运行验证：
 
-- output/research_session_1775971820.json 中，根 phase_results 六阶段的 metadata.deprecated_field_fallbacks 全部为空。
+- output/research_session_1775971820.json 中，根 phase_results 的 metadata.deprecated_field_fallbacks 全部为空。
 - 同一文件里，publish 根结果的剩余额外顶层字段只剩 analysis_results、research_artifact；本批删除后，publish 根级额外字段应归零。
 
 回归验证：
@@ -439,7 +445,7 @@
 
 真实运行验证目标：
 
-- 六阶段真实运行保持 completed。
-- 根 phase_results 六阶段的 metadata.deprecated_field_fallbacks 继续为空。
+- 当前真实研究运行保持 completed。
+- 根 phase_results 的 metadata.deprecated_field_fallbacks 继续为空。
 - publish.results 中不再出现 paper_draft / imrd_reports。
 - 新 session JSON 中这两个字段不再随着 cycle_snapshot 重复展开。

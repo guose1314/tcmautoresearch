@@ -11,3 +11,27 @@
   echo "Open http://127.0.0.1:8000/liveness"
   echo "Open http://127.0.0.1:8000/readiness"
 {{- end }}
+
+  Default application process:
+  {{ join " " .Values.app.command }} {{ join " " .Values.app.args }}
+
+2. Database migration automation:
+{{- if and .Values.migrations.enabled .Values.migrations.useHook }}
+  A Helm migration hook is enabled and will run automatically before install/upgrade:
+  alembic -x environment=production upgrade head
+{{- else if .Values.migrations.enabled }}
+  A regular migration Job resource is enabled.
+  Inspect it with:
+  kubectl get job --namespace {{ .Release.Namespace }} {{ printf "%s-db-migrate" (include "tcmautoresearch.fullname" .) }}
+{{- else }}
+  Automatic migrations are disabled.
+  Re-run your Helm install/upgrade with:
+  --set migrations.enabled=true
+
+  For one-off troubleshooting, run:
+  kubectl exec --namespace {{ .Release.Namespace }} deploy/{{ include "tcmautoresearch.fullname" . }} -- alembic -x environment=production upgrade head
+{{- end }}
+
+  If this database was originally created via ORM create_all() and has no alembic_version table:
+  kubectl exec --namespace {{ .Release.Namespace }} deploy/{{ include "tcmautoresearch.fullname" . }} -- alembic -x url=postgresql://tcm:YOUR_PASSWORD@<postgres-service>:5432/tcmautoresearch stamp 3e5089f32f9a
+  kubectl exec --namespace {{ .Release.Namespace }} deploy/{{ include "tcmautoresearch.fullname" . }} -- alembic -x url=postgresql://tcm:YOUR_PASSWORD@<postgres-service>:5432/tcmautoresearch upgrade head

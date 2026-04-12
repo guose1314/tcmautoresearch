@@ -18,6 +18,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "OrchestrationResult": ("src.orchestration.research_orchestrator", "OrchestrationResult"),
     "PhaseOutcome": ("src.orchestration.research_orchestrator", "PhaseOutcome"),
     "ResearchOrchestrator": ("src.orchestration.research_orchestrator", "ResearchOrchestrator"),
+    "ResearchRuntimeResult": ("src.orchestration.research_runtime_service", "ResearchRuntimeResult"),
+    "ResearchRuntimeService": ("src.orchestration.research_runtime_service", "ResearchRuntimeService"),
     "run_research": ("src.orchestration.research_orchestrator", "run_research"),
     "topic_to_phase_context": ("src.orchestration.research_orchestrator", "topic_to_phase_context"),
     "TaskResult": ("src.orchestration.task_scheduler", "TaskResult"),

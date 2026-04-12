@@ -4,6 +4,12 @@
 **分支**: `stage2-s2_1-preprocessor-opt`  
 **审计范围**: 全部 src/ 源码 (210 文件, ~60,500 行), tests/ (106 文件), tools/ (17 文件)
 
+同步说明（2026-04-12）：
+
+- 本文保留 2026-04-06 的历史审计结论与当时的阶段样本。
+- 当前主链已经演进为 Observe → Hypothesis → Experiment → ExperimentExecution → Analyze → Publish → Reflect。
+- 当前阶段边界应理解为：experiment = protocol design，experiment_execution = external execution import。
+
 ---
 
 ## 一、系统概览
@@ -13,7 +19,7 @@
 ### 1.1 技术栈
 
 | 层 | 技术 |
-|---|---|
+| --- | --- |
 | LLM 推理 | llama-cpp-python + CUDA (RTX 4060) |
 | NLP | jieba 分词, OpenCC 繁简转换, sentence-transformers |
 | 图数据库 | Neo4j 5.26 (可选) + NetworkX (内存) |
@@ -26,7 +32,7 @@
 ### 1.2 代码规模分布
 
 | 模块 | 文件数 | 行数 | 职责 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | research/ | 25 | 9,611 | 6阶段研究管道 + 假设/实验/文献 |
 | cycle/ | 6 | 5,508 | 循环迭代框架 |
 | generation/ | 7 | 4,457 | 论文/报告/引用生成 |
@@ -43,6 +49,8 @@
 ## 二、核心架构
 
 ### 2.1 架构总览
+
+> 历史基线图（2026-04-06）：以下 mermaid 图反映的是当次审计时观察到的总体架构快照，不应直接视为当前默认主链实现状态；当前主链口径已演进为 Observe → Hypothesis → Experiment → ExperimentExecution → Analyze → Publish → Reflect。
 
 ```mermaid
 graph TB
@@ -105,6 +113,8 @@ graph TB
 
 ### 2.2 研究管道架构
 
+> 历史基线图（2026-04-06）：以下 mermaid 图展示的是当时审计到的六阶段研究管道样本，不含 experiment_execution；当前默认主链已经在 experiment 与 analyze 之间显式加入 experiment_execution。
+
 ```mermaid
 stateDiagram-v2
     [*] --> Observe: 启动研究循环
@@ -131,6 +141,8 @@ stateDiagram-v2
 ```
 
 ### 2.3 部署架构
+
+> 历史基线图（2026-04-06）：以下 mermaid 图记录的是当时的部署视角与组件边界，主要用于保留审计证据，不应替代当前实际部署/接线状态判断。
 
 ```mermaid
 graph LR
@@ -162,6 +174,8 @@ graph LR
 **这是本次审计最重要的发现。**
 
 代码库中存在两套独立的研究执行系统，入口未统一：
+
+> 历史基线图（2026-04-06）：以下 mermaid 图描述的是当时发现的双系统并行状态，其中 System B 仍是六阶段编排基线；当前主链已完成 experiment / experiment_execution 语义拆分，并非此图中的旧状态。
 
 ```mermaid
 graph TD
@@ -195,7 +209,7 @@ graph TD
 ```
 
 | 对比 | System A (线性) | System B (6阶段) |
-|---|---|---|
+| --- | --- | --- |
 | 入口 | `run_cycle_demo.py` | `ResearchPipeline` / API |
 | 成熟度 | ✅ 生产可用 | ⚠️ 部分 stub |
 | LLM 调用 | 仅 EntityExtractor 可选 | Hypothesis/Gap 真实调用 |
@@ -205,6 +219,8 @@ graph TD
 ---
 
 ## 四、各模块成熟度评估
+
+> 历史基线图（2026-04-06）：以下 mermaid 图表示的是当次审计时的模块成熟度判断，用于保留历史评估结论，不应直接当作当前实现完成度面板。
 
 ```mermaid
 gantt
@@ -241,7 +257,7 @@ gantt
 ### 5.1 冗余代码 (~30 个文件可删除)
 
 | 废弃文件/目录 | 规范位置 | 理由 | 代价 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `src/research/ctext_corpus_collector.py` | `src/collector/` | re-export 包装 | 更新 examples/ 导入 |
 | `src/research/ctext_whitelist.py` | `src/collector/` | re-export 包装 | 同上 |
 | `src/research/literature_retriever.py` | `src/collector/` | re-export 包装 | 同上 |
@@ -260,7 +276,7 @@ gantt
 ### 5.2 架构耦合点
 
 | 耦合 | 位置 | 风险 | 建议 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `__init__.py` 全量导入链 | `src/analysis/__init__.py` → `src/research/` → `src/collector/` → `src/knowledge/` → `src/storage/` → `src/infrastructure/` | 导入任意模块触发全局初始化链 | 改为延迟导入 |
 | `run_cycle_demo.py` 2373 行 God-script | 根目录 | 混合入口/序列化/报告/信号处理 | 拆分为 CycleReporter 类 |
 | 质量评分硬编码 | `summarize_module_quality()` | 评分不反映真实结果 | 从模块结果计算 |
@@ -269,7 +285,7 @@ gantt
 ### 5.3 缺失实现
 
 | 缺失 | 影响 | 优先级 |
-|---|---|---|
+| --- | --- | --- |
 | AnalyzePhase 真实分析 (p, effect size) | 6阶段流程不完整 | P0 |
 | ReflectPhase 真实反思 | 无闭环改进 | P0 |
 | QualityAssessor 实质评估 | 质量门无效 | P1 |
@@ -281,7 +297,7 @@ gantt
 ## 六、架构优点
 
 | 优点 | 说明 |
-|---|---|
+| --- | --- |
 | **端口-适配器模式** | 5 个 Port + 5 个 Adapter 清晰解耦 |
 | **模块生命周期管理** | BaseModule 统一 initialize/execute/cleanup |
 | **LLM 本地部署** | CUDA offload 完整，无外部 API 依赖 |
@@ -300,7 +316,7 @@ gantt
 **目标**: 删除冗余，统一入口
 
 | 任务 | 理由 | 代价 |
-|---|---|---|
+| --- | --- | --- |
 | 删除 ~30 个包装层文件 | 消除维护混乱 | 更新 <10 处导入 |
 | 清理根目录临时文件 | 减少噪音 | 无 |
 | 移 `_check_*.py` → `tools/diagnostics/` | 整理工具 | 无功能影响 |
@@ -312,18 +328,21 @@ gantt
 **目标**: System A + System B 合一
 
 | 任务 | 理由 | 代价 |
-|---|---|---|
+| --- | --- | --- |
 | AnalyzePhase 接入真实分析模块 | 消除硬编码 p 值 | 需要对接 ReasoningEngine |
 | ReflectPhase 接入 QualityAssessor + LLM | 闭环反思 | 需要 QualityAssessor 升级 |
-| run_cycle_demo.py 改为调用 6 阶段管道 | 统一入口 | 依赖 Phase 1 + 2 |
+| run_cycle_demo.py 改为调用统一研究主链（当前已演进为七阶段） | 统一入口 | 依赖 Phase 1 + 2 |
 | Observe → System A 的 5 模块作为子流程 | 复用成熟实现 | 适配接口 |
+
+> 历史路线图（2026-04-06）：以下 mermaid 图是当时 Roadmap Phase 2 的目标收口图，用于保留设计演进方向；不要把它当作 2026-04-12 当前已全部落地的实现清单。
 
 ```mermaid
 graph TD
     subgraph "Phase 2 目标架构"
         O[Observe] --> H[Hypothesis]
         H --> E[Experiment]
-        E --> AN[Analyze]
+        E --> EX[ExperimentExecution]
+        EX --> AN[Analyze]
         AN --> P[Publish]
         P --> R[Reflect]
 
@@ -338,15 +357,15 @@ graph TD
 **目标**: 学习系统 + 质量门真正工作
 
 | 任务 | 理由 | 代价 |
-|---|---|---|
+| --- | --- | --- |
 | QualityAssessor 升级为 LLM 驱动 | 质量门有效 | LLM prompt 设计 |
 | SelfLearningEngine 接入分析反馈 | SelfLearningEngine 接入分析反馈 | 算法设计 |
 | Cycle runtime 接入真实循环 | 多轮迭代改进 | 依赖 Phase 2 |
 
 ### Phase 4: 生产化 (持续)
 
-| 任务 | 理由 | 代价 |
-|---|---|---|
+| 任务 | 理由 | 代价 | 当前状态 |
+| --- | --- | --- | --- |
 | `__init__.py` 延迟导入优化 | 减少启动时间 | 逐模块改造 | ✅ 已完成 (8400→96ms, -98.9%) |
 | PostgreSQL + Neo4j 默认启用 | 生产存储 | 配置调整 | ✅ 已完成 (production.yml + docker-compose) |
 | CORS 收紧 | 安全加固 | 配置调整 | ✅ 已完成 (生产环境白名单 + 方法/头限制) |

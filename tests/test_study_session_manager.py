@@ -22,7 +22,6 @@ from src.research.study_session_manager import (
     StudySessionManager,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -55,7 +54,7 @@ class TestEnumsAndDataclass(unittest.TestCase):
         phases = {p.value for p in ResearchPhase}
         self.assertSetEqual(
             phases,
-            {"observe", "hypothesis", "experiment", "analyze", "publish", "reflect"},
+            {"observe", "hypothesis", "experiment", "experiment_execution", "analyze", "publish", "reflect"},
         )
 
     def test_research_cycle_status_values(self):

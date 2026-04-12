@@ -44,6 +44,7 @@ from src.infrastructure.persistence import (
     Base,
     DatabaseManager,
 )
+from src.infrastructure.secret_resolution import resolve_config_password
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +55,7 @@ def _build_pg_connection_string(db_config: Dict[str, Any]) -> str:
     port = int(db_config.get("port", 5432))
     name = db_config.get("name", "tcmautoresearch")
     user = db_config.get("user", "tcm")
-    # 从环境变量读取密码（安全做法）
-    password_env = db_config.get("password_env", "TCM_DB_PASSWORD")
-    password = os.environ.get(password_env, db_config.get("password", ""))
+    password = resolve_config_password(db_config, default_env_name="TCM_DB_PASSWORD")
     ssl_mode = db_config.get("ssl_mode", "prefer")
     return f"postgresql://{user}:{password}@{host}:{port}/{name}?sslmode={ssl_mode}"
 
@@ -155,8 +154,7 @@ class StorageBackendFactory:
 
                 uri = self._neo4j_config.get("uri", "neo4j://localhost:7687")
                 user = self._neo4j_config.get("user", "neo4j")
-                password_env = self._neo4j_config.get("password_env", "TCM_NEO4J_PASSWORD")
-                password = os.environ.get(password_env, self._neo4j_config.get("password", ""))
+                password = resolve_config_password(self._neo4j_config, default_env_name="TCM_NEO4J_PASSWORD")
                 database = self._neo4j_config.get("database", "neo4j")
 
                 self._neo4j_driver = Neo4jDriver(

@@ -24,6 +24,10 @@ def build_cycle_demo_arg_parser() -> argparse.ArgumentParser:
         description=HELP_SUMMARY,
         formatter_class=argparse.RawTextHelpFormatter,
     )
+    parser.add_argument('--config', dest='config_path', type=str, default='config.yml',
+                        help='主配置文件路径（默认 config.yml）')
+    parser.add_argument('--environment', type=str, default=None,
+                        help='目标配置环境；未指定时按配置中心默认值或环境变量解析')
     parser.add_argument('--mode', choices=['demo', 'research'], default='demo',
                         help='运行模式: demo（现有行为）或 research（科研闭环）')
     parser.add_argument('--question', type=str, default='',

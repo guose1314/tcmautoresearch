@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from src.web.auth import get_current_user
+from src.web.ops.legacy_research_runtime import get_legacy_research_store
 
 logger = logging.getLogger(__name__)
 
@@ -746,42 +747,19 @@ async def kg_subgraph(
 @router.get("/graph/{research_id}")
 async def get_knowledge_graph(
     research_id: str,
+    request: Request,
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取知识图谱数据（JSON 格式，供前端可视化）。"""
     try:
-        from src.research.research_pipeline import ResearchPipeline
-
-        pipeline = ResearchPipeline()
-        cycles = getattr(pipeline, "research_cycles", None)
-        if cycles is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="研究编排器未初始化",
-            )
-
-        cycle = cycles.get(research_id)
+        store = get_legacy_research_store(request.app)
+        cycle = store.get_session(research_id)
         if cycle is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"未找到研究课题: {research_id}",
             )
-
-        # 从阶段执行结果中提取图谱数据
-        from src.research.study_session_manager import ResearchPhase
-
-        phase_data = {}
-        if hasattr(cycle, "phase_executions"):
-            phase_data = cycle.phase_executions or {}
-
-        graph_data: Dict[str, Any] = {"nodes": [], "edges": [], "statistics": {}}
-
-        # 尝试从 OBSERVE 阶段获取语义图谱
-        observe_result = phase_data.get(ResearchPhase.OBSERVE, phase_data.get("observe", {}))
-        if isinstance(observe_result, dict):
-            graph_data["nodes"] = observe_result.get("semantic_graph", {}).get("nodes", [])
-            graph_data["edges"] = observe_result.get("semantic_graph", {}).get("edges", [])
-            graph_data["statistics"] = observe_result.get("graph_statistics", {})
+        graph_data = store.get_observe_graph(research_id) or {"nodes": [], "edges": [], "statistics": {}}
 
         return {
             "research_id": research_id,

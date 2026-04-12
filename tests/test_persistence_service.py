@@ -5,12 +5,18 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+import uuid
+from datetime import datetime
+
+from sqlalchemy import text
 
 from src.infrastructure.persistence import PersistenceService, ResearchRecord
 from src.storage.db_models import (
     DatabaseManager,
     Document,
+    EntityTypeEnum,
     ProcessStatusEnum,
+    RelationshipCategoryEnum,
     RelationshipType,
 )
 
@@ -181,6 +187,87 @@ class TestPersistenceService(unittest.TestCase):
             self.assertEqual(stored.raw_text_size, 128)
 
         manager.close()
+
+    def test_create_default_relationships_normalizes_legacy_uppercase_category(self) -> None:
+        compat_db = os.path.join(self.tmpdir.name, "legacy-category.db")
+        manager = DatabaseManager(f"sqlite:///{compat_db}")
+        manager.init_db()
+
+        with manager.session_scope() as session:
+            session.execute(
+                text(
+                    """
+                    INSERT INTO relationship_types
+                        (id, relationship_name, relationship_type, description, category, confidence_baseline, created_at)
+                    VALUES
+                        (:id, :relationship_name, :relationship_type, :description, :category, :confidence_baseline, :created_at)
+                    """
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "relationship_name": "包含",
+                    "relationship_type": "CONTAINS",
+                    "description": "legacy row",
+                    "category": "COMPOSITION",
+                    "confidence_baseline": 0.99,
+                    "created_at": datetime.utcnow(),
+                },
+            )
+            DatabaseManager.create_default_relationships(session)
+
+        with manager.session_scope() as session:
+            rows = session.execute(
+                text(
+                    "SELECT relationship_type, category FROM relationship_types ORDER BY relationship_type"
+                )
+            ).fetchall()
+
+        manager.close()
+
+        categories = {relationship_type: category for relationship_type, category in rows}
+        self.assertEqual(categories["CONTAINS"], "COMPOSITION")
+        self.assertGreaterEqual(len(categories), 8)
+
+    def test_build_legacy_enum_label_map_normalizes_uppercase_labels(self) -> None:
+        process_map = DatabaseManager._build_legacy_enum_label_map(
+            ["PENDING", "PROCESSING", "COMPLETED", "FAILED"],
+            [member.value for member in ProcessStatusEnum],
+        )
+        entity_map = DatabaseManager._build_legacy_enum_label_map(
+            ["FORMULA", "HERB", "SYNDROME", "EFFICACY", "PROPERTY", "TASTE", "MERIDIAN", "OTHER"],
+            [member.value for member in EntityTypeEnum],
+        )
+        relationship_map = DatabaseManager._build_legacy_enum_label_map(
+            ["COMPOSITION", "THERAPEUTIC", "PROPERTY", "SIMILARITY", "OTHER"],
+            [member.value for member in RelationshipCategoryEnum],
+        )
+
+        self.assertEqual(
+            process_map,
+            {
+                "PENDING": "pending",
+                "PROCESSING": "processing",
+                "COMPLETED": "completed",
+                "FAILED": "failed",
+            },
+        )
+        self.assertEqual(entity_map["FORMULA"], "formula")
+        self.assertEqual(entity_map["OTHER"], "other")
+        self.assertEqual(relationship_map["COMPOSITION"], "composition")
+        self.assertEqual(
+            DatabaseManager._build_legacy_enum_label_map(
+                ["CUSTOM"],
+                [member.value for member in ProcessStatusEnum],
+            ),
+            {},
+        )
+
+    def test_postgres_string_list_column_classification_helpers(self) -> None:
+        self.assertTrue(DatabaseManager._is_expected_postgres_string_list_column(("ARRAY", "_varchar")))
+        self.assertFalse(DatabaseManager._is_expected_postgres_string_list_column(("JSON", "json")))
+        self.assertTrue(DatabaseManager._is_legacy_postgres_json_string_list_column(("JSON", "json")))
+        self.assertTrue(DatabaseManager._is_legacy_postgres_json_string_list_column(("jsonb", "jsonb")))
+        self.assertFalse(DatabaseManager._is_legacy_postgres_json_string_list_column(("ARRAY", "_varchar")))
 
 
 if __name__ == "__main__":

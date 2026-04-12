@@ -18,13 +18,17 @@ DEFAULT_CYCLE_DEMO_GOVERNANCE = {
 }
 
 
-def load_cycle_demo_governance_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
+def load_cycle_demo_governance_config(
+    config_path: Optional[Path] = None,
+    environment: Optional[str] = None,
+) -> Dict[str, Any]:
     """加载 cycle_demo 治理配置。"""
     from src.infrastructure.config_loader import load_settings_section
 
     section = load_settings_section(
         'governance.cycle_demo',
         config_path=config_path,
+        environment=environment,
         default={},
     )
     return {

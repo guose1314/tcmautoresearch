@@ -174,6 +174,7 @@ class TestReportGenerator(unittest.TestCase):
 
         self.assertIn("统计分析与语义推理共同支持小柴胡汤呈现稳定的配伍层级结构", report.content)
         self.assertIn("扩展至更多病种和剂量分层的证据综合", report.content)
+        self.assertIn("并不代表已经完成真实实验执行、临床入组或外部验证", report.content)
 
     def test_generate_docx_report_writes_output_file(self):
         report = self.generator.generate_report(self.session_result, "docx")

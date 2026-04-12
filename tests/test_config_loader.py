@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 from fastapi.testclient import TestClient
@@ -16,6 +18,10 @@ from src.infrastructure.config_loader import (
     load_settings,
     load_settings_section,
 )
+from src.infrastructure.runtime_config_assembler import build_runtime_assembly
+from src.web.app import create_app as create_legacy_web_app
+from web_console.app import create_app as create_web_console_app
+from web_console.job_manager import ResearchJobManager
 
 
 class TestConfigLoader(unittest.TestCase):
@@ -238,6 +244,93 @@ class TestConfigLoader(unittest.TestCase):
             "wos-secret-key",
         )
 
+    def test_build_runtime_assembly_reuses_settings_and_clones_pipeline_config(self) -> None:
+        settings = load_settings(root_path=self.root, environment="test")
+
+        assembly = build_runtime_assembly(settings=settings)
+
+        self.assertIs(assembly.settings, settings)
+        self.assertEqual(assembly.runtime_config["models"]["llm"]["api_key"], "test-llm-api-key")
+        self.assertEqual(
+            assembly.orchestrator_config["pipeline_config"]["literature_retrieval"]["pubmed_api_key"],
+            "pubmed-secret-key",
+        )
+
+        assembly.runtime_config["models"]["llm"]["api_key"] = "mutated-runtime-key"
+        self.assertEqual(
+            assembly.orchestrator_config["pipeline_config"]["models"]["llm"]["api_key"],
+            "test-llm-api-key",
+        )
+
+    def test_job_manager_uses_runtime_assembly_when_settings_provided(self) -> None:
+        settings = load_settings(root_path=self.root, environment="test")
+        manager = ResearchJobManager(settings=settings)
+        try:
+            self.assertEqual(
+                manager._default_orchestrator_config["pipeline_config"]["models"]["llm"]["api_key"],
+                "test-llm-api-key",
+            )
+            self.assertEqual(
+                manager.get_storage_summary()["storage_dir"],
+                str((self.root / "output" / "test" / "web_console_jobs").resolve()),
+            )
+        finally:
+            manager.close()
+
+    def test_database_url_prefers_explicit_password_over_password_env(self) -> None:
+        config_path = self.root / "config.yml"
+        payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        payload["database"] = {
+            "type": "postgresql",
+            "host": "db.example.local",
+            "port": 5432,
+            "name": "explicit_db",
+            "user": "explicit_user",
+            "password": "explicit-db-password",
+            "password_env": "TCM_DB_PASSWORD",
+        }
+        config_path.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+        original_env = os.environ.get("TCM_DB_PASSWORD")
+        os.environ["TCM_DB_PASSWORD"] = "stale-env-password"
+        try:
+            settings = load_settings(root_path=self.root, environment="test")
+        finally:
+            if original_env is None:
+                os.environ.pop("TCM_DB_PASSWORD", None)
+            else:
+                os.environ["TCM_DB_PASSWORD"] = original_env
+
+        self.assertEqual(
+            settings.database_url,
+            "postgresql://explicit_user:explicit-db-password@db.example.local:5432/explicit_db",
+        )
+
+    def test_neo4j_auth_prefers_explicit_password_over_password_env(self) -> None:
+        config_path = self.root / "config.yml"
+        payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        payload["neo4j"] = {
+            "enabled": True,
+            "uri": "bolt://neo4j.example.local:7687",
+            "user": "neo4j-user",
+            "password": "explicit-neo4j-password",
+            "password_env": "TCM_NEO4J_PASSWORD",
+            "database": "neo4j",
+        }
+        config_path.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+        original_env = os.environ.get("TCM_NEO4J_PASSWORD")
+        os.environ["TCM_NEO4J_PASSWORD"] = "stale-env-password"
+        try:
+            settings = load_settings(root_path=self.root, environment="test")
+        finally:
+            if original_env is None:
+                os.environ.pop("TCM_NEO4J_PASSWORD", None)
+            else:
+                os.environ["TCM_NEO4J_PASSWORD"] = original_env
+
+        self.assertEqual(settings.neo4j_auth, ("neo4j-user", "explicit-neo4j-password"))
+
     def test_create_app_uses_environment_isolated_runtime_paths(self) -> None:
         settings = load_settings(root_path=self.root, environment="test")
 
@@ -271,3 +364,234 @@ class TestConfigLoader(unittest.TestCase):
                 client.app.state.job_manager._default_orchestrator_config["pipeline_config"]["literature_retrieval"]["pubmed_api_key"],
                 "pubmed-secret-key",
             )
+
+    def test_web_console_app_uses_runtime_assembly_for_default_job_manager(self) -> None:
+        settings = load_settings(root_path=self.root, environment="test")
+
+        with TestClient(create_web_console_app(settings=settings)) as client:
+            self.assertEqual(client.get("/health").status_code, 200)
+            self.assertEqual(
+                client.app.state.job_manager._default_orchestrator_config["pipeline_config"]["models"]["llm"]["api_key"],
+                "test-llm-api-key",
+            )
+            self.assertEqual(
+                client.app.state.job_manager.get_storage_summary()["storage_dir"],
+                str((self.root / "output" / "test" / "web_console_jobs").resolve()),
+            )
+
+    def test_app_entrypoints_accept_config_path_and_environment(self) -> None:
+        with TestClient(create_app(config_path=self.root / "config.yml", environment="test")) as api_client:
+            self.assertEqual(api_client.get("/health").json()["environment"], "test")
+            self.assertEqual(
+                api_client.app.state.job_manager._default_orchestrator_config["pipeline_config"]["models"]["llm"]["api_key"],
+                "test-llm-api-key",
+            )
+
+        with TestClient(create_web_console_app(config_path=self.root / "config.yml", environment="test")) as web_client:
+            self.assertEqual(web_client.get("/health").json()["environment"], "test")
+            self.assertEqual(
+                web_client.app.state.job_manager._default_orchestrator_config["pipeline_config"]["literature_retrieval"]["pubmed_api_key"],
+                "pubmed-secret-key",
+            )
+
+        with TestClient(create_legacy_web_app(config_path=self.root / "config.yml", environment="test")) as legacy_client:
+            self.assertEqual(legacy_client.get("/health").json()["environment"], "test")
+            self.assertEqual(legacy_client.app.state.settings.environment, "test")
+            self.assertEqual(
+                legacy_client.app.state.config["models"]["llm"]["api_key"],
+                "test-llm-api-key",
+            )
+
+    def test_legacy_web_app_uses_settings_database_url_for_postgresql_init(self) -> None:
+        config_path = self.root / "config.yml"
+        payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        payload["database"] = {
+            "type": "postgresql",
+            "host": "db.example.local",
+            "port": 5432,
+            "name": "structured_research",
+            "user": "structured_user",
+            "password": "structured-password",
+        }
+        config_path.write_text(
+            yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+
+        settings = load_settings(root_path=self.root, environment="test")
+        observed: dict[str, object] = {}
+
+        class _FakeDatabaseManager:
+            def __init__(self, connection_string, echo=False):
+                observed["connection_string"] = connection_string
+                observed["echo"] = echo
+
+            def init_db(self):
+                observed["init_db"] = True
+
+            @contextmanager
+            def session_scope(self):
+                yield object()
+
+            @staticmethod
+            def create_default_relationships(_session):
+                return None
+
+            def close(self):
+                observed["close_called"] = True
+
+        with patch("src.infrastructure.persistence.DatabaseManager", _FakeDatabaseManager):
+            app = create_legacy_web_app(settings=settings)
+
+        self.assertEqual(observed["connection_string"], settings.database_url)
+        self.assertTrue(observed["init_db"])
+        self.assertIsInstance(app.state.db_manager, _FakeDatabaseManager)
+
+
+class TestWebStartupEntryPoints(unittest.TestCase):
+    def setUp(self) -> None:
+        self._original_config_path = os.environ.get("TCM_CONFIG_PATH")
+        self._original_environment = os.environ.get("TCM_ENV")
+        os.environ.pop("TCM_CONFIG_PATH", None)
+        os.environ.pop("TCM_ENV", None)
+
+    def tearDown(self) -> None:
+        if self._original_config_path is None:
+            os.environ.pop("TCM_CONFIG_PATH", None)
+        else:
+            os.environ["TCM_CONFIG_PATH"] = self._original_config_path
+
+        if self._original_environment is None:
+            os.environ.pop("TCM_ENV", None)
+        else:
+            os.environ["TCM_ENV"] = self._original_environment
+
+    def test_legacy_web_main_forwards_runtime_args_to_uvicorn(self) -> None:
+        from src.web import main as legacy_main
+
+        with patch.object(legacy_main.uvicorn, "run") as mock_run:
+            legacy_main.main(
+                [
+                    "--config",
+                    "./config/test.yml",
+                    "--environment",
+                    "test",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "8011",
+                    "--reload",
+                    "--log-level",
+                    "warning",
+                ]
+            )
+
+        self.assertEqual(os.environ["TCM_CONFIG_PATH"], "./config/test.yml")
+        self.assertEqual(os.environ["TCM_ENV"], "test")
+        mock_run.assert_called_once_with(
+            "src.web.main:create_uvicorn_app",
+            factory=True,
+            host="127.0.0.1",
+            port=8011,
+            reload=True,
+            log_level="warning",
+        )
+
+    def test_web_console_main_forwards_runtime_args_to_uvicorn(self) -> None:
+        from web_console import main as web_console_main
+
+        mock_uvicorn = unittest.mock.Mock()
+        with patch.object(web_console_main, "import_module", return_value=mock_uvicorn):
+            web_console_main.main(
+                [
+                    "--config",
+                    "./config/test.yml",
+                    "--environment",
+                    "test",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "8009",
+                    "--reload",
+                ]
+            )
+
+        self.assertEqual(os.environ["TCM_CONFIG_PATH"], "./config/test.yml")
+        self.assertEqual(os.environ["TCM_ENV"], "test")
+        mock_uvicorn.run.assert_called_once_with(
+            "web_console.main:create_uvicorn_app",
+            factory=True,
+            host="127.0.0.1",
+            port=8009,
+            reload=True,
+            log_level="info",
+        )
+
+    def test_api_main_forwards_runtime_args_to_uvicorn(self) -> None:
+        from src.api import main as api_main
+
+        mock_uvicorn = unittest.mock.Mock()
+        with patch.object(api_main, "import_module", return_value=mock_uvicorn):
+            api_main.main(
+                [
+                    "--config",
+                    "./config/test.yml",
+                    "--environment",
+                    "test",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "8010",
+                    "--reload",
+                    "--log-level",
+                    "warning",
+                ]
+            )
+
+        self.assertEqual(os.environ["TCM_CONFIG_PATH"], "./config/test.yml")
+        self.assertEqual(os.environ["TCM_ENV"], "test")
+        mock_uvicorn.run.assert_called_once_with(
+            "src.api.main:create_uvicorn_app",
+            factory=True,
+            host="127.0.0.1",
+            port=8010,
+            reload=True,
+            log_level="warning",
+        )
+
+    def test_legacy_web_factory_reads_runtime_override_env(self) -> None:
+        from src.web import main as legacy_main
+
+        os.environ["TCM_CONFIG_PATH"] = "./config/test.yml"
+        os.environ["TCM_ENV"] = "test"
+        sentinel = object()
+        with patch.object(legacy_main, "create_app", return_value=sentinel) as mock_create_app:
+            result = legacy_main.create_uvicorn_app()
+
+        self.assertIs(result, sentinel)
+        mock_create_app.assert_called_once_with(config_path="./config/test.yml", environment="test")
+
+    def test_web_console_factory_reads_runtime_override_env(self) -> None:
+        from web_console import main as web_console_main
+
+        os.environ["TCM_CONFIG_PATH"] = "./config/test.yml"
+        os.environ["TCM_ENV"] = "test"
+        sentinel = object()
+        with patch.object(web_console_main, "create_app", return_value=sentinel) as mock_create_app:
+            result = web_console_main.create_uvicorn_app()
+
+        self.assertIs(result, sentinel)
+        mock_create_app.assert_called_once_with(config_path="./config/test.yml", environment="test")
+
+    def test_api_factory_reads_runtime_override_env(self) -> None:
+        from src.api import main as api_main
+
+        os.environ["TCM_CONFIG_PATH"] = "./config/test.yml"
+        os.environ["TCM_ENV"] = "test"
+        sentinel = object()
+        mock_create_app = unittest.mock.Mock(return_value=sentinel)
+        with patch.object(api_main, "_load_create_app_factory", return_value=mock_create_app):
+            result = api_main.create_uvicorn_app()
+
+        self.assertIs(result, sentinel)
+        mock_create_app.assert_called_once_with(config_path="./config/test.yml", environment="test")

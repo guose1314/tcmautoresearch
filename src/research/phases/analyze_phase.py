@@ -97,6 +97,10 @@ class AnalyzePhaseMixin:
             if normalized_records:
                 return normalized_records
 
+        execution_records = self._collect_execution_stage_records(cycle)
+        if execution_records:
+            return execution_records
+
         documents = self._collect_analyze_documents(cycle, context)
         records: List[Dict[str, Any]] = []
         for index, document in enumerate(documents, start=1):
@@ -198,6 +202,10 @@ class AnalyzePhaseMixin:
         if isinstance(explicit_relationships, list) and explicit_relationships:
             return self._deduplicate_analyze_relationships([item for item in explicit_relationships if isinstance(item, dict)])
 
+        execution_relationships = self._collect_execution_stage_relationships(cycle)
+        if execution_relationships:
+            return execution_relationships
+
         observe_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.OBSERVE, {}).get("result", {})
         ingestion_pipeline = context.get("ingestion_pipeline") or get_phase_value(observe_result, "ingestion_pipeline", {}) or {}
         aggregate_relationships = (ingestion_pipeline.get("aggregate") or {}).get("semantic_relationships") or []
@@ -215,6 +223,71 @@ class AnalyzePhaseMixin:
 
         # Fallback: 从 Hypothesis 阶段的 source_entities 合成关系
         return self._synthesize_relationships_from_hypotheses(cycle)
+
+    def _collect_execution_stage_records(self, cycle: "ResearchCycle") -> List[Dict[str, Any]]:
+        execution_result = cycle.phase_executions.get(
+            self.pipeline.ResearchPhase.EXPERIMENT_EXECUTION,
+            {},
+        ).get("result", {})
+        if not isinstance(execution_result, dict):
+            return []
+
+        for key in ("analysis_records", "execution_records", "imported_records", "result_records", "records"):
+            candidate = get_phase_value(execution_result, key, []) or []
+            if not isinstance(candidate, list):
+                continue
+            normalized_records = self._normalize_analyze_records(candidate)
+            if normalized_records:
+                return normalized_records
+
+        documents = get_phase_value(execution_result, "documents", []) or []
+        if not isinstance(documents, list):
+            return []
+
+        records: List[Dict[str, Any]] = []
+        for index, document in enumerate(documents, start=1):
+            if not isinstance(document, dict):
+                continue
+            record = self._build_analyze_record_from_document(document, index)
+            if record:
+                records.append(record)
+        return records
+
+    def _collect_execution_stage_relationships(self, cycle: "ResearchCycle") -> List[Dict[str, Any]]:
+        execution_result = cycle.phase_executions.get(
+            self.pipeline.ResearchPhase.EXPERIMENT_EXECUTION,
+            {},
+        ).get("result", {})
+        if not isinstance(execution_result, dict):
+            return []
+
+        for key in (
+            "analysis_relationships",
+            "execution_relationships",
+            "imported_relationships",
+            "semantic_relationships",
+            "relationships",
+        ):
+            candidate = get_phase_value(execution_result, key, []) or []
+            if isinstance(candidate, list) and candidate:
+                return self._deduplicate_analyze_relationships(
+                    [item for item in candidate if isinstance(item, dict)]
+                )
+
+        documents = get_phase_value(execution_result, "documents", []) or []
+        if not isinstance(documents, list):
+            return []
+
+        relationships: List[Dict[str, Any]] = []
+        for document in documents:
+            if not isinstance(document, dict):
+                continue
+            relationships.extend(
+                item for item in (document.get("semantic_relationships") or []) if isinstance(item, dict)
+            )
+        if not relationships:
+            return []
+        return self._deduplicate_analyze_relationships(relationships)
 
     def _deduplicate_analyze_relationships(self, relationships: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         deduplicated: Dict[Tuple[str, str, str], Dict[str, Any]] = {}

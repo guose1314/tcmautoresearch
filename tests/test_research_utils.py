@@ -9,6 +9,7 @@ from src.api.research_utils import (
     _resolve_primary_association,
     build_markdown_report,
     build_research_dashboard_payload,
+    format_phase_name,
     iter_output_file_candidates,
     normalize_research_request,
     resolve_preferred_report_artifact,
@@ -90,6 +91,12 @@ class TestResearchUtils(unittest.TestCase):
         self.assertIn("### 分析阶段", report)
         self.assertIn("- 错误：chi square unavailable", report)
         self.assertIn("关键发现：桂枝、白芍", report)
+
+    def test_format_phase_name_marks_experiment_as_protocol_design(self):
+        self.assertEqual(format_phase_name("experiment"), "实验方案阶段")
+
+    def test_format_phase_name_marks_experiment_execution_explicitly(self):
+        self.assertEqual(format_phase_name("experiment_execution"), "实验执行阶段")
 
     def test_iter_output_candidates_and_resolve_preferred_report_artifact(self):
         with tempfile.TemporaryDirectory(dir=WORKSPACE_ROOT) as temp_dir:

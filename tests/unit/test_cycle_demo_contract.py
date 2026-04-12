@@ -2,6 +2,7 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import run_cycle_demo
 from src.cycle.cycle_runner import execute_real_module_pipeline, run_iteration_cycle
@@ -221,27 +222,36 @@ class TestCycleDemoContract(unittest.TestCase):
         from src.cycle.cycle_pipeline_bridge import run_pipeline_iteration
         from src.cycle.cycle_reporter import summarize_module_quality
 
-        fake_session = lambda question, config, phase_names=None, **kw: {
-            "status": "completed",
-            "session_id": "bridge_test",
-            "executed_phases": phase_names or [],
-            "phase_results": {
-                "observe": {"phase": "observe", "status": "completed"},
-                "reflect": {
-                    "phase": "reflect",
-                    "reflections": [{"topic": "t", "reflection": "r", "action": "a", "source": "quality_assessor"}],
-                    "quality_assessment": {"overall_cycle_score": 0.85},
-                    "improvement_plan": ["计划一"],
+        captured = {}
+
+        def fake_session(question, config, phase_names=None, **kw):
+            captured.update({"question": question, "config": config, "phase_names": phase_names, **kw})
+            return {
+                "status": "completed",
+                "session_id": "bridge_test",
+                "executed_phases": phase_names or [],
+                "phase_results": {
+                    "observe": {"phase": "observe", "status": "completed"},
+                    "reflect": {
+                        "phase": "reflect",
+                        "reflections": [{"topic": "t", "reflection": "r", "action": "a", "source": "quality_assessor"}],
+                        "quality_assessment": {"overall_cycle_score": 0.85},
+                        "improvement_plan": ["计划一"],
+                    },
                 },
-            },
-        }
+            }
 
         result = run_pipeline_iteration(
             1,
-            {"raw_text": "test", "objective": "小柴胡汤分析"},
+            {
+                "raw_text": "test",
+                "objective": "小柴胡汤分析",
+                "previous_feedback": {"quality_assessment": {"overall_cycle_score": 0.82}},
+            },
             run_research_session_fn=fake_session,
             summarize_module_quality_fn=summarize_module_quality,
             max_iterations=2,
+            runtime_config={"models": {"llm": {"provider": "local"}}},
         )
 
         # 返回契约: 必须包含 run_iteration_cycle 合同字段
@@ -256,6 +266,11 @@ class TestCycleDemoContract(unittest.TestCase):
         self.assertTrue(result["metadata"]["pipeline_mode"])
         self.assertIn("analysis_summary", result)
         self.assertEqual(result["analysis_summary"]["module_count"], 2)
+        self.assertEqual(captured["config"]["models"]["llm"]["provider"], "local")
+        self.assertEqual(
+            captured["config"]["previous_iteration_feedback"]["quality_assessment"]["overall_cycle_score"],
+            0.82,
+        )
 
     def test_pipeline_iteration_handles_session_failure(self):
         """run_research_session 抛异常时桥接函数返回 failed。"""
@@ -272,6 +287,61 @@ class TestCycleDemoContract(unittest.TestCase):
 
         self.assertEqual(result["status"], "failed")
         self.assertIn("boom", result["error"])
+
+    def test_run_full_cycle_demo_builds_runtime_config_once_for_default_pipeline(self):
+        from src.cycle.cycle_runner import ModuleLifecycle, run_full_cycle_demo
+
+        captured = {}
+
+        def fake_default_pipeline_iteration(
+            iteration_number,
+            input_data,
+            max_iterations=5,
+            shared_modules=None,
+            governance_config=None,
+            runtime_config=None,
+        ):
+            captured["iteration_number"] = iteration_number
+            captured["runtime_config"] = runtime_config
+            return {
+                "iteration_id": f"iter_{iteration_number}",
+                "iteration_number": iteration_number,
+                "status": "completed",
+                "duration": 0.1,
+                "modules": [],
+                "academic_insights": [{"type": "quality_assessment", "confidence": 0.9}],
+                "recommendations": [],
+                "failed_operations": [],
+                "analysis_summary": {"module_count": 0, "failed_operation_count": 0},
+                "metadata": {"max_iterations": max_iterations, "pipeline_mode": True},
+            }
+
+        with patch(
+            "src.cycle.cycle_runner.build_cycle_runtime_config",
+            return_value={"runtime": {"environment": "test"}},
+        ) as runtime_builder, patch(
+            "src.cycle.cycle_runner._default_pipeline_iteration",
+            side_effect=fake_default_pipeline_iteration,
+        ):
+            with patch("src.cycle.cycle_runner.time.sleep"):
+                run_full_cycle_demo(
+                    max_iterations=1,
+                    sample_data=["测试方剂"],
+                    config_path="./config/test.yml",
+                    environment="test",
+                    module_lifecycle=ModuleLifecycle(
+                        build=lambda: [],
+                        initialize=lambda _: None,
+                        cleanup=lambda _: None,
+                    ),
+                )
+
+        runtime_builder.assert_called_once_with(
+            config_path="./config/test.yml",
+            environment="test",
+        )
+        self.assertEqual(captured["iteration_number"], 1)
+        self.assertEqual(captured["runtime_config"], {"runtime": {"environment": "test"}})
 
 
 if __name__ == "__main__":

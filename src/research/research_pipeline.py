@@ -402,8 +402,17 @@ class ResearchPipeline:
         phase_name: str,
         phase_entry: Dict[str, Any],
         start_time: float,
+        phase_status: str = "completed",
+        error: Optional[str] = None,
     ) -> None:
-        self.phase_orchestrator._complete_phase(metadata, phase_name, phase_entry, start_time)
+        self.phase_orchestrator._complete_phase(
+            metadata,
+            phase_name,
+            phase_entry,
+            start_time,
+            phase_status=phase_status,
+            error=error,
+        )
 
     def _fail_phase(
         self,

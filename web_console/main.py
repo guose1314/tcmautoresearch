@@ -1,10 +1,65 @@
 """本地启动 Web Console API。"""
 
-from importlib import import_module
+from __future__ import annotations
 
-from web_console.app import app
+import argparse
+import os
+from importlib import import_module
+from typing import Optional, Sequence
+
+from web_console.app import create_app
+
+_CONFIG_PATH_ENV = "TCM_CONFIG_PATH"
+
+
+def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="TCMAutoResearch Web Console Server")
+    parser.add_argument("--host", default="127.0.0.1", help="监听地址 (默认: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=8000, help="监听端口 (默认: 8000)")
+    parser.add_argument("--reload", action="store_true", help="开发模式热重载")
+    parser.add_argument("--log-level", default="info", help="日志级别 (默认: info)")
+    parser.add_argument("--config", dest="config_path", default=None, help="主配置文件路径")
+    parser.add_argument("--environment", default=None, help="目标配置环境")
+    return parser
+
+
+def create_uvicorn_app():
+    return create_app(
+        config_path=_normalize_optional_text(os.getenv(_CONFIG_PATH_ENV)),
+        environment=_normalize_optional_text(os.getenv("TCM_ENV")),
+    )
+
+
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    parser = _build_arg_parser()
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    config_path = _normalize_optional_text(args.config_path)
+    environment = _normalize_optional_text(args.environment)
+    if config_path is None:
+        os.environ.pop(_CONFIG_PATH_ENV, None)
+    else:
+        os.environ[_CONFIG_PATH_ENV] = config_path
+    if environment is None:
+        os.environ.pop("TCM_ENV", None)
+    else:
+        os.environ["TCM_ENV"] = environment
+
+    uvicorn = import_module("uvicorn")
+    uvicorn.run(
+        "web_console.main:create_uvicorn_app",
+        factory=True,
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        log_level=args.log_level,
+    )
+
 
 if __name__ == "__main__":
-    uvicorn = import_module("uvicorn")
-
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    main()

@@ -19,7 +19,12 @@ web_console:
     - "*"
 
 database:
-  path: "./data/development/tcmautoresearch.db"
+  type: "postgresql"
+  host: "127.0.0.1"
+  port: 5432
+  name: "tcm_autoresearch"
+  user: "tcm_user"
+  password: "Hgk1989225"
 
 output:
   directory: "./output/development"
@@ -38,6 +43,7 @@ web_console:
 # ── 图数据库：开发环境默认启用 Neo4j ──
 neo4j:
   enabled: true
-  uri: "neo4j://localhost:7687"
+  uri: "neo4j://127.0.0.1:7687"
   user: "neo4j"
-  password_env: "TCM_NEO4J_PASSWORD"
+  password: "Hgk1989225"
+  database: "neo4j"

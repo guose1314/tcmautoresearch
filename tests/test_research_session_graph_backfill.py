@@ -1,0 +1,357 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+from src.infrastructure.persistence import DatabaseManager
+from src.infrastructure.research_session_repo import ResearchSessionRepository
+from src.research.research_session_graph_backfill import (
+    backfill_research_session_nodes,
+    backfill_structured_research_graph,
+    build_observe_entity_graph_properties,
+    build_research_artifact_graph_properties,
+    build_research_phase_execution_graph_properties,
+    build_research_session_graph_properties,
+)
+
+
+class _FakeNeo4jDriver:
+    def __init__(self) -> None:
+        self.batches = []
+        self.relationship_batches = []
+
+    def batch_create_nodes(self, nodes):
+        self.batches.append(list(nodes))
+        return True
+
+    def batch_create_relationships(self, edges):
+        self.relationship_batches.append(list(edges))
+        return True
+
+
+def test_build_research_session_graph_properties_omits_empty_values():
+    payload = build_research_session_graph_properties(
+        {
+            "cycle_id": "cycle-001",
+            "cycle_name": "测试会话",
+            "status": "completed",
+            "created_at": "2026-04-12T16:45:10",
+            "updated_at": None,
+            "research_scope": "",
+            "duration": 12.5,
+        }
+    )
+
+    assert payload == {
+        "cycle_id": "cycle-001",
+        "cycle_name": "测试会话",
+        "status": "completed",
+        "created_at": "2026-04-12T16:45:10",
+        "duration": 12.5,
+    }
+
+
+def test_build_research_phase_execution_graph_properties_omits_empty_values():
+    payload = build_research_phase_execution_graph_properties(
+        {
+            "phase": "observe",
+            "status": "completed",
+            "cycle_id": "cycle-001",
+            "created_at": "2026-04-12T16:45:11",
+            "error_detail": "",
+            "duration": 3.0,
+        }
+    )
+
+    assert payload == {
+        "phase": "observe",
+        "status": "completed",
+        "cycle_id": "cycle-001",
+        "created_at": "2026-04-12T16:45:11",
+        "duration": 3.0,
+    }
+
+
+def test_build_research_artifact_graph_properties_omits_empty_values():
+    payload = build_research_artifact_graph_properties(
+        {
+            "name": "markdown",
+            "artifact_type": "paper",
+            "cycle_id": "cycle-001",
+            "phase_execution_id": "phase-001",
+            "created_at": "2026-04-12T16:45:12",
+            "updated_at": None,
+            "description": "",
+            "size_bytes": 0,
+        }
+    )
+
+    assert payload == {
+        "name": "markdown",
+        "artifact_type": "paper",
+        "cycle_id": "cycle-001",
+        "phase_execution_id": "phase-001",
+        "created_at": "2026-04-12T16:45:12",
+        "size_bytes": 0,
+    }
+
+
+def test_build_observe_entity_graph_properties_omits_empty_values():
+    payload = build_observe_entity_graph_properties(
+        {
+            "id": "entity-001",
+            "name": "桂枝汤",
+            "type": "other",
+            "confidence": 0.95,
+            "alternative_names": [],
+            "description": "",
+            "entity_metadata": {
+                "raw_type": "formula",
+                "cycle_id": "cycle-001",
+                "document_urn": "doc:1",
+            },
+        }
+    )
+
+    assert payload == {
+        "entity_id": "entity-001",
+        "name": "桂枝汤",
+        "entity_type": "formula",
+        "confidence": 0.95,
+        "cycle_id": "cycle-001",
+        "document_urn": "doc:1",
+    }
+
+
+def test_backfill_research_session_nodes_upserts_all_sessions():
+    db_manager = DatabaseManager("sqlite:///:memory:")
+    db_manager.init_db()
+    repository = ResearchSessionRepository(db_manager)
+
+    repository.create_session(
+        {
+            "cycle_id": "cycle-001",
+            "cycle_name": "会话一",
+            "status": "completed",
+            "research_objective": "验证回填",
+            "created_at": datetime.utcnow().isoformat(),
+        }
+    )
+    repository.create_session(
+        {
+            "cycle_id": "cycle-002",
+            "cycle_name": "会话二",
+            "status": "active",
+            "research_scope": "方剂研究",
+            "created_at": datetime.utcnow().isoformat(),
+        }
+    )
+
+    fake_neo4j = _FakeNeo4jDriver()
+    summary = backfill_research_session_nodes(repository, fake_neo4j, batch_size=1)
+
+    assert summary["status"] == "active"
+    assert summary["batch_count"] == 2
+    assert summary["node_count"] == 2
+    assert len(fake_neo4j.batches) == 2
+
+    flattened = [node for batch in fake_neo4j.batches for node in batch]
+    by_id = {node.id: node for node in flattened}
+    assert by_id["cycle-001"].properties["cycle_id"] == "cycle-001"
+    assert by_id["cycle-001"].properties["cycle_name"] == "会话一"
+    assert by_id["cycle-002"].properties["research_scope"] == "方剂研究"
+    assert "created_at" in by_id["cycle-001"].properties
+
+    db_manager.close()
+
+
+def test_backfill_research_session_nodes_skips_when_neo4j_missing():
+    db_manager = DatabaseManager("sqlite:///:memory:")
+    db_manager.init_db()
+    repository = ResearchSessionRepository(db_manager)
+
+    summary = backfill_research_session_nodes(repository, None)
+
+    assert summary == {"status": "skipped", "batch_count": 0, "node_count": 0}
+
+    db_manager.close()
+
+
+def test_backfill_structured_research_graph_upserts_phase_artifact_nodes_and_edges():
+    db_manager = DatabaseManager("sqlite:///:memory:")
+    db_manager.init_db()
+    repository = ResearchSessionRepository(db_manager)
+
+    repository.create_session(
+        {
+            "cycle_id": "cycle-graph-001",
+            "cycle_name": "图谱回填",
+            "status": "completed",
+            "created_at": datetime.utcnow().isoformat(),
+        }
+    )
+    phase = repository.add_phase_execution(
+        "cycle-graph-001",
+        {
+            "phase": "publish",
+            "status": "completed",
+            "duration": 9.5,
+            "error_detail": "",
+        },
+    )
+    assert phase is not None
+
+    repository.add_artifact(
+        "cycle-graph-001",
+        {
+            "phase_execution_id": phase["id"],
+            "artifact_type": "paper",
+            "name": "paper.md",
+            "description": "论文草稿",
+            "file_path": "./output/paper.md",
+            "mime_type": "text/markdown",
+            "size_bytes": 128,
+        },
+    )
+    repository.add_artifact(
+        "cycle-graph-001",
+        {
+            "artifact_type": "report",
+            "name": "report.json",
+            "file_path": "./output/report.json",
+            "mime_type": "application/json",
+            "size_bytes": 64,
+        },
+    )
+
+    fake_neo4j = _FakeNeo4jDriver()
+    summary = backfill_structured_research_graph(repository, fake_neo4j, batch_size=1)
+
+    assert summary["status"] == "active"
+    assert summary["batch_count"] == 1
+    assert summary["session_node_count"] == 1
+    assert summary["phase_node_count"] == 1
+    assert summary["artifact_node_count"] == 2
+    assert summary["observe_entity_node_count"] == 0
+    assert summary["has_phase_edge_count"] == 1
+    assert summary["generated_edge_count"] == 1
+    assert summary["has_artifact_edge_count"] == 1
+    assert summary["semantic_edge_count"] == 0
+    assert summary["captured_edge_count"] == 0
+    assert len(fake_neo4j.batches) == 1
+    assert len(fake_neo4j.relationship_batches) == 1
+
+    flattened_nodes = [node for batch in fake_neo4j.batches for node in batch]
+    phase_nodes = [node for node in flattened_nodes if node.label == "ResearchPhaseExecution"]
+    artifact_nodes = [node for node in flattened_nodes if node.label == "ResearchArtifact"]
+    assert phase_nodes[0].properties["created_at"]
+    assert phase_nodes[0].properties["cycle_id"] == "cycle-graph-001"
+    assert {node.properties["name"] for node in artifact_nodes} == {"paper.md", "report.json"}
+    by_name = {node.properties["name"]: node for node in artifact_nodes}
+    assert by_name["paper.md"].properties["description"] == "论文草稿"
+    assert by_name["paper.md"].properties["created_at"]
+
+    flattened_edges = [edge for batch in fake_neo4j.relationship_batches for edge in batch]
+    relationship_types = {edge.relationship_type for edge, _, _ in flattened_edges}
+    assert relationship_types == {"HAS_PHASE", "GENERATED", "HAS_ARTIFACT"}
+
+    db_manager.close()
+
+
+def test_backfill_structured_research_graph_upserts_observe_entity_nodes_and_edges():
+    db_manager = DatabaseManager("sqlite:///:memory:")
+    db_manager.init_db()
+    repository = ResearchSessionRepository(db_manager)
+
+    repository.create_session(
+        {
+            "cycle_id": "cycle-observe-001",
+            "cycle_name": "观察图谱回填",
+            "status": "completed",
+            "created_at": datetime.utcnow().isoformat(),
+        }
+    )
+    phase = repository.add_phase_execution(
+        "cycle-observe-001",
+        {
+            "phase": "observe",
+            "status": "completed",
+            "duration": 6.0,
+        },
+    )
+    assert phase is not None
+
+    repository.replace_observe_document_graphs(
+        "cycle-observe-001",
+        phase["id"],
+        [
+            {
+                "urn": "doc:observe:1",
+                "title": "观察文档",
+                "raw_text_size": 128,
+                "processed_text_size": 120,
+                "entity_count": 2,
+                "entities": [
+                    {"name": "桂枝汤", "type": "formula", "confidence": 0.95, "position": 0, "length": 3},
+                    {"name": "桂枝", "type": "herb", "confidence": 0.93, "position": 4, "length": 2},
+                ],
+                "semantic_relationships": [
+                    {
+                        "source": "桂枝汤",
+                        "target": "桂枝",
+                        "type": "contains",
+                        "source_type": "formula",
+                        "target_type": "herb",
+                        "confidence": 0.95,
+                    }
+                ],
+                "output_generation": {"quality_metrics": {"confidence_score": 0.91}},
+            }
+        ],
+    )
+
+    fake_neo4j = _FakeNeo4jDriver()
+    summary = backfill_structured_research_graph(repository, fake_neo4j, batch_size=1)
+
+    assert summary["status"] == "active"
+    assert summary["session_node_count"] == 1
+    assert summary["phase_node_count"] == 1
+    assert summary["observe_entity_node_count"] == 2
+    assert summary["semantic_edge_count"] == 1
+    assert summary["captured_edge_count"] == 2
+
+    flattened_nodes = [node for batch in fake_neo4j.batches for node in batch]
+    labels = {node.label for node in flattened_nodes}
+    assert "Formula" in labels
+    assert "Herb" in labels
+
+    flattened_edges = [edge for batch in fake_neo4j.relationship_batches for edge in batch]
+    relationship_types = {edge.relationship_type for edge, _, _ in flattened_edges}
+    assert {"HAS_PHASE", "CONTAINS", "CAPTURED"}.issubset(relationship_types)
+
+    db_manager.close()
+
+
+def test_backfill_structured_research_graph_skips_when_neo4j_missing():
+    db_manager = DatabaseManager("sqlite:///:memory:")
+    db_manager.init_db()
+    repository = ResearchSessionRepository(db_manager)
+
+    summary = backfill_structured_research_graph(repository, None)
+
+    assert summary == {
+        "status": "skipped",
+        "batch_count": 0,
+        "node_count": 0,
+        "edge_count": 0,
+        "session_node_count": 0,
+        "phase_node_count": 0,
+        "artifact_node_count": 0,
+        "observe_entity_node_count": 0,
+        "has_phase_edge_count": 0,
+        "generated_edge_count": 0,
+        "has_artifact_edge_count": 0,
+        "semantic_edge_count": 0,
+        "captured_edge_count": 0,
+    }
+
+    db_manager.close()

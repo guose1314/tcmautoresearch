@@ -25,6 +25,7 @@ from .cycle_reporter import (
     start_phase,
     summarize_module_quality,
 )
+from .cycle_runtime_config import build_cycle_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -584,6 +585,7 @@ def _default_pipeline_iteration(
     max_iterations: int = 5,
     shared_modules: Optional[List[tuple[str, Any]]] = None,
     governance_config: Optional[Dict[str, Any]] = None,
+    runtime_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """默认迭代执行器：通过 6 阶段 ResearchPipeline 执行单次迭代。"""
     from .cycle_pipeline_bridge import run_pipeline_iteration
@@ -597,6 +599,7 @@ def _default_pipeline_iteration(
         summarize_module_quality_fn=summarize_module_quality,
         max_iterations=max_iterations,
         governance_config=governance_config,
+        runtime_config=runtime_config,
     )
 
 
@@ -604,6 +607,7 @@ def run_full_cycle_demo(
     max_iterations: int = 3,
     sample_data: Optional[List[str]] = None,
     config_path: Optional[str] = 'config.yml',
+    environment: Optional[str] = None,
     output_path: Optional[str] = None,
     governance_config_loader: Optional[Callable[[Optional[Path]], Dict[str, Any]]] = None,
     module_lifecycle: Optional[ModuleLifecycle] = None,
@@ -612,8 +616,6 @@ def run_full_cycle_demo(
     """运行完整循环演示。"""
     logger.info("=== 开始中医古籍全自动研究系统迭代循环演示 ===")
     demo_started_at = time.time()
-    if run_iteration is None:
-        run_iteration = _default_pipeline_iteration
     lifecycle = module_lifecycle or _DEFAULT_MODULE_LIFECYCLE
 
     config_loader = governance_config_loader
@@ -621,7 +623,37 @@ def run_full_cycle_demo(
         from .cycle_reporter import load_cycle_demo_governance_config
         config_loader = load_cycle_demo_governance_config
 
-    governance_config = config_loader(Path(config_path).resolve() if config_path else None)
+    resolved_config_path = Path(config_path).resolve() if config_path else None
+    if environment is not None:
+        try:
+            governance_config = config_loader(resolved_config_path, environment=environment)
+        except TypeError:
+            governance_config = config_loader(resolved_config_path)
+    else:
+        governance_config = config_loader(resolved_config_path)
+
+    if run_iteration is None:
+        runtime_config = build_cycle_runtime_config(
+            config_path=config_path,
+            environment=environment,
+        )
+
+        def run_iteration(
+            iteration_number: int,
+            input_data: Dict[str, Any],
+            max_iterations: int = 5,
+            shared_modules: Optional[List[tuple[str, Any]]] = None,
+            governance_config: Optional[Dict[str, Any]] = None,
+        ) -> Dict[str, Any]:
+            return _default_pipeline_iteration(
+                iteration_number=iteration_number,
+                input_data=input_data,
+                max_iterations=max_iterations,
+                shared_modules=shared_modules,
+                governance_config=governance_config,
+                runtime_config=runtime_config,
+            )
+
     cycle_metadata: Dict[str, Any] = {
         'phase_history': [],
         'phase_timings': {},
@@ -701,7 +733,11 @@ def run_full_cycle_demo(
         lifecycle.cleanup(shared_modules)
 
 
-def run_academic_demo(run_full_demo=run_full_cycle_demo):
+def run_academic_demo(
+    run_full_demo=run_full_cycle_demo,
+    config_path: Optional[str] = 'config.yml',
+    environment: Optional[str] = None,
+):
     """运行学术演示。"""
     logger.info("=== 开始学术级演示 ===")
 
@@ -729,7 +765,12 @@ def run_academic_demo(run_full_demo=run_full_cycle_demo):
     ]
 
     try:
-        results = run_full_demo(max_iterations=2, sample_data=[item["raw_text"] for item in academic_data])
+        results = run_full_demo(
+            max_iterations=2,
+            sample_data=[item["raw_text"] for item in academic_data],
+            config_path=config_path,
+            environment=environment,
+        )
 
         logger.info("=== 学术洞察 ===")
         if results and "academic_analysis" in results:
@@ -759,12 +800,20 @@ def run_academic_demo(run_full_demo=run_full_cycle_demo):
         raise
 
 
-def run_performance_demo(run_full_demo=run_full_cycle_demo):
+def run_performance_demo(
+    run_full_demo=run_full_cycle_demo,
+    config_path: Optional[str] = 'config.yml',
+    environment: Optional[str] = None,
+):
     """运行性能演示。"""
     logger.info("=== 开始性能演示 ===")
 
     try:
-        performance_results = run_full_demo(max_iterations=3)
+        performance_results = run_full_demo(
+            max_iterations=3,
+            config_path=config_path,
+            environment=environment,
+        )
 
         logger.info("=== 性能指标 ===")
         metrics = performance_results.get("performance_metrics", {})

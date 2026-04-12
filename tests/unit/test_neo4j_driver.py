@@ -1,8 +1,13 @@
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.storage.neo4j_driver import Neo4jDriver, _get_neo4j_graph_database
+from src.storage.neo4j_driver import (
+    Neo4jDriver,
+    _get_neo4j_graph_database,
+    create_knowledge_graph,
+)
 
 
 class _FakeQueryResult:
@@ -52,7 +57,7 @@ class _FakeTransaction:
             )
         if "RETURN n" in query:
             return _FakeQueryResult([{"n": {"id": node_id, "name": "四君子汤", "label": "Formula"}}])
-        if "collect(sovereign.name) as sovereign" in query:
+        if "WHERE type(r) IN $composition_roles" in query and "AS sovereign" in query:
             return _FakeQueryResult(
                 [
                     {
@@ -90,6 +95,61 @@ class _FakeDriver:
         return _FakeSession()
 
 
+class _RecordingTransaction:
+    def __init__(self, backend):
+        self._backend = backend
+
+    def run(self, query, **params):
+        self._backend.calls.append((query, params))
+        if "AS sovereign" in query and "composition_roles" in params:
+            return _FakeQueryResult(
+                [
+                    {
+                        "sovereign": ["人参"],
+                        "minister": ["白术"],
+                        "assistant": ["茯苓"],
+                        "envoy": [],
+                    }
+                ]
+            )
+        if "CALL (start)" in query:
+            return _FakeQueryResult([{"nodes": [], "edges": []}])
+        if "RETURN 1" in query:
+            return _FakeQueryResult([{"ok": 1}])
+        raise AssertionError(f"unexpected query: {query}")
+
+
+class _RecordingSession:
+    def __init__(self, backend):
+        self._backend = backend
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute_read(self, callback):
+        return callback(_RecordingTransaction(self._backend))
+
+
+class _RecordingDriver:
+    def __init__(self):
+        self.calls = []
+
+    def session(self, database=None):
+        del database
+        return _RecordingSession(self)
+
+
+class _FakeDiGraph:
+    def add_node(self, *_args, **_kwargs):
+        return None
+
+    def add_edge(self, *_args, **_kwargs):
+        return None
+
+
 class _FakeGraphDatabase:
     @staticmethod
     def driver(uri, auth, **kwargs):
@@ -103,7 +163,32 @@ class _FailingDriver:
         raise RuntimeError("connection failed")
 
 
+class _CapturedNeo4jDriver:
+    instances = []
+
+    def __init__(self, uri, auth, database="neo4j", **kwargs):
+        self.uri = uri
+        self.auth = auth
+        self.database = database
+        self.kwargs = kwargs
+        self.connected = False
+        type(self).instances.append(self)
+
+    def connect(self):
+        self.connected = True
+
+
 class TestNeo4jDriverSimilarityEvidence(unittest.TestCase):
+    def setUp(self):
+        self.original_password = os.environ.get("TCM_NEO4J_PASSWORD")
+        _CapturedNeo4jDriver.instances.clear()
+
+    def tearDown(self):
+        if self.original_password is None:
+            os.environ.pop("TCM_NEO4J_PASSWORD", None)
+        else:
+            os.environ["TCM_NEO4J_PASSWORD"] = self.original_password
+
     def test_get_neo4j_graph_database_uses_lazy_import(self):
         with patch("src.storage.neo4j_driver.import_module", return_value=SimpleNamespace(GraphDatabase=_FakeGraphDatabase)) as mocked:
             graph_database = _get_neo4j_graph_database()
@@ -155,6 +240,75 @@ class TestNeo4jDriverSimilarityEvidence(unittest.TestCase):
         self.assertEqual(node["name"], "四君子汤")
         self.assertEqual(composition["sovereign"], ["人参"])
         self.assertEqual(similar_formulas[0]["name"], "六君子汤")
+
+    def test_find_formula_composition_avoids_optional_missing_reltype_noise(self):
+        backend = _RecordingDriver()
+        driver = Neo4jDriver("neo4j://example", ("neo4j", "password"))
+        driver.driver = backend
+
+        payload = driver.find_formula_composition("四君子汤")
+
+        self.assertEqual(payload["sovereign"], ["人参"])
+        query, params = backend.calls[0]
+        self.assertIn("OPTIONAL MATCH (f)-[r]->(h:Herb)", query)
+        self.assertIn("WHERE type(r) IN $composition_roles", query)
+        self.assertNotIn("[:ENVOY]", query)
+        self.assertEqual(
+            params,
+            {
+                "formula_name": "四君子汤",
+                "composition_roles": ["SOVEREIGN", "MINISTER", "ASSISTANT", "ENVOY"],
+            },
+        )
+
+    def test_get_subgraph_uses_scoped_call_subquery(self):
+        backend = _RecordingDriver()
+        driver = Neo4jDriver("neo4j://example", ("neo4j", "password"))
+        driver.driver = backend
+        graph = create_knowledge_graph({"neo4j": {"enabled": False}}, preload_formulas=False)
+        del graph
+
+        from src.storage.neo4j_driver import Neo4jKnowledgeGraph
+
+        with patch("src.storage.neo4j_driver.import_module", return_value=SimpleNamespace(DiGraph=_FakeDiGraph)):
+            kg = Neo4jKnowledgeGraph(driver, preload_formulas=False)
+            kg.get_subgraph("entity::四君子汤", depth=2)
+
+        query, params = backend.calls[0]
+        self.assertIn("CALL (start)", query)
+        self.assertNotIn("CALL {", query)
+        self.assertEqual(params, {"entity_id": "entity::四君子汤"})
+
+    def test_create_knowledge_graph_prefers_explicit_password_over_env(self):
+        os.environ["TCM_NEO4J_PASSWORD"] = "stale-env-password"
+
+        with patch("src.storage.neo4j_driver.Neo4jDriver", _CapturedNeo4jDriver), patch(
+            "src.storage.neo4j_driver.Neo4jKnowledgeGraph",
+            side_effect=lambda driver, preload_formulas=False: {
+                "driver": driver,
+                "preload_formulas": preload_formulas,
+            },
+        ):
+            graph = create_knowledge_graph(
+                {
+                    "neo4j": {
+                        "enabled": True,
+                        "uri": "bolt://localhost:7687",
+                        "user": "neo4j",
+                        "password": "explicit-neo4j-password",
+                        "password_env": "TCM_NEO4J_PASSWORD",
+                        "database": "neo4j",
+                    }
+                },
+                preload_formulas=True,
+            )
+
+        self.assertEqual(len(_CapturedNeo4jDriver.instances), 1)
+        self.assertEqual(
+            _CapturedNeo4jDriver.instances[0].auth,
+            ("neo4j", "explicit-neo4j-password"),
+        )
+        self.assertTrue(graph["preload_formulas"])
 
 
 if __name__ == "__main__":

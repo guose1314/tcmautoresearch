@@ -53,6 +53,7 @@ class TestPhaseResultContract(unittest.TestCase):
             "observe": observe_result,
             "hypothesis": pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.HYPOTHESIS, {}),
             "experiment": pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.EXPERIMENT, {}),
+            "experiment_execution": pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.EXPERIMENT_EXECUTION, {}),
             "analyze": pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.ANALYZE, {}),
             "publish": pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.PUBLISH, {}),
             "reflect": pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.REFLECT, {}),

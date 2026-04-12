@@ -175,6 +175,7 @@ class TestRestApi(unittest.TestCase):
         self.assertEqual(health.json()["status"], "ok")
         self.assertIn("overall_health", health.json())
         self.assertIn("checks", health.json())
+        self.assertIn("database_schema_drift", {item["name"] for item in health.json()["checks"]})
 
         liveness = self.client.get("/api/v1/system/liveness")
         self.assertEqual(liveness.status_code, 200)

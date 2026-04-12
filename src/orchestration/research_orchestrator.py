@@ -5,7 +5,7 @@
 
 1. 配置解析与校验
 2. 创建并启动 ResearchPipeline 研究周期
-3. 按顺序驱动 OBSERVE → HYPOTHESIS → EXPERIMENT → ANALYZE → PUBLISH → REFLECT
+3. 按顺序驱动 OBSERVE → HYPOTHESIS → EXPERIMENT → EXPERIMENT_EXECUTION → ANALYZE → PUBLISH → REFLECT
 4. 收集并汇总每阶段结果
 5. 输出 ``OrchestrationResult``（含阶段摘要、状态、总耗时）
 6. 清理所有子模块资源
@@ -42,6 +42,7 @@ _DEFAULT_PHASES = [
     "observe",
     "hypothesis",
     "experiment",
+    "experiment_execution",
     "analyze",
     "publish",
     "reflect",
@@ -130,7 +131,7 @@ class ResearchOrchestrator:
     配置项（``config`` dict）：
 
     * ``pipeline_config``  : 直接传给 ResearchPipeline 的配置 dict
-    * ``phases``           : 要执行的阶段列表（默认全部六个）
+    * ``phases``           : 要执行的阶段列表（默认全部七个）
     * ``stop_on_failure``  : 某阶段失败后是否中止后续阶段（默认 True）
     * ``researchers``      : 研究人员列表（默认 ["orchestrator"]）
     * ``default_observe_context``   : OBSERVE 阶段默认 context 覆盖
@@ -381,12 +382,14 @@ class ResearchOrchestrator:
             )
 
         summary = self._summarize_phase_result(phase, result)
+        outcome_status = self._resolve_phase_outcome_status(result)
         self.logger.info("Orchestrator 阶段 %s 完成 (%.2fs)", phase.value, duration)
         return PhaseOutcome(
             phase=phase.value,
-            status="completed",
+            status=outcome_status,
             duration_sec=duration,
             summary=summary,
+            error=str(result.get("error") or "") if outcome_status == "failed" else "",
         )
 
     # ── context 构建 ─────────────────────────────────────────────────────── #
@@ -449,17 +452,34 @@ class ResearchOrchestrator:
             }
         if phase_name == "experiment":
             experiment_results = result.get("results") or {}
-            experiments = get_phase_value(result, "experiments", []) or []
-            first_experiment = experiments[0] if experiments else {}
+            metadata = result.get("metadata") or {}
+            protocol_designs = get_phase_value(result, "protocol_designs", []) or get_phase_value(result, "experiments", []) or []
+            first_protocol_design = protocol_designs[0] if protocol_designs else {}
+            design_completion_rate = get_phase_value(result, "design_completion_rate", None)
+            if design_completion_rate is None:
+                design_completion_rate = get_phase_value(result, "success_rate", 0.0)
             return {
-                "experiment_count": len(experiments),
-                "success_rate": get_phase_value(result, "success_rate", 0.0),
-                "selected_hypothesis_id": (result.get("metadata") or {}).get("selected_hypothesis_id", ""),
-                "evidence_record_count": (result.get("metadata") or {}).get("evidence_record_count", 0),
-                "weighted_evidence_score": (result.get("metadata") or {}).get("weighted_evidence_score", 0.0),
-                "methodology": experiment_results.get("methodology") or first_experiment.get("methodology", ""),
-                "sample_size": experiment_results.get("sample_size") or first_experiment.get("sample_size", 0),
-                "highest_gap_priority": (result.get("metadata") or {}).get("highest_gap_priority", "低"),
+                "protocol_design_count": len(protocol_designs),
+                "design_completion_rate": design_completion_rate,
+                "selected_hypothesis_id": metadata.get("selected_hypothesis_id", ""),
+                "evidence_record_count": metadata.get("evidence_record_count", 0),
+                "weighted_evidence_score": metadata.get("weighted_evidence_score", 0.0),
+                "methodology": experiment_results.get("methodology") or first_protocol_design.get("methodology", ""),
+                "sample_size": experiment_results.get("sample_size") or first_protocol_design.get("sample_size", 0),
+                "highest_gap_priority": metadata.get("highest_gap_priority", "低"),
+                "execution_status": experiment_results.get("execution_status") or metadata.get("execution_status", "not_executed"),
+                "real_world_validation_status": experiment_results.get("real_world_validation_status") or metadata.get("real_world_validation_status", "not_started"),
+            }
+        if phase_name == "experiment_execution":
+            execution_results = result.get("results") or {}
+            metadata = result.get("metadata") or {}
+            return {
+                "imported_record_count": metadata.get("imported_record_count", len(get_phase_value(result, "analysis_records", []) or [])),
+                "imported_relationship_count": metadata.get("imported_relationship_count", len(get_phase_value(result, "analysis_relationships", []) or [])),
+                "sampling_event_count": metadata.get("sampling_event_count", len(get_phase_value(result, "sampling_events", []) or [])),
+                "imported_artifact_count": metadata.get("imported_artifact_count", len(get_phase_artifact_map(result))),
+                "execution_status": execution_results.get("execution_status") or metadata.get("execution_status", "not_executed"),
+                "real_world_validation_status": execution_results.get("real_world_validation_status") or metadata.get("real_world_validation_status", "not_started"),
             }
         if phase_name == "analyze":
             return {
@@ -511,6 +531,17 @@ class ResearchOrchestrator:
         if hits:
             return "+".join(hits[:3])
         return "中医古籍与现代研究"
+
+    @staticmethod
+    def _resolve_phase_outcome_status(result: Dict[str, Any]) -> str:
+        status = str((result or {}).get("status") or "completed").strip().lower() or "completed"
+        if (result or {}).get("error"):
+            return "failed"
+        if status == "skipped":
+            return "skipped"
+        if status in {"failed", "blocked", "pending", "running"}:
+            return "failed"
+        return "completed"
 
 
 def run_research(
@@ -593,6 +624,12 @@ def topic_to_phase_context(
             "outcome": resolved_primary_outcome,
             "intervention": resolved_intervention,
             "comparison": resolved_comparison,
+        }
+    if phase_name == "experiment_execution":
+        return {
+            **base,
+            "execution_mode": "external_import",
+            "external_execution_required": True,
         }
     if phase_name == "analyze":
         return {**base}

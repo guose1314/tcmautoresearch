@@ -10,6 +10,8 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 import yaml
 
+from .secret_resolution import resolve_config_password
+
 logger = logging.getLogger(__name__)
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
@@ -390,8 +392,7 @@ class AppSettings:
             port = self.get("database.port", 5432)
             name = self.get("database.name", "tcmautoresearch")
             user = self.get("database.user", "tcm")
-            pw_env = self.get("database.password_env", "TCM_DB_PASSWORD")
-            password = os.environ.get(str(pw_env), "")
+            password = resolve_config_password(self.database_config, default_env_name="TCM_DB_PASSWORD")
             return f"postgresql://{user}:{password}@{host}:{port}/{name}"
         # default: sqlite
         db_path = self.get("database.path", "./data/tcmautoresearch.db")
@@ -414,10 +415,9 @@ class AppSettings:
 
     @property
     def neo4j_auth(self) -> tuple[str, str]:
-        """返回 ``(user, password)``，密码从环境变量读取。"""
+        """返回 ``(user, password)``，显式密码优先，其次读取环境变量。"""
         user = str(self.get("neo4j.user", "neo4j"))
-        pw_env = str(self.get("neo4j.password_env", "TCM_NEO4J_PASSWORD"))
-        password = os.environ.get(pw_env, "")
+        password = resolve_config_password(self.neo4j_config, default_env_name="TCM_NEO4J_PASSWORD")
         return (user, password)
 
     @property

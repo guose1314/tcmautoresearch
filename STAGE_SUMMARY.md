@@ -1,5 +1,81 @@
 # 阶段性推进摘要
 
+## 阶段性收口（2026-04-13）
+
+### 本轮收口目标
+
+- 把 CLI、独立 API、Legacy Web、Web Console 与 cycle/demo 入口统一到同一套 runtime assembler 与 shared runtime service。
+- 把七阶段科研主链中的 experiment / experiment_execution 语义边界真正落到 orchestrator、pipeline、持久化、报告、Web 展示与测试基线。
+- 让 PostgreSQL / Neo4j 结构化持久化成为研究会话主链默认路径，并补齐 observe 文档图谱、回填工具、迁移与部署支撑。
+- 把这轮代码与文档推进结果压成可续接 checkpoint，避免后续再从六阶段旧口径或 legacy 入口重新判题。
+
+### 当前已落地成果
+
+#### 1. 统一运行时与入口装配已经成形
+
+- 新增 src/infrastructure/runtime_config_assembler.py，统一产出 settings、runtime_config 与 orchestrator_config。
+- 新增 src/orchestration/research_runtime_service.py，作为 CLI、Web、Legacy Web 共享的研究运行时控制面，统一 cycle 生命周期、phase emit 与 orchestration 汇总。
+- 新增 src/cycle/cycle_runtime_config.py、src/api/main.py，并让 src/web/main.py、web_console/main.py、run_cycle_demo.py 相关分支都支持 config/environment 显式注入。
+- src/web/app.py、web_console/app.py、src/web/ops/job_manager.py 已改为复用 runtime assembly，而不是各自拼接一套局部配置。
+- Legacy Web 已不再直接绑定 in-memory ResearchPipeline 单例；src/web/ops/legacy_research_runtime.py 提供兼容 store，dashboard / analysis / research 路由都改为走统一 runtime + session store。
+
+#### 2. 七阶段主链与实验语义拆分已经落到实现面
+
+- src/research/study_session_manager.py、src/orchestration/research_orchestrator.py、src/research/pipeline_orchestrator.py、src/research/phase_orchestrator.py 已把默认研究链扩为 observe → hypothesis → experiment → experiment_execution → analyze → publish → reflect。
+- src/research/phases/experiment_phase.py 已明确 experiment=实验方案阶段，只负责 protocol design，并显式输出 not_executed / not_started 边界元数据。
+- 新增 src/research/phases/experiment_execution_phase.py 与 src/research/phase_handlers/experiment_execution_handler.py，承接外部实验执行、采样与结果导入；无输入时为 skipped，有输入时为 completed。
+- src/research/phases/analyze_phase.py、src/research/phases/publish_phase.py、src/research/real_observe_smoke.py 已能消费 experiment_execution 的导入记录、关系和状态，而不是继续把 experiment 混写成真实实验执行。
+- Web 与展示口径也已同步：web_console/static/index.html、src/web/routes/dashboard.py、src/api/research_utils.py 等位置统一把 experiment 显示为“实验方案阶段”，experiment_execution 显示为“实验执行阶段”。
+
+#### 3. PostgreSQL / Neo4j 结构化持久化主链已经接上
+
+- src/research/phase_orchestrator.py 已新增 structured persistence 主路径：ResearchSession / PhaseExecution / Artifact 写入 PostgreSQL，Neo4j 图投影与 legacy sqlite fallback 清晰分层。
+- src/infrastructure/research_session_repo.py 现已支持外部事务 session 复用，并新增 observe 文档、实体、关系的结构化落库与快照回读。
+- 新增 src/research/research_session_graph_backfill.py、tools/backfill_research_session_nodes.py、tools/backfill_research_graph_nodes.py，补齐历史研究会话到 Neo4j 的节点/边回填工具。
+- src/storage/transaction.py、src/storage/neo4j_driver.py 已继续收口查询与写入规范：split MATCH、scoped CALL、可选关系读取去噪，避免把旧的 Neo4j 通知模式重新带回主链。
+- src/infrastructure/monitoring.py 与相关测试已把 schema drift / structured storage 暴露到健康检查与监控摘要中。
+
+#### 4. 配置、迁移、部署与密钥解析已经补齐配套
+
+- 新增 src/infrastructure/alembic_runtime.py，统一 Alembic 从 environment / config / explicit url 解析目标数据库，不再依赖手工改 alembic.ini。
+- 新增两条 Alembic 迁移：7fbe6f4d7a2c_migrate_legacy_postgres_enum_columns_to_varchar_contract.py 与 d6c8f52a1b2e_migrate_postgres_string_list_columns_to_varchar_array_contract.py，用于收敛 PostgreSQL 历史 enum / string-list 契约漂移。
+- 新增 src/infrastructure/secret_resolution.py，并让 src/storage/backend_factory.py、src/storage/neo4j_driver.py 优先采用显式 password，再回退 password_env，减少配置与环境变量打架。
+- Docker / Helm / K8s 部署面已同步：deploy/helm/tcmautoresearch/templates/migration-job.yaml、deploy/k8s/tcmautoresearch-migrate-job.example.yaml、Dockerfile、docker-compose.yml、DOCKER_DEPLOYMENT.md、deploy/helm/tcmautoresearch/README.md 等均已纳入统一启动与迁移口径。
+
+#### 5. 文档真相同步与历史文档收口已经完成一轮
+
+- 新增 ARCHITECTURE_TCM_RESEARCH_METHOD_AUDIT_2026_04_12.md，作为当前阶段最接近“运行时真相”的架构审计基线。
+- README.md、docs/architecture/architecture-design.md、docs/module_contracts.md、docs/real_observe_smoke.md 与根目录历史 ARCHITECTURE / STAGE / PHASE_RESULT 文档已统一到七阶段当前边界。
+- 历史报告中的 Mermaid 图、ASCII 架构块与清单块已补“历史基线”说明，避免读者把旧设计图直接当成当前主链实现。
+- STORAGE_ARCHITECTURE.md、STORAGE_DELIVERY.md、STORAGE_PLAN_SUMMARY.md、STORAGE_FINAL_REPORT.md、STORAGE_TEST_SUMMARY.md 已完成 markdownlint 风格收口，并在最终 sweep 中清掉 MD047 / MD034 尾项。
+
+### 关键验证记录
+
+- 定向回归已通过：tests/unit/test_research_runtime_service.py、tests/unit/test_legacy_research_runtime.py、tests/test_research_pipeline_experiment.py、tests/test_research_pipeline_persist.py、tests/test_config_loader.py、tests/test_alembic_runtime.py、tests/test_research_session_graph_backfill.py、tests/unit/test_backend_factory.py、tests/test_research_session_repo.py、tests/unit/test_neo4j_driver.py，共 264 passed。
+- 真实持久化回归：integration_tests/test_experiment_execution_persistence_e2e.py 已在开发 PostgreSQL + Neo4j 上通过，结果为 2 passed in 22.36s。
+- 真实语义锁定：该回归已明确断言 experiment_execution 无输入时持久化为 skipped，有输入时持久化为 completed。
+- 文档最终收口：上述 5 份 STORAGE 历史文档最后一轮 diagnostics 已全部返回 No errors found。
+
+### 当前续接锚点
+
+- 运行时统一这条线当前已不该再回到“每个入口各装配一遍配置”的旧模式；后续若继续收口，应优先找剩余 direct pipeline shortcut 与 legacy 壳。
+- experiment / experiment_execution 的语义边界已经在代码、测试、文档、Web 文案和持久化层同时落地；后续不要再把 experiment 写回“真实实验执行”。
+- 结构化持久化已经接入主研究链，下一阶段重点不是“是否接线”，而是事务边界、fallback 治理、schema drift 与可观测性继续收敛。
+- 文档治理已完成一轮大收口；若后续继续扫尾，优先检查历史根文档是否还有六阶段旧表述、历史图示未标注，或 markdownlint 残留的 MD047 / MD034。
+
+### 任意日期继续接手建议
+
+1. 先读本节“阶段性收口（2026-04-13）”，再读 ARCHITECTURE_TCM_RESEARCH_METHOD_AUDIT_2026_04_12.md，不要再从更老的六阶段审计结论重新判断当前主链。
+2. 再看 README.md 与 docs/architecture/architecture-design.md，确认用户可见口径仍保持 experiment=实验方案阶段、experiment_execution=实验执行阶段。
+3. 代码续接时优先从 src/orchestration/research_runtime_service.py、src/infrastructure/runtime_config_assembler.py、src/research/phase_orchestrator.py、src/infrastructure/research_session_repo.py 四个点建立上下文。
+4. 如需验证主链真相，先跑 integration_tests/test_experiment_execution_persistence_e2e.py；如只做文档收口，先查历史文档里的旧图示/旧术语和 markdownlint 尾项。
+5. 后续真正的 P0 不再是阶段命名，而是文献学能力、默认 learning loop、事务边界/fallback 继续治理，以及剩余 legacy 入口的收敛。
+
+### 提交边界说明
+
+- 本次 checkpoint 应覆盖当前工作树中的运行时统一、七阶段实验语义拆分、结构化持久化与图回填、Alembic/部署支撑、以及架构/历史文档同步收口。
+- 新增审计文档、集成回归、迁移脚本、部署模板和历史文档清理均属于正式交付面，不再视作临时产物。
+
 ## 阶段性收口（2026-04-12）
 
 ### 本轮收口目标
@@ -71,15 +147,15 @@
 ## 阶段性收口（2026-04-08）
 
 ### 本轮收口目标
-- 对齐架构审计 Roadmap 的当前实现面，补齐 6 阶段科研主链与 `run_cycle_demo` 的边界拆分。
+- 对齐架构审计 Roadmap 的当前实现面，补齐当时科研主链与 `run_cycle_demo` 的边界拆分；当前主链已在此基础上继续演进为七阶段。
 - 落地 Neo4j/Cypher 注入防护、跨存储事务原子性和质量门扫描接入。
 - 收尾 Web 登录与 Dashboard 数据显示问题，保证当前版本能以统一登录页进入并正确读取 ORM 数据。
 
 ### 当前已落地成果
 
-#### 1. 6 阶段科研主链与 `run_cycle_demo` 收口
+#### 1. 历史科研主链与 `run_cycle_demo` 收口（当前主链已演进为七阶段）
 - `run_cycle_demo.py` 大幅瘦身，主文件从“大而全脚本”拆到 `src/cycle/` 下的桥接/插件/研究会话/存储持久化/子进程模块。
-- 新增 `src/cycle/cycle_pipeline_bridge.py`，让 `cycle_runner` 默认通过真实 `ResearchPipeline` 执行 6 阶段迭代，而不是继续堆积在 CLI 文件内。
+- 新增 `src/cycle/cycle_pipeline_bridge.py`，让 `cycle_runner` 默认通过真实 `ResearchPipeline` 执行当时主链迭代，而不是继续堆积在 CLI 文件内；后续主链已在 `experiment` 与 `analyze` 之间补入 `experiment_execution`。
 - 新增 `src/cycle/cycle_research_session.py`，把 research mode 的 session 生命周期、结果序列化、报告导出从入口脚本中抽离。
 - 新增 `src/cycle/cycle_plugin_workflows.py`、`src/cycle/cycle_storage_persist.py`、`src/cycle/cycle_subprocess.py`，把插件工作流、双库存档、subprocess 安全包装单独封装。
 

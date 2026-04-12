@@ -28,7 +28,7 @@
 当前系统采用**分层模块化 + 管道编排**架构，共 55+ Python 文件，约 16,000 行核心代码，划分为 10 个子包：
 
 | 子包 | 职责 | 文件数 | 核心行数 |
-|------|------|--------|----------|
+| --- | --- | --- | --- |
 | `core/` | 模块注册、基类、接口契约、算法选择 | 4 | 2,153 |
 | `preprocessor/` | 文档预处理（jieba + opencc） | 1 | ~250 |
 | `extractors/` | TCM 实体识别（6000+ 术语） | 1 | ~350 |
@@ -43,7 +43,7 @@
 ### 1.2 优点 ✅
 
 | # | 优点 | 说明 |
-|---|------|------|
+| --- | --- | --- |
 | 1 | **模块化分层清晰** | `BaseModule` 抽象基类 + `ModuleInterface` 契约，每个模块有统一的 `initialize/execute/cleanup` 生命周期 |
 | 2 | **学术标准嵌入** | 从配置到代码全面内嵌 T/C IATCM 098-2023 等 4 项标准 |
 | 3 | **多源文献聚合** | `LiteratureRetriever` 支持 12+ 数据源（PubMed, Semantic Scholar, arXiv 等） |
@@ -58,9 +58,9 @@
 ### 1.3 缺点 ❌
 
 | # | 缺点 | 严重度 | 说明 |
-|---|------|--------|------|
+| --- | --- | --- | --- |
 | 1 | **双轨接口体系** | 🔴 高 | `ModuleInterface`（dataclass）与 `BaseModule`（ABC）并存，职责重叠、继承关系混乱。`ModuleInterface` 用 `raise NotImplementedError` 而非 ABC |
-| 2 | **God Module — research_pipeline.py** | 🔴 高 | 1,390 行，同时承担流程编排、文献检索调度、假设生成、实验设计、分析、发布 6 大职责，直接硬编码实例化 5 个下游模块 |
+| 2 | **God Module — research_pipeline.py** | 🔴 高 | 旧版 `research_pipeline.py` 曾同时承担流程编排、文献检索调度、假设生成、experiment 协议设计、experiment_execution 导入协调、分析、发布等职责，更证明其必须继续拆分 |
 | 3 | **God Module — research_methods.py** | 🟡 中 | 1,538 行，8 个分析器类塞进一个文件，无法独立测试和演进 |
 | 4 | **缺失模块** | 🔴 高 | `src/output/output_generator.py` 和 `src/data/tcm_lexicon.py` 被 import 但**不存在**，运行即 `ImportError` |
 | 5 | **配置 YAML 语法错误** | 🟡 中 | `config.yml` 第 277 行 `memory_usage: 85` 缩进在 `ctext_corpus` 下层，造成键冲突；`cluster_nodes` 重复定义 |
@@ -79,12 +79,12 @@
 
 ### 2.1 技术债务
 
-```
+```text
 优先级 P0 = 阻塞运行, P1 = 影响核心功能, P2 = 影响可维护性
 ```
 
 | ID | 债务项 | 优先级 | 理由 | 代价 |
-|----|--------|--------|------|------|
+| --- | --- | --- | --- | --- |
 | TD-01 | `output_generator.py` 不存在 | P0 | `run_cycle_demo.py` 第 19 行 import 直接 crash | 实现约 400 行代码 |
 | TD-02 | `tcm_lexicon.py` 不存在 | P0 | `advanced_entity_extractor.py` import 失败 | 实现约 200 行代码 |
 | TD-03 | `config.yml` YAML 语法错误 | P0 | 解析失败影响所有配置读取 | 约 0.5h 修复 |
@@ -166,7 +166,7 @@ graph LR
 根据需求，目标系统需覆盖完整科研闭环的 **10 大能力**：
 
 | # | 能力 | 当前状态 | 目标状态 |
-|---|------|----------|----------|
+| --- | --- | --- | --- |
 | 1 | 中医古代文献自动收集 | ✅ 部分（ctext API + 文献检索） | ✅ 完善（批量爬取 + 格式统一） |
 | 2 | 格式自动转换 | ✅ 部分（编码检测 + opencc） | ✅ 完善（PDF/EPUB/扫描件 OCR） |
 | 3 | 信息统一化 | ✅ 部分（文本清洗 + 分词） | ✅ 完善（标准术语映射 + 元数据规范化） |
@@ -318,7 +318,7 @@ graph LR
 #### 📦 新增模块
 
 | 模块 | 路径 | 职责 | 理由 | 代价 |
-|------|------|------|------|------|
+| --- | --- | --- | --- | --- |
 | **格式转换服务** | `src/collector/format_converter.py` | PDF/EPUB/扫描件解析、OCR 识别、统一为内部 Markdown | 当前仅支持 TXT/DOCX，无法处理古籍扫描件 | 约 800 行，依赖 pymupdf + tesseract |
 | **信息统一化服务** | `src/collector/normalizer.py` | 术语标准化映射、元数据规范化、编码统一 | 分散在 preprocessor 中，需独立为可复用服务 | 约 400 行 |
 | **数据挖掘服务** | `src/analysis/data_mining.py` | 关联规则、聚类分析、频繁项集、预测建模 | 当前仅有基础模式识别，缺乏经典数据挖掘算法 | 约 600 行，依赖 mlxtend + sklearn |
@@ -332,7 +332,7 @@ graph LR
 #### 🔧 重构模块
 
 | 现有模块 | 重构动作 | 理由 | 代价 |
-|----------|----------|------|------|
+| --- | --- | --- | --- |
 | `core/module_interface.py` + `core/module_base.py` | **合并**为单一 `BaseModule(ABC)` | 消除双轨接口混乱 | ⚠️ **破坏性变更**：所有模块需更新继承关系，约 2h |
 | `research/research_pipeline.py` | **拆分**为 `ResearchOrchestrator` + 各阶段 Handler | 消除 God Module | ⚠️ **破坏性变更**：调用方需更新引用，约 8h |
 | `semantic_modeling/research_methods.py` | **拆分**为 8 个独立文件 | 1538 行无法独立演进 | 兼容性变更：约 4h |
@@ -341,7 +341,7 @@ graph LR
 
 ### 4.3 目录结构方案
 
-```
+```text
 src/
 ├── core/                        # 核心框架（精简）
 │   ├── base_module.py           # 统一基类 (合并后)
@@ -367,7 +367,8 @@ src/
 ├── research/                    # BC3: 研究智能上下文 (精简)
 │   ├── orchestrator.py          # 研究流程编排 (从 pipeline 拆出)
 │   ├── hypothesis_generator.py  # 假设生成 (从 pipeline 拆出)
-│   ├── experiment_designer.py   # 实验设计 (从 pipeline 拆出)
+│   ├── experiment_designer.py   # 实验方案阶段 / protocol design (从 pipeline 拆出)
+│   ├── experiment_execution_importer.py # 实验执行阶段 / 外部结果导入 (新增)
 │   ├── theoretical_framework.py # 理论框架 (保留)
 │   └── methods/                 # 研究方法 (从 1 文件拆为 8 文件)
 │       ├── formula_structure.py
@@ -485,17 +486,25 @@ class Events:
     ENTITIES_EXTRACTED = "entities.extracted"
     GRAPH_BUILT = "graph.built"
     HYPOTHESIS_GENERATED = "hypothesis.generated"
-    EXPERIMENT_DESIGNED = "experiment.designed"
+    EXPERIMENT_PROTOCOL_DESIGNED = "experiment.protocol_designed"
+    EXPERIMENT_EXECUTION_IMPORTED = "experiment_execution.imported"
     ANALYSIS_COMPLETED = "analysis.completed"
     FIGURE_GENERATED = "figure.generated"
     PAPER_DRAFTED = "paper.drafted"
     QUALITY_CHECKED = "quality.checked"
 ```
 
+当前文档与运行时用户可见输出应统一使用以下阶段显示名与边界：
+
+| 阶段标识 | 显示名 | 当前边界 |
+| --- | --- | --- |
+| experiment | 实验方案阶段 | 仅负责 protocol design，不在系统内自动执行真实实验 |
+| experiment_execution | 实验执行阶段 | 仅负责外部实验执行、采样与结果导入 |
+
 ### 5.3 跨上下文接口
 
 | 源上下文 | 目标上下文 | 接口 | 数据格式 |
-|----------|-----------|------|----------|
+| --- | --- | --- | --- |
 | 采集域 → 分析域 | `StandardDocument` | 统一文档 DTO | `{id, text, metadata, source, format_info}` |
 | 分析域 → 研究域 | `AnalysisResult` | 分析结果 DTO | `{entities, graph, reasoning, statistics}` |
 | 研究域 → 生成域 | `ResearchArtifact` | 研究产物 DTO | `{hypothesis, evidence, data_mining_result}` |
@@ -554,11 +563,12 @@ flowchart TD
     HYPO --> H2[证据链构建]
     HYPO --> H3[可证伪性评估]
     
-    H1 --> EXPERIMENT[实验设计]
+    H1 --> EXPERIMENT[Experiment / 实验方案阶段]
     H2 --> EXPERIMENT
     H3 --> EXPERIMENT
-    
-    EXPERIMENT --> ANALYZE[分析验证]
+
+    EXPERIMENT --> EXECUTION[experiment_execution / 实验执行阶段<br/>外部执行结果导入]
+    EXECUTION --> ANALYZE[Analyze / 分析阶段]
     
     ANALYZE --> FIGURE[科研图片生成]
     FIGURE --> FIG1[网络药理图]
@@ -853,7 +863,7 @@ graph TB
 > **目标**: 让系统可运行
 
 | 任务 | 优先级 | 工时 | 破坏性 |
-|------|--------|------|--------|
+| --- | --- | --- | --- |
 | 实现 `src/output/output_generator.py` | P0 | 4h | 否 |
 | 实现 `src/data/tcm_lexicon.py` | P0 | 2h | 否 |
 | 修复 `config.yml` YAML 语法错误 | P0 | 0.5h | 否 |
@@ -864,7 +874,7 @@ graph TB
 > **目标**: 消除技术债务，统一架构
 
 | 任务 | 优先级 | 工时 | 破坏性 |
-|------|--------|------|--------|
+| --- | --- | --- | --- |
 | 合并 `ModuleInterface` 和 `BaseModule` 为统一基类 | P1 | 4h | ⚠️ 是 |
 | 拆分 `research_pipeline.py` 为编排器 + 阶段处理器 | P1 | 8h | ⚠️ 是 |
 | 拆分 `research_methods.py` 为 8 个独立文件 | P1 | 4h | 否 |
@@ -878,7 +888,7 @@ graph TB
 > **目标**: 补齐 10 大能力
 
 | 任务 | 优先级 | 工时 | 破坏性 |
-|------|--------|------|--------|
+| --- | --- | --- | --- |
 | 实现格式转换服务（PDF/EPUB/OCR） | P1 | 8h | 否 |
 | 实现信息统一化服务 | P1 | 4h | 否 |
 | 实现数据挖掘服务（关联规则/聚类/频繁项集） | P1 | 8h | 否 |
@@ -893,7 +903,7 @@ graph TB
 > **目标**: 提供服务化能力
 
 | 任务 | 优先级 | 工时 | 破坏性 |
-|------|--------|------|--------|
+| --- | --- | --- | --- |
 | 实现 FastAPI REST API | P2 | 8h | 否 |
 | 实现 WebSocket 实时进度推送 | P2 | 4h | 否 |
 | 实现配置中心（环境隔离） | P2 | 4h | 否 |
@@ -907,7 +917,7 @@ graph TB
 > **目标**: 达到生产级质量
 
 | 任务 | 优先级 | 工时 | 破坏性 |
-|------|--------|------|--------|
+| --- | --- | --- | --- |
 | 核心模块单测覆盖率 ≥ 90% | P2 | 16h | 否 |
 | 集成测试 + E2E 测试 | P2 | 8h | 否 |
 | 性能基准测试 + 优化 | P2 | 8h | 否 |
@@ -961,7 +971,7 @@ gantt
 ## 10. 风险与缓解
 
 | # | 风险 | 影响 | 概率 | 缓解措施 |
-|---|------|------|------|----------|
+| --- | --- | --- | --- | --- |
 | 1 | 阶段 1 破坏性重构导致回归 | 🔴 高 | 🟡 中 | 先建立全面测试基线（阶段 0），每次重构后运行全量测试 |
 | 2 | LLM 推理性能不足 | 🟡 中 | 🟡 中 | 保留 CPU fallback；支持更大模型热替换 |
 | 3 | OCR 识别古籍手写体困难 | 🟡 中 | 🔴 高 | 集成专用古文 OCR 模型；人工校对兜底 |
@@ -976,7 +986,7 @@ gantt
 以下变更会影响现有调用方，需要在实施时特别注意兼容性：
 
 | 变更 | 影响范围 | 迁移策略 |
-|------|----------|----------|
+| --- | --- | --- |
 | `ModuleInterface` 删除 | 直接使用 `ModuleInterface` 的代码 | 替换为 `BaseModule`，提供 1 个版本的兼容别名 |
 | `research_pipeline.py` 拆分 | 所有 `from src.research.research_pipeline import ResearchPipeline` | 在原文件保留 re-export 兼容层 |
 | 目录重组 | 所有跨包 import | 在旧路径放置 `__init__.py` 做 re-export，标记 `DeprecationWarning` |
@@ -987,7 +997,7 @@ gantt
 ## 附录 B: 关键设计决策记录
 
 | 决策 | 选项 | 选择 | 理由 |
-|------|------|------|------|
+| --- | --- | --- | --- |
 | 基类统一方案 | A.保留双轨 B.合并为 BaseModule | **B** | 消除开发者困惑，减少维护面 |
 | 模块通信 | A.直接调用 B.事件总线 C.消息队列 | **B** | 进程内轻量解耦，无需引入外部 MQ |
 | 持久化 | A.pickle B.SQLite C.PostgreSQL | **B→C** | 阶段 2 用 SQLite，阶段 3 平台化后切 PostgreSQL |

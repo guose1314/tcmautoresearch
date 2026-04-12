@@ -110,6 +110,11 @@ class TestTopicToPhaseContext(unittest.TestCase):
         self.assertEqual(ctx["study_type"], "network_pharmacology")
         self.assertIn("靶点", ctx["primary_outcome"])
 
+    def test_experiment_execution_defaults_to_external_import_mode(self):
+        ctx = topic_to_phase_context("四君子汤网络药理机制研究", ResearchPhase.EXPERIMENT_EXECUTION)
+        self.assertEqual(ctx["execution_mode"], "external_import")
+        self.assertTrue(ctx["external_execution_required"])
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # _slug_topic
@@ -184,7 +189,7 @@ class TestOrchestratorRunHappyPath(unittest.TestCase):
         orch = ResearchOrchestrator()
         result = orch.run("芍药甘草汤")
         self.assertEqual(result.status, "completed")
-        self.assertEqual(len(result.phases), 6)
+        self.assertEqual(len(result.phases), 7)
         self.assertTrue(all(p.status == "completed" for p in result.phases))
 
     @patch("src.orchestration.research_orchestrator.ResearchPipeline")
@@ -239,7 +244,7 @@ class TestOrchestratorFailureHandling(unittest.TestCase):
         statuses = {p.phase: p.status for p in result.phases}
         self.assertEqual(statuses["observe"], "failed")
         # 所有后续阶段应被跳过
-        for ph in ["hypothesis", "experiment", "analyze", "publish", "reflect"]:
+        for ph in ["hypothesis", "experiment", "experiment_execution", "analyze", "publish", "reflect"]:
             self.assertEqual(statuses[ph], "skipped", f"{ph} 应为 skipped")
 
     @patch("src.orchestration.research_orchestrator.ResearchPipeline")
@@ -472,11 +477,13 @@ class TestOrchestratorObserveHypothesisExperimentSummary(unittest.TestCase):
 
         self.assertEqual(observe_summary["literature_records"], 2)
         self.assertGreaterEqual(hypothesis_summary["hypothesis_count"], 1)
-        self.assertEqual(experiment_summary["experiment_count"], 1)
-        self.assertEqual(experiment_summary["success_rate"], 1.0)
+        self.assertEqual(experiment_summary["protocol_design_count"], 1)
+        self.assertEqual(experiment_summary["design_completion_rate"], 1.0)
         self.assertTrue(experiment_summary["selected_hypothesis_id"])
         self.assertEqual(experiment_summary["evidence_record_count"], 2)
         self.assertGreater(experiment_summary["weighted_evidence_score"], 0.0)
+        self.assertEqual(experiment_summary["execution_status"], "not_executed")
+        self.assertEqual(experiment_summary["real_world_validation_status"], "not_started")
 
     @patch("src.research.research_pipeline.ResearchPipeline._run_clinical_gap_analysis")
     @patch("src.research.research_pipeline.LiteratureRetriever.close")

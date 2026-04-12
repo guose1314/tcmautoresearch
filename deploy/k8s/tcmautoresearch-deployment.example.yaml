@@ -1,9 +1,23 @@
+# 运维约定：不要手工修改 alembic.ini 的 sqlalchemy.url。
+# 推荐迁移命令：
+#   kubectl exec -n <namespace> deploy/tcmautoresearch-api -- alembic -x environment=production upgrade head
+# 如果不想手工 exec，可直接 apply 配套示例：
+#   kubectl apply -f deploy/k8s/tcmautoresearch-migrate-job.example.yaml
+# 定向排障命令：
+#   kubectl exec -n <namespace> deploy/tcmautoresearch-api -- alembic -x url=postgresql://tcm:<password>@<postgres-service>:5432/tcmautoresearch upgrade head
+# 如果目标库是早期通过 ORM create_all() 初始化、没有 alembic_version：
+#   kubectl exec -n <namespace> deploy/tcmautoresearch-api -- alembic -x url=postgresql://tcm:<password>@<postgres-service>:5432/tcmautoresearch stamp 3e5089f32f9a
+#   kubectl exec -n <namespace> deploy/tcmautoresearch-api -- alembic -x url=postgresql://tcm:<password>@<postgres-service>:5432/tcmautoresearch upgrade head
+# 应用默认启动命令：
+#   python -m src.api.main --config config.yml --environment production --host 0.0.0.0 --port 8000
 apiVersion: v1
 kind: Secret
 metadata:
   name: tcmautoresearch-secrets
 type: Opaque
 stringData:
+  TCM_DB_PASSWORD: "replace-with-postgresql-password"
+  TCM_NEO4J_PASSWORD: "replace-with-neo4j-password"
   TCM_SECRET__MODELS__LLM__API_KEY: "sk-prod-xxx"
   TCM_SECRET__CLINICAL_GAP_ANALYSIS__API_KEY: "sk-gap-prod-xxx"
   TCM_SECRET__LITERATURE_RETRIEVAL__PUBMED_EMAIL: "research@example.com"
@@ -38,6 +52,8 @@ spec:
         - name: api
           image: ghcr.io/guose1314/tcmautoresearch:latest
           imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "src.api.main"]
+          args: ["--config", "config.yml", "--environment", "production", "--host", "0.0.0.0", "--port", "8000"]
           ports:
             - containerPort: 8000
               name: http

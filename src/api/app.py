@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Response
@@ -19,8 +20,12 @@ from src.api.routes import (
     system_router,
 )
 from src.core.architecture import SystemArchitecture
-from src.infrastructure.config_loader import AppSettings, load_settings
+from src.infrastructure.config_loader import AppSettings
 from src.infrastructure.monitoring import MonitoringService
+from src.infrastructure.runtime_config_assembler import (
+    RuntimeAssembly,
+    build_runtime_assembly,
+)
 from web_console.job_manager import ResearchJobManager
 
 
@@ -30,12 +35,17 @@ def configure_api_services(
     job_manager: Optional[ResearchJobManager] = None,
     architecture: Optional[SystemArchitecture] = None,
     settings: Optional[AppSettings] = None,
+    runtime_assembly: Optional[RuntimeAssembly] = None,
+    config_path: Optional[str | Path] = None,
+    environment: Optional[str] = None,
 ) -> ResearchJobManager:
-    resolved_settings = settings or load_settings()
-    manager = job_manager or ResearchJobManager(
-        storage_dir=resolved_settings.job_storage_dir,
-        default_orchestrator_config={"pipeline_config": resolved_settings.materialize_runtime_config()},
+    resolved_runtime_assembly = runtime_assembly or build_runtime_assembly(
+        settings=settings,
+        config_path=config_path,
+        environment=environment,
     )
+    resolved_settings = resolved_runtime_assembly.settings
+    manager = job_manager or ResearchJobManager(runtime_assembly=resolved_runtime_assembly)
     resolved_architecture = architecture or create_default_architecture(resolved_settings)
     app.state.settings = resolved_settings
     app.state.job_manager = manager
@@ -67,14 +77,22 @@ def create_app(
     job_manager: Optional[ResearchJobManager] = None,
     architecture: Optional[SystemArchitecture] = None,
     settings: Optional[AppSettings] = None,
+    config_path: Optional[str | Path] = None,
+    environment: Optional[str] = None,
 ) -> FastAPI:
-    resolved_settings = settings or load_settings()
+    runtime_assembly = build_runtime_assembly(
+        settings=settings,
+        config_path=config_path,
+        environment=environment,
+    )
+    resolved_settings = runtime_assembly.settings
     app = FastAPI(title=resolved_settings.api_title, version=resolved_settings.api_version)
     manager = configure_api_services(
         app,
         job_manager=job_manager,
         architecture=architecture,
         settings=resolved_settings,
+        runtime_assembly=runtime_assembly,
     )
 
     app.add_middleware(
@@ -105,6 +123,3 @@ def create_app(
 
     include_api_routers(app, base_prefix="/api/v1")
     return app
-
-
-app = create_app()

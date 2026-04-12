@@ -9,7 +9,7 @@ This repository now includes a fixed, validated real-corpus smoke profile for th
 - Observe excerpt size: 3000 characters per file
 - Literature retrieval: disabled
 - Hypothesis LLM generation: disabled
-- Experiment LLM protocol generation: disabled
+- Experiment protocol-design generation: disabled
 
 Publish primary association and mining details are resolved from nested statistical_analysis and data_mining_result payloads. No publish-level mining aliases are required.
 
@@ -86,7 +86,7 @@ The offline blocker during the recheck was not missing corpus data anymore. It w
 
 ## Operational LLM Note
 
-This smoke profile intentionally keeps Hypothesis and Experiment LLM generation disabled so the baseline stays deterministic.
+This smoke profile intentionally keeps Hypothesis LLM generation and Experiment protocol-design generation disabled so the baseline stays deterministic.
 
 For normal application use, prefer the local GGUF runtime:
 

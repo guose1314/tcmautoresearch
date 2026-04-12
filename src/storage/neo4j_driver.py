@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
+from src.infrastructure.secret_resolution import resolve_config_password
+
 from .graph_interface import (
     ENTITY_TYPES,
     FOUR_LEVELS,
@@ -406,20 +408,23 @@ class Neo4jDriver:
         try:
             query = """
             MATCH (f:Formula {name: $formula_name})
-            OPTIONAL MATCH (f)-[:SOVEREIGN]->(sovereign:Herb)
-            OPTIONAL MATCH (f)-[:MINISTER]->(minister:Herb)
-            OPTIONAL MATCH (f)-[:ASSISTANT]->(assistant:Herb)
-            OPTIONAL MATCH (f)-[:ENVOY]->(envoy:Herb)
-            RETURN 
-                collect(sovereign.name) as sovereign,
-                collect(minister.name) as minister,
-                collect(assistant.name) as assistant,
-                collect(envoy.name) as envoy
+            OPTIONAL MATCH (f)-[r]->(h:Herb)
+            WHERE type(r) IN $composition_roles
+            WITH collect(DISTINCT {role: type(r), herb: h.name}) AS role_pairs
+            RETURN
+                [pair IN role_pairs WHERE pair.role = 'SOVEREIGN' AND pair.herb IS NOT NULL | pair.herb] AS sovereign,
+                [pair IN role_pairs WHERE pair.role = 'MINISTER' AND pair.herb IS NOT NULL | pair.herb] AS minister,
+                [pair IN role_pairs WHERE pair.role = 'ASSISTANT' AND pair.herb IS NOT NULL | pair.herb] AS assistant,
+                [pair IN role_pairs WHERE pair.role = 'ENVOY' AND pair.herb IS NOT NULL | pair.herb] AS envoy
             """
             
             with self.driver.session(database=self.database) as session:
                 result = session.execute_read(
-                    lambda tx: tx.run(query, formula_name=formula_name).single()
+                    lambda tx: tx.run(
+                        query,
+                        formula_name=formula_name,
+                        composition_roles=["SOVEREIGN", "MINISTER", "ASSISTANT", "ENVOY"],
+                    ).single()
                 )
             
             if result:
@@ -794,8 +799,7 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
         safe_depth = max(1, min(int(depth), 20))
         query = f"""  # nosec: cypher — safe_depth is a bounded int(1-20)
         MATCH (start {{id: $entity_id}})
-        CALL {{
-            WITH start
+        CALL (start) {{
             MATCH path = (start)-[*1..{safe_depth}]-(neighbor)
             RETURN nodes(path) AS ns, relationships(path) AS rs
         }}
@@ -1092,8 +1096,7 @@ def create_knowledge_graph(
     if neo4j_cfg.get("enabled"):
         uri = neo4j_cfg.get("uri", "neo4j://localhost:7687")
         user = neo4j_cfg.get("user", "neo4j")
-        password_env = neo4j_cfg.get("password_env", "TCM_NEO4J_PASSWORD")
-        password = os.environ.get(password_env, "")
+        password = resolve_config_password(neo4j_cfg, default_env_name="TCM_NEO4J_PASSWORD")
         database = neo4j_cfg.get("database", "neo4j")
         try:
             driver = Neo4jDriver(

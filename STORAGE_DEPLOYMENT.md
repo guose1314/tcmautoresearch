@@ -292,13 +292,38 @@ if __name__ == '__main__':
 python initialize_storage.py
 ```
 
-### 方式2：使用 SQLAlchemy CLI
+### 方式2：使用 Alembic（推荐）
 
 ```bash
-# 创建数据表
-alembic upgrade head
+# 推荐：按环境走配置中心，不要手工修改 alembic.ini 的 sqlalchemy.url
+alembic -x environment=production upgrade head
+```
 
-# 或直接使用SQLAlchemy
+```bash
+# 定向：显式指定目标库，适合本地临时库或一次性运维
+alembic -x url=postgresql://tcm_user:your_password@localhost:5432/tcm_autoresearch upgrade head
+```
+
+运维约定：
+- 日常迁移优先使用 `-x environment=production`，由配置中心统一解析 `config.yml` + `config/production.yml`，并读取 `TCM_DB_PASSWORD`。
+- 只有在需要明确打某一台临时库或手工排障时，才使用 `-x url=...`。
+- 不再建议通过手工编辑 `alembic.ini` 来切换生产目标库，这种方式最容易误打错库。
+
+如果是历史本地 PostgreSQL，且当初通过 ORM `create_all()` 建库、没有 `alembic_version`，先执行一次基线标记：
+
+```bash
+alembic -x url=postgresql://tcm_user:your_password@localhost:5432/tcm_autoresearch stamp 3e5089f32f9a
+alembic -x url=postgresql://tcm_user:your_password@localhost:5432/tcm_autoresearch upgrade head
+```
+
+当前 `head` 已包含：
+- legacy native enum -> varchar 契约迁移
+- `entities.alternative_names` / `processing_statistics.source_modules` -> PostgreSQL `varchar[]` 契约迁移
+
+仅在一次性初始化、且明确不需要 Alembic 版本治理时，才考虑直接使用 SQLAlchemy 建表：
+
+```bash
+# 非推荐，仅适用于实验性空库初始化
 python -c "
 from src.storage import DatabaseManager, Base
 from sqlalchemy import create_engine
