@@ -8,6 +8,8 @@
 
 - 本文是 2026-03-28 的早期存储方案总结，保留当时的设计目标、交付范围与预期收益。
 - 当前主科研链已经默认接入 PostgreSQL / Neo4j 结构化持久化；下文 ASCII 架构块和数据流块应理解为历史设计目标说明，而不是当前实现现状图。
+- 当前结构化存储运行态统一使用 README 中“结构化存储状态词汇表”的四个状态词：双写完成、仅 PG 模式、待回填、schema drift 待治理。
+- 当前主科研链的主写路径以 `StorageBackendFactory.transaction()` + `TransactionCoordinator` 为准；本文里的 `UnifiedStorageDriver` / 双库入库图示属于历史方案摘要口径。
 
 ---
 
@@ -86,7 +88,7 @@
     ↓ save_research_analysis()
 [PostgreSQL: quality_metrics, research_analyses表]
     ↓
-[完整存储完成]
+[设计目标：结构化存储完成]
 ```
 
 ---
@@ -195,7 +197,7 @@ Formula -[:CONTAINS]-> Herb
 | `database_schema.py` | src/storage/ | PostgreSQL 初始化脚本和 SQL 模板 |
 | `db_models.py` | src/storage/ | SQLAlchemy ORM 模型（8 个表） |
 | `neo4j_driver.py` | src/storage/ | Neo4j 驱动和 CRUD 操作 |
-| `storage_driver.py` | src/storage/ | 统一存储驱动（PostgreSQL + Neo4j 一体化） |
+| `storage_driver.py` | src/storage/ | 历史统一存储驱动（当前主链以 `backend_factory` + `transaction` 为准） |
 | `__init__.py` | src/storage/ | 模块导出 |
 
 ### B. 文档文件

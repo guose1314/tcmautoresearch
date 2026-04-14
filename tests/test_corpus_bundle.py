@@ -109,6 +109,12 @@ class TestCorpusBundleFromCtext(unittest.TestCase):
         self.assertEqual(doc.source_ref, "ctp:analects:1")
         self.assertEqual(doc.title, "论语·学而")
         self.assertEqual(len(doc.children), 1)
+        self.assertEqual(doc.metadata["version_metadata"]["work_title"], "论语·学而")
+        self.assertEqual(doc.children[0].metadata["version_metadata"]["work_title"], "论语·学而")
+        self.assertNotEqual(
+            doc.children[0].metadata["version_metadata"]["fragment_key"],
+            doc.metadata["version_metadata"]["fragment_key"],
+        )
 
     def test_old_stats_preserved(self):
         """backward-compat: 旧 document_count 字段应保留在 stats 中。"""
@@ -298,6 +304,8 @@ class TestExtractTextEntries(unittest.TestCase):
         # 新格式含 source_type
         self.assertIn("source_type", entries[0])
         self.assertEqual(entries[0]["source_type"], "ctext")
+        self.assertIn("version_metadata", entries[0])
+        self.assertIn("work_fragment_key", entries[0]["version_metadata"])
 
     def test_extract_empty_docs(self):
         result = {"documents": []}
@@ -375,6 +383,10 @@ class TestLocalCorpusCollector(unittest.TestCase):
         self.assertEqual(result["stats"]["total_documents"], 1)
         doc_title = result["documents"][0]["title"]
         self.assertEqual(doc_title, "本草纲目-明-李时珍")
+        version_metadata = result["documents"][0]["metadata"]["version_metadata"]
+        self.assertEqual(version_metadata["work_title"], "本草纲目")
+        self.assertEqual(version_metadata["dynasty"], "明")
+        self.assertEqual(version_metadata["author"], "李时珍")
 
     def test_short_file_skipped(self):
         collector = LocalCorpusCollector({"data_dir": self.tmp, "min_text_length": 50})

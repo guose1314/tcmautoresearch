@@ -31,7 +31,7 @@
 | src/reasoning/reasoning_engine.py | 关系推理与模式识别 | entities, graph | reasoning results | networkx | 输出结构化，避免返回不可序列化对象 |
 | src/output/output_generator.py | 最终结构化结果组装 | pipeline context | structured_json | BaseModule | 路径脱敏、列表限长、JSON 安全化 |
 | src/cycle/cycle_runner.py | 真实模块链执行与迭代汇总 | input_data(dict) | module_results(list), iteration summary(dict) | analysis/preprocessor/extractor/reasoning/output | 支持可选模块降级，避免旧 iteration 子系统回流 |
-| src/cycle/cycle_research_session.py | 研究 session 执行、导出与持久化 | session context | research_session JSON/report paths | research_pipeline, cycle_reporter | 只持久化当前会话契约，避免历史镜像膨胀 |
+| src/cycle/cycle_research_session.py | 消费 entrypoint=demo 装配结果并透传研究入口参数 | question/orchestrator_config/可选 phase override | ResearchRuntimeResult.session_result | cycle_runtime_config, orchestration.research_runtime_service | 不在入口层声明 demo 默认值，不直写 session JSON 或报告文件 |
 | src/research/research_pipeline.py | 科研闭环编排 | cycle context | phase outputs | preprocessor/extractor/LLM | LLMEngine 延迟导入，降低模块导入副作用 |
 | src/llm/llm_engine.py | 本地 GGUF 推理与科研提示词编排 | prompt/system_prompt | model response | llama-cpp-python | 导入失败可诊断、模型路径校验、GPU 参数受控 |
 | src/common/exceptions.py | 统一异常体系（7 种子类） | message/code/detail/context | TCMBaseError 子类 | — | 所有业务异常继承 TCMBaseError，保持可序列化 context |

@@ -192,6 +192,19 @@ class Document(Base):
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     source_file = Column(String(500), nullable=False, unique=True)
+    document_urn = Column(String(500), nullable=True)
+    document_title = Column(String(500), nullable=True)
+    source_type = Column(String(64), nullable=True)
+    catalog_id = Column(String(255), nullable=True)
+    work_title = Column(String(255), nullable=True)
+    fragment_title = Column(String(255), nullable=True)
+    work_fragment_key = Column(String(500), nullable=True)
+    version_lineage_key = Column(String(500), nullable=True)
+    witness_key = Column(String(500), nullable=True)
+    dynasty = Column(String(255), nullable=True)
+    author = Column(String(255), nullable=True)
+    edition = Column(String(255), nullable=True)
+    version_metadata_json = Column(JSON, default=dict, nullable=False)
     processing_timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
     objective = Column(String(255), nullable=True)
     raw_text_size = Column(Integer, default=0, nullable=False)
@@ -231,6 +244,11 @@ class Document(Base):
         Index("idx_documents_status", "process_status"),
         Index("idx_documents_timestamp", "processing_timestamp"),
         Index("idx_documents_file", "source_file"),
+        Index("idx_documents_urn", "document_urn"),
+        Index("idx_documents_catalog_id", "catalog_id"),
+        Index("idx_documents_lineage", "version_lineage_key"),
+        Index("idx_documents_work_fragment", "work_fragment_key"),
+        Index("idx_documents_witness", "witness_key"),
         CheckConstraint("quality_score >= 0 AND quality_score <= 1", name="ck_documents_quality_score"),
     )
 

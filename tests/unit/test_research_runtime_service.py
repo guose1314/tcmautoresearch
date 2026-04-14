@@ -30,9 +30,13 @@ class _FakePipeline:
         return True
 
     def execute_research_phase(self, cycle_id, phase, phase_context=None):
+        phase_context = dict(phase_context or {})
         result = {
             "phase": phase.value,
-            "metadata": {"received_question": phase_context.get("question")},
+            "metadata": {
+                "received_question": phase_context.get("question"),
+                "received_phase_context": phase_context,
+            },
         }
         if phase.value == "observe":
             result.update(
@@ -49,6 +53,7 @@ class _FakePipeline:
                     "abstract": "test abstract",
                     "analysis_results": {"statistical_analysis": {"p_value": 0.01}},
                     "research_artifact": {"evidence": [{"id": "ev-1"}]},
+                    "output_files": {"markdown": "output/research.md"},
                 }
             )
         self.cycle.phase_executions[phase] = {"result": result}
@@ -133,6 +138,108 @@ class TestResearchRuntimeService(unittest.TestCase):
         self.assertIn("statistical_analysis", orchestration.analysis_results)
         self.assertIn("evidence", orchestration.research_artifact)
         self.assertEqual([name for name, _payload in events][-1], "job_completed")
+
+    def test_run_applies_publish_report_policy_through_shared_runtime(self):
+        service = ResearchRuntimeService(
+            {
+                "pipeline_config": {},
+                "phases": ["publish"],
+            }
+        )
+
+        research_pipeline_module = import_module("src.research.research_pipeline")
+
+        original_pipeline = research_pipeline_module.ResearchPipeline
+        try:
+            research_pipeline_module.ResearchPipeline = _FakePipeline
+            result = service.run(
+                "桂枝汤研究",
+                phase_contexts={
+                    "publish": {"allow_pipeline_citation_fallback": False},
+                },
+                report_output_formats=["markdown", "docx"],
+                report_output_dir="output/research_reports",
+            )
+        finally:
+            research_pipeline_module.ResearchPipeline = original_pipeline
+
+        publish_context = result.phase_results["publish"]["metadata"]["received_phase_context"]
+        self.assertEqual(publish_context["report_output_formats"], ["markdown", "docx"])
+        self.assertEqual(publish_context["report_output_dir"], "output/research_reports")
+        self.assertFalse(publish_context["allow_pipeline_citation_fallback"])
+
+    def test_run_result_can_build_session_result_contract(self):
+        service = ResearchRuntimeService(
+            {
+                "pipeline_config": {},
+                "phases": ["observe", "publish"],
+            }
+        )
+
+        research_pipeline_module = import_module("src.research.research_pipeline")
+
+        original_pipeline = research_pipeline_module.ResearchPipeline
+        try:
+            research_pipeline_module.ResearchPipeline = _FakePipeline
+            result = service.run("桂枝汤研究")
+        finally:
+            research_pipeline_module.ResearchPipeline = original_pipeline
+
+        session_result = result.session_result
+        self.assertEqual(session_result["session_id"], "cycle-runtime-1")
+        self.assertEqual(session_result["cycle_id"], "cycle-runtime-1")
+        self.assertEqual(session_result["question"], "桂枝汤研究")
+        self.assertEqual(session_result["executed_phases"], ["observe", "publish"])
+        self.assertEqual(
+            session_result["metadata"]["cycle_name"],
+            result.orchestration_result.pipeline_metadata["cycle_name"],
+        )
+        self.assertEqual(session_result["report_outputs"]["markdown"], "output/research.md")
+        self.assertIn("observe", session_result["phase_results"])
+
+    def test_runtime_profile_applies_demo_research_defaults(self):
+        service = ResearchRuntimeService(
+            {
+                "pipeline_config": {},
+                "runtime_profile": "demo_research",
+            }
+        )
+
+        research_pipeline_module = import_module("src.research.research_pipeline")
+
+        original_pipeline = research_pipeline_module.ResearchPipeline
+        try:
+            research_pipeline_module.ResearchPipeline = _FakePipeline
+            result = service.run("桂枝汤研究")
+        finally:
+            research_pipeline_module.ResearchPipeline = original_pipeline
+
+        self.assertEqual(service.phase_names, ["observe"])
+        self.assertEqual(list(result.phase_results.keys()), ["observe"])
+        self.assertEqual(result.orchestration_result.pipeline_metadata["scope"], "中医药")
+        self.assertRegex(result.orchestration_result.pipeline_metadata["cycle_name"], r"^research_\d+$")
+
+    def test_run_supports_timestamp_cycle_name_strategy(self):
+        service = ResearchRuntimeService(
+            {
+                "pipeline_config": {},
+                "phases": ["observe"],
+                "default_cycle_name_mode": "timestamp",
+                "default_cycle_name_prefix": "research",
+            }
+        )
+
+        research_pipeline_module = import_module("src.research.research_pipeline")
+
+        original_pipeline = research_pipeline_module.ResearchPipeline
+        try:
+            research_pipeline_module.ResearchPipeline = _FakePipeline
+            result = service.run("桂枝汤研究")
+        finally:
+            research_pipeline_module.ResearchPipeline = original_pipeline
+
+        cycle_name = result.orchestration_result.pipeline_metadata["cycle_name"]
+        self.assertRegex(cycle_name, r"^research_\d+$")
 
     def test_run_marks_partial_and_emits_skipped_after_failure(self):
         service = ResearchRuntimeService(

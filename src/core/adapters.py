@@ -84,6 +84,9 @@ class DefaultAnalysisAdapter(AnalysisPort):
     def __init__(self, module_factory: Any) -> None:
         self._factory = module_factory
 
+    def create_philology_service(self, config: Optional[Dict[str, Any]]=None) -> Any:
+        return self._factory.create("philology_service", config or {})
+
     def create_preprocessor(self, config: Optional[Dict[str, Any]]=None) -> Any:
         return self._factory.create("document_preprocessor", config or {})
 

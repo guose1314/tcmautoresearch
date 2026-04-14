@@ -8,6 +8,7 @@ from src.research.research_session_graph_backfill import (
     backfill_research_session_nodes,
     backfill_structured_research_graph,
     build_observe_entity_graph_properties,
+    build_observe_version_witness_graph_properties,
     build_research_artifact_graph_properties,
     build_research_phase_execution_graph_properties,
     build_research_session_graph_properties,
@@ -119,6 +120,45 @@ def test_build_observe_entity_graph_properties_omits_empty_values():
         "confidence": 0.95,
         "cycle_id": "cycle-001",
         "document_urn": "doc:1",
+    }
+
+
+def test_build_observe_version_witness_graph_properties_omits_empty_values():
+    payload = build_observe_version_witness_graph_properties(
+        {
+            "id": "observe-doc-1",
+            "urn": "doc:1",
+            "title": "伤寒论宋本",
+            "source_type": "ctext",
+            "version_metadata": {
+                "witness_key": "ctext:doc:1",
+                "version_lineage_key": "伤寒论|辨脉法|东汉|张仲景|宋本",
+                "work_fragment_key": "伤寒论|辨脉法",
+                "catalog_id": "ctp:shang-han-lun/bian-mai-fa",
+                "work_title": "伤寒论",
+                "fragment_title": "辨脉法",
+                "dynasty": "东汉",
+                "author": "张仲景",
+                "edition": "宋本",
+            },
+        }
+    )
+
+    assert payload == {
+        "witness_key": "ctext:doc:1",
+        "version_lineage_key": "伤寒论|辨脉法|东汉|张仲景|宋本",
+        "work_fragment_key": "伤寒论|辨脉法",
+        "catalog_id": "ctp:shang-han-lun/bian-mai-fa",
+        "work_title": "伤寒论",
+        "fragment_title": "辨脉法",
+        "dynasty": "东汉",
+        "author": "张仲景",
+        "edition": "宋本",
+        "source_type": "ctext",
+        "source_ref": "doc:1",
+        "document_id": "observe-doc-1",
+        "document_urn": "doc:1",
+        "document_title": "伤寒论宋本",
     }
 
 
@@ -287,9 +327,23 @@ def test_backfill_structured_research_graph_upserts_observe_entity_nodes_and_edg
             {
                 "urn": "doc:observe:1",
                 "title": "观察文档",
+                "source_type": "ctext",
                 "raw_text_size": 128,
                 "processed_text_size": 120,
                 "entity_count": 2,
+                "metadata": {
+                    "version_metadata": {
+                        "work_title": "伤寒论",
+                        "fragment_title": "辨脉法",
+                        "work_fragment_key": "伤寒论|辨脉法",
+                        "version_lineage_key": "伤寒论|辨脉法|东汉|张仲景|宋本",
+                        "catalog_id": "ctp:shang-han-lun/bian-mai-fa",
+                        "dynasty": "东汉",
+                        "author": "张仲景",
+                        "edition": "宋本",
+                        "witness_key": "ctext:doc:observe:1",
+                    }
+                },
                 "entities": [
                     {"name": "桂枝汤", "type": "formula", "confidence": 0.95, "position": 0, "length": 3},
                     {"name": "桂枝", "type": "herb", "confidence": 0.93, "position": 4, "length": 2},
@@ -316,17 +370,23 @@ def test_backfill_structured_research_graph_upserts_observe_entity_nodes_and_edg
     assert summary["session_node_count"] == 1
     assert summary["phase_node_count"] == 1
     assert summary["observe_entity_node_count"] == 2
+    assert summary["version_lineage_node_count"] == 1
+    assert summary["version_witness_node_count"] == 1
     assert summary["semantic_edge_count"] == 1
     assert summary["captured_edge_count"] == 2
+    assert summary["observed_witness_edge_count"] == 1
+    assert summary["belongs_to_lineage_edge_count"] == 1
 
     flattened_nodes = [node for batch in fake_neo4j.batches for node in batch]
     labels = {node.label for node in flattened_nodes}
     assert "Formula" in labels
     assert "Herb" in labels
+    assert "VersionWitness" in labels
+    assert "VersionLineage" in labels
 
     flattened_edges = [edge for batch in fake_neo4j.relationship_batches for edge in batch]
     relationship_types = {edge.relationship_type for edge, _, _ in flattened_edges}
-    assert {"HAS_PHASE", "CONTAINS", "CAPTURED"}.issubset(relationship_types)
+    assert {"HAS_PHASE", "CONTAINS", "CAPTURED", "OBSERVED_WITNESS", "BELONGS_TO_LINEAGE"}.issubset(relationship_types)
 
     db_manager.close()
 
@@ -347,11 +407,15 @@ def test_backfill_structured_research_graph_skips_when_neo4j_missing():
         "phase_node_count": 0,
         "artifact_node_count": 0,
         "observe_entity_node_count": 0,
+        "version_lineage_node_count": 0,
+        "version_witness_node_count": 0,
         "has_phase_edge_count": 0,
         "generated_edge_count": 0,
         "has_artifact_edge_count": 0,
         "semantic_edge_count": 0,
         "captured_edge_count": 0,
+        "observed_witness_edge_count": 0,
+        "belongs_to_lineage_edge_count": 0,
     }
 
     db_manager.close()

@@ -58,6 +58,7 @@ def create_app(
             settings=settings,
             config_path=config_path,
             environment=environment,
+            entrypoint="web",
         )
     resolved_settings = runtime_assembly.settings if runtime_assembly is not None else None
     resolved_title = title or (resolved_settings.api_title if resolved_settings is not None else "TCMAutoResearch")
@@ -89,6 +90,8 @@ def create_app(
     app.state.config = resolved_extra_config
     if resolved_settings is not None:
         app.state.settings = resolved_settings
+    if runtime_assembly is not None:
+        app.state.runtime_assembly = runtime_assembly
 
     # ---- 数据库初始化 ----
     try:

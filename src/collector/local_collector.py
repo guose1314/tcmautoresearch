@@ -18,6 +18,7 @@ from src.collector.corpus_bundle import (
     CorpusDocument,
     _make_bundle_id,
     _make_doc_id,
+    build_document_version_metadata,
 )
 from src.core.module_base import BaseModule
 
@@ -101,11 +102,17 @@ class LocalCorpusCollector(BaseModule):
                     source_type="local",
                     source_ref=path,
                     language="zh",
-                    metadata={
-                        "file_name": os.path.basename(path),
-                        "encoding": encoding_used,
-                        "file_size": os.path.getsize(path),
-                    },
+                    metadata=build_document_version_metadata(
+                        title=title,
+                        source_type="local",
+                        source_ref=path,
+                        metadata={
+                            "file_name": os.path.basename(path),
+                            "encoding": encoding_used,
+                            "file_size": os.path.getsize(path),
+                            "source_name": "local_file",
+                        },
+                    ),
                     collected_at=collected_at,
                 )
                 documents.append(doc)

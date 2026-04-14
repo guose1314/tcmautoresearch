@@ -482,6 +482,246 @@ class TestResearchPipelineObserve(unittest.TestCase):
         self.assertEqual(result["aggregate"]["output_quality_metrics"], [{"entities_extracted": 1}])
         self.assertIn("keep going", result["aggregate"]["output_recommendations"])
 
+    @patch("src.research.research_pipeline.OutputGenerator.cleanup")
+    @patch("src.research.research_pipeline.OutputGenerator.initialize")
+    @patch("src.research.research_pipeline.ReasoningEngine.cleanup")
+    @patch("src.research.research_pipeline.ReasoningEngine.initialize")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.cleanup")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.execute")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.initialize")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.cleanup")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.execute")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.initialize")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.cleanup")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.execute")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.initialize")
+    def test_observe_ingestion_emits_philology_outputs(
+        self,
+        mock_pre_init, mock_pre_exec, mock_pre_clean,
+        mock_ex_init, mock_ex_exec, mock_ex_clean,
+        mock_sem_init, mock_sem_exec, mock_sem_clean,
+        mock_reason_init, mock_reason_clean,
+        mock_out_init, mock_out_clean,
+    ):
+        mock_pre_init.return_value = True
+        mock_pre_clean.return_value = True
+        mock_pre_exec.side_effect = lambda context: {
+            "processed_text": context["raw_text"],
+            "metadata": context.get("metadata", {}),
+            "processing_steps": ["pass_through"],
+        }
+
+        mock_ex_init.return_value = True
+        mock_ex_clean.return_value = True
+        mock_ex_exec.side_effect = lambda context: {
+            "entities": [{"name": "黄芪", "type": "herb", "confidence": 0.95}]
+            if "黄芪" in context.get("processed_text", "")
+            else [],
+            "statistics": {"by_type": {"herb": 1} if "黄芪" in context.get("processed_text", "") else {}},
+            "confidence_scores": {"average_confidence": 0.95 if "黄芪" in context.get("processed_text", "") else 0.0},
+        }
+
+        mock_sem_init.return_value = True
+        mock_sem_clean.return_value = True
+        mock_sem_exec.return_value = {
+            "semantic_graph": {"nodes": [], "edges": []},
+            "graph_statistics": {"nodes_count": 1, "edges_count": 0, "relationships_by_type": {}},
+        }
+
+        mock_reason_init.return_value = False
+        mock_reason_clean.return_value = True
+        mock_out_init.return_value = False
+        mock_out_clean.return_value = True
+
+        pipeline = ResearchPipeline({})
+        result = pipeline.phase_handlers.run_observe_ingestion_pipeline(
+            {
+                "sources": ["local"],
+                "stats": {"total_documents": 2},
+                "documents": [
+                    {
+                        "text": "黃芪當歸補血湯。",
+                        "urn": "doc:1",
+                        "title": "补血汤宋本",
+                        "source_type": "local",
+                        "metadata": {
+                            "version_metadata": {
+                                "work_title": "补血汤",
+                                "work_key": "补血汤",
+                                "fragment_title": "补血汤",
+                                "fragment_key": "补血汤",
+                                "work_fragment_key": "补血汤|补血汤",
+                                "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                                "dynasty": "明",
+                                "author": "李时珍",
+                                "edition": "宋本",
+                                "witness_key": "local:doc:1",
+                            }
+                        },
+                    },
+                    {
+                        "text": "黃耆當歸補血湯。",
+                        "urn": "doc:2",
+                        "title": "补血汤明抄本",
+                        "source_type": "local",
+                        "metadata": {
+                            "version_metadata": {
+                                "work_title": "补血汤",
+                                "work_key": "补血汤",
+                                "fragment_title": "补血汤",
+                                "fragment_key": "补血汤",
+                                "work_fragment_key": "补血汤|补血汤",
+                                "version_lineage_key": "补血汤|补血汤|明|李时珍|明抄本",
+                                "dynasty": "明",
+                                "author": "李时珍",
+                                "edition": "明抄本",
+                                "witness_key": "local:doc:2",
+                            }
+                        },
+                    },
+                ],
+            },
+            {"max_texts": 2, "max_chars_per_text": 500},
+        )
+
+        self.assertEqual(result["processed_document_count"], 2)
+        self.assertGreaterEqual(result["aggregate"]["philology_document_count"], 2)
+        self.assertGreaterEqual(result["aggregate"]["recognized_term_count"], 2)
+        self.assertGreaterEqual(result["aggregate"]["orthographic_variant_count"], 1)
+        self.assertGreaterEqual(result["aggregate"]["terminology_standard_table_count"], 2)
+        self.assertGreaterEqual(result["aggregate"]["version_collation_difference_count"], 1)
+        self.assertGreaterEqual(result["aggregate"]["version_collation_witness_count"], 1)
+        self.assertGreaterEqual(result["aggregate"]["collation_entry_count"], 1)
+        self.assertGreaterEqual(result["aggregate"]["philology_asset_count"], 3)
+        self.assertTrue(any("版本对勘" in note for note in result["aggregate"]["philology_notes"]))
+
+        aggregate_assets = result["aggregate"]["philology_assets"]
+        self.assertEqual(len(aggregate_assets["terminology_standard_table"]), result["aggregate"]["terminology_standard_table_count"])
+        self.assertEqual(len(aggregate_assets["collation_entries"]), result["aggregate"]["collation_entry_count"])
+        self.assertEqual(aggregate_assets["annotation_report"]["summary"]["processed_document_count"], 2)
+
+        first_doc = result["documents"][0]
+        self.assertIn("philology", first_doc)
+        self.assertIn("philology_assets", first_doc)
+        self.assertGreaterEqual(first_doc["philology"]["term_standardization"]["recognized_term_count"], 1)
+        self.assertGreaterEqual(first_doc["philology"]["version_collation"]["difference_count"], 1)
+        self.assertGreaterEqual(first_doc["philology"]["term_standardization"]["terminology_standard_table_count"], 1)
+        self.assertGreaterEqual(first_doc["philology"]["version_collation"]["collation_entry_count"], 1)
+        self.assertEqual(
+            first_doc["philology"]["version_collation"]["witnesses"][0]["selection_strategy"],
+            "work_fragment_key",
+        )
+
+        first_term_row = first_doc["philology"]["term_standardization"]["terminology_standard_table"][0]
+        self.assertIn("canonical", first_term_row)
+        self.assertIn("observed_forms", first_term_row)
+        first_collation_entry = first_doc["philology"]["version_collation"]["collation_entries"][0]
+        self.assertIn("judgement", first_collation_entry)
+        self.assertIn("base_context", first_collation_entry)
+
+        self.assertIn("黄芪", mock_pre_exec.call_args_list[0].args[0]["raw_text"])
+
+    def test_observe_phase_emits_philology_artifacts(self):
+        pipeline = ResearchPipeline(
+            {
+                "philology_service": {
+                    "artifact_output": {
+                        "enabled": True,
+                        "include_terminology_standard_table": True,
+                        "include_collation_entries": True,
+                        "include_annotation_report": True,
+                    }
+                }
+            }
+        )
+        cycle = pipeline.create_research_cycle(
+            cycle_name="observe_philology_artifacts",
+            description="observe phase artifact test",
+            objective="验证文献学产物",
+            scope="古籍观察",
+        )
+        observe_handler = pipeline.phase_handlers.get_observe_handler()
+
+        ingestion_result = {
+            "processed_document_count": 1,
+            "documents": [],
+            "aggregate": {
+                "philology_document_count": 1,
+                "term_mapping_count": 1,
+                "orthographic_variant_count": 1,
+                "recognized_term_count": 1,
+                "terminology_standard_table_count": 1,
+                "version_collation_difference_count": 1,
+                "version_collation_witness_count": 1,
+                "collation_entry_count": 1,
+                "philology_asset_count": 3,
+                "philology_notes": ["输出 1 条可复用校勘条目"],
+                "philology_assets": {
+                    "terminology_standard_table": [
+                        {
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:1",
+                            "canonical": "黄芪",
+                            "label": "本草药名",
+                            "status": "standardized",
+                            "observed_forms": ["黃芪"],
+                            "configured_variants": ["黃耆"],
+                            "sources": ["normalizer_term_mapping"],
+                            "notes": ["黃芪 统一为 黄芪（本草药名）"],
+                        }
+                    ],
+                    "collation_entries": [
+                        {
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:1",
+                            "difference_type": "replace",
+                            "base_text": "黃芪",
+                            "witness_text": "黃耆",
+                            "judgement": "异体字通用",
+                            "note": "此处属字形异写，不改义项。",
+                        }
+                    ],
+                    "annotation_report": {
+                        "summary": {"processed_document_count": 1},
+                        "documents": [{"document_title": "补血汤宋本", "collation_entry_count": 1}],
+                    },
+                },
+            },
+        }
+
+        with patch.object(observe_handler, "_collect_observe_corpus_if_enabled", return_value=None), patch.object(
+            observe_handler,
+            "_run_observe_literature_if_enabled",
+            return_value=None,
+        ), patch.object(
+            observe_handler,
+            "_run_observe_ingestion_if_enabled",
+            return_value=ingestion_result,
+        ), patch.object(
+            observe_handler,
+            "_build_observe_metadata",
+            return_value={"philology_artifacts": True},
+        ):
+            result = pipeline.phase_handlers.execute_observe_phase(cycle, {})
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(result["artifacts"]), 3)
+        artifact_names = {item["name"] for item in result["artifacts"]}
+        self.assertEqual(
+            artifact_names,
+            {
+                "observe_philology_terminology_table",
+                "observe_philology_collation_entries",
+                "observe_philology_annotation_report",
+            },
+        )
+        terminology_artifact = next(item for item in result["artifacts"] if item["name"] == "observe_philology_terminology_table")
+        self.assertEqual(terminology_artifact["artifact_type"], "dataset")
+        self.assertEqual(terminology_artifact["content"]["row_count"], 1)
+        report_artifact = next(item for item in result["artifacts"] if item["name"] == "observe_philology_annotation_report")
+        self.assertEqual(report_artifact["artifact_type"], "report")
+        self.assertEqual(report_artifact["content"]["summary"]["processed_document_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

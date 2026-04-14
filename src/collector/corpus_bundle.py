@@ -22,6 +22,172 @@ from typing import Any, Dict, List, Optional, Tuple
 # Schema version — 判别新旧格式的唯一标识
 # ─────────────────────────────────────────────────────────────────────────────
 BUNDLE_SCHEMA_VERSION = "1.0"
+_DYNASTY_LIST = (
+    "先秦|秦|西汉|东汉|汉|三国|魏|晋|西晋|东晋|南北朝|南朝|北朝|隋|唐|五代|五代十国|"
+    "北宋|南宋|宋|辽|金|元|明|清|民国|近代|现代|当代"
+)
+_RE_FILENAME_VERSION_META = re.compile(
+    rf"^(?:(\d{{3}})-)?(.+?)[-—–]({_DYNASTY_LIST})[-—–](.+?)(?:\.[^.]+)?$"
+)
+_LINEAGE_NORMALIZE_RE = re.compile(r"[\s《》\[\]【】()（）:：\-_.、，,.;；/\\]+")
+
+
+def build_document_version_metadata(
+    title: str,
+    source_type: str,
+    source_ref: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """补全文档级显式版本元数据。"""
+    enriched_metadata = dict(metadata or {})
+    existing_version_metadata = enriched_metadata.get("version_metadata")
+    version_metadata = dict(existing_version_metadata) if isinstance(existing_version_metadata, dict) else {}
+
+    filename_title, filename_dynasty, filename_author = _infer_filename_version_fields(source_ref or title)
+    authors = enriched_metadata.get("authors")
+    primary_author = ""
+    if isinstance(authors, list) and authors:
+        primary_author = str(authors[0] or "").strip()
+
+    work_title = _first_nonempty(
+        version_metadata.get("work_title"),
+        enriched_metadata.get("work_title"),
+        enriched_metadata.get("root_title"),
+        filename_title,
+        title,
+    )
+    work_title = str(work_title or "").strip()
+    fragment_title = _first_nonempty(
+        version_metadata.get("fragment_title"),
+        enriched_metadata.get("fragment_title"),
+        enriched_metadata.get("section_title"),
+        work_title,
+    )
+    fragment_title = str(fragment_title or work_title).strip()
+
+    work_key = _first_nonempty(
+        version_metadata.get("work_key"),
+        enriched_metadata.get("work_key"),
+    )
+    work_key = str(work_key or _normalize_lineage_token(work_title)).strip()
+
+    fragment_key = _first_nonempty(
+        version_metadata.get("fragment_key"),
+        enriched_metadata.get("fragment_key"),
+    )
+    fragment_key = str(fragment_key or _normalize_lineage_token(fragment_title or work_title)).strip() or work_key
+
+    work_fragment_key = _first_nonempty(
+        version_metadata.get("work_fragment_key"),
+        enriched_metadata.get("work_fragment_key"),
+    )
+    work_fragment_key = str(work_fragment_key or _build_work_fragment_key(work_key, fragment_key)).strip()
+
+    dynasty = _first_nonempty(
+        version_metadata.get("dynasty"),
+        enriched_metadata.get("dynasty"),
+        enriched_metadata.get("era"),
+        enriched_metadata.get("period"),
+        filename_dynasty,
+    )
+    author = _first_nonempty(
+        version_metadata.get("author"),
+        enriched_metadata.get("author"),
+        enriched_metadata.get("creator"),
+        enriched_metadata.get("creator_name"),
+        primary_author,
+        filename_author,
+    )
+    edition = _first_nonempty(
+        version_metadata.get("edition"),
+        enriched_metadata.get("edition"),
+        enriched_metadata.get("version"),
+        enriched_metadata.get("print_edition"),
+        enriched_metadata.get("witness_label"),
+        enriched_metadata.get("source_edition"),
+    )
+    catalog_id = _first_nonempty(
+        version_metadata.get("catalog_id"),
+        enriched_metadata.get("catalog_id"),
+        enriched_metadata.get("source_catalog_id"),
+        enriched_metadata.get("catalog_ref"),
+    )
+    if not catalog_id:
+        catalog_id = source_ref
+    source_name = _first_nonempty(
+        version_metadata.get("source_name"),
+        enriched_metadata.get("source_name"),
+        enriched_metadata.get("source"),
+        source_type,
+    )
+
+    version_lineage_key = _first_nonempty(
+        version_metadata.get("version_lineage_key"),
+        enriched_metadata.get("version_lineage_key"),
+        enriched_metadata.get("lineage_key"),
+        enriched_metadata.get("version_family"),
+    )
+    if not version_lineage_key:
+        version_lineage_key = _build_version_lineage_key(work_fragment_key, dynasty, author, edition)
+
+    witness_key = _first_nonempty(
+        version_metadata.get("witness_key"),
+        enriched_metadata.get("witness_key"),
+        enriched_metadata.get("witness_id"),
+    )
+    witness_namespace = str(catalog_id or source_type or "").strip() or str(source_type or "").strip()
+    witness_key = str(witness_key or f"{witness_namespace}:{source_ref or work_fragment_key}").strip()
+
+    lineage_source = version_metadata.get("lineage_source")
+    if not lineage_source:
+        if existing_version_metadata or any(
+            enriched_metadata.get(key)
+            for key in ("version_lineage_key", "lineage_key", "version_family", "work_key", "fragment_key", "edition")
+        ):
+            lineage_source = "explicit_metadata"
+        elif filename_title or filename_dynasty or filename_author:
+            lineage_source = "filename_inference"
+        elif enriched_metadata.get("root_title") or enriched_metadata.get("root_urn"):
+            lineage_source = "root_context"
+        else:
+            lineage_source = "title_fallback"
+
+    version_metadata = {
+        **version_metadata,
+        "work_title": work_title,
+        "work_key": work_key,
+        "fragment_title": fragment_title,
+        "fragment_key": fragment_key,
+        "work_fragment_key": work_fragment_key,
+        "version_lineage_key": str(version_lineage_key),
+        "dynasty": str(dynasty or "").strip(),
+        "author": str(author or "").strip(),
+        "edition": str(edition or "").strip(),
+        "catalog_id": str(catalog_id or "").strip(),
+        "source_name": str(source_name or source_type).strip(),
+        "source_type": str(source_type or "").strip(),
+        "source_ref": str(source_ref or "").strip(),
+        "witness_key": witness_key,
+        "lineage_source": lineage_source,
+    }
+
+    if enriched_metadata.get("root_title"):
+        version_metadata["root_title"] = str(enriched_metadata.get("root_title") or "").strip()
+    if enriched_metadata.get("root_urn"):
+        version_metadata["root_urn"] = str(enriched_metadata.get("root_urn") or "").strip()
+
+    enriched_metadata["version_metadata"] = version_metadata
+    for key in ("work_title", "work_key", "fragment_title", "fragment_key", "work_fragment_key", "version_lineage_key"):
+        enriched_metadata.setdefault(key, version_metadata[key])
+    if version_metadata.get("dynasty"):
+        enriched_metadata.setdefault("dynasty", version_metadata["dynasty"])
+    if version_metadata.get("author"):
+        enriched_metadata.setdefault("author", version_metadata["author"])
+    if version_metadata.get("edition"):
+        enriched_metadata.setdefault("edition", version_metadata["edition"])
+    if version_metadata.get("catalog_id"):
+        enriched_metadata.setdefault("catalog_id", version_metadata["catalog_id"])
+    return enriched_metadata
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -170,26 +336,63 @@ class CorpusBundle:
             for e in (result.get("errors") or [])
         ]
 
-        def _convert_node(node: Dict[str, Any]) -> CorpusDocument:
+        def _convert_node(
+            node: Dict[str, Any],
+            *,
+            root_title: str,
+            root_urn: str,
+            depth: int,
+        ) -> CorpusDocument:
             urn = node.get("urn", "")
             doc_id = _make_doc_id("ctext", urn)
-            children = [_convert_node(c) for c in (node.get("children") or [])]
+            title = node.get("title", "")
+            current_root_title = root_title or title
+            current_root_urn = root_urn or urn
+            raw_node_metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+            node_metadata_payload = dict(raw_node_metadata)
+            node_metadata_payload.setdefault("seed_urn", urn in (result.get("seed_urns") or []))
+            node_metadata_payload.setdefault("output_file", result.get("output_file", ""))
+            node_metadata_payload.setdefault("root_title", current_root_title)
+            node_metadata_payload.setdefault("root_urn", current_root_urn)
+            node_metadata_payload["fragment_title"] = title or current_root_title
+            node_metadata_payload["node_depth"] = depth
+            node_metadata_payload.setdefault("source_name", "ctext")
+            node_metadata = build_document_version_metadata(
+                title=title,
+                source_type="ctext",
+                source_ref=urn,
+                metadata=node_metadata_payload,
+            )
+            children = [
+                _convert_node(
+                    c,
+                    root_title=current_root_title,
+                    root_urn=current_root_urn,
+                    depth=depth + 1,
+                )
+                for c in (node.get("children") or [])
+            ]
             return CorpusDocument(
                 doc_id=doc_id,
-                title=node.get("title", ""),
+                title=title,
                 text=(node.get("text") or "").strip(),
                 source_type="ctext",
                 source_ref=urn,
                 language="zh",
-                metadata={
-                    "seed_urn": urn in (result.get("seed_urns") or []),
-                    "output_file": result.get("output_file", ""),
-                },
+                metadata=node_metadata,
                 collected_at=collected_at,
                 children=children,
             )
 
-        documents = [_convert_node(d) for d in (result.get("documents") or [])]
+        documents = [
+            _convert_node(
+                d,
+                root_title=d.get("title", ""),
+                root_urn=d.get("urn", ""),
+                depth=0,
+            )
+            for d in (result.get("documents") or [])
+        ]
         old_stats = result.get("stats") or {}
         stats = {
             "total_documents": len(documents),
@@ -229,7 +432,12 @@ class CorpusBundle:
                 source_type="local",
                 source_ref=d.get("path", ""),
                 language=d.get("language", "zh"),
-                metadata=d.get("metadata") or {},
+                metadata=build_document_version_metadata(
+                    title=d.get("title", os.path.basename(d.get("path", ""))),
+                    source_type="local",
+                    source_ref=d.get("path", ""),
+                    metadata=d.get("metadata") or {},
+                ),
                 collected_at=collected_at,
             )
             for d in (result.get("files") or result.get("documents") or [])
@@ -286,13 +494,19 @@ class CorpusBundle:
                 source_type="pdf",
                 source_ref=pdf_path,
                 language="en",  # PDF 通常为英文
-                metadata={
-                    "abstract": result.get("abstract", ""),
-                    "abstract_translated": result.get("abstract_translated", ""),
-                    "fragment_count": len(fragments),
-                    "output_markdown": result.get("output_markdown", ""),
-                    "status": result.get("status", ""),
-                },
+                metadata=build_document_version_metadata(
+                    title=title,
+                    source_type="pdf",
+                    source_ref=pdf_path,
+                    metadata={
+                        "abstract": result.get("abstract", ""),
+                        "abstract_translated": result.get("abstract_translated", ""),
+                        "fragment_count": len(fragments),
+                        "output_markdown": result.get("output_markdown", ""),
+                        "status": result.get("status", ""),
+                        "source_name": "pdf",
+                    },
+                ),
                 collected_at=collected_at,
             )
             documents.append(doc)
@@ -385,7 +599,12 @@ class CorpusBundle:
                     source_type=source_hint,
                     source_ref=source_ref,
                     language=str(item.get("language") or "zh"),
-                    metadata=metadata,
+                    metadata=build_document_version_metadata(
+                        title=title,
+                        source_type=source_hint,
+                        source_ref=source_ref,
+                        metadata=metadata,
+                    ),
                     collected_at=collected_at,
                 )
             )
@@ -477,12 +696,20 @@ def _extract_entries_from_bundle(corpus_result: Dict[str, Any]) -> List[Dict[str
     bundle = CorpusBundle.from_dict(corpus_result)
     entries = []
     for doc in bundle.flat_documents():
+        metadata = build_document_version_metadata(
+            title=doc.title,
+            source_type=doc.source_type,
+            source_ref=doc.source_ref,
+            metadata=doc.metadata,
+        )
         entries.append({
             "urn": doc.source_ref,
             "title": doc.title,
             "text": doc.text,
             "source_type": doc.source_type,
             "doc_id": doc.doc_id,
+            "metadata": metadata,
+            "version_metadata": metadata.get("version_metadata", {}),
         })
     return entries
 
@@ -495,13 +722,73 @@ def _extract_entries_from_ctext(corpus_result: Dict[str, Any]) -> List[Dict[str,
         node = stack.pop(0)
         text = (node.get("text") or "").strip()
         if text:
-            entries.append({
+            raw_metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+            metadata = build_document_version_metadata(
+                title=node.get("title", ""),
+                source_type=str(node.get("source_type") or corpus_result.get("source") or "ctext"),
+                source_ref=node.get("urn", ""),
+                metadata=raw_metadata,
+            )
+            entry = {
                 "urn": node.get("urn", ""),
                 "title": node.get("title", ""),
                 "text": text,
-            })
+                "metadata": metadata,
+                "version_metadata": metadata.get("version_metadata", {}),
+            }
+            source_type = str(node.get("source_type") or corpus_result.get("source") or "").strip()
+            if source_type and source_type != "ctext":
+                entry["source_type"] = source_type
+            entries.append(entry)
         stack.extend(node.get("children", []) or [])
     return entries
+
+
+def _first_nonempty(*values: Any) -> Any:
+    for value in values:
+        if isinstance(value, str):
+            if value.strip():
+                return value.strip()
+            continue
+        if value not in (None, [], {}, ()):
+            return value
+    return ""
+
+
+def _infer_filename_version_fields(source_ref: str) -> Tuple[str, str, str]:
+    candidate = os.path.splitext(os.path.basename(source_ref or ""))[0]
+    if not candidate:
+        return "", "", ""
+
+    match = _RE_FILENAME_VERSION_META.match(candidate)
+    if not match:
+        return "", "", ""
+
+    _, work_title, dynasty, author = match.groups()
+    return str(work_title or "").strip(), str(dynasty or "").strip(), str(author or "").strip()
+
+
+def _normalize_lineage_token(value: Any) -> str:
+    token = str(value or "").strip().lower()
+    if not token:
+        return ""
+    return _LINEAGE_NORMALIZE_RE.sub("", token)
+
+
+def _build_work_fragment_key(work_key: str, fragment_key: str) -> str:
+    normalized_work_key = _normalize_lineage_token(work_key)
+    normalized_fragment_key = _normalize_lineage_token(fragment_key) or normalized_work_key
+    return "|".join(part for part in [normalized_work_key, normalized_fragment_key] if part)
+
+
+def _build_version_lineage_key(work_fragment_key: str, dynasty: Any, author: Any, edition: Any) -> str:
+    components = [
+        _normalize_lineage_token(work_fragment_key),
+        _normalize_lineage_token(dynasty),
+        _normalize_lineage_token(author),
+        _normalize_lineage_token(edition),
+    ]
+    return "|".join(component for component in components if component)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

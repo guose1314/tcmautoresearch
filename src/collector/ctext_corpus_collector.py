@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Set
 
 import requests
 
+from src.collector.corpus_bundle import build_document_version_metadata
 from src.collector.ctext_whitelist import build_batch_manifest, load_whitelist
 from src.common.http_client import HttpClient
 from src.core.module_base import BaseModule
@@ -71,19 +72,38 @@ class CTextCorpusCollector(BaseModule):
 
         whitelist_urns: List[str] = []
         whitelist_urls: List[str] = []
+        whitelist_entries_by_urn: Dict[str, Dict[str, Any]] = {}
+        whitelist_entries_by_url: Dict[str, Dict[str, Any]] = {}
         if use_whitelist:
             whitelist_manifest = self.generate_batch_collection_manifest(
                 selected_groups=whitelist_groups,
                 whitelist_path=whitelist_path,
                 output_file=""
             )
-            whitelist_urns = [entry.get("urn", "") for entry in whitelist_manifest.get("entries", []) if entry.get("urn")]
-            whitelist_urls = [entry.get("url", "") for entry in whitelist_manifest.get("entries", []) if entry.get("url")]
+            whitelist_entries = [entry for entry in whitelist_manifest.get("entries", []) if isinstance(entry, dict)]
+            whitelist_urns = [entry.get("urn", "") for entry in whitelist_entries if entry.get("urn")]
+            whitelist_urls = [entry.get("url", "") for entry in whitelist_entries if entry.get("url")]
+            whitelist_entries_by_urn = {
+                str(entry.get("urn") or "").strip(): entry
+                for entry in whitelist_entries
+                if str(entry.get("urn") or "").strip()
+            }
+            whitelist_entries_by_url = {
+                str(entry.get("url") or "").strip(): entry
+                for entry in whitelist_entries
+                if str(entry.get("url") or "").strip()
+            }
 
         if not urns and not urls and not whitelist_urns and not whitelist_urls:
             raise ValueError("请提供 ctext_urns 或 ctext_urls")
 
-        resolved_urns = self._resolve_urls_to_urns(urls + whitelist_urls)
+        resolved_url_pairs = self._resolve_urls_to_urn_pairs(urls + whitelist_urls)
+        resolved_urns = [item["urn"] for item in resolved_url_pairs]
+        for resolved in resolved_url_pairs:
+            entry = whitelist_entries_by_url.get(str(resolved.get("url") or "").strip())
+            resolved_urn = str(resolved.get("urn") or "").strip()
+            if entry and resolved_urn and resolved_urn not in whitelist_entries_by_urn:
+                whitelist_entries_by_urn[resolved_urn] = entry
         seed_urns = self._deduplicate_urns(urns + resolved_urns + whitelist_urns)
 
         visited: Set[str] = set()
@@ -92,7 +112,16 @@ class CTextCorpusCollector(BaseModule):
 
         for urn in seed_urns:
             try:
-                doc = self._collect_urn(urn=urn, recurse=recurse, depth=0, max_depth=max_depth, visited=visited)
+                seed_entry = whitelist_entries_by_urn.get(str(urn or "").strip())
+                doc = self._collect_urn(
+                    urn=urn,
+                    recurse=recurse,
+                    depth=0,
+                    max_depth=max_depth,
+                    visited=visited,
+                    seed_entry=seed_entry,
+                    root_metadata=dict(seed_entry.get("metadata") or {}) if isinstance(seed_entry, dict) else None,
+                )
                 documents.append(doc)
             except Exception as e:
                 errors.append({"urn": urn, "error": str(e)})
@@ -137,15 +166,20 @@ class CTextCorpusCollector(BaseModule):
         return manifest
 
     def _resolve_urls_to_urns(self, urls: List[str]) -> List[str]:
+        return [item["urn"] for item in self._resolve_urls_to_urn_pairs(urls)]
+
+    def _resolve_urls_to_urn_pairs(self, urls: List[str]) -> List[Dict[str, str]]:
         urns: List[str] = []
+        resolved_pairs: List[Dict[str, str]] = []
         for url in urls:
             data = self._request_json("readlink", {"url": url})
             urn = data.get("urn")
             if urn:
                 urns.append(urn)
+                resolved_pairs.append({"url": url, "urn": urn})
             else:
                 self.logger.warning(f"无法从 URL 解析 URN: {url}")
-        return urns
+        return resolved_pairs
 
     def _collect_urn(
         self,
@@ -153,7 +187,9 @@ class CTextCorpusCollector(BaseModule):
         recurse: bool,
         depth: int,
         max_depth: int,
-        visited: Set[str]
+        visited: Set[str],
+        seed_entry: Optional[Dict[str, Any]] = None,
+        root_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         normalized = urn.strip()
         if not normalized:
@@ -167,18 +203,27 @@ class CTextCorpusCollector(BaseModule):
                 "text": "",
                 "subsections": [],
                 "children": [],
-                "is_duplicate": True
+                "is_duplicate": True,
+                "metadata": dict(root_metadata or {}),
             }
 
         visited.add(normalized)
         data = self._request_json("gettext", {"urn": normalized})
 
-        title = data.get("title", "")
+        title = str(data.get("title") or (seed_entry or {}).get("title") or "").strip()
         fulltext = data.get("fulltext", []) or []
         text_lines = [line for line in fulltext if isinstance(line, str)]
+        node_metadata = self._build_ctext_node_metadata(
+            normalized,
+            title,
+            depth=depth,
+            seed_entry=seed_entry,
+            root_metadata=root_metadata,
+        )
 
         subsection_urns = self._extract_subsection_urns(data.get("subsections", []))
         children: List[Dict[str, Any]] = []
+        child_root_metadata = dict(node_metadata if depth == 0 else (root_metadata or node_metadata))
         if recurse and depth < max_depth:
             for sub_urn in subsection_urns:
                 try:
@@ -187,7 +232,9 @@ class CTextCorpusCollector(BaseModule):
                         recurse=True,
                         depth=depth + 1,
                         max_depth=max_depth,
-                        visited=visited
+                        visited=visited,
+                        seed_entry=seed_entry,
+                        root_metadata=child_root_metadata,
                     )
                     children.append(child)
                 except Exception as e:
@@ -198,7 +245,8 @@ class CTextCorpusCollector(BaseModule):
                         "text": "",
                         "subsections": [],
                         "children": [],
-                        "error": str(e)
+                        "error": str(e),
+                        "metadata": dict(child_root_metadata),
                     })
 
         return {
@@ -207,8 +255,55 @@ class CTextCorpusCollector(BaseModule):
             "fulltext": text_lines,
             "text": "\n".join(text_lines),
             "subsections": subsection_urns,
-            "children": children
+            "children": children,
+            "metadata": node_metadata,
         }
+
+    def _build_ctext_node_metadata(
+        self,
+        urn: str,
+        title: str,
+        *,
+        depth: int,
+        seed_entry: Optional[Dict[str, Any]],
+        root_metadata: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        inherited_metadata = dict(root_metadata or {})
+        seed_metadata = dict(seed_entry.get("metadata") or {}) if isinstance(seed_entry, dict) else {}
+        metadata = dict(inherited_metadata)
+        if depth == 0:
+            metadata.update(seed_metadata)
+
+        root_version_metadata = (
+            inherited_metadata.get("version_metadata") if isinstance(inherited_metadata.get("version_metadata"), dict) else {}
+        )
+        effective_version_metadata = dict(root_version_metadata or {})
+        if depth == 0 and isinstance(seed_metadata.get("version_metadata"), dict):
+            effective_version_metadata.update(seed_metadata.get("version_metadata") or {})
+        if depth > 0:
+            for key in ("fragment_key", "work_fragment_key", "version_lineage_key", "witness_key"):
+                effective_version_metadata.pop(key, None)
+            effective_version_metadata["fragment_title"] = title
+        if effective_version_metadata:
+            metadata["version_metadata"] = effective_version_metadata
+
+        metadata.setdefault("root_title", str(root_version_metadata.get("work_title") or inherited_metadata.get("root_title") or (seed_entry or {}).get("work_title") or (seed_entry or {}).get("title") or title).strip())
+        metadata.setdefault("root_urn", str(root_version_metadata.get("source_ref") or inherited_metadata.get("root_urn") or (seed_entry or {}).get("urn") or urn).strip())
+        metadata.setdefault("source_name", "ctext")
+        metadata.setdefault("catalog_id", str((seed_entry or {}).get("catalog_id") or metadata.get("catalog_id") or urn).strip())
+        metadata["fragment_title"] = title or str(metadata.get("fragment_title") or metadata.get("root_title") or "").strip()
+        metadata["node_depth"] = depth
+        if isinstance(seed_entry, dict):
+            metadata.setdefault("seed_urn", seed_entry.get("urn"))
+            metadata.setdefault("seed_title", seed_entry.get("title"))
+            metadata.setdefault("seed_priority", seed_entry.get("priority"))
+
+        return build_document_version_metadata(
+            title=title or str((seed_entry or {}).get("title") or "").strip(),
+            source_type="ctext",
+            source_ref=urn,
+            metadata=metadata,
+        )
 
     def _extract_subsection_urns(self, subsections: Any) -> List[str]:
         urns: List[str] = []

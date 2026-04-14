@@ -94,6 +94,7 @@ class OrchestrationResult:
     pipeline_metadata: Dict[str, Any]
     analysis_results: Dict[str, Any] = field(default_factory=dict)
     research_artifact: Dict[str, Any] = field(default_factory=dict)
+    observe_philology: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         payload = {
@@ -110,6 +111,8 @@ class OrchestrationResult:
             payload["analysis_results"] = self.analysis_results
         if self.research_artifact:
             payload["research_artifact"] = self.research_artifact
+        if self.observe_philology:
+            payload["observe_philology"] = self.observe_philology
         return payload
 
     @property

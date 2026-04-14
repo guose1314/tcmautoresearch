@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 
@@ -14,6 +15,7 @@ from src.infrastructure.persistence import (
     ArtifactTypeEnum,
     Base,
     DatabaseManager,
+    Document,
     PhaseExecution,
     PhaseStatusEnum,
     ResearchArtifact,
@@ -397,9 +399,23 @@ class TestObserveDocumentGraph:
                 {
                     "urn": "doc:observe:1",
                     "title": "观察文档一",
+                    "source_type": "ctext",
                     "raw_text_size": 128,
                     "processed_text_size": 120,
                     "entity_count": 2,
+                    "metadata": {
+                        "version_metadata": {
+                            "work_title": "伤寒论",
+                            "fragment_title": "辨脉法",
+                            "work_fragment_key": "伤寒论|辨脉法",
+                            "version_lineage_key": "伤寒论|辨脉法|东汉|张仲景|宋本",
+                            "catalog_id": "ctp:shang-han-lun/bian-mai-fa",
+                            "dynasty": "东汉",
+                            "author": "张仲景",
+                            "edition": "宋本",
+                            "witness_key": "ctext:ctp:shang-han-lun/bian-mai-fa",
+                        }
+                    },
                     "entities": [
                         {"name": "桂枝汤", "type": "formula", "confidence": 0.95, "position": 0, "length": 3},
                         {"name": "桂枝", "type": "herb", "confidence": 0.93, "position": 4, "length": 2},
@@ -427,6 +443,9 @@ class TestObserveDocumentGraph:
         assert snapshot["entities"][0]["entity_metadata"]["cycle_id"] == session_payload["cycle_id"]
         assert snapshot["semantic_relationships"][0]["relationship_type"] == "CONTAINS"
         assert snapshot["semantic_relationships"][0]["source_entity_type"] == "formula"
+        assert snapshot["source_type"] == "ctext"
+        assert snapshot["version_metadata"]["catalog_id"] == "ctp:shang-han-lun/bian-mai-fa"
+        assert snapshot["version_metadata"]["version_lineage_key"] == "伤寒论|辨脉法|东汉|张仲景|宋本"
 
     def test_get_full_snapshot_includes_observe_documents(self, repo):
         session_payload = _make_payload(cycle_id="observe-snapshot")
@@ -439,8 +458,22 @@ class TestObserveDocumentGraph:
                 {
                     "urn": "doc:observe:1",
                     "title": "观察文档一",
+                    "source_type": "ctext",
                     "raw_text_size": 128,
                     "entity_count": 1,
+                    "metadata": {
+                        "version_metadata": {
+                            "work_title": "黄帝内经",
+                            "fragment_title": "上古天真论",
+                            "work_fragment_key": "黄帝内经|上古天真论",
+                            "version_lineage_key": "黄帝内经|上古天真论|先秦至汉|佚名|CTP本",
+                            "catalog_id": "ctp:huangdi-neijing/shang-gu-tian-zhen-lun",
+                            "dynasty": "先秦至汉",
+                            "author": "佚名",
+                            "edition": "CTP本",
+                            "witness_key": "ctext:ctp:huangdi-neijing/shang-gu-tian-zhen-lun",
+                        }
+                    },
                     "entities": [
                         {"name": "桂枝汤", "type": "formula", "confidence": 0.95, "position": 0, "length": 3},
                     ],
@@ -455,6 +488,354 @@ class TestObserveDocumentGraph:
         assert len(snapshot["observe_documents"]) == 1
         assert snapshot["observe_documents"][0]["entity_count"] == 1
         assert snapshot["observe_documents"][0]["title"] == "观察文档一"
+        assert len(snapshot["version_lineages"]) == 1
+        assert snapshot["version_lineages"][0]["witness_count"] == 1
+        assert snapshot["version_lineages"][0]["work_title"] == "黄帝内经"
+
+    def test_list_observe_version_lineages_groups_multiple_witnesses(self, repo):
+        session_payload = _make_payload(cycle_id="observe-lineage")
+        repo.create_session(session_payload)
+        phase = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "observe", "status": "completed"})
+
+        repo.replace_observe_document_graphs(
+            session_payload["cycle_id"],
+            phase["id"],
+            [
+                {
+                    "urn": "doc:observe:1",
+                    "title": "伤寒论宋本",
+                    "source_type": "ctext",
+                    "metadata": {
+                        "version_metadata": {
+                            "work_title": "伤寒论",
+                            "fragment_title": "辨脉法",
+                            "work_fragment_key": "伤寒论|辨脉法",
+                            "version_lineage_key": "伤寒论|辨脉法|东汉|张仲景|宋本",
+                            "catalog_id": "ctp:shang-han-lun/bian-mai-fa",
+                            "dynasty": "东汉",
+                            "author": "张仲景",
+                            "edition": "宋本",
+                            "witness_key": "ctext:doc:1",
+                        }
+                    },
+                    "entities": [],
+                    "semantic_relationships": [],
+                },
+                {
+                    "urn": "doc:observe:2",
+                    "title": "伤寒论影印本",
+                    "source_type": "archive_org",
+                    "metadata": {
+                        "version_metadata": {
+                            "work_title": "伤寒论",
+                            "fragment_title": "辨脉法",
+                            "work_fragment_key": "伤寒论|辨脉法",
+                            "version_lineage_key": "伤寒论|辨脉法|东汉|张仲景|宋本",
+                            "catalog_id": "archive_org",
+                            "dynasty": "东汉",
+                            "author": "张仲景",
+                            "edition": "宋本",
+                            "witness_key": "archive_org:doc:2",
+                        }
+                    },
+                    "entities": [],
+                    "semantic_relationships": [],
+                },
+            ],
+        )
+
+        lineages = repo.list_observe_version_lineages(session_payload["cycle_id"])
+
+        assert len(lineages) == 1
+        assert lineages[0]["witness_count"] == 2
+        assert {w["catalog_id"] for w in lineages[0]["witnesses"]} == {"ctp:shang-han-lun/bian-mai-fa", "archive_org"}
+
+    def test_list_observe_document_graphs_derives_version_metadata_for_legacy_rows(self, repo, db_manager):
+        session_payload = _make_payload(cycle_id="observe-legacy-lineage")
+        repo.create_session(session_payload)
+        phase = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "observe", "status": "completed"})
+
+        snapshots = repo.replace_observe_document_graphs(
+            session_payload["cycle_id"],
+            phase["id"],
+            [
+                {
+                    "urn": r"C:\Users\hgk\tcmautoresearch\data\013-本草纲目-明-李时珍.txt",
+                    "title": "本草纲目-明-李时珍",
+                    "entities": [],
+                    "semantic_relationships": [],
+                }
+            ],
+        )
+
+        document_id = snapshots[0]["id"]
+        session = db_manager.get_session()
+        try:
+            document = session.get(Document, uuid.UUID(document_id))
+            assert document is not None
+            document.document_urn = None
+            document.document_title = None
+            document.source_type = None
+            document.catalog_id = None
+            document.work_title = None
+            document.fragment_title = None
+            document.work_fragment_key = None
+            document.version_lineage_key = None
+            document.witness_key = None
+            document.dynasty = None
+            document.author = None
+            document.edition = None
+            document.version_metadata_json = {}
+            document.notes = json.dumps(
+                {
+                    "cycle_id": session_payload["cycle_id"],
+                    "phase": "observe",
+                    "phase_execution_id": phase["id"],
+                    "document_index": 0,
+                    "urn": r"C:\Users\hgk\tcmautoresearch\data\013-本草纲目-明-李时珍.txt",
+                    "title": "本草纲目-明-李时珍",
+                },
+                ensure_ascii=False,
+            )
+            session.commit()
+        finally:
+            session.close()
+            db_manager.remove_session()
+
+        legacy_snapshot = repo.list_observe_document_graphs(session_payload["cycle_id"])[0]
+
+        assert legacy_snapshot["source_type"] == "local"
+        assert legacy_snapshot["work_title"] == "本草纲目"
+        assert legacy_snapshot["dynasty"] == "明"
+        assert legacy_snapshot["author"] == "李时珍"
+        assert legacy_snapshot["version_metadata"]["catalog_id"].endswith("013-本草纲目-明-李时珍.txt")
+        assert legacy_snapshot["version_metadata"]["version_lineage_key"]
+
+    def test_backfill_observe_document_version_metadata_persists_legacy_rows(self, repo, db_manager):
+        session_payload = _make_payload(cycle_id="observe-legacy-writeback")
+        repo.create_session(session_payload)
+        phase = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "observe", "status": "completed"})
+
+        snapshots = repo.replace_observe_document_graphs(
+            session_payload["cycle_id"],
+            phase["id"],
+            [
+                {
+                    "urn": r"C:\Users\hgk\tcmautoresearch\data\013-本草纲目-明-李时珍.txt",
+                    "title": "本草纲目-明-李时珍",
+                    "entities": [],
+                    "semantic_relationships": [],
+                }
+            ],
+        )
+
+        document_id = snapshots[0]["id"]
+        session = db_manager.get_session()
+        try:
+            document = session.get(Document, uuid.UUID(document_id))
+            assert document is not None
+            document.document_urn = None
+            document.document_title = None
+            document.source_type = None
+            document.catalog_id = None
+            document.work_title = None
+            document.fragment_title = None
+            document.work_fragment_key = None
+            document.version_lineage_key = None
+            document.witness_key = None
+            document.dynasty = None
+            document.author = None
+            document.edition = None
+            document.version_metadata_json = {}
+            document.notes = json.dumps(
+                {
+                    "cycle_id": session_payload["cycle_id"],
+                    "phase": "observe",
+                    "phase_execution_id": phase["id"],
+                    "document_index": 0,
+                    "urn": r"C:\Users\hgk\tcmautoresearch\data\013-本草纲目-明-李时珍.txt",
+                    "title": "本草纲目-明-李时珍",
+                },
+                ensure_ascii=False,
+            )
+            session.commit()
+        finally:
+            session.close()
+            db_manager.remove_session()
+
+        summary = repo.backfill_observe_document_version_metadata(session_payload["cycle_id"])
+
+        session = db_manager.get_session()
+        try:
+            document = session.get(Document, uuid.UUID(document_id))
+            assert document is not None
+            notes = json.loads(document.notes)
+        finally:
+            session.close()
+            db_manager.remove_session()
+
+        assert summary["scanned_document_count"] == 1
+        assert summary["updated_document_count"] == 1
+        assert document.document_urn and document.document_urn.endswith("013-本草纲目-明-李时珍.txt")
+        assert document.document_title == "本草纲目-明-李时珍"
+        assert document.source_type == "local"
+        assert document.work_title == "本草纲目"
+        assert document.fragment_title == "本草纲目"
+        assert document.dynasty == "明"
+        assert document.author == "李时珍"
+        assert document.version_lineage_key
+        assert document.version_metadata_json["catalog_id"].endswith("013-本草纲目-明-李时珍.txt")
+        assert notes["source_type"] == "local"
+        assert notes["version_metadata"]["version_lineage_key"] == document.version_lineage_key
+
+    def test_backfill_observe_philology_artifacts_persists_from_phase_output(self, repo):
+        session_payload = _make_payload(cycle_id="observe-philology-backfill")
+        repo.create_session(session_payload)
+        observe_output = {
+            "phase": "observe",
+            "status": "completed",
+            "results": {
+                "ingestion_pipeline": {
+                    "documents": [],
+                    "aggregate": {
+                        "philology_assets": {
+                            "terminology_standard_table": [
+                                {
+                                    "document_title": "补血汤宋本",
+                                    "document_urn": "doc:observe:philology:1",
+                                    "canonical": "黄芪",
+                                    "label": "本草药名",
+                                    "status": "standardized",
+                                    "observed_forms": ["黃芪"],
+                                    "configured_variants": ["黃耆"],
+                                    "sources": ["normalizer_term_mapping"],
+                                    "notes": ["黃芪 统一为 黄芪（本草药名）"],
+                                }
+                            ],
+                            "collation_entries": [
+                                {
+                                    "document_title": "补血汤宋本",
+                                    "document_urn": "doc:observe:philology:1",
+                                    "difference_type": "replace",
+                                    "base_text": "黃芪",
+                                    "witness_text": "黃耆",
+                                    "judgement": "异体字通用",
+                                    "base_context": "黃芪當歸",
+                                    "witness_context": "黃耆當歸",
+                                }
+                            ],
+                            "annotation_report": {
+                                "summary": {
+                                    "processed_document_count": 1,
+                                    "philology_document_count": 1,
+                                    "term_mapping_count": 1,
+                                    "orthographic_variant_count": 1,
+                                    "recognized_term_count": 1,
+                                    "terminology_standard_table_count": 1,
+                                    "version_collation_difference_count": 1,
+                                    "version_collation_witness_count": 1,
+                                    "collation_entry_count": 1,
+                                    "philology_notes": ["输出 1 条可复用校勘条目"],
+                                },
+                                "documents": [
+                                    {
+                                        "document_title": "补血汤宋本",
+                                        "document_urn": "doc:observe:philology:1",
+                                        "source_type": "ctext",
+                                        "mapping_count": 1,
+                                        "recognized_term_count": 1,
+                                        "terminology_standard_table_count": 1,
+                                        "difference_count": 1,
+                                        "collation_entry_count": 1,
+                                        "witness_count": 1,
+                                        "philology_notes": ["输出 1 条可复用校勘条目"],
+                                    }
+                                ],
+                            },
+                        }
+                    },
+                }
+            },
+            "artifacts": [],
+            "metadata": {},
+            "error": None,
+        }
+        phase = repo.add_phase_execution(
+            session_payload["cycle_id"],
+            {"phase": "observe", "status": "completed", "output": observe_output},
+        )
+
+        summary = repo.backfill_observe_philology_artifacts(session_payload["cycle_id"])
+        artifacts = {
+            artifact["name"]: artifact
+            for artifact in repo.list_artifacts(session_payload["cycle_id"])
+            if artifact.get("phase_execution_id") == phase["id"]
+        }
+        snapshot = repo.get_full_snapshot(session_payload["cycle_id"])
+
+        assert summary["scanned_phase_count"] == 1
+        assert summary["updated_phase_count"] == 1
+        assert summary["created_artifact_count"] == 3
+        assert set(artifacts) == {
+            "observe_philology_terminology_table",
+            "observe_philology_collation_entries",
+            "observe_philology_annotation_report",
+        }
+        assert artifacts["observe_philology_terminology_table"]["artifact_type"] == "dataset"
+        assert artifacts["observe_philology_terminology_table"]["content"]["rows"][0]["canonical"] == "黄芪"
+        assert artifacts["observe_philology_collation_entries"]["content"]["entries"][0]["witness_text"] == "黃耆"
+        assert artifacts["observe_philology_annotation_report"]["content"]["summary"]["collation_entry_count"] == 1
+        assert snapshot is not None
+        assert snapshot["observe_philology"]["terminology_standard_table_count"] == 1
+        assert snapshot["observe_philology"]["collation_entry_count"] == 1
+        assert snapshot["observe_philology"]["source"] == "artifacts"
+
+    def test_backfill_observe_philology_artifacts_skips_sessions_without_philology(self, repo):
+        session_payload = _make_payload(cycle_id="observe-philology-backfill-skip")
+        repo.create_session(session_payload)
+        phase = repo.add_phase_execution(
+            session_payload["cycle_id"],
+            {
+                "phase": "observe",
+                "status": "completed",
+                "output": {
+                    "phase": "observe",
+                    "status": "completed",
+                    "results": {
+                        "ingestion_pipeline": {
+                            "documents": [
+                                {
+                                    "urn": "doc:observe:plain:1",
+                                    "title": "普通观察文档",
+                                    "entities": [],
+                                    "semantic_relationships": [],
+                                }
+                            ],
+                            "aggregate": {
+                                "total_entities": 0,
+                                "entity_type_counts": {},
+                                "average_confidence": 0.0,
+                            },
+                        }
+                    },
+                    "artifacts": [],
+                    "metadata": {},
+                    "error": None,
+                },
+            },
+        )
+
+        summary = repo.backfill_observe_philology_artifacts(session_payload["cycle_id"])
+        artifacts = [
+            artifact
+            for artifact in repo.list_artifacts(session_payload["cycle_id"])
+            if artifact.get("phase_execution_id") == phase["id"]
+        ]
+
+        assert summary["scanned_phase_count"] == 1
+        assert summary["updated_phase_count"] == 0
+        assert summary["created_artifact_count"] == 0
+        assert artifacts == []
 
     def test_external_transaction_rolls_back_observe_graph_on_neo4j_failure(self, db_manager, repo):
         session_payload = _make_payload(cycle_id="observe-txn-rollback")

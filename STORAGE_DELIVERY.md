@@ -4,6 +4,8 @@
 
 - 本文保留 2026-03-28 的存储方案交付清单语境，主要用于记录当时的交付范围与文档导航方式。
 - 当前主科研链已经真实接入 PostgreSQL / Neo4j 结构化持久化；下文 ASCII 清单块若无额外说明，均应理解为历史交付时点的清单或目标结构，而不是当前实现现状快照。
+- 当前结构化存储运行态统一使用 README 中“结构化存储状态词汇表”的四个状态词：双写完成、仅 PG 模式、待回填、schema drift 待治理。
+- 当前主科研链的主写路径以 `StorageBackendFactory.transaction()` + `TransactionCoordinator` 为准；本文里的 `storage_driver.py` / `UnifiedStorageDriver` 描述属于历史交付物口径。
 
 ---
 
@@ -21,7 +23,7 @@ src/storage/
 ├── database_schema.py          # PostgreSQL Schema 定义（SQL 初始化脚本）
 ├── db_models.py                # SQLAlchemy ORM 模型（8 张表具体实现）
 ├── neo4j_driver.py             # Neo4j 驱动和图操作
-└── storage_driver.py           # 统一存储驱动（PostgreSQL + Neo4j 一体化）
+└── storage_driver.py           # 历史统一存储驱动（当前主链另有事务协调面）
 ```
 
 #### 文件说明
@@ -30,7 +32,7 @@ src/storage/
 | --- | --- | --- | --- |
 | db_models.py | ~450 | Document, Entity, EntityRelationship 等 8 个 ORM 类 | 定义所有数据表结构 |
 | neo4j_driver.py | ~350 | Neo4jDriver, Neo4jNode, Neo4jEdge | 图数据库操作接口 |
-| storage_driver.py | ~500 | UnifiedStorageDriver | 统一接口，同时管理 PostgreSQL 和 Neo4j |
+| storage_driver.py | ~500 | UnifiedStorageDriver | 历史统一接口示例；当前主链以 `backend_factory` + `transaction` 为准 |
 | database_schema.py | ~200 | SQL 初始化脚本，视图定义 | PostgreSQL 初始化 |
 
 ---

@@ -88,6 +88,31 @@ class FakeRunner:
             "comparison": payload.get("comparison"),
         }
         analysis_results, research_artifact = self._build_publish_contract_payload()
+        observe_philology = {
+            "terminology_standard_table": [
+                {
+                    "document_title": "补血汤宋本",
+                    "document_urn": "doc:rest:1",
+                    "canonical": "黄芪",
+                    "label": "本草药名",
+                }
+            ],
+            "collation_entries": [
+                {
+                    "document_title": "补血汤宋本",
+                    "document_urn": "doc:rest:1",
+                    "difference_type": "replace",
+                    "base_text": "黃芪",
+                    "witness_text": "黃耆",
+                }
+            ],
+            "annotation_report": {
+                "summary": {
+                    "processed_document_count": 1,
+                    "philology_notes": ["输出 1 条可复用校勘条目"],
+                }
+            },
+        }
         if emit is not None:
             emit("cycle_created", {"topic": topic, "cycle_id": "cycle-rest", "cycle_name": "demo", "scope": "test"})
             emit("phase_started", {"phase": "observe", "index": 1, "total": 1, "progress": 0.0})
@@ -117,6 +142,7 @@ class FakeRunner:
                 "pipeline_metadata": {"cycle_name": "demo", "scope": "test", "protocol_inputs": protocol_inputs},
                 "analysis_results": analysis_results,
                 "research_artifact": research_artifact,
+                "observe_philology": observe_philology,
             }
             emit("job_completed", {"status": "completed", "result": result})
             return _ResultWrapper(result)
@@ -133,6 +159,7 @@ class FakeRunner:
                 "pipeline_metadata": {"cycle_name": "sync-demo", "scope": "test", "protocol_inputs": protocol_inputs},
                 "analysis_results": analysis_results,
                 "research_artifact": research_artifact,
+                "observe_philology": observe_philology,
             }
         )
 
@@ -291,6 +318,8 @@ class TestRestApi(unittest.TestCase):
         self.assertEqual(protocol_inputs["primary_outcome"], "疲劳量表评分变化")
         self.assertEqual(protocol_inputs["intervention"], "黄芪颗粒")
         self.assertEqual(protocol_inputs["comparison"], "安慰剂")
+        self.assertEqual(payload["observe_philology"]["terminology_standard_table"][0]["canonical"], "黄芪")
+        self.assertEqual(payload["observe_philology"]["collation_entries"][0]["witness_text"], "黃耆")
 
     def test_versioned_run_omits_publish_mining_alias_fields(self):
         response = self.client.post(

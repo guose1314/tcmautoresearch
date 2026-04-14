@@ -159,6 +159,31 @@ class FakeRunner:
                         ],
                     },
                 },
+                "observe_philology": {
+                    "terminology_standard_table": [
+                        {
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:console:1",
+                            "canonical": "黄芪",
+                            "label": "本草药名",
+                        }
+                    ],
+                    "collation_entries": [
+                        {
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:console:1",
+                            "difference_type": "replace",
+                            "base_text": "黃芪",
+                            "witness_text": "黃耆",
+                        }
+                    ],
+                    "annotation_report": {
+                        "summary": {
+                            "processed_document_count": 1,
+                            "philology_notes": ["输出 1 条可复用校勘条目"],
+                        }
+                    },
+                },
                 "phases": [
                     {"phase": "observe", "status": "completed", "duration_sec": 0.01, "error": "", "summary": {"observation_count": 2}},
                     {"phase": "analyze", "status": "completed", "duration_sec": 0.01, "error": "", "summary": {"key_findings": ["A"]}},
@@ -260,6 +285,7 @@ class TestWebConsoleApi(unittest.TestCase):
         manager = ResearchJobManager(
             runner_factory=lambda config: FakeRunner({**config, "artifact_markdown_path": self.artifact_markdown_path}),
             storage_dir=self.job_storage_dir,
+            default_orchestrator_config={"runtime_profile": "web_research"},
         )
         self.manager = manager
         app = create_app(job_manager=manager)
@@ -517,6 +543,21 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertEqual(protocol_inputs["intervention"], "黄芪颗粒")
         self.assertEqual(protocol_inputs["comparison"], "安慰剂")
 
+    def test_job_manager_resolves_web_runtime_profile_for_sync_and_async_entries(self):
+        self.assertEqual(self.manager._resolve_orchestrator_config({})["runtime_profile"], "web_research")
+        self.assertEqual(
+            self.manager._resolve_orchestrator_config(
+                {"orchestrator_config": {"phases": ["observe"]}}
+            )["runtime_profile"],
+            "web_research",
+        )
+        self.assertEqual(
+            self.manager._resolve_orchestrator_config(
+                {"orchestrator_config": {"runtime_profile": "custom_profile"}}
+            )["runtime_profile"],
+            "custom_profile",
+        )
+
     def test_create_job_accepts_explicit_protocol_inputs(self):
         create_response = self.client.post(
             "/api/research/jobs",
@@ -692,6 +733,10 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertEqual(payload["evidence_board"]["data_mining_summary"]["association_rule_count"], 1)
         self.assertEqual(payload["evidence_board"]["data_mining_summary"]["cluster_count"], 1)
         self.assertEqual(payload["evidence_board"]["data_mining_methods"], ["association_rules", "clustering"])
+        self.assertEqual(payload["evidence_board"]["terminology_standard_table_count"], 1)
+        self.assertEqual(payload["evidence_board"]["collation_entry_count"], 1)
+        self.assertEqual(payload["evidence_board"]["philology"]["terminology_standard_table"][0]["canonical"], "黄芪")
+        self.assertEqual(payload["evidence_board"]["philology"]["collation_entries"][0]["witness_text"], "黃耆")
 
         self.assertEqual(payload["knowledge_graph_board"]["source"], "research_artifact.similar_formula_graph_evidence_summary")
         self.assertEqual(payload["knowledge_graph_board"]["stats"]["node_count"], 2)

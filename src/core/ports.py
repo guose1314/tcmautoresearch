@@ -42,11 +42,15 @@ class CollectionPort(ABC):
 
 
 # ---------------------------------------------------------------------------
-# AnalysisPort — preprocessing, extraction, semantic modelling, reasoning
+# AnalysisPort — philology, preprocessing, extraction, semantic modelling, reasoning
 # ---------------------------------------------------------------------------
 
 class AnalysisPort(ABC):
     """Boundary for the document-analysis pipeline."""
+
+    @abstractmethod
+    def create_philology_service(self, config: Optional[Dict[str, Any]] = None) -> Any:
+        """Return an initializable PhilologyService instance."""
 
     @abstractmethod
     def create_preprocessor(self, config: Optional[Dict[str, Any]] = None) -> Any:

@@ -164,6 +164,22 @@ modules:
     academic_validation: true
     standard_compliance: true
 
+philology_service:
+  enabled: true
+  max_recognized_terms: 12
+  max_collation_diffs: 8
+  max_witnesses: 3
+  collation_context_window: 12
+  enable_glossary: true
+  enable_version_collation: true
+  artifact_output:
+    enabled: true
+    include_terminology_standard_table: true
+    include_collation_entries: true
+    include_annotation_report: true
+  terminology_standards: []
+  collation_entry_rules: []
+
 # Model configuration
 models:
   # Large language model configuration

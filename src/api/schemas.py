@@ -39,6 +39,7 @@ class ResearchResult(BaseModel):
     pipeline_metadata: Dict[str, Any] = Field(default_factory=dict, description="流程元数据")
     analysis_results: Dict[str, Any] = Field(default_factory=dict, description="分析域输出 DTO")
     research_artifact: Dict[str, Any] = Field(default_factory=dict, description="研究产物 DTO")
+    observe_philology: Dict[str, Any] = Field(default_factory=dict, description="Observe 文献学资产 DTO")
     output_files: Dict[str, Any] = Field(default_factory=dict, description="输出文件集合")
 
 

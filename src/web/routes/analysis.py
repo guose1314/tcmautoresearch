@@ -9,7 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from src.web.auth import get_current_user
-from src.web.ops.legacy_research_runtime import get_legacy_research_store
+from src.web.ops.research_session_service import (
+    get_research_observe_graph,
+    get_research_session,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -752,14 +755,13 @@ async def get_knowledge_graph(
 ):
     """获取知识图谱数据（JSON 格式，供前端可视化）。"""
     try:
-        store = get_legacy_research_store(request.app)
-        cycle = store.get_session(research_id)
+        cycle = get_research_session(request.app, research_id)
         if cycle is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"未找到研究课题: {research_id}",
             )
-        graph_data = store.get_observe_graph(research_id) or {"nodes": [], "edges": [], "statistics": {}}
+        graph_data = get_research_observe_graph(request.app, research_id) or {"nodes": [], "edges": [], "statistics": {}}
 
         return {
             "research_id": research_id,

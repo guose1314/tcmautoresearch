@@ -1,5 +1,11 @@
 # 存储系统查询和使用示例
 
+同步说明（2026-04-14）：
+
+- 当前结构化存储运行态统一使用 README 中“结构化存储状态词汇表”的四个状态词：双写完成、仅 PG 模式、待回填、schema drift 待治理。
+- 下文 SQL / Cypher 示例默认面向“双写完成”或至少 PG 事实已成立的环境；若系统处于“仅 PG 模式”或“待回填”，Neo4j 查询覆盖面可能不完整。
+- 当前主科研链的主写路径以 `StorageBackendFactory.transaction()` + `TransactionCoordinator` 为准；本文保留的 `UnifiedStorageDriver` 示例主要用于历史方案理解与局部脚本参考。
+
 ## PostgreSQL 常用查询
 
 ### 1. 文档管理查询

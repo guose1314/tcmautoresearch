@@ -1,14 +1,20 @@
 # 存储系统集成指南
 
+同步说明（2026-04-14）：
+
+- 当前结构化存储运行态统一使用 README 中“结构化存储状态词汇表”的四个状态词：双写完成、仅 PG 模式、待回填、schema drift 待治理。
+- 本文保留的 `UnifiedStorageDriver` / `run_cycle_demo.py` 接线示例属于 2026-03-28 的历史集成草案；当前主链以 `StorageBackendFactory.transaction()` + `TransactionCoordinator` + `ResearchSessionRepository` 为准。
+- 文中若出现“统一存储驱动双写”“全部入库完成”等措辞，应按“双写完成 / 仅 PG 模式 / 待回填 / schema drift 待治理”解释运行态。
+
 ## 概述
 
-本指南说明如何将统一存储驱动（PostgreSQL + Neo4j）集成到中医古籍研究系统的现有处理流程中。
+本指南说明 2026-03-28 时点如何将早期统一存储驱动（PostgreSQL + Neo4j）集成到中医古籍研究系统的处理流程中。
 
 ---
 
 ## 架构集成概图
 
-```
+```text
 输入文件
    ↓
 ┌─────────────────────────────────────┐

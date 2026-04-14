@@ -21,14 +21,20 @@ import json
 import logging
 import os
 from datetime import datetime
+from html import escape
+from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from src.web.auth import get_current_user
-from src.web.ops.legacy_research_runtime import get_legacy_research_store
+from src.web.ops.research_session_service import (
+    get_research_session,
+    list_research_sessions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +46,8 @@ router = APIRouter(tags=["dashboard"])
 
 _DATA_DIR = Path("data")
 _OUTPUT_DIR = Path("output")
+_PHILOLOGY_TERMINOLOGY_PAGE_SIZE = 8
+_PHILOLOGY_COLLATION_PAGE_SIZE = 6
 
 
 def _count_corpus_files() -> int:
@@ -154,6 +162,712 @@ def _build_session_summary(session: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _safe_html(value: Any) -> str:
+    return escape(str(value or ""), quote=True)
+
+
+def _safe_join(values: Any, sep: str = "、") -> str:
+    if not isinstance(values, list):
+        return "—"
+    items = [str(item).strip() for item in values if str(item).strip()]
+    if not items:
+        return "—"
+    return _safe_html(sep.join(items))
+
+
+def _normalize_page(value: Any, default: int = 1) -> int:
+    try:
+        page = int(value)
+    except (TypeError, ValueError):
+        return default
+    return page if page > 0 else default
+
+
+def _paginate_items(items: List[Dict[str, Any]], page: int, page_size: int) -> Dict[str, Any]:
+    total_count = len(items)
+    total_pages = max(1, ceil(total_count / page_size)) if total_count else 1
+    current_page = min(max(_normalize_page(page), 1), total_pages)
+    start = (current_page - 1) * page_size
+    end = start + page_size
+    return {
+        "items": items[start:end],
+        "page": current_page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "total_count": total_count,
+    }
+
+
+def _project_detail_url(
+    cycle_id: str,
+    *,
+    terminology_page: int = 1,
+    collation_page: int = 1,
+    drawer: bool = False,
+    document_title: str = "",
+) -> str:
+    query = [
+        f"terminology_page={max(1, terminology_page)}",
+        f"collation_page={max(1, collation_page)}",
+    ]
+    normalized_document_title = str(document_title or "").strip()
+    if normalized_document_title:
+        query.append(f"document_title={quote(normalized_document_title, safe='')}")
+    if drawer:
+        query.append("drawer=1")
+    return f"/api/projects/{quote(str(cycle_id or '').strip(), safe='')}/detail?{'&'.join(query)}"
+
+
+def _project_fragment_url(
+    cycle_id: str,
+    *,
+    document_urn: str = "",
+    document_title: str = "",
+    highlight: str = "",
+    context: str = "",
+    role: str = "base",
+) -> str:
+    query: List[str] = []
+    for key, value in (
+        ("document_urn", document_urn),
+        ("document_title", document_title),
+        ("highlight", highlight),
+        ("context", context),
+        ("role", role),
+    ):
+        normalized = str(value or "").strip()
+        if normalized:
+            query.append(f"{key}={quote(normalized, safe='')}")
+    return f"/api/projects/{quote(str(cycle_id or '').strip(), safe='')}/fragment-preview?{'&'.join(query)}"
+
+
+def _render_session_status_badge(status: str) -> str:
+    status_map = {
+        "completed": ("✅", "已完成", "bg-emerald-50 text-emerald-700"),
+        "active": ("🔄", "进行中", "bg-blue-50 text-blue-700"),
+        "running": ("🔄", "运行中", "bg-blue-50 text-blue-700"),
+        "failed": ("❌", "失败", "bg-red-50 text-red-600"),
+        "pending": ("⏳", "待执行", "bg-amber-50 text-amber-700"),
+    }
+    icon, label, cls = status_map.get(status, ("❓", status or "未知", "bg-gray-50 text-gray-500"))
+    return (
+        f'<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium {cls}">'
+        f"{icon} {_safe_html(label)}</span>"
+    )
+
+
+def _render_phase_tags(phases: List[str]) -> str:
+    if not phases:
+        return '<span class="text-xs text-gray-300">暂无阶段记录</span>'
+    return " ".join(
+        f'<span class="inline-block px-1.5 py-0.5 text-[10px] font-medium rounded bg-emerald-50 text-emerald-700">{_safe_html(phase)}</span>'
+        for phase in phases
+    )
+
+
+def _render_detail_pagination(
+    cycle_id: str,
+    *,
+    section: str,
+    page: int,
+    total_pages: int,
+    total_count: int,
+    terminology_page: int,
+    collation_page: int,
+    drawer: bool,
+    document_title: str,
+) -> str:
+    if total_count <= 0:
+        return ""
+
+    target_id = "#session-detail-drawer-content" if drawer else "#project-detail-panel"
+    prev_term_page = page - 1 if section == "terminology" else terminology_page
+    next_term_page = page + 1 if section == "terminology" else terminology_page
+    prev_collation_page = page - 1 if section == "collation" else collation_page
+    next_collation_page = page + 1 if section == "collation" else collation_page
+
+    def _button(label: str, url: str, disabled: bool) -> str:
+        if disabled:
+            return (
+                '<span class="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-200 '
+                'text-gray-300 bg-gray-50 cursor-not-allowed">'
+                f"{_safe_html(label)}</span>"
+            )
+        return (
+            f'<button type="button" class="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-200 '
+            f'text-gray-600 hover:text-gray-900 hover:border-gray-300 hover:bg-gray-50 transition" '
+            f'hx-get="{_safe_html(url)}" hx-target="{target_id}" hx-swap="outerHTML">{_safe_html(label)}</button>'
+        )
+
+    prev_url = _project_detail_url(
+        cycle_id,
+        terminology_page=prev_term_page,
+        collation_page=prev_collation_page,
+        drawer=drawer,
+        document_title=document_title,
+    )
+    next_url = _project_detail_url(
+        cycle_id,
+        terminology_page=next_term_page,
+        collation_page=next_collation_page,
+        drawer=drawer,
+        document_title=document_title,
+    )
+    return f"""
+    <div class="mt-3 flex items-center justify-between gap-3 text-xs text-gray-500">
+        <span>第 {page} / {total_pages} 页 · 共 {total_count} 条</span>
+        <div class="flex items-center gap-2">
+            {_button("上一页", prev_url, page <= 1)}
+            {_button("下一页", next_url, page >= total_pages)}
+        </div>
+    </div>
+    """
+
+
+def _document_label(item: Dict[str, Any], *, witness: bool = False) -> str:
+    title_key = "witness_title" if witness else "document_title"
+    urn_key = "witness_urn" if witness else "document_urn"
+    return str(item.get(title_key) or item.get(urn_key) or "").strip()
+
+
+def _item_matches_document_filter(item: Dict[str, Any], document_title: str) -> bool:
+    normalized = str(document_title or "").strip()
+    if not normalized:
+        return True
+    candidates = {
+        _document_label(item),
+        _document_label(item, witness=True),
+    }
+    return normalized in {candidate for candidate in candidates if candidate}
+
+
+def _collect_document_filter_options(
+    terminology_rows: List[Dict[str, Any]],
+    collation_entries: List[Dict[str, Any]],
+) -> List[str]:
+    options: List[str] = []
+    for item in [*terminology_rows, *collation_entries]:
+        for candidate in (_document_label(item), _document_label(item, witness=True)):
+            if candidate and candidate not in options:
+                options.append(candidate)
+    return options
+
+
+def _render_document_filter_chips(
+    cycle_id: str,
+    *,
+    document_options: List[str],
+    selected_document_title: str,
+    drawer: bool,
+) -> str:
+    if not document_options:
+        return ""
+
+    target_id = "#session-detail-drawer-content" if drawer else "#project-detail-panel"
+
+    def _chip(label: str, *, active: bool, document_title: str) -> str:
+        base_class = "inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium border transition"
+        cls = (
+            "bg-emerald-600 border-emerald-600 text-white"
+            if active
+            else "bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300"
+        )
+        return (
+            f'<button type="button" class="{base_class} {cls}" '
+            f'hx-get="{_safe_html(_project_detail_url(cycle_id, terminology_page=1, collation_page=1, drawer=drawer, document_title=document_title))}" '
+            f'hx-target="{target_id}" hx-swap="outerHTML">{_safe_html(label)}</button>'
+        )
+
+    summary = (
+        f'<span class="text-xs text-emerald-700">当前筛选：{_safe_html(selected_document_title)}</span>'
+        if selected_document_title
+        else '<span class="text-xs text-gray-500">按文献标题切换术语表与校勘条目明细</span>'
+    )
+    chips = [_chip("全部文献", active=not selected_document_title, document_title="")]
+    chips.extend(
+        _chip(option, active=option == selected_document_title, document_title=option)
+        for option in document_options
+    )
+    return f"""
+    <div class="rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+                <h4 class="text-sm font-semibold text-gray-800">按文献标题筛选</h4>
+                <p class="text-sm text-gray-400 mt-1">术语标准表与校勘条目会按同一文献标题同步过滤</p>
+            </div>
+            {summary}
+        </div>
+        <div class="mt-3 flex flex-wrap gap-2">{''.join(chips)}</div>
+    </div>
+    """
+
+
+def _resolve_observe_document(
+    session: Dict[str, Any],
+    *,
+    document_urn: str = "",
+    document_title: str = "",
+) -> Dict[str, Any]:
+    documents = session.get("observe_documents") if isinstance(session.get("observe_documents"), list) else []
+    normalized_urn = str(document_urn or "").strip()
+    normalized_title = str(document_title or "").strip()
+    for document in documents:
+        if not isinstance(document, dict):
+            continue
+        urn = str(document.get("urn") or document.get("document_urn") or "").strip()
+        title = str(document.get("title") or document.get("document_title") or "").strip()
+        if normalized_urn and urn == normalized_urn:
+            return dict(document)
+        if normalized_title and title == normalized_title:
+            return dict(document)
+    return {}
+
+
+def _candidate_document_paths(document: Dict[str, Any]) -> List[Path]:
+    candidates: List[Path] = []
+    seen: set[str] = set()
+
+    def _append(raw_path: Any) -> None:
+        text = str(raw_path or "").strip()
+        if not text:
+            return
+        normalized = os.path.normcase(os.path.abspath(text)) if os.path.isabs(text) else os.path.normcase(str(Path(text)))
+        if normalized in seen:
+            return
+        seen.add(normalized)
+        candidates.append(Path(text))
+
+    _append(document.get("source_file"))
+    _append(document.get("urn") or document.get("document_urn"))
+
+    title = str(document.get("title") or document.get("document_title") or "").strip()
+    if title and _DATA_DIR.exists():
+        for path in _DATA_DIR.glob("*.txt"):
+            stem = str(path.stem or "").strip()
+            if title in stem or stem in title:
+                _append(path)
+    return candidates
+
+
+def _read_document_source_text(document: Dict[str, Any]) -> tuple[str, str]:
+    for candidate in _candidate_document_paths(document):
+        try:
+            if candidate.is_file():
+                return candidate.read_text(encoding="utf-8", errors="ignore"), str(candidate)
+        except Exception:
+            continue
+    return "", ""
+
+
+def _extract_fragment_window(source_text: str, *, highlight: str, context: str, window: int = 96) -> tuple[str, str, bool]:
+    text = str(source_text or "")
+    highlight_text = str(highlight or "").strip()
+    context_text = str(context or "").strip()
+    anchor = ""
+    if context_text and context_text in text:
+        anchor = context_text
+    elif highlight_text and highlight_text in text:
+        anchor = highlight_text
+
+    if anchor:
+        start = max(text.find(anchor) - window, 0)
+        end = min(text.find(anchor) + len(anchor) + window, len(text))
+        fragment = text[start:end]
+        if start > 0:
+            fragment = "..." + fragment
+        if end < len(text):
+            fragment = fragment + "..."
+        mark_term = highlight_text if highlight_text and highlight_text in fragment else anchor
+        return fragment, mark_term, True
+
+    fallback = context_text or highlight_text or text[: window * 2] or "未能生成原始文档片段预览。"
+    if text and len(text) > window * 2 and not context_text and not highlight_text:
+        fallback = text[: window * 2] + "..."
+    mark_term = highlight_text if highlight_text and highlight_text in fallback else ""
+    return fallback, mark_term, False
+
+
+def _highlight_fragment_html(fragment: str, mark_term: str) -> str:
+    escaped_fragment = _safe_html(fragment)
+    escaped_mark = _safe_html(mark_term)
+    if not escaped_mark or escaped_mark not in escaped_fragment:
+        return escaped_fragment
+    return escaped_fragment.replace(
+        escaped_mark,
+        f'<mark class="bg-amber-200 text-amber-950 px-0.5 rounded">{escaped_mark}</mark>',
+    )
+
+
+def _render_fragment_preview_modal(
+    session: Dict[str, Any] | None,
+    *,
+    document_urn: str = "",
+    document_title: str = "",
+    highlight: str = "",
+    context: str = "",
+    role: str = "base",
+    error_message: str = "",
+) -> str:
+    if not isinstance(session, dict):
+        message = error_message or "未找到可预览的原始文档片段。"
+        return f"""
+        <div id="document-fragment-modal-content" class="bg-white rounded-2xl border border-gray-100 shadow-2xl max-w-3xl w-full overflow-hidden">
+            <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+                <div>
+                    <h3 class="text-base font-semibold text-gray-800">原始文档片段</h3>
+                    <p class="text-sm text-gray-400 mt-1">校勘上下文定位预览</p>
+                </div>
+                <button type="button" class="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-500 hover:text-gray-800 hover:border-gray-300 transition" onclick="closeDocumentFragmentModal()">关闭</button>
+            </div>
+            <div class="p-6">{_empty_state("📖", "暂无片段", message)}</div>
+        </div>
+        """
+
+    document = _resolve_observe_document(session, document_urn=document_urn, document_title=document_title)
+    resolved_title = str(document.get("title") or document_title or document.get("document_title") or document_urn or "未标注文献").strip()
+    source_text, source_path = _read_document_source_text(document)
+    fragment, mark_term, located = _extract_fragment_window(
+        source_text,
+        highlight=highlight,
+        context=context,
+    ) if source_text else _extract_fragment_window("", highlight=highlight, context=context)
+    source_type = str(document.get("source_type") or document.get("metadata", {}).get("source_type") or "unknown").strip() or "unknown"
+    role_label = "Base 原文" if str(role or "").strip().lower() == "base" else "Witness 对校文"
+    status_badge = (
+        '<span class="inline-flex items-center px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium">已定位本地源文献片段</span>'
+        if located and source_text
+        else '<span class="inline-flex items-center px-2 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-medium">未定位到本地全文，展示校勘上下文预览</span>'
+    )
+    source_label = source_path or str(document.get("source_file") or document.get("urn") or document_urn or "未记录源路径").strip() or "未记录源路径"
+    return f"""
+    <div id="document-fragment-modal-content" class="bg-white rounded-2xl border border-gray-100 shadow-2xl max-w-3xl w-full overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+            <div>
+                <div class="flex flex-wrap items-center gap-2">{status_badge}</div>
+                <h3 class="text-base font-semibold text-gray-800 mt-2">原始文档片段</h3>
+                <p class="text-sm text-gray-400 mt-1">{_safe_html(resolved_title)} · {role_label}</p>
+            </div>
+            <button type="button" class="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-500 hover:text-gray-800 hover:border-gray-300 transition" onclick="closeDocumentFragmentModal()">关闭</button>
+        </div>
+        <div class="p-5 space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-gray-500">
+                <div class="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                    <p>文献标题：<span class="text-gray-700">{_safe_html(resolved_title)}</span></p>
+                    <p class="mt-1">来源类型：<span class="text-gray-700">{_safe_html(source_type)}</span></p>
+                </div>
+                <div class="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                    <p>高亮词：<span class="text-gray-700">{_safe_html(highlight or '—')}</span></p>
+                    <p class="mt-1 break-all">源路径 / URN：<span class="text-gray-700">{_safe_html(source_label)}</span></p>
+                </div>
+            </div>
+            <div class="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">片段预览</p>
+                <div class="rounded-xl bg-white border border-gray-100 p-4 text-sm leading-7 text-gray-700 whitespace-pre-wrap font-serif">{_highlight_fragment_html(fragment, mark_term)}</div>
+            </div>
+        </div>
+    </div>
+    """
+
+
+def _render_session_detail_panel(
+    session: Dict[str, Any] | None,
+    *,
+    terminology_page: int = 1,
+    collation_page: int = 1,
+    drawer: bool = False,
+    document_title: str = "",
+    error_message: str = "",
+) -> str:
+    panel_id = "session-detail-drawer-content" if drawer else "project-detail-panel"
+    panel_class = "bg-white rounded-2xl border border-gray-100 shadow-sm"
+    close_button = (
+        '<button type="button" class="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-200 '
+        'text-sm text-gray-500 hover:text-gray-800 hover:border-gray-300 transition" '
+        'onclick="closeSessionDetailDrawer()">关闭</button>'
+        if drawer
+        else ""
+    )
+
+    if not isinstance(session, dict):
+        message = error_message or "选择一条研究任务后，可在这里查看 Observe 阶段的术语标准表与校勘条目。"
+        return f"""
+        <div id="{panel_id}" class="{panel_class}">
+            <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+                <div>
+                    <h3 class="text-base font-semibold text-gray-800">研究任务详情</h3>
+                    <p class="text-sm text-gray-400 mt-1">分页展开 Observe 文献学结构化资产</p>
+                </div>
+                {close_button}
+            </div>
+            <div class="p-6">{_empty_state("📚", "暂无详情", message)}</div>
+        </div>
+        """
+
+    title = str(
+        session.get("cycle_name")
+        or session.get("title")
+        or session.get("research_objective")
+        or session.get("description")
+        or session.get("cycle_id")
+        or "未命名研究任务"
+    ).strip() or "未命名研究任务"
+    objective = str(session.get("research_objective") or session.get("description") or "").strip()
+    cycle_id = str(session.get("cycle_id") or "").strip()
+    phases = _session_phases(session)
+    observe = session.get("observe_philology") if isinstance(session.get("observe_philology"), dict) else {}
+    annotation_report = observe.get("annotation_report") if isinstance(observe.get("annotation_report"), dict) else {}
+    summary = annotation_report.get("summary") if isinstance(annotation_report.get("summary"), dict) else {}
+    notes = summary.get("philology_notes") if isinstance(summary.get("philology_notes"), list) else []
+    selected_document_title = str(document_title or "").strip()
+
+    terminology_rows_all = sorted(
+        [dict(item) for item in observe.get("terminology_standard_table") or [] if isinstance(item, dict)],
+        key=lambda item: (
+            str(item.get("document_title") or item.get("document_urn") or ""),
+            str(item.get("canonical") or ""),
+        ),
+    )
+    collation_entries_all = sorted(
+        [dict(item) for item in observe.get("collation_entries") or [] if isinstance(item, dict)],
+        key=lambda item: (
+            str(item.get("document_title") or item.get("document_urn") or ""),
+            str(item.get("witness_title") or item.get("witness_urn") or ""),
+            str(item.get("base_text") or ""),
+        ),
+    )
+    document_options = _collect_document_filter_options(terminology_rows_all, collation_entries_all)
+    terminology_rows = [item for item in terminology_rows_all if _item_matches_document_filter(item, selected_document_title)]
+    collation_entries = [item for item in collation_entries_all if _item_matches_document_filter(item, selected_document_title)]
+
+    term_page = _paginate_items(terminology_rows, terminology_page, _PHILOLOGY_TERMINOLOGY_PAGE_SIZE)
+    collation_page_data = _paginate_items(collation_entries, collation_page, _PHILOLOGY_COLLATION_PAGE_SIZE)
+
+    status = _render_session_status_badge(str(session.get("status") or "pending").strip().lower())
+    duration = float(session.get("duration") or 0.0)
+    source = str(observe.get("source") or "unavailable").strip() or "unavailable"
+    document_count = int(summary.get("processed_document_count") or observe.get("document_count") or 0)
+    terminology_count = int(observe.get("terminology_standard_table_count") or len(terminology_rows))
+    collation_count = int(observe.get("collation_entry_count") or len(collation_entries))
+    notes_html = "".join(
+        f'<span class="inline-flex items-center px-2 py-1 rounded-full bg-amber-50 text-amber-700 text-xs">{_safe_html(note)}</span>'
+        for note in notes[:8]
+    ) or '<span class="text-xs text-gray-400">暂无文献学说明</span>'
+    filter_chips_html = _render_document_filter_chips(
+        cycle_id,
+        document_options=document_options,
+        selected_document_title=selected_document_title,
+        drawer=drawer,
+    )
+
+    terminology_rows_html = ""
+    status_labels = {"standardized": "已规范化", "configured": "仅配置", "recognized": "已识别"}
+    for row in term_page["items"]:
+        terminology_rows_html += f"""
+        <tr class="border-b border-gray-100 last:border-0 align-top">
+            <td class="px-3 py-3 text-sm text-gray-700 min-w-[140px]">
+                <div class="font-medium text-gray-800">{_safe_html(row.get("document_title") or "—")}</div>
+                <div class="text-[11px] text-gray-400 mt-1 break-all">{_safe_html(row.get("document_urn") or row.get("source_type") or "")}</div>
+            </td>
+            <td class="px-3 py-3 text-sm text-gray-800 min-w-[120px]">{_safe_html(row.get("canonical") or "—")}</td>
+            <td class="px-3 py-3 text-sm text-gray-600 min-w-[96px]">{_safe_html(row.get("label") or row.get("category") or "—")}</td>
+            <td class="px-3 py-3 text-sm text-gray-600 min-w-[88px]">{_safe_html(status_labels.get(str(row.get("status") or "").strip().lower(), row.get("status") or "—"))}</td>
+            <td class="px-3 py-3 text-sm text-gray-600 min-w-[180px]">{_safe_join(row.get("observed_forms"))}</td>
+            <td class="px-3 py-3 text-sm text-gray-600 min-w-[160px]">{_safe_join(row.get("configured_variants"))}</td>
+            <td class="px-3 py-3 text-sm text-gray-600 min-w-[140px]">{_safe_join(row.get("sources"))}</td>
+            <td class="px-3 py-3 text-sm text-gray-600 min-w-[220px]">{_safe_join(row.get("notes"))}</td>
+        </tr>
+        """
+
+    if not terminology_rows_html:
+        terminology_rows_html = (
+            '<tr><td colspan="8" class="px-3 py-8 text-center text-sm text-gray-400">'
+            f'{_safe_html(selected_document_title or "全部文献")} 下暂无术语标准表记录</td></tr>'
+        )
+
+    difference_labels = {"replace": "异文替换", "insert": "疑似衍文", "delete": "疑似脱文"}
+    severity_classes = {
+        "info": "bg-slate-50 text-slate-600",
+        "warning": "bg-amber-50 text-amber-700",
+        "high": "bg-red-50 text-red-600",
+    }
+    collation_cards_html = ""
+    for entry in collation_page_data["items"]:
+        severity = str(entry.get("severity") or "info").strip().lower() or "info"
+        severity_class = severity_classes.get(severity, "bg-slate-50 text-slate-600")
+        judgement = str(entry.get("judgement") or difference_labels.get(str(entry.get("difference_type") or ""), "异文")).strip()
+        difference_label = difference_labels.get(str(entry.get("difference_type") or "").strip(), str(entry.get("difference_type") or "异文").strip() or "异文")
+        canonical_reading = str(entry.get("canonical_reading") or "").strip()
+        matched_rule = str(entry.get("matched_rule") or "").strip()
+        base_fragment_url = _project_fragment_url(
+            cycle_id,
+            document_urn=str(entry.get("document_urn") or "").strip(),
+            document_title=str(entry.get("document_title") or "").strip(),
+            highlight=str(entry.get("base_text") or "").strip(),
+            context=str(entry.get("base_context") or "").strip(),
+            role="base",
+        )
+        witness_fragment_url = _project_fragment_url(
+            cycle_id,
+            document_urn=str(entry.get("witness_urn") or entry.get("document_urn") or "").strip(),
+            document_title=str(entry.get("witness_title") or entry.get("document_title") or "").strip(),
+            highlight=str(entry.get("witness_text") or "").strip(),
+            context=str(entry.get("witness_context") or "").strip(),
+            role="witness",
+        )
+        collation_cards_html += f"""
+        <article class="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-3">
+            <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                    <h4 class="text-sm font-semibold text-gray-800">{_safe_html(entry.get("document_title") or entry.get("document_urn") or "未标注文献")}</h4>
+                    <p class="text-xs text-gray-400 mt-1">对校版本：{_safe_html(entry.get("witness_title") or entry.get("witness_urn") or "平行版本")}</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <span class="inline-flex items-center px-2 py-1 rounded-full bg-blue-50 text-blue-700">{_safe_html(difference_label)}</span>
+                    <span class="inline-flex items-center px-2 py-1 rounded-full {severity_class}">{_safe_html(judgement)}</span>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                <div class="rounded-lg bg-rose-50 border border-rose-100 p-3">
+                    <p class="text-[11px] font-semibold text-rose-600 uppercase tracking-wide">Base</p>
+                    <p class="text-sm font-medium text-gray-800 mt-1 break-all">{_safe_html(entry.get("base_text") or "—")}</p>
+                    <p class="text-xs text-gray-500 mt-2 leading-5">{_safe_html(entry.get("base_context") or "无上下文")}</p>
+                    <button type="button" class="mt-3 inline-flex items-center px-2.5 py-1 rounded-lg border border-rose-200 text-xs text-rose-700 hover:bg-rose-100 transition" onclick="openDocumentFragmentModal()" hx-get="{_safe_html(base_fragment_url)}" hx-target="#document-fragment-modal-content" hx-swap="outerHTML">跳到原始片段</button>
+                </div>
+                <div class="rounded-lg bg-emerald-50 border border-emerald-100 p-3">
+                    <p class="text-[11px] font-semibold text-emerald-600 uppercase tracking-wide">Witness</p>
+                    <p class="text-sm font-medium text-gray-800 mt-1 break-all">{_safe_html(entry.get("witness_text") or "—")}</p>
+                    <p class="text-xs text-gray-500 mt-2 leading-5">{_safe_html(entry.get("witness_context") or "无上下文")}</p>
+                    <button type="button" class="mt-3 inline-flex items-center px-2.5 py-1 rounded-lg border border-emerald-200 text-xs text-emerald-700 hover:bg-emerald-100 transition" onclick="openDocumentFragmentModal()" hx-get="{_safe_html(witness_fragment_url)}" hx-target="#document-fragment-modal-content" hx-swap="outerHTML">跳到原始片段</button>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-gray-500">
+                <p>选择策略：<span class="text-gray-700">{_safe_html(entry.get("selection_strategy") or "—")}</span></p>
+                <p>来源：<span class="text-gray-700">{_safe_html(entry.get("source") or "—")}</span></p>
+                <p>规范读法：<span class="text-gray-700">{_safe_html(canonical_reading or "—")}</span></p>
+                <p>匹配规则：<span class="text-gray-700">{_safe_html(matched_rule or "—")}</span></p>
+            </div>
+            <div class="rounded-lg bg-gray-50 p-3 text-sm text-gray-600 leading-6">{_safe_html(entry.get("note") or "暂无校勘说明")}</div>
+        </article>
+        """
+
+    if not collation_cards_html:
+        collation_cards_html = _empty_state("🧾", "暂无校勘条目", f"{selected_document_title or '全部文献'} 下尚未输出可复用的版本对勘条目。")
+
+    detail_body = f"""
+    <div class="p-5 space-y-6">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">{status}</div>
+                <h3 class="text-xl font-semibold text-gray-900 mt-3 break-words">{_safe_html(title)}</h3>
+                <p class="text-sm text-gray-500 mt-2 leading-6">{_safe_html(objective or '暂无研究目标说明')}</p>
+                <div class="mt-3 flex flex-wrap gap-1.5">{_render_phase_tags(phases)}</div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 min-w-[220px] text-center">
+                <div class="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                    <p class="text-[11px] uppercase tracking-wide text-gray-400">文献</p>
+                    <p class="text-lg font-semibold text-gray-800 mt-1">{document_count}</p>
+                </div>
+                <div class="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                    <p class="text-[11px] uppercase tracking-wide text-gray-400">术语</p>
+                    <p class="text-lg font-semibold text-gray-800 mt-1">{terminology_count}</p>
+                </div>
+                <div class="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                    <p class="text-[11px] uppercase tracking-wide text-gray-400">校勘</p>
+                    <p class="text-lg font-semibold text-gray-800 mt-1">{collation_count}</p>
+                </div>
+                <div class="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                    <p class="text-[11px] uppercase tracking-wide text-gray-400">来源</p>
+                    <p class="text-sm font-semibold text-gray-800 mt-1 break-all">{_safe_html(source)}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="rounded-2xl border border-amber-100 bg-amber-50/70 p-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h4 class="text-sm font-semibold text-amber-900">Observe 文献学摘要</h4>
+                <span class="text-xs text-amber-700">cycle: {_safe_html(cycle_id or '—')} · 用时 {duration:.1f}s</span>
+            </div>
+            <div class="mt-3 flex flex-wrap gap-2">{notes_html}</div>
+        </div>
+
+        {filter_chips_html}
+
+        <section class="rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h4 class="text-base font-semibold text-gray-800">术语标准表</h4>
+                    <p class="text-sm text-gray-400 mt-1">分页查看规范术语、观测写法、来源与注记</p>
+                </div>
+                <span class="text-xs text-gray-500">每页 {_PHILOLOGY_TERMINOLOGY_PAGE_SIZE} 条</span>
+            </div>
+            <div class="mt-4 overflow-x-auto rounded-xl border border-gray-100 bg-white">
+                <table class="min-w-full divide-y divide-gray-100">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">文献</th>
+                            <th class="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">规范术语</th>
+                            <th class="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">类别</th>
+                            <th class="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">状态</th>
+                            <th class="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">观测写法</th>
+                            <th class="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">配置异写</th>
+                            <th class="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">来源</th>
+                            <th class="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">注记</th>
+                        </tr>
+                    </thead>
+                    <tbody>{terminology_rows_html}</tbody>
+                </table>
+            </div>
+            {_render_detail_pagination(
+                cycle_id,
+                section="terminology",
+                page=term_page["page"],
+                total_pages=term_page["total_pages"],
+                total_count=term_page["total_count"],
+                terminology_page=term_page["page"],
+                collation_page=collation_page_data["page"],
+                drawer=drawer,
+                document_title=selected_document_title,
+            )}
+        </section>
+
+        <section class="rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h4 class="text-base font-semibold text-gray-800">校勘条目明细</h4>
+                    <p class="text-sm text-gray-400 mt-1">分页查看 base / witness 异文、上下文、判断与校勘说明</p>
+                </div>
+                <span class="text-xs text-gray-500">每页 {_PHILOLOGY_COLLATION_PAGE_SIZE} 条</span>
+            </div>
+            <div class="mt-4 space-y-3">{collation_cards_html}</div>
+            {_render_detail_pagination(
+                cycle_id,
+                section="collation",
+                page=collation_page_data["page"],
+                total_pages=collation_page_data["total_pages"],
+                total_count=collation_page_data["total_count"],
+                terminology_page=term_page["page"],
+                collation_page=collation_page_data["page"],
+                drawer=drawer,
+                document_title=selected_document_title,
+            )}
+        </section>
+    </div>
+    """
+
+    return f"""
+    <div id="{panel_id}" class="{panel_class}">
+        <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+            <div>
+                <h3 class="text-base font-semibold text-gray-800">研究任务详情</h3>
+                <p class="text-sm text-gray-400 mt-1">聚合展示 Observe 阶段术语标准表与校勘条目</p>
+            </div>
+            {close_button}
+        </div>
+        {detail_body}
+    </div>
+    """
+
+
 # ---------------------------------------------------------------------------
 # Helpers – research output scanning
 # ---------------------------------------------------------------------------
@@ -163,13 +877,12 @@ def _scan_research_sessions(request: Request | None = None) -> List[Dict[str, An
     """优先从结构化存储读取研究会话，失败时回退扫描 output/ 导出文件。"""
     if request is not None:
         try:
-            store = get_legacy_research_store(request.app)
-            summaries = store.list_sessions()
+            summaries = list_research_sessions(request.app)
             if summaries:
                 results: List[Dict[str, Any]] = []
                 for item in summaries[:50]:
                     cycle_id = str(item.get("cycle_id") or "").strip()
-                    session = store.get_session(cycle_id) if cycle_id else None
+                    session = get_research_session(request.app, cycle_id) if cycle_id else None
                     source = session if isinstance(session, dict) else item
                     if isinstance(source, dict):
                         results.append(_build_session_summary(source))
@@ -613,14 +1326,27 @@ async def projects_recent(
         ) or '<span class="text-xs text-gray-300">—</span>'
         title = s["title"][:60]
         paper_badge = ' <span class="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">📝 论文</span>' if s["has_reports"] else ""
+        detail_button = ""
+        if s["cycle_id"]:
+            detail_url = _project_detail_url(s["cycle_id"], drawer=True)
+            detail_button = (
+                f'<button type="button" class="inline-flex items-center px-2.5 py-1 rounded-lg border border-gray-200 '
+                f'text-xs text-gray-500 hover:text-gray-800 hover:border-gray-300 transition" '
+                f'onclick="openSessionDetailDrawer()" hx-get="{_safe_html(detail_url)}" '
+                f'hx-target="#session-detail-drawer-content" hx-swap="outerHTML">查看详情</button>'
+            )
         rows += f"""
         <div class="px-5 py-3 hover:bg-gray-50 transition">
             <div class="flex items-start justify-between gap-3">
                 <div class="flex-1 min-w-0">
                     <p class="text-sm font-medium text-gray-800 truncate">{title}{paper_badge}</p>
                     <div class="mt-1 flex flex-wrap gap-1">{phases_tags}</div>
+                    <p class="mt-1 text-[10px] text-gray-400 truncate">cycle: {_safe_html(s['cycle_id'][:40]) or '—'}</p>
                 </div>
-                <span class="text-xs {cls} whitespace-nowrap">{icon} {label}</span>
+                <div class="flex flex-col items-end gap-2">
+                    <span class="text-xs {cls} whitespace-nowrap">{icon} {label}</span>
+                    {detail_button}
+                </div>
             </div>
         </div>"""
 
@@ -637,7 +1363,7 @@ async def projects_page(
     total = len(sessions)
     completed = sum(1 for s in sessions if s["status"] == "completed")
 
-    _STATUS_MAP = {
+    status_map = {
         "completed": ("✅", "已完成", "bg-emerald-50 text-emerald-700"),
         "active": ("🔄", "进行中", "bg-blue-50 text-blue-700"),
         "running": ("🔄", "运行中", "bg-blue-50 text-blue-700"),
@@ -645,24 +1371,48 @@ async def projects_page(
         "pending": ("⏳", "待执行", "bg-amber-50 text-amber-700"),
     }
 
+    initial_session: Dict[str, Any] | None = None
+    if sessions:
+        initial_cycle_id = str(sessions[0].get("cycle_id") or "").strip()
+        if initial_cycle_id:
+            try:
+                initial_session = get_research_session(request.app, initial_cycle_id)
+            except Exception:
+                logger.exception("dashboard project detail preload failed: %s", initial_cycle_id)
+
     project_cards = ""
     for s in sessions:
-        icon, label, cls = _STATUS_MAP.get(s["status"], ("❓", s["status"], "bg-gray-50 text-gray-500"))
+        icon, label, cls = status_map.get(s["status"], ("❓", s["status"], "bg-gray-50 text-gray-500"))
         phases_html = " ".join(
             f'<span class="inline-block px-1.5 py-0.5 text-[10px] font-medium rounded bg-gray-100 text-gray-600">{p}</span>'
             for p in s["phases"]
         ) or '<span class="text-xs text-gray-300">无阶段</span>'
         paper_badge = '<span class="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded ml-1">📝 论文</span>' if s["has_reports"] else ""
         title = s["title"][:70]
+        question = str(s.get("question") or "").strip()
+        detail_button = ""
+        if s["cycle_id"]:
+            detail_button = (
+                f'<button type="button" class="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-200 '
+                f'text-sm text-gray-600 hover:text-gray-900 hover:border-gray-300 hover:bg-gray-50 transition" '
+                f'hx-get="{_safe_html(_project_detail_url(s["cycle_id"]))}" '
+                f'hx-target="#project-detail-panel" hx-swap="outerHTML">查看详情</button>'
+            )
         project_cards += f"""
-        <div class="bg-white rounded-xl border border-gray-100 p-4 hover:shadow-md transition">
-            <div class="flex items-start justify-between mb-2">
-                <h3 class="text-sm font-semibold text-gray-800 flex-1 truncate">{title}{paper_badge}</h3>
-                <span class="text-[10px] font-medium px-2 py-0.5 rounded-full {cls} ml-2 whitespace-nowrap">{icon} {label}</span>
+        <article class="bg-white rounded-2xl border border-gray-100 p-4 hover:shadow-md transition">
+            <div class="flex items-start justify-between gap-3 mb-2">
+                <div class="min-w-0 flex-1">
+                    <h3 class="text-sm font-semibold text-gray-800 truncate">{title}{paper_badge}</h3>
+                    <p class="text-xs text-gray-500 mt-1 line-clamp-2">{_safe_html(question or '暂无问题摘要')}</p>
+                </div>
+                <span class="text-[10px] font-medium px-2 py-0.5 rounded-full {cls} whitespace-nowrap">{icon} {label}</span>
             </div>
-            <div class="flex flex-wrap gap-1 mb-2">{phases_html}</div>
-            <p class="text-[10px] text-gray-400 truncate">cycle: {s['cycle_id'][:30]}</p>
-        </div>"""
+            <div class="flex flex-wrap gap-1 mb-3">{phases_html}</div>
+            <div class="flex items-center justify-between gap-3">
+                <p class="text-[10px] text-gray-400 truncate">cycle: {_safe_html(s['cycle_id'][:40]) or '—'}</p>
+                {detail_button}
+            </div>
+        </article>"""
 
     if not project_cards:
         project_cards = _empty_state(
@@ -671,6 +1421,8 @@ async def projects_page(
             "使用 AI 助手，或 POST /api/research/run 直接运行研究；如需异步跟踪，请 POST /api/research/jobs",
         )
 
+    detail_panel = _render_session_detail_panel(initial_session)
+
     html = f"""
     {_section_header("研究任务", f"共 {total} 个研究任务 · 已完成 {completed} · 论文产出 {imrd['total']} 份")}
     <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
@@ -678,9 +1430,89 @@ async def projects_page(
         {_card("✅ 已完成", str(completed), "emerald-600")}
         {_card("📝 论文输出", str(imrd["total"]), "purple-600")}
     </div>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{project_cards}</div>
+    <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-4 items-start">
+        <div class="space-y-4">{project_cards}</div>
+        {detail_panel}
+    </div>
     """
     return HTMLResponse(html)
+
+
+@router.get("/api/projects/{cycle_id}/detail", response_class=HTMLResponse)
+async def project_detail_panel(
+    request: Request,
+    cycle_id: str,
+    terminology_page: int = 1,
+    collation_page: int = 1,
+    document_title: str = "",
+    drawer: int = 0,
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> HTMLResponse:
+    try:
+        session = get_research_session(request.app, cycle_id)
+    except Exception as exc:
+        logger.exception("dashboard project detail load failed: %s", cycle_id)
+        return HTMLResponse(
+            _render_session_detail_panel(
+                None,
+                terminology_page=terminology_page,
+                collation_page=collation_page,
+                drawer=bool(drawer),
+                document_title=document_title,
+                error_message=f"加载研究任务详情失败: {exc}",
+            )
+        )
+
+    return HTMLResponse(
+        _render_session_detail_panel(
+            session,
+            terminology_page=terminology_page,
+            collation_page=collation_page,
+            drawer=bool(drawer),
+            document_title=document_title,
+            error_message=f"未找到研究任务: {cycle_id}",
+        )
+    )
+
+
+@router.get("/api/projects/{cycle_id}/fragment-preview", response_class=HTMLResponse)
+async def project_fragment_preview(
+    request: Request,
+    cycle_id: str,
+    document_urn: str = "",
+    document_title: str = "",
+    highlight: str = "",
+    context: str = "",
+    role: str = "base",
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> HTMLResponse:
+    try:
+        session = get_research_session(request.app, cycle_id)
+    except Exception as exc:
+        logger.exception("dashboard project fragment preview failed: %s", cycle_id)
+        return HTMLResponse(
+            _render_fragment_preview_modal(
+                None,
+                document_urn=document_urn,
+                document_title=document_title,
+                highlight=highlight,
+                context=context,
+                role=role,
+                error_message=f"加载原始文档片段失败: {exc}",
+            )
+        )
+
+    return HTMLResponse(
+        _render_fragment_preview_modal(
+            session,
+            document_urn=document_urn,
+            document_title=document_title,
+            highlight=highlight,
+            context=context,
+            role=role,
+            error_message=f"未找到研究任务: {cycle_id}",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

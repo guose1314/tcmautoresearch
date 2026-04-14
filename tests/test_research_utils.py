@@ -373,6 +373,60 @@ class TestResearchUtils(unittest.TestCase):
         self.assertEqual(payload["knowledge_graph_board"]["stats"]["node_count"], 2)
         self.assertEqual(payload["knowledge_graph_board"]["highlights"][0]["title"], "桂枝汤 -> 桂枝加葛根汤")
 
+    def test_build_research_dashboard_payload_includes_observe_philology(self):
+        snapshot = {
+            "job_id": "job-philology",
+            "topic": "补血汤 philology dashboard",
+            "status": "completed",
+            "progress": 100,
+            "current_phase": "publish",
+            "result": {
+                "cycle_id": "cycle-philology",
+                "phases": [
+                    {
+                        "phase": "observe",
+                        "status": "completed",
+                        "duration_sec": 3.0,
+                        "summary": {"observation_count": 1},
+                    }
+                ],
+                "pipeline_metadata": {"cycle_name": "philology-demo"},
+                "observe_philology": {
+                    "terminology_standard_table": [
+                        {
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:1",
+                            "canonical": "黄芪",
+                            "label": "本草药名",
+                        }
+                    ],
+                    "collation_entries": [
+                        {
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:1",
+                            "difference_type": "replace",
+                            "base_text": "黃芪",
+                            "witness_text": "黃耆",
+                        }
+                    ],
+                    "annotation_report": {
+                        "summary": {
+                            "processed_document_count": 1,
+                            "philology_notes": ["输出 1 条可复用校勘条目"],
+                        }
+                    },
+                },
+            },
+        }
+
+        payload = build_research_dashboard_payload(snapshot)
+
+        self.assertEqual(payload["evidence_board"]["terminology_standard_table_count"], 1)
+        self.assertEqual(payload["evidence_board"]["collation_entry_count"], 1)
+        self.assertEqual(payload["evidence_board"]["philology_document_count"], 1)
+        self.assertEqual(payload["evidence_board"]["philology"]["terminology_standard_table"][0]["canonical"], "黄芪")
+        self.assertEqual(payload["evidence_board"]["philology"]["collation_entries"][0]["witness_text"], "黃耆")
+
     def test_dashboard_statistical_alias_helpers_require_standard_nested_fields(self):
         analysis_results = {
             "statistical_analysis": {

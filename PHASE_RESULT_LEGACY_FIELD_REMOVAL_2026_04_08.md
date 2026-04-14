@@ -56,7 +56,7 @@
 - 运行证据：本次根 publish 未产生 deprecated_field_fallbacks 命中 output_files
 - 当前标准承载位：artifacts
 - 仍需注意的非 helper 读取：
-  - cycle/cycle_research_session.py 读取的是 report_export_result.get("output_files")，属于 report 导出结果，不是 PhaseResult 顶层兼容债务
+  - cycle/cycle_research_session.py 读取的是 report_export_result.get("output_files")，属于当时 wrapper 仍直接承接 report 导出时的历史审计观察，不是 PhaseResult 顶层兼容债务；截至 2026-04-14，当前 shared runtime 主路径里该入口已不再本地执行这段导出逻辑
   - publish_phase 内部对 paper_result/citation_result/report_generation_result 的 output_files 读取，属于子组件返回值，不是本轮 PhaseResult 删除目标
 - 删除前动作：
   - 先确认对外 API/序列化是否仍显式依赖 publish 顶层 output_files

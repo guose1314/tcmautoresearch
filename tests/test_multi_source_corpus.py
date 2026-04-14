@@ -62,6 +62,36 @@ class TestMultiSourceCorpus(unittest.TestCase):
         plan = build_source_collection_plan("黄帝内经", "data/corpus_source_registry.json")
         self.assertEqual(plan["route_count"], 10)
         self.assertEqual(plan["title"], "黄帝内经")
+        ctext_route = next(route for route in plan["routes"] if route["source_id"] == "ctext")
+        self.assertEqual(ctext_route["catalog_id"], "ctext")
+        self.assertEqual(ctext_route["edition"], "Chinese Text Project 数字整理本")
+        self.assertIn("catalog_id", ctext_route["version_metadata_defaults"])
+
+    def test_build_witnesses_merges_source_registry_version_metadata(self):
+        witnesses = build_witnesses_from_records(
+            [
+                {
+                    "source_id": "ctext",
+                    "title": "伤寒论·辨脉法",
+                    "text": "伤寒三日，阳明脉大。",
+                    "metadata": {
+                        "work_title": "伤寒论",
+                        "fragment_title": "辨脉法",
+                        "catalog_id": "ctp:shang-han-lun/bian-mai-fa",
+                        "dynasty": "东汉",
+                        "author": "张仲景",
+                        "edition": "宋本",
+                    },
+                }
+            ]
+        )
+
+        self.assertEqual(len(witnesses), 1)
+        version_metadata = witnesses[0].metadata["version_metadata"]
+        self.assertEqual(version_metadata["catalog_id"], "ctp:shang-han-lun/bian-mai-fa")
+        self.assertEqual(version_metadata["edition"], "宋本")
+        self.assertEqual(version_metadata["source_name"], "Chinese Text Project")
+        self.assertEqual(version_metadata["work_title"], "伤寒论")
 
 
 if __name__ == "__main__":

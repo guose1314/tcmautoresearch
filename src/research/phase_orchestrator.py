@@ -772,12 +772,21 @@ class PhaseOrchestrator(PhaseTrackerMixin):
 
         deduplicated: Dict[tuple[str, str], Dict[str, Any]] = {}
         for artifact in artifacts:
-            name = str(artifact.get("name") or artifact.get("type") or f"{phase_name}_artifact").strip()
-            path = str(artifact.get("path") or artifact.get("value") or "").strip()
+            name = str(artifact.get("name") or artifact.get("type") or artifact.get("artifact_type") or f"{phase_name}_artifact").strip()
+            raw_path = artifact.get("path") or artifact.get("file_path")
+            if not raw_path and isinstance(artifact.get("value"), str):
+                raw_path = artifact.get("value")
+            path = str(raw_path or "").strip()
             key = (name, path)
             if key not in deduplicated:
                 deduplicated[key] = artifact
         return list(deduplicated.values())
+
+    def _estimate_artifact_size(self, payload: Any) -> int:
+        try:
+            return len(json.dumps(self._serialize_value(payload), ensure_ascii=False).encode("utf-8"))
+        except Exception:
+            return 0
 
     def _collect_observe_semantic_relationships(self, cycle: ResearchCycle) -> List[Dict[str, Any]]:
         observe_execution = cycle.phase_executions.get(ResearchPhase.OBSERVE, {})
@@ -850,23 +859,45 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             phase_execution_id = phase_record.get("id")
 
             for artifact in self._collect_phase_artifacts(phase_name, phase_result):
-                artifact_name = str(artifact.get("name") or artifact.get("type") or f"{phase_name}_artifact").strip()
-                file_path = str(artifact.get("path") or artifact.get("value") or "").strip()
+                artifact_name = str(artifact.get("name") or artifact.get("type") or artifact.get("artifact_type") or f"{phase_name}_artifact").strip()
+                raw_file_path = artifact.get("path") or artifact.get("file_path")
+                if not raw_file_path and isinstance(artifact.get("value"), str):
+                    raw_file_path = artifact.get("value")
+                file_path = str(raw_file_path or "").strip()
+                content_payload = artifact.get("content") if "content" in artifact else artifact
+                explicit_artifact_type = str(artifact.get("artifact_type") or "").strip().lower()
+                explicit_mime_type = str(artifact.get("mime_type") or "").strip() or None
+                explicit_size_bytes = artifact.get("size_bytes")
+                artifact_metadata = {
+                    "phase": phase_name,
+                    "phase_status": phase_result.get("status"),
+                }
+                if isinstance(artifact.get("metadata"), dict):
+                    artifact_metadata.update(self._serialize_value(artifact.get("metadata") or {}))
+
+                size_bytes = 0
+                if explicit_size_bytes not in (None, ""):
+                    try:
+                        size_bytes = int(explicit_size_bytes)
+                    except (TypeError, ValueError):
+                        size_bytes = 0
+                if size_bytes <= 0 and file_path:
+                    size_bytes = self._resolve_artifact_size(file_path)
+                if size_bytes <= 0:
+                    size_bytes = self._estimate_artifact_size(content_payload)
+
                 saved = repository.add_artifact(
                     cycle.cycle_id,
                     {
                         "phase_execution_id": phase_execution_id,
-                        "artifact_type": self._infer_artifact_type(phase_name, artifact_name, file_path),
+                        "artifact_type": explicit_artifact_type or self._infer_artifact_type(phase_name, artifact_name, file_path),
                         "name": artifact_name,
                         "description": str(artifact.get("description") or artifact.get("label") or "").strip(),
-                        "content": self._serialize_value(artifact),
+                        "content": self._serialize_value(content_payload),
                         "file_path": file_path or None,
-                        "mime_type": self._infer_mime_type(file_path),
-                        "size_bytes": self._resolve_artifact_size(file_path),
-                        "metadata": {
-                            "phase": phase_name,
-                            "phase_status": phase_result.get("status"),
-                        },
+                        "mime_type": explicit_mime_type or self._infer_mime_type(file_path) or "application/json",
+                        "size_bytes": size_bytes,
+                        "metadata": artifact_metadata,
                     },
                     session=session,
                 )
@@ -918,6 +949,8 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             from src.research.research_session_graph_backfill import (
                 build_observe_entity_graph_nodes,
                 build_observe_graph_edges,
+                build_observe_version_graph_edges,
+                build_observe_version_graph_nodes,
                 build_research_artifact_graph_properties,
                 build_research_phase_execution_graph_properties,
                 build_research_session_graph_properties,
@@ -1039,7 +1072,22 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             if observe_document_records:
                 for node in build_observe_entity_graph_nodes(observe_document_records):
                     _add_node(node.label, node.id, node.properties)
+                for node in build_observe_version_graph_nodes(observe_document_records):
+                    _add_node(node.label, node.id, node.properties)
                 for edge, source_label, target_label in build_observe_graph_edges(
+                    cycle.cycle_id,
+                    observe_phase_id,
+                    observe_document_records,
+                ):
+                    _add_edge(
+                        edge.source_id,
+                        edge.target_id,
+                        edge.relationship_type,
+                        source_label,
+                        target_label,
+                        edge.properties,
+                    )
+                for edge, source_label, target_label in build_observe_version_graph_edges(
                     cycle.cycle_id,
                     observe_phase_id,
                     observe_document_records,
@@ -1179,6 +1227,31 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     "phase_execution_count": len(phase_records),
                     "artifact_count": len(artifact_records),
                     "observe_document_count": len(observe_documents),
+                    "observe_version_witness_count": sum(
+                        1
+                        for item in observe_documents
+                        if isinstance(item, dict)
+                        and (
+                            str((item.get("version_metadata") or {}).get("witness_key") or "").strip()
+                            or str(item.get("witness_key") or "").strip()
+                        )
+                    ),
+                    "observe_version_lineage_count": len(
+                        {
+                            str(
+                                ((item.get("version_metadata") or {}).get("version_lineage_key") or "").strip()
+                                or ((item.get("version_metadata") or {}).get("work_fragment_key") or "").strip()
+                                or str(item.get("version_lineage_key") or "").strip()
+                            )
+                            for item in observe_documents
+                            if isinstance(item, dict)
+                            and (
+                                str(((item.get("version_metadata") or {}).get("version_lineage_key") or "").strip())
+                                or str(((item.get("version_metadata") or {}).get("work_fragment_key") or "").strip())
+                                or str(item.get("version_lineage_key") or "").strip()
+                            )
+                        }
+                    ),
                     "observe_entity_count": sum(int(item.get("entity_count") or 0) for item in observe_documents if isinstance(item, dict)),
                     "observe_relationship_count": sum(int(item.get("relationship_count") or 0) for item in observe_documents if isinstance(item, dict)),
                     "graph_node_count": graph_report.get("node_count", 0),

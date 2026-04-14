@@ -17,6 +17,7 @@ from src.orchestration.research_orchestrator import (
     _slug_topic,
     topic_to_phase_context,
 )
+from src.research.observe_philology import resolve_observe_philology_assets
 from src.research.phase_result import get_phase_value
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,21 @@ _DEFAULT_PHASES = [
     "publish",
     "reflect",
 ]
+
+_SHARED_RUNTIME_PROFILES: Dict[str, Dict[str, Any]] = {
+    "demo_research": {
+        "phases": ["observe"],
+        "stop_on_failure": True,
+        "default_cycle_name_mode": "timestamp",
+        "default_cycle_name_prefix": "research",
+        "default_scope": "中医药",
+    },
+    "web_research": {
+        "phases": list(_DEFAULT_PHASES),
+        "stop_on_failure": True,
+        "default_cycle_name_mode": "slug",
+    }
+}
 
 
 def _load_pipeline_symbols() -> tuple[Any, Any]:
@@ -52,12 +68,52 @@ class ResearchRuntimeResult:
     def to_dict(self) -> Dict[str, Any]:
         return self.orchestration_result.to_dict()
 
+    @property
+    def session_result(self) -> Dict[str, Any]:
+        normalized_question = str(self.orchestration_result.topic or "").strip()
+        phase_results = dict(self.phase_results or {})
+        cycle_snapshot = dict(self.cycle_snapshot or {})
+        publish_result = phase_results.get("publish") if isinstance(phase_results.get("publish"), dict) else {}
+        publish_output_files = dict(publish_result.get("output_files") or {}) if isinstance(publish_result, dict) else {}
+
+        session_result = {
+            "status": self.orchestration_result.status,
+            "session_id": self.orchestration_result.cycle_id,
+            "cycle_id": self.orchestration_result.cycle_id,
+            "title": f"中医科研 IMRD 报告：{normalized_question}",
+            "question": normalized_question,
+            "research_question": normalized_question,
+            "executed_phases": list(phase_results.keys()),
+            "phase_results": phase_results,
+            "metadata": {
+                "research_question": normalized_question,
+                "cycle_name": self.orchestration_result.pipeline_metadata.get("cycle_name"),
+            },
+            "cycle_snapshot": cycle_snapshot,
+        }
+
+        observe_philology = (
+            dict(self.orchestration_result.observe_philology)
+            if isinstance(self.orchestration_result.observe_philology, dict)
+            else {}
+        )
+        if observe_philology:
+            session_result["observe_philology"] = observe_philology
+        if publish_output_files:
+            session_result["report_outputs"] = publish_output_files
+        return session_result
+
+    def to_session_result(self) -> Dict[str, Any]:
+        return self.session_result
+
 
 class ResearchRuntimeService:
     """Execute a research session through one shared control path."""
 
     def __init__(self, orchestrator_config: Optional[Dict[str, Any]] = None):
-        self.config: Dict[str, Any] = deepcopy(orchestrator_config or {})
+        raw_config: Dict[str, Any] = deepcopy(orchestrator_config or {})
+        profile_defaults = self._resolve_runtime_profile_config(raw_config.get("runtime_profile"))
+        self.config: Dict[str, Any] = {**profile_defaults, **raw_config}
         self.pipeline_config: Dict[str, Any] = deepcopy(self.config.get("pipeline_config") or {})
         self.stop_on_failure: bool = bool(self.config.get("stop_on_failure", True))
         self.researchers: List[str] = list(self.config.get("researchers") or ["orchestrator"])
@@ -66,12 +122,27 @@ class ResearchRuntimeService:
         normalized_phases = [str(item).strip().lower() for item in configured_phases if str(item).strip()]
         self.phase_names = normalized_phases or list(_DEFAULT_PHASES)
 
+    @staticmethod
+    def _resolve_runtime_profile_config(runtime_profile: Optional[str]) -> Dict[str, Any]:
+        normalized_profile = str(runtime_profile or "").strip().lower()
+        if not normalized_profile:
+            return {}
+
+        profile_defaults = _SHARED_RUNTIME_PROFILES.get(normalized_profile)
+        if profile_defaults is None:
+            logger.warning("忽略未知 runtime_profile: %s", runtime_profile)
+            return {}
+
+        return deepcopy(profile_defaults)
+
     def run(
         self,
         topic: str,
         *,
         cycle_id: Optional[str] = None,
         phase_contexts: Optional[Dict[str, Dict[str, Any]]] = None,
+        report_output_formats: Optional[List[str]] = None,
+        report_output_dir: Optional[str] = None,
         cycle_name: Optional[str] = None,
         description: Optional[str] = None,
         scope: Optional[str] = None,
@@ -88,11 +159,17 @@ class ResearchRuntimeService:
         ResearchPipeline, ResearchPhase = _load_pipeline_symbols()
         phases = self._resolve_phases(ResearchPhase)
         normalized_phase_contexts = self._normalize_phase_contexts(phase_contexts)
+        normalized_phase_contexts = self._apply_publish_report_policy(
+            normalized_phase_contexts,
+            report_output_formats=report_output_formats,
+            report_output_dir=report_output_dir,
+        )
         resolved_cycle_id = str(cycle_id or "").strip() or None
 
-        resolved_cycle_name = cycle_name or _slug_topic(normalized_topic)
+        resolved_cycle_name = self._resolve_cycle_name(normalized_topic, cycle_name)
         resolved_description = description or normalized_topic
-        resolved_scope = scope or ResearchOrchestrator._infer_scope(normalized_topic)
+        default_scope = str(self.config.get("default_scope") or "").strip()
+        resolved_scope = scope or default_scope or ResearchOrchestrator._infer_scope(normalized_topic)
         protocol_inputs = {
             "study_type": study_type,
             "primary_outcome": primary_outcome,
@@ -107,6 +184,7 @@ class ResearchRuntimeService:
         phase_outcomes: List[PhaseOutcome] = []
         overall_status = "completed"
         publish_highlights: Dict[str, Dict[str, Any]] = {}
+        observe_philology: Dict[str, Any] = {}
 
         pipeline = ResearchPipeline(self.pipeline_config)
         cycle = pipeline.create_research_cycle(
@@ -232,6 +310,12 @@ class ResearchRuntimeService:
                 cycle_id,
                 cycle_snapshot,
             )
+            observe_philology = resolve_observe_philology_assets(
+                observe_phase_result=phase_results.get("observe"),
+                observe_documents=cycle_snapshot.get("observe_documents") if isinstance(cycle_snapshot.get("observe_documents"), list) else [],
+            )
+            if not observe_philology.get("available"):
+                observe_philology = {}
         finally:
             try:
                 pipeline.cleanup()
@@ -259,6 +343,7 @@ class ResearchRuntimeService:
             },
             analysis_results=publish_highlights.get("analysis_results") or {},
             research_artifact=publish_highlights.get("research_artifact") or {},
+            observe_philology=observe_philology,
         )
         self._emit(
             emit,
@@ -284,6 +369,18 @@ class ResearchRuntimeService:
             return resolved
         observe = phase_map.get("observe")
         return [observe] if observe is not None else []
+
+    def _resolve_cycle_name(self, topic: str, explicit_cycle_name: Optional[str]) -> str:
+        normalized_explicit_cycle_name = str(explicit_cycle_name or "").strip()
+        if normalized_explicit_cycle_name:
+            return normalized_explicit_cycle_name
+
+        default_cycle_name_mode = str(self.config.get("default_cycle_name_mode") or "slug").strip().lower()
+        if default_cycle_name_mode == "timestamp":
+            cycle_name_prefix = str(self.config.get("default_cycle_name_prefix") or "research").strip() or "research"
+            return f"{cycle_name_prefix}_{int(time.time())}"
+
+        return _slug_topic(topic)
 
     def _build_phase_context(
         self,
@@ -323,6 +420,31 @@ class ResearchRuntimeService:
                 continue
             normalized[phase_name] = dict(value)
         return normalized
+
+    @staticmethod
+    def _apply_publish_report_policy(
+        phase_contexts: Dict[str, Dict[str, Any]],
+        *,
+        report_output_formats: Optional[List[str]],
+        report_output_dir: Optional[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        normalized_formats = [
+            str(item).strip()
+            for item in (report_output_formats or [])
+            if str(item).strip()
+        ]
+        normalized_output_dir = str(report_output_dir or "").strip()
+        if not normalized_formats and not normalized_output_dir:
+            return phase_contexts
+
+        merged = deepcopy(phase_contexts)
+        publish_context = dict(merged.get("publish") or {})
+        if normalized_formats:
+            publish_context["report_output_formats"] = normalized_formats
+        if normalized_output_dir:
+            publish_context["report_output_dir"] = normalized_output_dir
+        merged["publish"] = publish_context
+        return merged
 
     @staticmethod
     def _normalize_phase_result(raw_result: Any) -> Dict[str, Any]:

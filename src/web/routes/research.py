@@ -18,7 +18,14 @@ from fastapi import (
 from pydantic import BaseModel, Field
 
 from src.web.auth import get_current_user, verify_token
-from src.web.ops.legacy_research_runtime import get_legacy_research_store
+from src.web.ops.research_session_service import (
+    create_research_session,
+    get_research_session,
+    list_research_sessions,
+)
+from src.web.ops.research_session_service import (
+    execute_research_phase as execute_research_session_phase,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,8 +94,8 @@ async def create_research(
 ):
     """创建研究课题。"""
     try:
-        store = get_legacy_research_store(request.app)
-        cycle = store.create_session(
+        cycle = create_research_session(
+            request.app,
             cycle_name=body.cycle_name,
             description=body.description,
             objective=body.objective,
@@ -112,8 +119,7 @@ async def list_research(
 ):
     """获取所有研究项目列表。"""
     try:
-        store = get_legacy_research_store(request.app)
-        cycles = store.list_sessions()
+        cycles = list_research_sessions(request.app)
         return {"cycles": cycles, "total": len(cycles)}
     except Exception as exc:
         logger.exception("获取研究列表失败")
@@ -131,8 +137,7 @@ async def get_research_detail(
 ):
     """获取研究课题详情。"""
     try:
-        store = get_legacy_research_store(request.app)
-        cycle = store.get_session(cycle_id)
+        cycle = get_research_session(request.app, cycle_id)
         if cycle is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -170,8 +175,8 @@ async def execute_research_phase(
         )
 
     try:
-        store = get_legacy_research_store(request.app)
-        execution = store.execute_phase(
+        execution = execute_research_session_phase(
+            request.app,
             cycle_id,
             phase_enum.value,
             phase_context=body.phase_context,

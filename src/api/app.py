@@ -43,11 +43,13 @@ def configure_api_services(
         settings=settings,
         config_path=config_path,
         environment=environment,
+        entrypoint="web",
     )
     resolved_settings = resolved_runtime_assembly.settings
     manager = job_manager or ResearchJobManager(runtime_assembly=resolved_runtime_assembly)
     resolved_architecture = architecture or create_default_architecture(resolved_settings)
     app.state.settings = resolved_settings
+    app.state.runtime_assembly = resolved_runtime_assembly
     app.state.job_manager = manager
     app.state.architecture = resolved_architecture
     app.state.monitoring_service = create_default_monitoring_service(
@@ -84,6 +86,7 @@ def create_app(
         settings=settings,
         config_path=config_path,
         environment=environment,
+        entrypoint="web",
     )
     resolved_settings = runtime_assembly.settings
     app = FastAPI(title=resolved_settings.api_title, version=resolved_settings.api_version)

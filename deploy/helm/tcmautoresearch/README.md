@@ -1,5 +1,11 @@
 # tcmautoresearch Helm Chart
 
+状态口径说明（2026-04-14）：
+
+- Helm hook、Kubernetes Job、`kubectl exec` 迁移、Deployment ready 与探针通过，统一只表示部署或迁移动作完成，不自动等同于结构化存储处于“双写完成”。
+- Helm / K8s 运维统一沿用 README 的结构化存储状态词汇表：双写完成、仅 PG 模式、待回填、schema drift 待治理。
+- Neo4j 未启用、初始化失败或当前不可用时，集群内环境仍可能处于“仅 PG 模式”；历史图投影、Observe 版本元数据与文献学结构化资产也可能继续处于“待回填”。
+
 ## 安装
 
 ```bash
@@ -75,3 +81,14 @@ kubectl exec -n tcm deploy/tcmautoresearch \
 - 只有在需要定向某一台实例时，才使用 `-x url=...`；其中主机名应写集群内 PostgreSQL Service 名称，而不是 `localhost`。
 - 当 `migrations.enabled=true` 时，推荐优先使用自动 Job/hook；上面的 `kubectl exec` 只保留给一次性排障或历史库补基线。
 - 如果目标库是早期通过 ORM `create_all()` 初始化、还没有 `alembic_version`，先执行 `stamp 3e5089f32f9a`，再执行 `upgrade head`。
+
+## 结构化存储状态判读
+
+Helm / K8s 运维验收时，统一按以下口径记录结构化存储状态：
+
+| 状态 | 验收含义 | 集群侧动作 |
+| --- | --- | --- |
+| 双写完成 | PostgreSQL 与 Neo4j 都处于 active，可对同一轮 structured persist 的 session / artifact / 图投影做一致读取。 | 记录为主链健康，并继续确认没有遗留待回填项。 |
+| 仅 PG 模式 | PostgreSQL 写入成立，但 Neo4j 未启用、初始化失败或当前不可用。 | 视为显式降级态；不要把 hook 成功或 Pod ready 误判成完整双写成功。 |
+| 待回填 | 历史图投影、Observe 版本元数据或文献学结构化资产仍需 writeback / backfill。 | 补齐后再把该环境标记为结构化资产完整。 |
+| schema drift 待治理 | 迁移、health check 或 drift 诊断仍有未清理告警。 | 先清理 drift，再推进发布、扩容或回填验收。 |

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Dict, List
 
+from src.collector.corpus_bundle import build_document_version_metadata
+
 FORMAT_RULES = {
     "tei_xml": [".tei", ".tei.xml"],
     "xml": [".xml"],
@@ -101,6 +103,7 @@ def build_source_collection_plan(
     sources = registry.get("sources", [])
     routes = []
     for source in sources:
+        version_defaults = _extract_source_version_defaults(source)
         routes.append(
             {
                 "source_id": source.get("id", ""),
@@ -109,6 +112,11 @@ def build_source_collection_plan(
                 "collection_modes": source.get("collection_modes", []),
                 "supported_formats": source.get("supported_formats", []),
                 "implemented": source.get("implemented", False),
+                "catalog_id": version_defaults.get("catalog_id", ""),
+                "edition": version_defaults.get("edition", ""),
+                "author": version_defaults.get("author", ""),
+                "dynasty": version_defaults.get("dynasty", ""),
+                "version_metadata_defaults": version_defaults,
                 "recommended_query": book_title
             }
         )
@@ -166,17 +174,61 @@ def cross_validate_witnesses(
 
 
 def build_witnesses_from_records(records: List[Dict[str, Any]]) -> List[SourceWitness]:
+    try:
+        registry = load_source_registry()
+        source_index = {
+            str(source.get("id") or "").strip(): source
+            for source in registry.get("sources", [])
+            if isinstance(source, dict) and str(source.get("id") or "").strip()
+        }
+    except Exception:
+        source_index = {}
+
     witnesses: List[SourceWitness] = []
     for record in records:
         text = record.get("text", "")
         if not text:
             continue
+        source_id = str(record.get("source_id", "unknown") or "unknown").strip() or "unknown"
+        source_defaults = _extract_source_version_defaults(source_index.get(source_id) or {})
+        metadata = dict(source_defaults)
+        record_metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+        metadata.update(record_metadata)
+        for field in ("catalog_id", "edition", "author", "dynasty", "work_title", "fragment_title"):
+            if field in record and record.get(field) not in (None, ""):
+                metadata[field] = record.get(field)
+        source_ref = str(
+            record.get("source_ref")
+            or record.get("urn")
+            or metadata.get("source_ref")
+            or (source_index.get(source_id) or {}).get("base_url")
+            or source_id
+        ).strip()
+        metadata = build_document_version_metadata(
+            title=str(record.get("title") or "").strip(),
+            source_type=source_id,
+            source_ref=source_ref,
+            metadata=metadata,
+        )
         witnesses.append(
             SourceWitness(
-                source_id=record.get("source_id", "unknown"),
+                source_id=source_id,
                 title=record.get("title", ""),
                 text=text,
-                metadata=record.get("metadata", {})
+                metadata=metadata,
             )
         )
     return witnesses
+
+
+def _extract_source_version_defaults(source: Dict[str, Any]) -> Dict[str, Any]:
+    source_id = str(source.get("id") or "").strip()
+    catalog_id = str(source.get("catalog_id") or source_id).strip()
+    return {
+        "catalog_id": catalog_id,
+        "edition": str(source.get("edition") or "").strip(),
+        "author": str(source.get("author") or "").strip(),
+        "dynasty": str(source.get("dynasty") or "").strip(),
+        "source_name": str(source.get("name") or source_id).strip(),
+        "source_type": source_id,
+    }

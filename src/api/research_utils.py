@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, Optional
 
 from fastapi.responses import FileResponse
 
+from src.research.observe_philology import resolve_observe_philology_assets
 from src.research.phase_result import get_phase_artifact_map, get_phase_value
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -373,6 +374,22 @@ def _resolve_publish_highlight_payload(result: Dict[str, Any], key: str) -> Dict
     if nested:
         return nested
     return _as_dict(result.get(key))
+
+
+def _resolve_observe_phase_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+    phase_results = _as_dict(result.get("phase_results"))
+    return _as_dict(phase_results.get("observe"))
+
+
+def _resolve_observe_philology(result: Dict[str, Any]) -> Dict[str, Any]:
+    observe_phase_result = _resolve_observe_phase_result(result)
+    return resolve_observe_philology_assets(
+        observe_philology=result.get("observe_philology"),
+        artifacts=_as_list(observe_phase_result.get("artifacts")),
+        observe_phase_result=observe_phase_result,
+    )
 
 
 def _iter_report_artifact_candidates(result: Dict[str, Any]) -> Iterable[tuple[str, str]]:
@@ -795,6 +812,7 @@ def _build_dashboard_evidence_board(
     primary_association: Dict[str, Any],
     data_mining_summary: Dict[str, Any],
     data_mining_methods: list[str],
+    observe_philology: Dict[str, Any],
 ) -> Dict[str, Any]:
     evidence_records = _as_list(evidence_protocol.get("evidence_records"))
     claims = _as_list(evidence_protocol.get("claims"))
@@ -806,6 +824,10 @@ def _build_dashboard_evidence_board(
         "primary_association": primary_association,
         "data_mining_summary": data_mining_summary,
         "data_mining_methods": data_mining_methods,
+        "philology": observe_philology,
+        "terminology_standard_table_count": int(_safe_float(observe_philology.get("terminology_standard_table_count"), 0.0)),
+        "collation_entry_count": int(_safe_float(observe_philology.get("collation_entry_count"), 0.0)),
+        "philology_document_count": int(_safe_float(observe_philology.get("document_count"), 0.0)),
     }
 
 
@@ -847,6 +869,7 @@ def build_research_dashboard_payload(snapshot: Dict[str, Any]) -> Dict[str, Any]
     primary_association = _resolve_primary_association(analysis_results, research_artifact)
     data_mining_summary = _resolve_data_mining_summary(analysis_results, research_artifact)
     data_mining_methods = _resolve_dashboard_data_mining_methods(analysis_results, data_mining_summary)
+    observe_philology = _resolve_observe_philology(result)
     knowledge_graph_board = _build_knowledge_graph_board(result)
     phase_items = _build_dashboard_phase_items(phases)
 
@@ -886,6 +909,7 @@ def build_research_dashboard_payload(snapshot: Dict[str, Any]) -> Dict[str, Any]
             primary_association,
             data_mining_summary,
             data_mining_methods,
+            observe_philology,
         ),
         "knowledge_graph_board": knowledge_graph_board,
         "protocol_inputs": _build_dashboard_protocol_inputs(protocol_inputs),

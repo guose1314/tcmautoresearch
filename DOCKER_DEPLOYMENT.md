@@ -2,6 +2,12 @@
 
 本文档对齐 Architecture 3.0 的平台化目标，提供可直接运行的容器化方案。
 
+状态口径说明（2026-04-14）：
+
+- 容器部署、回填、排障统一使用 README 中“结构化存储状态词汇表”的四个状态词：双写完成、仅 PG 模式、待回填、schema drift 待治理。
+- 当前主科研链的主写路径以 `StorageBackendFactory.transaction()` + `TransactionCoordinator` 为准；容器内“服务已启动”“探针通过”“迁移完成”不自动等同于“双写完成”。
+- Neo4j 未启用、初始化失败或当前不可用时，容器化部署仍可能处于“仅 PG 模式”；历史图投影与 Observe 结构化资产则可能继续处于“待回填”。
+
 ## 1. 产物清单
 
 - Dockerfile: 生产镜像构建文件
@@ -81,6 +87,17 @@ docker compose exec tcmautoresearch \
 ```
 
 - 当前 `head` 已包含 legacy enum -> varchar，以及字符串列表列 -> `varchar[]` 的 PostgreSQL 契约迁移。
+
+### 2.6 结构化存储状态判读
+
+容器化部署验收时，统一按以下口径记录结构化存储状态：
+
+| 状态 | 验收含义 | 容器侧动作 |
+| --- | --- | --- |
+| 双写完成 | PostgreSQL 与 Neo4j 都处于 active，可对同一轮 structured persist 的 session / artifact / 图投影做一致读取。 | 记录为主链健康，并继续确认没有遗留待回填项。 |
+| 仅 PG 模式 | PostgreSQL 写入成立，但 Neo4j 未启用、初始化失败或不可用。 | 视为显式降级态；不要把探针通过误判成完整双写成功。 |
+| 待回填 | 历史图投影、Observe 版本元数据或文献学结构化资产仍需 writeback / backfill。 | 补齐后再把该环境标记为结构化资产完整。 |
+| schema drift 待治理 | 迁移、health check 或 drift 诊断仍有未清理告警。 | 先清理 drift，再推进发布或回填验收。 |
 
 ## 3. CI 注入 secrets（推荐）
 

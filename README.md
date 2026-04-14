@@ -10,8 +10,21 @@
 
 - 七阶段研究链：Observe -> Hypothesis -> Experiment -> ExperimentExecution -> Analyze -> Publish -> Reflect，其中 Experiment 负责实验方案设计，ExperimentExecution 负责外部实验执行、采样与结果导入。
 - 本地 GGUF 大模型集成：支持以本地模型承担结构化摘要、假说生成、讨论初稿与反思诊断。
-- 双存储架构：支持 PostgreSQL 结构化存储与 Neo4j 图谱投影。
+- 结构化存储主链：PostgreSQL 默认承载 structured persist，Neo4j 在可用时承接图投影；Neo4j 未启用或初始化失败时允许仅 PG 模式。
 - 多入口运行：CLI、独立 API、Web Console、Legacy Web 本地调试路径已逐步统一到同一套 runtime assembler。
+
+## 结构化存储状态词汇表
+
+下列术语同时用于 README、STORAGE 系列报告、部署说明、回填说明与运维排障，避免“已连接”“双库同步”“结构化存储完成”等表述继续分叉。
+
+其中“双写完成 / 仅 PG 模式”是主运行态，“待回填 / schema drift 待治理”是可叠加的治理状态。
+
+| 状态 | 含义 | 判读要点 |
+| --- | --- | --- |
+| 双写完成 | PostgreSQL + Neo4j 在同一轮 structured persist 后即可一致读取 session、phase execution、artifact 与图投影。 | `pg_status=active`、`neo4j_status=active`，且当前会话不依赖额外 writeback / backfill 才能补齐主链事实。 |
+| 仅 PG 模式 | PostgreSQL 写入已成立，但 Neo4j 未启用、初始化失败或当前不可用。 | 这是显式降级态，不等于完整双写成功。 |
+| 待回填 | 当前或历史会话仍需 writeback / backfill 才能补齐图投影、Observe 版本元数据或文献学结构化资产。 | 可与“双写完成”或“仅 PG 模式”叠加；重点是资产完整性尚未收口。 |
+| schema drift 待治理 | 健康检查或诊断已发现 schema / contract 偏差，服务可能仍可运行，但结构化状态不应视为完全收口。 | 发布、验收和排障时需要先清理迁移 / drift 告警。 |
 
 ## 系统特色
 
@@ -22,6 +35,8 @@
 - 安全与治理：支持 secrets 注入、监控告警、审计与最小化明文暴露。
 
 ## 系统架构
+
+> 下图是能力总览示意，不是 2026-04-14 的精确运行时接线图。当前真实入口装配、runtime_profile 语义与结构化持久化主链，应以 ResearchRuntimeService + RuntimeConfigAssembler + ResearchSessionRepository 的实现与测试基线为准。
 
 ```text
 ┌─────────────────────────────────────────────────────────┐

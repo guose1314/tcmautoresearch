@@ -1,22 +1,31 @@
 # 存储系统部署指南
 
+状态口径说明（2026-04-14）：
+
+- 部署、验收、回填和排障统一使用 README 中“结构化存储状态词汇表”的四个状态词：双写完成、仅 PG 模式、待回填、schema drift 待治理。
+- 当前主科研链的主写路径以 `StorageBackendFactory.transaction()` + `TransactionCoordinator` 为准；“组件已连接”“服务已启动”“迁移已完成”不自动等同于“双写完成”。
+- Neo4j 未启用、初始化失败或当前不可用时，系统允许进入“仅 PG 模式”；历史图投影和 Observe 结构化资产则可能继续处于“待回填”。
+
 ## 前置要求
 
 ### 1. PostgreSQL 安装
 
 #### Windows 安装
 
-**方式1：使用安装程序**
-- 下载PostgreSQL 14+: https://www.postgresql.org/download/windows/
-- 运行安装程序，记住root密码
+##### 方式1：使用安装程序
+
+- 下载 PostgreSQL 14+：[PostgreSQL Windows 下载页](https://www.postgresql.org/download/windows/)
+- 运行安装程序，记住 root 密码
 - 默认端口：5432
 
-**方式2：使用 Choco（如果已安装）**
+##### 方式2：使用 Choco（如果已安装）
+
 ```powershell
 choco install postgresql14
 ```
 
-**方式3：使用 Docker**
+##### 方式3：使用 Docker
+
 ```powershell
 docker run --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:14
 ```
@@ -45,13 +54,13 @@ ALTER DATABASE tcm_autoresearch OWNER TO tcm_user;
 
 ### 2. Neo4j 安装
 
-#### Windows 安装
+#### Neo4j Windows 安装
 
-**下载和安装 Neo4j**
+##### 下载和安装 Neo4j
 
-从你的D盘目录：`D:\neo4j-community-5.26.23-windows`
+从你的 D 盘目录：`D:\neo4j-community-5.26.23-windows`
 
-**启动Neo4j**
+##### 启动 Neo4j
 
 ```powershell
 # 进入Neo4j目录
@@ -65,8 +74,9 @@ cd D:\neo4j-community-5.26.23-windows\bin
 ./neo4j.exe start
 ```
 
-**访问 Neo4j Browser**
-- URL: http://localhost:7474
+##### 访问 Neo4j Browser
+
+- 地址：[http://localhost:7474](http://localhost:7474)
 - 默认用户: neo4j
 - 默认密码: neo4j（首次登录需更改）
 
@@ -181,6 +191,7 @@ spec:
 ```
 
 说明：
+
 - 推荐优先使用根路径 `/liveness` 和 `/readiness`，不要把集群探针绑死到 `/api/v1/system/...`。
 - `readiness` 失败表示应用暂时不应接流量。
 - `liveness` 失败表示进程已不可恢复，适合交给 Kubernetes 重启。
@@ -189,6 +200,7 @@ spec:
 ### 5. 应用 Secrets 注入
 
 应用层敏感项建议统一走 secrets 管理，而不是写在 `config.yml`。推荐方式：
+
 - 本地开发：使用 `secrets.yml` 或 `secrets/development.yml`
 - 测试/生产：通过 CI 或 Kubernetes Secret 注入 `TCM_SECRET__...` 环境变量
 
@@ -223,7 +235,7 @@ spec:
                                 name: tcmautoresearch-secrets
 ```
 
-                完整可部署示例：`deploy/k8s/tcmautoresearch-deployment.example.yaml`
+完整可部署示例见 [deploy/k8s/tcmautoresearch-deployment.example.yaml](deploy/k8s/tcmautoresearch-deployment.example.yaml)。
 
 ---
 
@@ -305,6 +317,7 @@ alembic -x url=postgresql://tcm_user:your_password@localhost:5432/tcm_autoresear
 ```
 
 运维约定：
+
 - 日常迁移优先使用 `-x environment=production`，由配置中心统一解析 `config.yml` + `config/production.yml`，并读取 `TCM_DB_PASSWORD`。
 - 只有在需要明确打某一台临时库或手工排障时，才使用 `-x url=...`。
 - 不再建议通过手工编辑 `alembic.ini` 来切换生产目标库，这种方式最容易误打错库。
@@ -317,6 +330,7 @@ alembic -x url=postgresql://tcm_user:your_password@localhost:5432/tcm_autoresear
 ```
 
 当前 `head` 已包含：
+
 - legacy native enum -> varchar 契约迁移
 - `entities.alternative_names` / `processing_statistics.source_modules` -> PostgreSQL `varchar[]` 契约迁移
 
@@ -362,6 +376,17 @@ stats = neo4j.get_graph_statistics()
 print(stats)
 neo4j.close()
 ```
+
+### 3. 结构化存储状态判读
+
+部署验收时，统一按以下口径判断状态：
+
+| 状态 | 验收含义 | 运维动作 |
+| --- | --- | --- |
+| 双写完成 | PostgreSQL 与 Neo4j 都处于 active，可对同一轮 structured persist 的 session / artifact / 图投影做一致读取。 | 记录为主链健康；继续关注是否仍有待回填项。 |
+| 仅 PG 模式 | PostgreSQL 写入成立，但 Neo4j 未启用、初始化失败或不可用。 | 视为显式降级态，不能对外宣称完整双写成功。 |
+| 待回填 | 历史图投影、Observe 版本元数据或文献学结构化资产仍需 writeback / backfill。 | 在发布前执行补齐，并把结果并入验收记录。 |
+| schema drift 待治理 | 迁移、health check 或 drift 诊断仍有未清理告警。 | 先治理 schema / contract 偏差，再确认结构化状态收口。 |
 
 ---
 
@@ -460,6 +485,7 @@ def process_with_storage(source_file: str, raw_text: str, config: dict) -> list[
 **问题**：`psycopg2.OperationalError: could not connect to server`
 
 **解决方案**：
+
 1. 检查PostgreSQL服务是否运行：`services.msc` → 搜索PostgreSQL
 2. 检查端口：`netstat -ano | findstr :5432`
 3. 检查防火墙规则
@@ -470,20 +496,23 @@ def process_with_storage(source_file: str, raw_text: str, config: dict) -> list[
 **问题**：`neo4j.exceptions.AuthError: The client is unauthorized`
 
 **解决方案**：
+
 1. 确认Neo4j正在运行
-2. 重置密码：访问 http://localhost:7474 → 重置
+2. 重置密码：访问 [http://localhost:7474](http://localhost:7474) → 重置
 3. 检查URI格式（bolt vs http）
 4. 防火墙是否开放7687端口
 
 ### Q3: 内存不足
 
 **解决方案**：
+
 - PostgreSQL：增加 `shared_buffers`, `effective_cache_size`
 - Neo4j：增加 `dbms.memory.heap.max_size`
 
 ### Q4: UUID冲突
 
 **解决方案**：
+
 - 使用 `uuid-ossp` 扩展（自动处理）
 - 或使用 `uuid.uuid4()` 生成唯一ID
 
@@ -563,8 +592,8 @@ DELETE FROM processing_logs WHERE timestamp < NOW() - INTERVAL '90 days';
 
 ## 参考文档
 
-- PostgreSQL文档：https://www.postgresql.org/docs/
-- Neo4j文档：https://neo4j.com/docs/
-- SQLAlchemy文档：https://docs.sqlalchemy.org/
-- Neo4j Python驱动：https://neo4j.com/docs/driver-manual/current/
+- [PostgreSQL 文档](https://www.postgresql.org/docs/)
+- [Neo4j 文档](https://neo4j.com/docs/)
+- [SQLAlchemy 文档](https://docs.sqlalchemy.org/)
+- [Neo4j Python 驱动文档](https://neo4j.com/docs/driver-manual/current/)
 

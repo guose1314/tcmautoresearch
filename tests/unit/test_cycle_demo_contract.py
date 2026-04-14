@@ -2,11 +2,11 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import run_cycle_demo
-from src.cycle.cycle_runner import execute_real_module_pipeline, run_iteration_cycle
-from src.research.study_session_manager import ResearchPhase
+from src.cycle.cycle_runner import run_iteration_cycle
 
 
 class TestCycleDemoContract(unittest.TestCase):
@@ -96,72 +96,72 @@ class TestCycleDemoContract(unittest.TestCase):
             run_cycle_demo.run_research_session = original_run_research_session
 
     def test_run_research_session_can_export_markdown_report(self):
-        class FakeCycle:
-            def __init__(self):
-                self.cycle_id = "cycle_demo_research"
-                self.cycle_name = "research_demo"
-                self.description = "测试问题"
-                self.research_objective = "测试问题"
-                self.research_scope = "中医药"
-                self.researchers = []
-                self.phase_executions = {}
+        captured = {}
 
-        class FakePipeline:
-            def __init__(self, config=None):
-                self.config = config or {}
-                self.cycle = FakeCycle()
-
-            def create_research_cycle(self, **kwargs):
-                return self.cycle
-
-            def start_research_cycle(self, cycle_id):
-                return True
-
-            def execute_research_phase(self, cycle_id, phase, phase_context=None):
-                if phase is ResearchPhase.OBSERVE:
-                    result = {
-                        "phase": "observe",
-                        "observations": ["小柴胡汤配伍具有核心药对特征"],
-                        "findings": ["柴胡与黄芩在多来源数据中稳定共现"],
-                        "literature_pipeline": {
-                            "summaries": ["现有文献认为小柴胡汤具有和解少阳的核心作用"],
-                            "evidence_matrix": [{"intervention": "小柴胡汤", "outcome": "症状改善", "evidence_level": "moderate"}],
-                        },
-                        "ingestion_pipeline": {
-                            "entities": [{"name": "小柴胡汤"}, {"name": "柴胡"}, {"name": "黄芩"}],
-                            "semantic_graph": {"nodes": ["小柴胡汤", "柴胡", "黄芩"], "edges": [["小柴胡汤", "柴胡"], ["小柴胡汤", "黄芩"]]},
-                        },
-                    }
-                else:
-                    result = {"phase": phase.value}
-                self.cycle.phase_executions[phase] = {"result": result}
-                return result
-
-            def complete_research_cycle(self, cycle_id):
-                return True
-
-            def cleanup(self):
-                return True
-
-            def _serialize_cycle(self, cycle):
+        class _FakeRuntimeResult(SimpleNamespace):
+            @property
+            def session_result(self):
+                publish_result = self.phase_results.get("publish") if isinstance(self.phase_results.get("publish"), dict) else {}
+                publish_output_files = dict(publish_result.get("output_files") or {}) if isinstance(publish_result, dict) else {}
+                question = str(self.orchestration_result.topic or "")
                 return {
-                    "cycle_id": cycle.cycle_id,
-                    "cycle_name": cycle.cycle_name,
-                    "phase_executions": {
-                        phase.value: payload for phase, payload in cycle.phase_executions.items()
+                    "status": self.orchestration_result.status,
+                    "session_id": self.orchestration_result.cycle_id,
+                    "cycle_id": self.orchestration_result.cycle_id,
+                    "title": f"中医科研 IMRD 报告：{question}",
+                    "question": question,
+                    "research_question": question,
+                    "executed_phases": list(self.phase_results.keys()),
+                    "phase_results": dict(self.phase_results),
+                    "metadata": {
+                        "research_question": question,
+                        "cycle_name": self.orchestration_result.pipeline_metadata.get("cycle_name"),
                     },
+                    "cycle_snapshot": dict(self.cycle_snapshot),
+                    "report_outputs": publish_output_files,
                 }
 
-        import src.research.research_pipeline as research_pipeline_module
+        class FakeRuntimeService:
+            def __init__(self, config=None):
+                self.config = config or {}
+                self.phase_names = list(self.config.get("phases") or ["observe"])
 
-        original_pipeline = research_pipeline_module.ResearchPipeline
-        try:
-            research_pipeline_module.ResearchPipeline = FakePipeline
+            def run(self, topic, **kwargs):
+                captured["config"] = dict(self.config)
+                captured["topic"] = topic
+                captured["kwargs"] = dict(kwargs)
+                output_path = Path(kwargs["report_output_dir"]) / "report.md"
+                output_path.write_text(
+                    "## Introduction\n\n## Methods\n\n## Results\n\n## Discussion\n",
+                    encoding="utf-8",
+                )
+                return _FakeRuntimeResult(
+                    orchestration_result=SimpleNamespace(
+                        status="completed",
+                        cycle_id="cycle_demo_research",
+                        pipeline_metadata={"cycle_name": "research_demo"},
+                        observe_philology={},
+                        topic=topic,
+                    ),
+                    phase_results={
+                        "observe": {"phase": "observe", "status": "completed"},
+                        "publish": {
+                            "phase": "publish",
+                            "status": "completed",
+                            "output_files": {"markdown": str(output_path)},
+                        },
+                    },
+                    cycle_snapshot={"cycle_id": "cycle_demo_research"},
+                )
+
+        with patch("src.cycle.cycle_research_session.ResearchRuntimeService", FakeRuntimeService):
             with TemporaryDirectory() as tmp:
                 result = run_cycle_demo.run_research_session(
                     question="小柴胡汤的方剂配伍规律研究",
-                    config={},
-                    phase_names=["observe"],
+                    config={
+                        "pipeline_config": {},
+                        "runtime_profile": "demo_research",
+                    },
                     export_report_formats=["markdown"],
                     report_output_dir=tmp,
                 )
@@ -169,14 +169,65 @@ class TestCycleDemoContract(unittest.TestCase):
                 self.assertEqual(result["status"], "completed")
                 self.assertIn("report_outputs", result)
                 self.assertIn("markdown", result["report_outputs"])
+                self.assertEqual(result["question"], "小柴胡汤的方剂配伍规律研究")
+                self.assertEqual(captured["config"]["runtime_profile"], "demo_research")
+                self.assertNotIn("phases", captured["config"])
+                self.assertNotIn("cycle_name", captured["kwargs"])
+                self.assertNotIn("scope", captured["kwargs"])
+                self.assertNotIn("description", captured["kwargs"])
                 self.assertTrue(Path(result["report_outputs"]["markdown"]).exists())
                 markdown_text = Path(result["report_outputs"]["markdown"]).read_text(encoding="utf-8")
                 self.assertIn("## Introduction", markdown_text)
                 self.assertIn("## Methods", markdown_text)
                 self.assertIn("## Results", markdown_text)
                 self.assertIn("## Discussion", markdown_text)
-        finally:
-            research_pipeline_module.ResearchPipeline = original_pipeline
+
+    def test_run_research_session_does_not_inject_local_runtime_profile(self):
+        captured = {}
+
+        class _FakeRuntimeResult(SimpleNamespace):
+            @property
+            def session_result(self):
+                return {
+                    "status": self.orchestration_result.status,
+                    "question": self.orchestration_result.topic,
+                    "metadata": {},
+                    "phase_results": {},
+                    "cycle_snapshot": {},
+                }
+
+        class FakeRuntimeService:
+            def __init__(self, config=None):
+                self.config = config or {}
+                self.phase_names = list(self.config.get("phases") or ["observe"])
+                captured["config"] = dict(self.config)
+
+            def run(self, topic, **kwargs):
+                captured["topic"] = topic
+                captured["kwargs"] = dict(kwargs)
+                return _FakeRuntimeResult(
+                    orchestration_result=SimpleNamespace(
+                        status="completed",
+                        topic=topic,
+                    ),
+                )
+
+        with patch("src.cycle.cycle_research_session.ResearchRuntimeService", FakeRuntimeService):
+            result = run_cycle_demo.run_research_session(
+                question="桂枝汤的配伍规律",
+                config={"models": {"llm": {"provider": "local"}}},
+            )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(captured["topic"], "桂枝汤的配伍规律")
+        self.assertEqual(
+            captured["config"],
+            {"pipeline_config": {"models": {"llm": {"provider": "local"}}}},
+        )
+        self.assertNotIn("runtime_profile", captured["config"])
+        self.assertNotIn("cycle_name", captured["kwargs"])
+        self.assertNotIn("description", captured["kwargs"])
+        self.assertNotIn("scope", captured["kwargs"])
 
     def test_main_forwards_report_switches_to_research_session(self):
         original_run_research_session = run_cycle_demo.run_research_session

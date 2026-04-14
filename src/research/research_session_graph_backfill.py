@@ -114,6 +114,69 @@ def build_observe_entity_graph_properties(entity_record: Mapping[str, Any]) -> D
     return _compact_graph_properties(payload)
 
 
+def _observe_document_version_metadata(document_record: Mapping[str, Any]) -> Dict[str, Any]:
+    version_metadata = document_record.get("version_metadata") if isinstance(document_record.get("version_metadata"), dict) else {}
+    if version_metadata:
+        return dict(version_metadata)
+    metadata = document_record.get("metadata") if isinstance(document_record.get("metadata"), dict) else {}
+    nested_version_metadata = metadata.get("version_metadata") if isinstance(metadata.get("version_metadata"), dict) else {}
+    return dict(nested_version_metadata)
+
+
+def _observe_version_lineage_node_id(document_record: Mapping[str, Any]) -> str:
+    version_metadata = _observe_document_version_metadata(document_record)
+    lineage_key = str(version_metadata.get("version_lineage_key") or version_metadata.get("work_fragment_key") or "").strip()
+    if not lineage_key:
+        return ""
+    return f"version_lineage::{lineage_key}"
+
+
+def _observe_version_witness_node_id(document_record: Mapping[str, Any]) -> str:
+    version_metadata = _observe_document_version_metadata(document_record)
+    witness_key = str(version_metadata.get("witness_key") or document_record.get("id") or document_record.get("urn") or "").strip()
+    if not witness_key:
+        return ""
+    return f"version_witness::{witness_key}"
+
+
+def build_observe_version_lineage_graph_properties(document_record: Mapping[str, Any]) -> Dict[str, Any]:
+    version_metadata = _observe_document_version_metadata(document_record)
+    payload = {
+        "version_lineage_key": str(version_metadata.get("version_lineage_key") or "").strip(),
+        "work_fragment_key": str(version_metadata.get("work_fragment_key") or "").strip(),
+        "work_title": str(version_metadata.get("work_title") or document_record.get("work_title") or "").strip(),
+        "fragment_title": str(version_metadata.get("fragment_title") or document_record.get("fragment_title") or "").strip(),
+        "dynasty": str(version_metadata.get("dynasty") or document_record.get("dynasty") or "").strip(),
+        "author": str(version_metadata.get("author") or document_record.get("author") or "").strip(),
+        "edition": str(version_metadata.get("edition") or document_record.get("edition") or "").strip(),
+        "lineage_id_source": "version_lineage_key" if version_metadata.get("version_lineage_key") else "work_fragment_key",
+    }
+    return _compact_graph_properties(payload)
+
+
+def build_observe_version_witness_graph_properties(document_record: Mapping[str, Any]) -> Dict[str, Any]:
+    version_metadata = _observe_document_version_metadata(document_record)
+    payload = {
+        "witness_key": str(version_metadata.get("witness_key") or document_record.get("id") or document_record.get("urn") or "").strip(),
+        "version_lineage_key": str(version_metadata.get("version_lineage_key") or document_record.get("version_lineage_key") or "").strip(),
+        "work_fragment_key": str(version_metadata.get("work_fragment_key") or document_record.get("work_fragment_key") or "").strip(),
+        "catalog_id": str(version_metadata.get("catalog_id") or document_record.get("catalog_id") or "").strip(),
+        "work_title": str(version_metadata.get("work_title") or document_record.get("work_title") or "").strip(),
+        "fragment_title": str(version_metadata.get("fragment_title") or document_record.get("fragment_title") or "").strip(),
+        "dynasty": str(version_metadata.get("dynasty") or document_record.get("dynasty") or "").strip(),
+        "author": str(version_metadata.get("author") or document_record.get("author") or "").strip(),
+        "edition": str(version_metadata.get("edition") or document_record.get("edition") or "").strip(),
+        "source_type": str(version_metadata.get("source_type") or document_record.get("source_type") or "").strip(),
+        "source_ref": str(version_metadata.get("source_ref") or document_record.get("urn") or "").strip(),
+        "document_id": str(document_record.get("id") or "").strip(),
+        "document_urn": str(document_record.get("urn") or "").strip(),
+        "document_title": str(document_record.get("title") or "").strip(),
+        "cycle_id": str(document_record.get("cycle_id") or "").strip(),
+        "phase_execution_id": str(document_record.get("phase_execution_id") or "").strip(),
+    }
+    return _compact_graph_properties(payload)
+
+
 def build_research_session_graph_nodes(session_records: Sequence[Mapping[str, Any]]) -> List[Neo4jNode]:
     nodes: List[Neo4jNode] = []
     for session_record in session_records:
@@ -208,6 +271,44 @@ def build_observe_entity_graph_nodes(
                     properties=build_observe_entity_graph_properties(entity_record),
                 )
             )
+    return nodes
+
+
+def build_observe_version_graph_nodes(
+    observe_documents: Sequence[Mapping[str, Any]],
+) -> List[Neo4jNode]:
+    nodes: List[Neo4jNode] = []
+    seen: set[tuple[str, str]] = set()
+    for document_record in observe_documents:
+        version_metadata = _observe_document_version_metadata(document_record)
+        if not version_metadata:
+            continue
+
+        lineage_node_id = _observe_version_lineage_node_id(document_record)
+        if lineage_node_id:
+            lineage_key = ("VersionLineage", lineage_node_id)
+            if lineage_key not in seen:
+                seen.add(lineage_key)
+                nodes.append(
+                    Neo4jNode(
+                        id=lineage_node_id,
+                        label="VersionLineage",
+                        properties=build_observe_version_lineage_graph_properties(document_record),
+                    )
+                )
+
+        witness_node_id = _observe_version_witness_node_id(document_record)
+        if witness_node_id:
+            witness_key = ("VersionWitness", witness_node_id)
+            if witness_key not in seen:
+                seen.add(witness_key)
+                nodes.append(
+                    Neo4jNode(
+                        id=witness_node_id,
+                        label="VersionWitness",
+                        properties=build_observe_version_witness_graph_properties(document_record),
+                    )
+                )
     return nodes
 
 
@@ -380,6 +481,79 @@ def build_observe_graph_edges(
     return edges
 
 
+def build_observe_version_graph_edges(
+    cycle_id: str,
+    observe_phase_id: str,
+    observe_documents: Sequence[Mapping[str, Any]],
+) -> List[Tuple[Neo4jEdge, str, str]]:
+    normalized_cycle_id = str(cycle_id or "").strip()
+    normalized_phase_id = str(observe_phase_id or "").strip()
+    edges: List[Tuple[Neo4jEdge, str, str]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+
+    def _append_edge(edge: Neo4jEdge, source_label: str, target_label: str) -> None:
+        key = (source_label, edge.source_id, edge.relationship_type, target_label, edge.target_id)
+        if key in seen:
+            return
+        seen.add(key)
+        edges.append((edge, source_label, target_label))
+
+    for document_record in observe_documents:
+        version_metadata = _observe_document_version_metadata(document_record)
+        if not version_metadata:
+            continue
+
+        witness_node_id = _observe_version_witness_node_id(document_record)
+        lineage_node_id = _observe_version_lineage_node_id(document_record)
+        document_id = str(document_record.get("id") or "").strip()
+        document_urn = str(document_record.get("urn") or "").strip()
+        document_title = str(document_record.get("title") or "").strip()
+
+        if normalized_phase_id and witness_node_id:
+            _append_edge(
+                Neo4jEdge(
+                    source_id=normalized_phase_id,
+                    target_id=witness_node_id,
+                    relationship_type="OBSERVED_WITNESS",
+                    properties=_compact_graph_properties(
+                        {
+                            "cycle_id": normalized_cycle_id,
+                            "phase": "observe",
+                            "phase_execution_id": normalized_phase_id,
+                            "document_id": document_id,
+                            "document_urn": document_urn,
+                            "document_title": document_title,
+                            "version_lineage_key": str(version_metadata.get("version_lineage_key") or "").strip(),
+                            "witness_key": str(version_metadata.get("witness_key") or "").strip(),
+                        }
+                    ),
+                ),
+                "ResearchPhaseExecution",
+                "VersionWitness",
+            )
+
+        if witness_node_id and lineage_node_id:
+            _append_edge(
+                Neo4jEdge(
+                    source_id=witness_node_id,
+                    target_id=lineage_node_id,
+                    relationship_type="BELONGS_TO_LINEAGE",
+                    properties=_compact_graph_properties(
+                        {
+                            "cycle_id": normalized_cycle_id or str(document_record.get("cycle_id") or "").strip(),
+                            "work_fragment_key": str(version_metadata.get("work_fragment_key") or "").strip(),
+                            "version_lineage_key": str(version_metadata.get("version_lineage_key") or "").strip(),
+                            "catalog_id": str(version_metadata.get("catalog_id") or document_record.get("catalog_id") or "").strip(),
+                        }
+                    ),
+                ),
+                "VersionWitness",
+                "VersionLineage",
+            )
+
+    return edges
+
+
 def _iter_session_batches(repository: Any, batch_size: int) -> Iterable[List[Dict[str, Any]]]:
     effective_batch_size = max(int(batch_size or 0), 1)
     offset = 0
@@ -459,11 +633,15 @@ def backfill_structured_research_graph(
             "phase_node_count": 0,
             "artifact_node_count": 0,
             "observe_entity_node_count": 0,
+            "version_lineage_node_count": 0,
+            "version_witness_node_count": 0,
             "has_phase_edge_count": 0,
             "generated_edge_count": 0,
             "has_artifact_edge_count": 0,
             "semantic_edge_count": 0,
             "captured_edge_count": 0,
+            "observed_witness_edge_count": 0,
+            "belongs_to_lineage_edge_count": 0,
         }
 
     batch_count = 0
@@ -471,11 +649,15 @@ def backfill_structured_research_graph(
     phase_node_count = 0
     artifact_node_count = 0
     observe_entity_node_count = 0
+    version_lineage_node_count = 0
+    version_witness_node_count = 0
     has_phase_edge_count = 0
     generated_edge_count = 0
     has_artifact_edge_count = 0
     semantic_edge_count = 0
     captured_edge_count = 0
+    observed_witness_edge_count = 0
+    belongs_to_lineage_edge_count = 0
 
     for snapshot_batch in _iter_session_snapshot_batches(repository, batch_size):
         nodes: List[Neo4jNode] = []
@@ -493,26 +675,34 @@ def backfill_structured_research_graph(
             phase_nodes = build_research_phase_execution_graph_nodes(cycle_id, phase_records)
             artifact_nodes = build_research_artifact_graph_nodes(cycle_id, artifact_records)
             observe_entity_nodes = build_observe_entity_graph_nodes(observe_documents)
+            observe_version_nodes = build_observe_version_graph_nodes(observe_documents)
             batch_edges = build_research_graph_edges(cycle_id, phase_records, artifact_records)
             observe_phase_id = str((next((record for record in phase_records if str(record.get("phase") or "").strip() == "observe"), {}) or {}).get("id") or "").strip()
             observe_edges = build_observe_graph_edges(cycle_id, observe_phase_id, observe_documents)
+            observe_version_edges = build_observe_version_graph_edges(cycle_id, observe_phase_id, observe_documents)
 
             nodes.extend(session_nodes)
             nodes.extend(phase_nodes)
             nodes.extend(artifact_nodes)
             nodes.extend(observe_entity_nodes)
+            nodes.extend(observe_version_nodes)
             edges.extend(batch_edges)
             edges.extend(observe_edges)
+            edges.extend(observe_version_edges)
 
             session_node_count += len(session_nodes)
             phase_node_count += len(phase_nodes)
             artifact_node_count += len(artifact_nodes)
             observe_entity_node_count += len(observe_entity_nodes)
+            version_lineage_node_count += sum(1 for node in observe_version_nodes if node.label == "VersionLineage")
+            version_witness_node_count += sum(1 for node in observe_version_nodes if node.label == "VersionWitness")
             has_phase_edge_count += sum(1 for edge, _, _ in batch_edges if edge.relationship_type == "HAS_PHASE")
             generated_edge_count += sum(1 for edge, _, _ in batch_edges if edge.relationship_type == "GENERATED")
             has_artifact_edge_count += sum(1 for edge, _, _ in batch_edges if edge.relationship_type == "HAS_ARTIFACT")
             semantic_edge_count += sum(1 for edge, _, _ in observe_edges if edge.relationship_type != "CAPTURED")
             captured_edge_count += sum(1 for edge, _, _ in observe_edges if edge.relationship_type == "CAPTURED")
+            observed_witness_edge_count += sum(1 for edge, _, _ in observe_version_edges if edge.relationship_type == "OBSERVED_WITNESS")
+            belongs_to_lineage_edge_count += sum(1 for edge, _, _ in observe_version_edges if edge.relationship_type == "BELONGS_TO_LINEAGE")
 
         if not nodes:
             continue
@@ -522,19 +712,38 @@ def backfill_structured_research_graph(
             raise RuntimeError("Neo4j batch_create_relationships returned False while backfilling structured research graph edges")
         batch_count += 1
 
-    edge_count = has_phase_edge_count + generated_edge_count + has_artifact_edge_count + semantic_edge_count + captured_edge_count
+    edge_count = (
+        has_phase_edge_count
+        + generated_edge_count
+        + has_artifact_edge_count
+        + semantic_edge_count
+        + captured_edge_count
+        + observed_witness_edge_count
+        + belongs_to_lineage_edge_count
+    )
     return {
         "status": "active",
         "batch_count": batch_count,
-        "node_count": session_node_count + phase_node_count + artifact_node_count + observe_entity_node_count,
+        "node_count": (
+            session_node_count
+            + phase_node_count
+            + artifact_node_count
+            + observe_entity_node_count
+            + version_lineage_node_count
+            + version_witness_node_count
+        ),
         "edge_count": edge_count,
         "session_node_count": session_node_count,
         "phase_node_count": phase_node_count,
         "artifact_node_count": artifact_node_count,
         "observe_entity_node_count": observe_entity_node_count,
+        "version_lineage_node_count": version_lineage_node_count,
+        "version_witness_node_count": version_witness_node_count,
         "has_phase_edge_count": has_phase_edge_count,
         "generated_edge_count": generated_edge_count,
         "has_artifact_edge_count": has_artifact_edge_count,
         "semantic_edge_count": semantic_edge_count,
         "captured_edge_count": captured_edge_count,
+        "observed_witness_edge_count": observed_witness_edge_count,
+        "belongs_to_lineage_edge_count": belongs_to_lineage_edge_count,
     }

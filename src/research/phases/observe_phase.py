@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, Dict, List
+import re
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping
 
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
 from src.collector.corpus_bundle import (
     CorpusBundle,
+    build_document_version_metadata,
     extract_text_entries,
     is_corpus_bundle,
 )
 from src.cycle.cycle_runner import execute_real_module_pipeline
+from src.research.observe_philology import build_observe_philology_artifact_payloads
 from src.research.phase_result import build_phase_result
 
 
@@ -45,6 +48,7 @@ class ObservePhaseMixin:
             ingestion_result,
             literature_result,
         )
+        artifacts = self._build_observe_philology_artifacts(ingestion_result)
         status = "degraded" if any(
             isinstance(item, dict) and item.get("error")
             for item in (corpus_result, ingestion_result, literature_result)
@@ -59,6 +63,7 @@ class ObservePhaseMixin:
                 "ingestion_pipeline": ingestion_result,
                 "literature_pipeline": literature_result,
             },
+            artifacts=artifacts,
             metadata=metadata,
             extra_fields={
                 "observations": observations,
@@ -203,6 +208,27 @@ class ObservePhaseMixin:
         observations.append(
             f"已完成 {ingestion_result.get('processed_document_count', 0)} 篇文本的预处理、实体抽取与语义建模"
         )
+        philology_document_count = int(aggregate.get("philology_document_count") or 0)
+        term_mapping_count = int(aggregate.get("term_mapping_count") or 0)
+        orthographic_variant_count = int(aggregate.get("orthographic_variant_count") or 0)
+        recognized_term_count = int(aggregate.get("recognized_term_count") or 0)
+        terminology_standard_table_count = int(aggregate.get("terminology_standard_table_count") or 0)
+        version_collation_difference_count = int(aggregate.get("version_collation_difference_count") or 0)
+        collation_entry_count = int(aggregate.get("collation_entry_count") or 0)
+        if philology_document_count:
+            observations.append(f"已对 {philology_document_count} 篇文本执行术语标准化与文献学注记")
+        if term_mapping_count or orthographic_variant_count:
+            findings.append(
+                f"文献学层累计完成 {term_mapping_count + orthographic_variant_count} 处术语归一或异写识别"
+            )
+        if recognized_term_count:
+            findings.append(f"文献学层输出 {recognized_term_count} 条术语训诂注记")
+        if terminology_standard_table_count:
+            findings.append(f"文献学层整理 {terminology_standard_table_count} 条术语标准表记录")
+        if version_collation_difference_count:
+            findings.append(f"版本对勘累计发现 {version_collation_difference_count} 处异文")
+        if collation_entry_count:
+            findings.append(f"文献学层生成 {collation_entry_count} 条可复用校勘条目")
         findings.append(f"首段主流程累计识别 {aggregate.get('total_entities', 0)} 个实体")
         findings.append(
             f"累计构建 {aggregate.get('semantic_graph_nodes', 0)} 个语义节点与 {aggregate.get('semantic_graph_edges', 0)} 条关系"
@@ -248,6 +274,7 @@ class ObservePhaseMixin:
             ingestion_result,
             ingestion_ok,
         )
+        ingestion_aggregate = (ingestion_result or {}).get("aggregate") or {}
 
         return {
             "data_source": self._resolve_observe_data_source(context),
@@ -259,6 +286,14 @@ class ObservePhaseMixin:
             "ctext_groups": self._resolve_whitelist_groups(context),
             "downstream_processing": downstream_processing,
             "semantic_modeling": semantic_modeling,
+            "philology_processing": bool(ingestion_aggregate.get("philology_document_count", 0) > 0),
+            "terminology_standardization": bool(
+                ingestion_aggregate.get("term_mapping_count", 0) > 0
+                or ingestion_aggregate.get("orthographic_variant_count", 0) > 0
+                or ingestion_aggregate.get("recognized_term_count", 0) > 0
+            ),
+            "version_collation": bool(ingestion_aggregate.get("version_collation_witness_count", 0) > 0),
+            "philology_artifacts": bool(ingestion_aggregate.get("philology_asset_count", 0) > 0),
             "output_generation": self._has_observe_output_generation(ingestion_result, ingestion_ok),
             "literature_retrieval": literature_ok,
             "evidence_matrix": self._has_observe_evidence_matrix(literature_result, literature_ok),
@@ -325,6 +360,13 @@ class ObservePhaseMixin:
 
         literature_config = self.pipeline.config.get("literature_retrieval", {})
         return bool(literature_config.get("enabled", False))
+
+    def _should_run_observe_philology(self, context: Dict[str, Any]) -> bool:
+        if "run_philology" in context:
+            return bool(context.get("run_philology"))
+
+        philology_config = self.pipeline.config.get("philology_service", {})
+        return bool(philology_config.get("enabled", True))
 
     def _run_observe_literature_pipeline(self, context: Dict[str, Any]) -> Dict[str, Any]:
         literature_config = self.pipeline.config.get("literature_retrieval", {})
@@ -509,6 +551,8 @@ class ObservePhaseMixin:
             self.pipeline.logger.error("观察阶段子流程初始化失败: %s", e)
             return {"error": str(e)}
 
+        version_witness_map = self._build_observe_version_witness_map(text_entries)
+
         document_results: List[Dict[str, Any]] = []
         entity_type_counts: Dict[str, int] = {}
         total_entities = 0
@@ -519,30 +563,59 @@ class ObservePhaseMixin:
         reasoning_summaries: List[Dict[str, Any]] = []
         output_quality_metrics: List[Dict[str, Any]] = []
         output_recommendations: List[str] = []
+        philology_document_count = 0
+        term_mapping_count = 0
+        orthographic_variant_count = 0
+        recognized_term_count = 0
+        terminology_standard_table_count = 0
+        version_collation_difference_count = 0
+        version_collation_witness_count = 0
+        collation_entry_count = 0
+        philology_notes: List[str] = []
 
         try:
-            for entry in selected_entries:
+            for index, entry in enumerate(selected_entries):
                 raw_text = entry.get("text", "")[:max_chars_per_text]
+                entry_key = self._build_observe_entry_key(entry, index)
                 module_results = execute_real_module_pipeline(
                     {
                         "raw_text": raw_text,
                         "source_file": entry.get("urn", "unknown"),
-                        "metadata": {
-                            "title": entry.get("title", ""),
-                            "source": "ctext",
-                            "collection_stage": "observe",
-                        },
+                        "parallel_versions": version_witness_map.get(entry_key, []),
+                        "metadata": self._build_observe_entry_metadata(entry),
                     },
                     modules=module_chain,
                     manage_module_lifecycle=False,
                     optional_modules={"ReasoningEngine", "OutputGenerator"},
                 )
 
+                philology_result = self._extract_module_output(module_results, "PhilologyService")
                 preprocess_result = self._extract_module_output(module_results, "DocumentPreprocessor")
                 extraction_result = self._extract_module_output(module_results, "EntityExtractor")
                 semantic_result = self._extract_module_output(module_results, "SemanticModeler")
                 reasoning_result = self._extract_module_output(module_results, "ReasoningEngine")
                 output_result = self._extract_module_output(module_results, "OutputGenerator")
+
+                philology_payload = philology_result.get("philology", {}) if isinstance(philology_result, dict) else {}
+                term_standardization = philology_payload.get("term_standardization", {})
+                version_collation = philology_payload.get("version_collation", {})
+                philology_assets = philology_payload.get("philology_assets", {}) if isinstance(philology_payload, dict) else {}
+                document_philology_notes = philology_payload.get("philology_notes", []) or philology_result.get("philology_notes", [])
+
+                if philology_payload:
+                    philology_document_count += 1
+                term_mapping_count += int(term_standardization.get("mapping_count") or 0)
+                orthographic_variant_count += int(term_standardization.get("orthographic_variant_count") or 0)
+                recognized_term_count += int(term_standardization.get("recognized_term_count") or 0)
+                terminology_standard_table_count += int(term_standardization.get("terminology_standard_table_count") or 0)
+                version_collation_difference_count += int(version_collation.get("difference_count") or 0)
+                if int(version_collation.get("witness_count") or 0) > 0:
+                    version_collation_witness_count += 1
+                collation_entry_count += int(version_collation.get("collation_entry_count") or 0)
+                for note in document_philology_notes:
+                    note_text = str(note or "").strip()
+                    if note_text and note_text not in philology_notes:
+                        philology_notes.append(note_text)
 
                 entities = extraction_result.get("entities", [])
                 total_entities += len(entities)
@@ -576,8 +649,13 @@ class ObservePhaseMixin:
                     {
                         "urn": entry.get("urn", ""),
                         "title": entry.get("title", ""),
+                        "source_type": entry.get("source_type", "unknown"),
+                        "metadata": self._build_observe_entry_metadata(entry),
                         "raw_text_preview": raw_text[:120],
                         "raw_text_size": len(raw_text),
+                        "philology": philology_payload,
+                        "philology_notes": document_philology_notes,
+                        "philology_assets": philology_assets,
                         "processed_text_preview": preprocess_result.get("processed_text", "")[:120],
                         "processed_text_size": len(str(preprocess_result.get("processed_text", "") or "")),
                         "entities": self._deduplicate_entities(entities),
@@ -604,6 +682,37 @@ class ObservePhaseMixin:
                     if isinstance(entity, dict)
                 ]
             )
+            terminology_standard_table = self._aggregate_observe_terminology_standard_table(document_results)
+            collation_entries = self._aggregate_observe_collation_entries(document_results)
+            philology_annotation_report = self._build_observe_philology_annotation_report(
+                document_results,
+                {
+                    "processed_document_count": len(document_results),
+                    "philology_document_count": philology_document_count,
+                    "term_mapping_count": term_mapping_count,
+                    "orthographic_variant_count": orthographic_variant_count,
+                    "recognized_term_count": recognized_term_count,
+                    "terminology_standard_table_count": len(terminology_standard_table),
+                    "version_collation_difference_count": version_collation_difference_count,
+                    "version_collation_witness_count": version_collation_witness_count,
+                    "collation_entry_count": len(collation_entries),
+                    "philology_notes": philology_notes,
+                },
+            )
+            philology_assets = {
+                "terminology_standard_table": terminology_standard_table,
+                "collation_entries": collation_entries,
+                "annotation_report": philology_annotation_report,
+            }
+            philology_asset_count = sum(
+                1
+                for payload in (
+                    terminology_standard_table,
+                    collation_entries,
+                    philology_annotation_report,
+                )
+                if payload not in (None, "", [], {})
+            )
             return {
                 "processed_document_count": len(document_results),
                 "documents": document_results,
@@ -616,6 +725,17 @@ class ObservePhaseMixin:
                     "semantic_graph_nodes": total_semantic_nodes,
                     "semantic_graph_edges": total_semantic_edges,
                     "semantic_relationships": self._deduplicate_relationships(total_semantic_relationships),
+                    "philology_document_count": philology_document_count,
+                    "term_mapping_count": term_mapping_count,
+                    "orthographic_variant_count": orthographic_variant_count,
+                    "recognized_term_count": recognized_term_count,
+                    "terminology_standard_table_count": len(terminology_standard_table),
+                    "version_collation_difference_count": version_collation_difference_count,
+                    "version_collation_witness_count": version_collation_witness_count,
+                    "collation_entry_count": len(collation_entries),
+                    "philology_asset_count": philology_asset_count,
+                    "philology_assets": philology_assets,
+                    "philology_notes": philology_notes,
                     "reasoning_summary": self._merge_reasoning_summaries(reasoning_summaries),
                     "output_quality_metrics": output_quality_metrics,
                     "output_recommendations": output_recommendations,
@@ -631,14 +751,25 @@ class ObservePhaseMixin:
         self,
         context: Dict[str, Any],
     ) -> tuple[List[tuple[str, Any]], List[Any]]:
+        philology_service = self.pipeline.analysis_port.create_philology_service(
+            self._merge_observe_module_config(
+                self.pipeline.config.get("philology_service", {}),
+                context.get("philology_config") or {},
+            )
+        )
         preprocessor = self.pipeline.analysis_port.create_preprocessor(context.get("preprocessor_config") or {})
         extractor = self.pipeline.analysis_port.create_extractor(context.get("extractor_config") or {})
         semantic_builder = self.pipeline.analysis_port.create_semantic_builder(context.get("semantic_builder_config") or {})
         reasoning_engine = self.pipeline.analysis_port.create_reasoning_engine(context.get("reasoning_engine_config") or {})
         output_generator = self.pipeline.output_port.create_output_generator(context.get("output_generator_config") or {})
 
-        cleanup_modules = [output_generator, reasoning_engine, semantic_builder, extractor, preprocessor]
+        cleanup_modules = [output_generator, reasoning_engine, semantic_builder, extractor, preprocessor, philology_service]
         module_chain: List[tuple[str, Any]] = []
+
+        if self._should_run_observe_philology(context):
+            if not philology_service.initialize():
+                raise RuntimeError("文献学服务初始化失败")
+            module_chain.append(("PhilologyService", philology_service))
 
         if not preprocessor.initialize():
             raise RuntimeError("文档预处理器初始化失败")
@@ -666,6 +797,259 @@ class ObservePhaseMixin:
 
         return module_chain, cleanup_modules
 
+    def _build_observe_philology_artifacts(self, ingestion_result: Dict[str, Any] | None) -> List[Dict[str, Any]]:
+        if not ingestion_result or ingestion_result.get("error"):
+            return []
+
+        artifact_config = self.pipeline.config.get("philology_service", {}).get("artifact_output", {})
+        aggregate = ingestion_result.get("aggregate") if isinstance(ingestion_result, dict) else {}
+        philology_assets = aggregate.get("philology_assets") if isinstance(aggregate, dict) else {}
+        return build_observe_philology_artifact_payloads(philology_assets, artifact_config)
+
+    def _aggregate_observe_terminology_standard_table(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        seen: set[tuple[str, str, tuple[str, ...]]] = set()
+        for document in documents:
+            if not isinstance(document, dict):
+                continue
+            philology_assets = document.get("philology_assets") if isinstance(document.get("philology_assets"), dict) else {}
+            document_rows = philology_assets.get("terminology_standard_table") if isinstance(philology_assets.get("terminology_standard_table"), list) else []
+            for row in document_rows:
+                if not isinstance(row, dict):
+                    continue
+                observed_forms = tuple(sorted(str(item) for item in (row.get("observed_forms") or []) if str(item).strip()))
+                key = (
+                    str(document.get("urn") or document.get("title") or "").strip(),
+                    str(row.get("canonical") or "").strip(),
+                    observed_forms,
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(
+                    {
+                        **row,
+                        "document_title": str(document.get("title") or "").strip(),
+                        "document_urn": str(document.get("urn") or "").strip(),
+                        "source_type": str(document.get("source_type") or "").strip(),
+                    }
+                )
+        return rows
+
+    def _aggregate_observe_collation_entries(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        entries: List[Dict[str, Any]] = []
+        seen: set[tuple[str, str, str, str, str]] = set()
+        for document in documents:
+            if not isinstance(document, dict):
+                continue
+            philology_assets = document.get("philology_assets") if isinstance(document.get("philology_assets"), dict) else {}
+            document_entries = philology_assets.get("collation_entries") if isinstance(philology_assets.get("collation_entries"), list) else []
+            for entry in document_entries:
+                if not isinstance(entry, dict):
+                    continue
+                key = (
+                    str(document.get("urn") or document.get("title") or "").strip(),
+                    str(entry.get("witness_urn") or entry.get("witness_title") or "").strip(),
+                    str(entry.get("difference_type") or "").strip(),
+                    str(entry.get("base_text") or "").strip(),
+                    str(entry.get("witness_text") or "").strip(),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                entries.append(
+                    {
+                        **entry,
+                        "document_title": str(document.get("title") or "").strip(),
+                        "document_urn": str(document.get("urn") or "").strip(),
+                        "source_type": str(document.get("source_type") or "").strip(),
+                    }
+                )
+        return entries
+
+    def _build_observe_philology_annotation_report(
+        self,
+        documents: List[Dict[str, Any]],
+        summary: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        document_reports: List[Dict[str, Any]] = []
+        for document in documents:
+            if not isinstance(document, dict):
+                continue
+            philology = document.get("philology") if isinstance(document.get("philology"), dict) else {}
+            term_standardization = philology.get("term_standardization") if isinstance(philology.get("term_standardization"), dict) else {}
+            version_collation = philology.get("version_collation") if isinstance(philology.get("version_collation"), dict) else {}
+            document_reports.append(
+                {
+                    "document_title": str(document.get("title") or "").strip(),
+                    "document_urn": str(document.get("urn") or "").strip(),
+                    "source_type": str(document.get("source_type") or "").strip(),
+                    "mapping_count": int(term_standardization.get("mapping_count") or 0),
+                    "recognized_term_count": int(term_standardization.get("recognized_term_count") or 0),
+                    "terminology_standard_table_count": int(term_standardization.get("terminology_standard_table_count") or 0),
+                    "difference_count": int(version_collation.get("difference_count") or 0),
+                    "collation_entry_count": int(version_collation.get("collation_entry_count") or 0),
+                    "witness_count": int(version_collation.get("witness_count") or 0),
+                    "philology_notes": [str(note) for note in (document.get("philology_notes") or []) if str(note).strip()],
+                }
+            )
+        return {
+            "summary": dict(summary),
+            "documents": document_reports,
+        }
+
+    @staticmethod
+    def _merge_observe_module_config(base_config: Mapping[str, Any], override_config: Mapping[str, Any]) -> Dict[str, Any]:
+        merged: Dict[str, Any] = dict(base_config or {})
+        for key, value in (override_config or {}).items():
+            existing = merged.get(key)
+            if isinstance(existing, dict) and isinstance(value, Mapping):
+                merged[key] = ObservePhaseMixin._merge_observe_module_config(existing, value)
+                continue
+            merged[key] = value
+        return merged
+
+    def _build_observe_version_witness_map(
+        self,
+        entries: List[Dict[str, Any]],
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        lineage_groups: Dict[str, List[tuple[str, Dict[str, Any], Dict[str, Any]]]] = {}
+        work_fragment_groups: Dict[str, List[tuple[str, Dict[str, Any], Dict[str, Any]]]] = {}
+        indexed_entries: List[tuple[str, Dict[str, Any], Dict[str, Any]]] = []
+
+        for index, entry in enumerate(entries):
+            entry_key = self._build_observe_entry_key(entry, index)
+            version_metadata = self._extract_observe_entry_version_metadata(entry)
+            indexed_entry = (entry_key, entry, version_metadata)
+            indexed_entries.append(indexed_entry)
+
+            version_lineage_key = str(version_metadata.get("version_lineage_key") or "").strip()
+            if version_lineage_key:
+                lineage_groups.setdefault(version_lineage_key, []).append(indexed_entry)
+
+            work_fragment_key = str(version_metadata.get("work_fragment_key") or "").strip()
+            if work_fragment_key:
+                work_fragment_groups.setdefault(work_fragment_key, []).append(indexed_entry)
+
+        witness_map: Dict[str, List[Dict[str, Any]]] = {}
+        for entry_key, entry, version_metadata in indexed_entries:
+            version_lineage_key = str(version_metadata.get("version_lineage_key") or "").strip()
+            work_fragment_key = str(version_metadata.get("work_fragment_key") or "").strip()
+            selection_strategy = ""
+            grouped: List[tuple[str, Dict[str, Any], Dict[str, Any]]] = []
+
+            if version_lineage_key and len(lineage_groups.get(version_lineage_key, [])) > 1:
+                grouped = lineage_groups[version_lineage_key]
+                selection_strategy = "version_lineage_key"
+            elif work_fragment_key and len(work_fragment_groups.get(work_fragment_key, [])) > 1:
+                grouped = work_fragment_groups[work_fragment_key]
+                selection_strategy = "work_fragment_key"
+
+            if not grouped:
+                continue
+
+            base_witness_key = str(version_metadata.get("witness_key") or entry_key).strip()
+            ranked_candidates = sorted(
+                [candidate for candidate in grouped if candidate[0] != entry_key],
+                key=lambda candidate: self._score_observe_witness_candidate(version_metadata, candidate[2]),
+                reverse=True,
+            )
+
+            witness_payloads: List[Dict[str, Any]] = []
+            for other_key, other_entry, other_version_metadata in ranked_candidates:
+                witness_key = str(other_version_metadata.get("witness_key") or other_key).strip()
+                if witness_key == base_witness_key:
+                    continue
+                if not str(other_entry.get("text", "")).strip():
+                    continue
+                witness_payloads.append(
+                    self._build_observe_witness_payload(
+                        other_entry,
+                        selection_strategy=selection_strategy,
+                        version_metadata=other_version_metadata,
+                    )
+                )
+
+            if witness_payloads:
+                witness_map[entry_key] = witness_payloads
+        return witness_map
+
+    def _build_observe_entry_metadata(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        metadata = dict(entry.get("metadata") or {})
+        metadata.setdefault("title", entry.get("title", ""))
+        metadata.setdefault("source_type", entry.get("source_type", metadata.get("source_type") or "unknown"))
+        metadata.setdefault("source", metadata.get("source_name") or metadata.get("source") or metadata.get("source_type") or "unknown")
+        metadata.setdefault("collection_stage", "observe")
+        metadata.setdefault("source_file", entry.get("urn", "unknown"))
+        if entry.get("doc_id"):
+            metadata.setdefault("identifier", entry.get("doc_id"))
+
+        if not isinstance(metadata.get("version_metadata"), dict):
+            metadata["version_metadata"] = self._extract_observe_entry_version_metadata(entry)
+
+        return metadata
+
+    def _extract_observe_entry_version_metadata(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        version_metadata = entry.get("version_metadata")
+        if isinstance(version_metadata, dict) and version_metadata:
+            return dict(version_metadata)
+
+        metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+        if isinstance(metadata.get("version_metadata"), dict) and metadata.get("version_metadata"):
+            return dict(metadata["version_metadata"])
+
+        enriched_metadata = build_document_version_metadata(
+            title=str(entry.get("title") or ""),
+            source_type=str(entry.get("source_type") or metadata.get("source_type") or "unknown"),
+            source_ref=str(entry.get("urn") or metadata.get("source_file") or ""),
+            metadata=metadata,
+        )
+        return dict(enriched_metadata.get("version_metadata") or {})
+
+    def _score_observe_witness_candidate(
+        self,
+        base_version_metadata: Dict[str, Any],
+        candidate_version_metadata: Dict[str, Any],
+    ) -> int:
+        score = 0
+        if candidate_version_metadata.get("version_lineage_key") == base_version_metadata.get("version_lineage_key"):
+            score += 100
+        if candidate_version_metadata.get("work_fragment_key") == base_version_metadata.get("work_fragment_key"):
+            score += 50
+        if candidate_version_metadata.get("dynasty") and candidate_version_metadata.get("dynasty") == base_version_metadata.get("dynasty"):
+            score += 20
+        if candidate_version_metadata.get("author") and candidate_version_metadata.get("author") == base_version_metadata.get("author"):
+            score += 15
+        if candidate_version_metadata.get("source_name") and candidate_version_metadata.get("source_name") != base_version_metadata.get("source_name"):
+            score += 5
+        return score
+
+    def _build_observe_witness_payload(
+        self,
+        entry: Dict[str, Any],
+        *,
+        selection_strategy: str,
+        version_metadata: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return {
+            "urn": entry.get("urn", ""),
+            "title": entry.get("title", ""),
+            "text": entry.get("text", ""),
+            "source_type": entry.get("source_type", "unknown"),
+            "metadata": dict(entry.get("metadata") or {}),
+            "version_metadata": dict(version_metadata or {}),
+            "selection_strategy": selection_strategy,
+        }
+
+    def _build_observe_entry_key(self, entry: Dict[str, Any], index: int) -> str:
+        urn = str(entry.get("urn") or "").strip()
+        if urn:
+            return urn
+        title = str(entry.get("title") or "").strip()
+        if title:
+            return f"{title}::{index}"
+        return f"entry::{index}"
+
     def _cleanup_observe_subpipeline_modules(self, modules: List[Any]) -> None:
         for module in reversed(modules):
             try:
@@ -686,7 +1070,7 @@ class ObservePhaseMixin:
                 return output_data if isinstance(output_data, dict) else {}
         return {}
 
-    def _extract_corpus_text_entries(self, corpus_result: Dict[str, Any]) -> List[Dict[str, str]]:
+    def _extract_corpus_text_entries(self, corpus_result: Dict[str, Any]) -> List[Dict[str, Any]]:
         return extract_text_entries(corpus_result)
 
     def _extract_semantic_relationships(self, semantic_result: Dict[str, Any]) -> List[Dict[str, Any]]:

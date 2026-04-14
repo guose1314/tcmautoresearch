@@ -447,7 +447,124 @@
       </div>
     </main>
 
+    <div
+      id="session-detail-drawer"
+      class="fixed inset-0 z-50 hidden"
+      aria-hidden="true"
+    >
+      <div
+        class="absolute inset-0 bg-gray-900/40 backdrop-blur-sm"
+        onclick="closeSessionDetailDrawer()"
+      ></div>
+      <div
+        class="absolute right-0 top-0 h-full w-full max-w-4xl bg-white shadow-2xl overflow-y-auto"
+      >
+        <div
+          id="session-detail-drawer-content"
+          class="bg-white rounded-none border-0 shadow-none"
+        >
+          <div
+            class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3"
+          >
+            <div>
+              <h3 class="text-base font-semibold text-gray-800">
+                研究任务详情
+              </h3>
+              <p class="text-sm text-gray-400 mt-1">
+                聚合展示 Observe 阶段术语标准表与校勘条目
+              </p>
+            </div>
+            <button
+              type="button"
+              class="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-500 hover:text-gray-800 hover:border-gray-300 transition"
+              onclick="closeSessionDetailDrawer()"
+            >
+              关闭
+            </button>
+          </div>
+          <div class="p-6 text-sm text-gray-400">
+            从“最近研究任务”中选择一条记录查看详情。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      id="document-fragment-modal"
+      class="fixed inset-0 z-[60] hidden"
+      aria-hidden="true"
+    >
+      <div
+        class="absolute inset-0 bg-gray-900/50 backdrop-blur-sm"
+        onclick="closeDocumentFragmentModal()"
+      ></div>
+      <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div
+          id="document-fragment-modal-content"
+          class="bg-white rounded-2xl border border-gray-100 shadow-2xl max-w-3xl w-full overflow-hidden"
+        >
+          <div
+            class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3"
+          >
+            <div>
+              <h3 class="text-base font-semibold text-gray-800">
+                原始文档片段
+              </h3>
+              <p class="text-sm text-gray-400 mt-1">
+                点击校勘条目的“跳到原始片段”后在此预览
+              </p>
+            </div>
+            <button
+              type="button"
+              class="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-500 hover:text-gray-800 hover:border-gray-300 transition"
+              onclick="closeDocumentFragmentModal()"
+            >
+              关闭
+            </button>
+          </div>
+          <div class="p-6 text-sm text-gray-400">等待载入原始文档片段…</div>
+        </div>
+      </div>
+    </div>
+
     <script>
+      function openSessionDetailDrawer() {
+        var drawer = document.getElementById("session-detail-drawer");
+        if (!drawer) return;
+        drawer.classList.remove("hidden");
+        drawer.setAttribute("aria-hidden", "false");
+        document.body.classList.add("overflow-hidden");
+      }
+
+      function closeSessionDetailDrawer() {
+        var drawer = document.getElementById("session-detail-drawer");
+        if (!drawer) return;
+        drawer.classList.add("hidden");
+        drawer.setAttribute("aria-hidden", "true");
+        document.body.classList.remove("overflow-hidden");
+      }
+
+      function openDocumentFragmentModal() {
+        var modal = document.getElementById("document-fragment-modal");
+        if (!modal) return;
+        modal.classList.remove("hidden");
+        modal.setAttribute("aria-hidden", "false");
+      }
+
+      function closeDocumentFragmentModal() {
+        var modal = document.getElementById("document-fragment-modal");
+        if (!modal) return;
+        modal.classList.add("hidden");
+        modal.setAttribute("aria-hidden", "true");
+      }
+
+      document.addEventListener("keydown", function (evt) {
+        if (evt.key === "Escape") {
+          closeSessionDetailDrawer();
+          closeDocumentFragmentModal();
+        }
+      });
+
       function dashboardApp() {
         // Redirect to login if no token
         if (!localStorage.getItem("access_token")) {

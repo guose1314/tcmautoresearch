@@ -18,7 +18,7 @@
 但如果以《中医文献研究法》的要求来衡量，它距离“可运行科研平台”还有明显差距，核心问题不在单个算法，而在系统收口：
 
 - ResearchRuntimeService + RuntimeConfigAssembler 已完成 CLI / Web / demo 主研究路径的首轮收口，但兼容壳和历史直连路径仍需继续清理。
-- PostgreSQL / Neo4j 已进入主科研链结构化持久化路径；当配置可用时会沉淀 session、phase execution、artifact 与图投影，但 legacy 文件导出与 fallback 仍然存在。
+- PostgreSQL / Neo4j 已进入主科研链结构化持久化路径；当配置可用时会沉淀 session、phase execution、artifact 与图投影，但 Neo4j 未启用或初始化失败时仍允许仅 PG 运行，历史图投影与 Observe 结构化资产完整性也仍需依赖 writeback / backfill / health-check 工具链治理。
 - Experiment 已明确收口为 protocol design，experiment_execution 独立承接外部实验执行、采样与结果导入；当前平台边界是“辅助设计 + 导入外部执行结果”，不是“在系统内自动开展真实实验”。
 - Reflect 虽然能产出反思，但默认没有把学习反馈真正注入下一轮运行。
 - 本地 Qwen 接入存在多条旁路，缓存、参数、模型选择和成本控制没有统一治理。
@@ -52,7 +52,7 @@
 | --- | --- | ---: | --- | --- |
 | 统一配置中心 | src/infrastructure/config_loader.py、src/infrastructure/runtime_config_assembler.py、config.yml、config/*.yml | 88% | 配置分环境、路径解析、secret 覆写能力较完整，且已注入 shared runtime path | 仍需持续清理绕开 assembler 的配置旁路 |
 | CLI 应用壳 | run_cycle_demo.py、src/cycle/cycle_command_executor.py | 82% | 入口已经瘦身，research 路径已桥接 shared runtime service | 历史 demo / 兼容壳仍需继续压缩 |
-| 研究会话封装 | src/cycle/cycle_research_session.py、src/orchestration/research_runtime_service.py | 80% | 能启动七阶段并落结构化 session 结果 | 仍保留兼容性的文件导出与 legacy 壳 |
+| 研究会话封装 | src/cycle/cycle_research_session.py、src/orchestration/research_runtime_service.py | 83% | 能启动七阶段并落结构化 session 结果，demo / web 入口 profile 已由 RuntimeConfigAssembler 统一产出，旧 `session_result` DTO 与 demo profile 默认值都已并入 shared runtime contract | 外层 wrapper 已基本收口为消费装配结果与参数透传，后续重点是防止新的入口特例重新长回外壳 |
 | 科研内核 | src/research/research_pipeline.py | 87% | 七阶段边界清晰，模块工厂、事件总线、PhaseResult 已成形 | 仍是中心枢纽，负担较重 |
 | Observe | src/research/phases/observe_phase.py | 75% | 已能整合本地语料、文献检索、ingestion、种子观察 | 还缺少校勘/训诂/版本对勘等真正文献学能力 |
 | Hypothesis | src/research/phases/hypothesis_phase.py、src/research/hypothesis_engine.py | 76% | 可以基于观察结果与知识图谱生成假说 | 质量依赖上游语料与图谱质量 |
@@ -62,8 +62,8 @@
 | Publish | src/research/phases/publish_phase.py、src/generation/* | 86% | 已能产出 paper draft、IMRD、引用、artifact | 导出路径多，外层汇总报告默认不总是开启 |
 | Reflect + Quality | src/research/phases/reflect_phase.py、src/quality/quality_assessor.py | 72% | 能评估循环质量并输出改进建议 | 默认没有触发真实自学习回写 |
 | 本地 LLM 层 | src/llm/llm_engine.py、src/infra/llm_service.py | 74% | 本地 GGUF 路径清晰，支持缓存与 API/本地双模式 | 多个业务模块直接 new LLMEngine，治理不统一 |
-| 存储层 | src/storage/backend_factory.py、src/storage/storage_driver.py、src/storage/transaction.py | 78% | PostgreSQL / Neo4j 结构化持久化已进入主科研链，session / phase / artifact 可回读并投影到图 | legacy fallback 与更强事务边界仍需继续收敛 |
-| Web 层 | src/web/main.py、src/web/app.py、src/web/ops/job_manager.py | 74% | Web / legacy Web 已桥接 shared runtime path，具备 Job/SSE、Dashboard | 历史接口与摘要口径仍需继续收口 |
+| 存储层 | src/storage/backend_factory.py、src/storage/storage_driver.py、src/storage/transaction.py | 78% | PostgreSQL / Neo4j 结构化持久化已进入主科研链，session / phase / artifact 可回读并投影到图 | `sqlite_fallback` / 仅 PG 降级、历史图投影补齐与统一观测口径仍需继续收敛 |
+| Web 层 | src/web/main.py、src/web/app.py、src/web/ops/job_manager.py | 74% | Web 与本地调试启动路径已桥接 shared runtime path，具备 Job/SSE、Dashboard | 历史接口与摘要口径仍需继续收口 |
 
 ## 4. 当前架构的优点
 
@@ -114,7 +114,7 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 - Observe 更像“采集 + ingestion”，不是严格的文献学研究。
 - Experiment / ExperimentExecution 虽已拆分，但 execution 仍依赖外部输入，不是系统内实证执行器。
 - Reflect 仍偏“总结器”，不是“学习器”。
-- 结构化存储虽已成为主链基础设施，但兼容 fallback 和外层摘要治理尚未完全清理。
+- 结构化存储虽已成为主链基础设施，但降级态、历史补齐态和外层摘要治理尚未完全收口。
 
 ## 6. 技术债务与耦合点
 
@@ -130,10 +130,99 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 
 | 问题 | 说明 | 理由 | 代价 |
 | --- | --- | --- | --- |
-| 主入口兼容壳仍存在 | ResearchRuntimeService 已统一主研究路径，但 legacy demo / Web 壳与少量直连路径仍保留 | 继续存在认知成本和回漂风险 | 中，约 2-4 人日 |
-| 结构化存储事务边界仍可继续收敛 | PostgreSQL / Neo4j 主链已接线，但 fallback、跨库一致性与可观测性仍需治理 | 影响一致性与故障排查 | 中，约 3-5 人日 |
+| 主入口兼容壳仍存在 | ResearchRuntimeService 已统一主研究路径，但 demo 壳、Web transport wrapper 与少量直连路径仍保留 | 调用方仍难形成“ResearchRuntimeService 是唯一主链”的稳定认知；新功能、修复或观测逻辑容易继续挂到外层包装，重新造成配置、结果口径与治理链路分叉 | 中，约 2-4 人日 |
+| 结构化存储事务边界仍可继续收敛 | `TransactionCoordinator` 已把主写路径收口为“PG flush → Neo4j execute → PG commit”，但初始化仍允许 `sqlite_fallback` / 仅 PG 降级，历史数据与图投影补齐也仍依赖 writeback / backfill / health-check 工具链协同治理 | 同一研究会话仍可能出现“PG 事实已成立、Neo4j 投影未启用或历史增量待补齐”的运行状态；若状态上抛、告警与排障口径不统一，会直接增加一致性判断与故障排查成本 | 中，约 3-5 人日 |
 | Observe 反向依赖 cycle 层 | research phase 调 cycle runner | 形成跨层耦合，后续难以做干净边界 | 中，约 2-4 人日 |
 | LLM 多条旁路 | paper_plugin、翻译、助手等直接 new LLMEngine | 模型参数、缓存、GPU 使用和成本控制无法统一 | 中，约 3-5 人日 |
+
+“主入口兼容壳仍存在”的当前实现状态如下：
+
+1. Demo research 入口：`src/cycle/cycle_research_session.py`
+
+- 该入口已经删除 `export_research_session_reports(...)`、`output/research_session_*.json` 直写和 `generated_by = run_cycle_demo.research_mode` 这类 demo 来源标记。
+- 当前 publish report policy、`research_时间戳` 默认命名、旧 `session_result` DTO 与 demo research profile 默认值都已下沉到 shared runtime；同时 `RuntimeConfigAssembler` / `RuntimeAssembly` 现会按 `entrypoint=demo` 直接产出 `demo_research` profile，该入口当前只消费装配结果并做参数透传，已经是纯薄包装。
+
+1. Legacy Web 兼容层：`src/web/ops/legacy_research_runtime.py`
+
+- Web 路由读取面与执行面已经改走 `research_session_service.py`，旧的 `get_legacy_research_store()` 入口与 `LegacyResearchRuntimeStore` 适配层都已退出仓库代码。
+- 这说明 legacy Web 壳已经从“活跃接线面”继续收缩到“已删除的历史兼容层”；当前不存在可供新功能继续挂接的 Python 兼容入口。
+
+1. Web Job/SSE 入口：`src/web/ops/job_manager.py`
+
+- 研究执行 runner 已拆到 `src/web/ops/research_job_runner.py`，`job_manager.py` 现在主要保留 job 队列、SSE 推送、持久化恢复与调度协调职责。
+- 当前剩余的是异步 transport wrapper，而不是第二套会话事实源；因此这里的治理重点已从“拆主链”转成“维持 transport 边界不再反向扩张”。
+
+“主入口兼容壳仍存在”的治理动作当前状态如下：
+
+已完成：
+
+- `RuntimeConfigAssembler` / `RuntimeAssembly` 现已直接为 CLI / demo research 入口产出 `demo_research` shared runtime profile；`src/cycle/cycle_research_session.py` 已删除超出入口职责的报告导出与会话文件直写逻辑，旧 `session_result` DTO 与 demo research profile 默认值现都并入 shared runtime contract，wrapper 当前只消费装配结果与参数透传。
+- `RuntimeConfigAssembler` / `RuntimeAssembly` 现已直接为 Web 入口产出 `web_research` shared runtime profile；`src/web/ops/research_session_service.py` 与 `src/web/ops/job_manager.py` / `src/web/ops/research_job_runner.py` 不再各自在 wrapper 层补 Web 默认值语义。
+- `src/web/routes/research.py`、`src/web/routes/dashboard.py`、`src/web/routes/analysis.py` 已不再依赖 `get_legacy_research_store()`；旧的 legacy Web 适配层文件也已随之删除，不再保留独立 store/adapter 接线面。
+- `src/web/ops/job_manager.py` 已把研究执行 runner 与 contract 拼装职责拆出，当前只保留 job 生命周期、SSE 推送、恢复与调度相关能力。
+
+剩余项：
+
+- 继续防止旧 cycle API 外形经由新的 helper、route patch 或 transport 层重新回流；如果确实存在外部兼容诉求，应在边界层做显式 DTO 适配，而不是恢复独立 legacy store 文件。
+- 继续防止 demo research wrapper 重新长回本地默认值、结果 DTO 组装或 output policy；新的 demo 特例若确有必要，应优先收进 RuntimeConfigAssembler 的 entrypoint/profile 映射与 shared runtime profile，而不是重新挂回入口函数。
+- 继续约束 `src/web/ops/job_manager.py` 与 `src/web/ops/research_job_runner.py` 的边界，确保新增功能只进入 runtime / repository contract，而不是重新长回 Web transport 层。
+- 继续防止 Web 入口的 `runtime_profile` 语义再次回到隐式默认或局部 helper；如果未来确有新的入口族群，应新增明确 profile 名称，而不是在 route / job wrapper 中散落默认值。
+
+后收什么：
+
+- 保持 CLI / demo research 入口已收口到 `ResearchRuntimeService` + `ResearchRuntimeResult` 的状态，由 RuntimeConfigAssembler + shared runtime 共同决定 entrypoint profile、phase_context、report policy、artifact/output policy、`session_result` summary contract 与 demo profile 默认值；demo 壳后续只应保留消费装配结果与参数透传。
+- 保持 Legacy Web 兼容层已删除状态；若未来确有外部兼容诉求，只允许在 route / DTO 边界做薄适配，不再恢复独立 store / adapter 文件。
+- 把 Web 执行面继续收口为“job manager 负责任务生命周期，runtime service 负责研究执行，repository snapshot / result DTO 负责结果读取”；避免 job manager、legacy store、demo 壳分别维持自己的结果口径。
+
+最后验什么：
+
+- 验证 `run_cycle_demo` research 模式、Web 同步入口、Web 异步 job 入口三条路径，最终都落到同一份 runtime contract，且 phase list、status、artifacts、analysis summary、observe philology 等关键字段口径一致。
+- 验证仓库代码中不再出现新的 `get_legacy_research_store()` 风格入口或新的路由级兼容绑定；兼容壳应保持在明确隔离区，而不是重新回流到活跃调用面。
+- 验证 demo / Web 外壳中不再直接写 `output/research_session_*.json`、不再补旧 session 默认字段、也不再引入新的研究结果摘要口径；研究会话的事实源只剩 runtime result 与 repository snapshot。
+
+“结构化存储事务边界仍可继续收敛”的当前实现状态如下：
+
+1. 主写路径事务协调：`src/storage/backend_factory.py` + `src/storage/transaction.py`
+
+- `ResearchPipeline` 当前的 structured persist 已统一经由 `StorageBackendFactory.transaction()` 进入 `TransactionCoordinator`，提交顺序是 PG flush → Neo4j execute → PG commit。
+- `Neo4j` 执行失败时会回滚 PG；PG commit 失败时也会对已执行的 Neo4j 写操作做补偿。这说明主链已经不再是“各写各的”，而是有明确的跨库存储控制面。
+
+1. 降级与 fallback 边界：`src/storage/backend_factory.py` + `src/research/phase_orchestrator.py`
+
+- `StorageBackendFactory.initialize()` 在关系库存储不是 PostgreSQL 时仍会落到 `sqlite_fallback`；Neo4j 初始化失败时会显式降级为“仅 PG 模式”。
+- 在 `factory.transaction()` 主写路径内，Neo4j 投影异常会直接中断事务，不会伪装成“PG 成功 + 图稍后再说”；但对于 Neo4j 未启用、初始化失败或历史数据未补齐的环境，系统当前仍允许“PG 已成立、图未接通或待回填”的运行态。
+
+1. 回填与观测：`src/infrastructure/research_session_repo.py` + `tools/backfill_research_session_nodes.py` + `src/infrastructure/monitoring.py`
+
+- 仓库已提供 `backfill_observe_document_version_metadata(...)`、`backfill_observe_philology_artifacts(...)` 与 `backfill_structured_research_graph(...)`，说明版本元数据、Observe 文献学资产与 Neo4j 图投影的历史补齐链已经存在。
+- 运行期也已有 `cycle.metadata.storage_persistence`、数据库健康检查与 schema drift 诊断，但这些状态目前仍分散在 runtime metadata、monitoring summary、backfill/writeback 报告与日志里，还没有一个单一、稳定、对调用方友好的“结构化存储一致性状态合同”。
+
+“结构化存储事务边界仍可继续收敛”的治理动作当前状态如下：
+
+已完成：
+
+- 主科研链的结构化持久化已经统一通过 `StorageBackendFactory.transaction()` + `TransactionCoordinator` 执行，而不是分别直写 PostgreSQL / Neo4j。
+- Neo4j 写路径已经补上 split MATCH 与 driver 级回归，真实 PG / Neo4j 冒烟已验证主链可在无多余 cartesian-product 通知的前提下完成双写。
+- Observe 版本元数据 writeback、Observe 文献学 artifact writeback、structured graph backfill、数据库 health check 与 schema drift 检查已经形成补偿和诊断工具链。
+
+剩余项：
+
+- 继续把 `sqlite_fallback` / “仅 PG 模式”从“技术上允许发生”收口成更显式的运行策略、告警语义和调用方可见状态，避免外层把降级态误读为完整双写成功。
+- 继续统一 runtime metadata、monitoring summary、backfill/writeback 报告里的状态口径，使系统能直接区分“实时双写完成”“仅 PG 成功”“历史图投影待补齐”“schema drift 待治理”等状态。
+- 继续把 `TransactionResult.compensations_applied`、图投影失败原因与补齐结果提升为稳定观测字段，而不是主要依赖日志和人工排障阅读。
+- 继续减少“运行主链成功但历史增量仍需回填”的灰区路径；确需 eventual consistency 的场景，应显式标注边界，而不是让调用方面对隐式不一致窗口。
+
+后收什么：
+
+- 保持结构化主写路径继续收口到 `StorageBackendFactory` + `TransactionCoordinator`，由统一事务边界控制 PG / Neo4j 的写入顺序、失败处理与补偿语义。
+- 把结构化持久化的事实状态继续收口为一套稳定合同，让 runtime result、repository snapshot、dashboard 与运维检查对同一会话给出一致结论，而不是各自拼接一套“是否写成功”的判断。
+- 把历史补齐工具链继续定位为显式治理资产，而不是默认依赖的隐式主路径；凡是依赖 writeback / backfill 才完整的状态，都应能被一眼识别出来。
+
+最后验什么：
+
+- 验证 PostgreSQL + Neo4j 正常可用时，session、phase execution、artifact、observe version witness / lineage 与图投影在同一轮 structured persist 后即可一致读取。
+- 验证 Neo4j 未启用、初始化失败或连接异常时，系统会明确暴露为 `neo4j_status != active` 或“仅 PG 模式”，而不会被 UI / 运维误判成完整双写成功。
+- 验证补偿失败、graph backfill 待执行、schema drift 存在等异常态，在 runtime metadata、monitoring summary 与 backfill 报告里使用一致口径，而不是分散在日志里由人工拼接事实。
 
 ### 6.3 P2 级
 
@@ -147,7 +236,7 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 
 | 模块 | 当前状态 | 判断 |
 | --- | --- | --- |
-| src/storage/backend_factory.py | 已成为 ResearchPipeline / ResearchRuntimeService 的结构化持久化主链入口；不可用时回退 legacy 路径 | active |
+| src/storage/backend_factory.py | 已成为 ResearchPipeline / ResearchRuntimeService 的结构化持久化主链入口；关系库存储可落 PostgreSQL，Neo4j 不可用时显式转为仅 PG 模式，非 PostgreSQL 环境仍可能出现 `sqlite_fallback` | active |
 | src/storage/transaction.py | 已用于 PostgreSQL + Neo4j 协调写入与图关系投影，仍可继续强化事务观测与收敛 | active |
 | src/storage/storage_driver.py | 主要在论文插件持久化路径使用 | 插件路径，不是科研会话默认路径 |
 | src/learning/self_learning_engine.py | Reflect 支持注入，但默认运行未启用 | 休眠扩展能力 |
@@ -291,7 +380,7 @@ flowchart TD
 | 1. 把 ResearchRuntimeService 固化为唯一 research mainline，并继续清理 direct pipeline shortcuts | 主入口统一已经完成首轮收口；现在要防止入口语义再次分叉 | 中，2-4 人日 |
 | 2. 持续以 RuntimeConfigAssembler 收口剩余直连配置旁路 | 统一配置入口已经建立，但仍需把残余绕行点清掉，避免配置声明和运行行为再次脱节 | 中，1-3 人日 |
 | 3. 已完成 Experiment / ExperimentExecution 语义拆分；继续统一 UI、文档、报告和提示词边界 | 现在的重点不再是拆阶段，而是防止用户可见文案回到“experiment=真实实验执行”的误导表述 | 中，1-2 人日 |
-| 4. 在已接入 PG / Neo4j 主链的基础上，继续收敛事务边界、fallback 观测与回填治理 | 研究资产默认沉淀已经成立；下一步是提升一致性、可观测性和运维可控性 | 中，3-5 人日 |
+| 4. 在已接入 PG / Neo4j 主链的基础上，继续收敛事务边界、降级状态观测与回填治理 | 研究资产默认沉淀已经成立；下一步是提升一致性、可观测性和运维可控性 | 中，3-5 人日 |
 | 5. 新增 PhilologyService，专做校勘、训诂、术语标准化和版本比对 | 《中医文献研究法》的基础层目前覆盖不足；这是与一般 NLP 文本系统最关键的区别 | 高，6-12 人日 |
 | 6. 把所有 LLM 获取统一走 LLMGateway / CachedLLMService | 当前多处直接 new LLMEngine，导致缓存、参数、资源与模型切换失控 | 中，3-5 人日 |
 | 7. 新增 ResearchDossierBuilder，构建长上下文研究 dossier | 本地 7B 模型上下文有限，需要先把语料、证据、图谱和术语解释压缩成可复用 dossier，才能稳定提高生成质量 | 中，3-4 人日 |
@@ -418,16 +507,16 @@ RETURN count(r) AS written_count;
 
 目标：在已完成首轮统一的基础上，继续清理所有直连 ResearchPipeline 的兼容壳和配置旁路。
 
-- 动作：已引入 ResearchRuntimeService、RuntimeConfigAssembler，并贯通 CLI、Web、demo、legacy Web 的主要 research 路径；后续继续清理残余兼容层。
+- 动作：已引入 ResearchRuntimeService、RuntimeConfigAssembler，并贯通 CLI、Web、demo 与 Web 本地调试启动路径的主要 research 路径；旧的 legacy Web compatibility file 已删除，后续继续清理残余 demo / transport 包装。
 - 交付：主入口唯一化进一步固化，运行结果口径持续保持一致。
 - 理由：不先收口入口，后面的存储、学习和 LLM 优化都会继续分叉。
 - 代价：中，约 2-4 人日。
 
 ### 阶段 B：继续把存储从“已接主链”升级成“强一致基础设施”
 
-目标：在已默认落 PostgreSQL 证据库与 Neo4j 图谱库的基础上，继续强化事务边界、fallback 治理和运维观测。
+目标：在已默认落 PostgreSQL 证据库与 Neo4j 图谱库的基础上，继续强化事务边界、降级状态治理和运维观测。
 
-- 动作：ResearchPipeline 已接入 StorageBackendFactory / ResearchSessionRepository；后续继续收敛 TransactionCoordinator、fallback 观测与回填工具链。
+- 动作：ResearchPipeline 已接入 StorageBackendFactory / ResearchSessionRepository；后续继续收敛 TransactionCoordinator、`sqlite_fallback` / 仅 PG 状态口径、以及 writeback / backfill 观测工具链。
 - 交付：session、phase_result、artifact、graph 已可追溯，并继续提升跨库一致性与运维稳定性。
 - 理由：没有统一资产沉淀，就不可能做真正的跨会话研究积累。
 - 代价：中，约 3-5 人日。
@@ -476,6 +565,6 @@ RETURN count(r) AS written_count;
 - 文献学基础能力。
 - 真实实验仍依赖系统外部。
 - 默认学习闭环。
-- LLM / 事务边界与兼容回退治理。
+- LLM / 事务边界与结构化存储降级治理。
 
 只要这四点收住，当前仓库完全有机会从“能跑研究流程”升级为“能积累研究资产、支撑持续迭代的中医文献研究平台”。

@@ -2356,6 +2356,63 @@
             return lines;
         }
 
+        function buildObservePhilologyLines(philology) {
+            if (!philology || typeof philology !== "object") {
+                return [];
+            }
+
+            const terminologyRows = Array.isArray(philology.terminology_standard_table)
+                ? philology.terminology_standard_table
+                : [];
+            const collationEntries = Array.isArray(philology.collation_entries)
+                ? philology.collation_entries
+                : [];
+            const annotationReport = philology.annotation_report && typeof philology.annotation_report === "object"
+                ? philology.annotation_report
+                : {};
+            const summary = annotationReport.summary && typeof annotationReport.summary === "object"
+                ? annotationReport.summary
+                : {};
+            const philologyNotes = Array.isArray(summary.philology_notes)
+                ? summary.philology_notes.filter((item) => String(item || "").trim())
+                : [];
+            const lines = [];
+
+            lines.push(`术语标准表：${safeNumber(philology.terminology_standard_table_count, terminologyRows.length)}`);
+            lines.push(`校勘条目：${safeNumber(philology.collation_entry_count, collationEntries.length)}`);
+            lines.push(`涉及文档：${safeNumber(philology.document_count, summary.processed_document_count || 0)}`);
+
+            if (terminologyRows.length > 0) {
+                const samples = terminologyRows
+                    .slice(0, 3)
+                    .map((row) => String(row.canonical || row.label || row.document_title || "").trim())
+                    .filter(Boolean);
+                if (samples.length > 0) {
+                    lines.push(`术语示例：${samples.join("、")}`);
+                }
+            }
+
+            if (collationEntries.length > 0) {
+                const samples = collationEntries
+                    .slice(0, 2)
+                    .map((entry) => {
+                        const baseText = String(entry.base_text || "-").trim() || "-";
+                        const witnessText = String(entry.witness_text || "-").trim() || "-";
+                        return `${baseText} / ${witnessText}`;
+                    })
+                    .filter(Boolean);
+                if (samples.length > 0) {
+                    lines.push(`校勘示例：${samples.join("；")}`);
+                }
+            }
+
+            if (philologyNotes.length > 0) {
+                lines.push(`注记摘要：${philologyNotes.slice(0, 2).join("；")}`);
+            }
+
+            return lines;
+        }
+
         function buildAnalysisBlocks(result) {
             const analysis = result?.analysis_results;
             if (!analysis || typeof analysis !== "object") {
@@ -3700,6 +3757,11 @@
                     })()
                 )
             );
+
+            const philologyLines = buildObservePhilologyLines(evidenceBoard.philology);
+            if (philologyLines.length > 0) {
+                auxGrid.appendChild(buildDashboardBox("文献学校勘", philologyLines));
+            }
 
             auxGrid.appendChild(
                 buildDashboardBox("协议输入", [

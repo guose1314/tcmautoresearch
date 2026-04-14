@@ -3,10 +3,16 @@ ctext 标准语料白名单配置与批量清单构建工具
 """
 
 import json
+from copy import deepcopy
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-DEFAULT_CTEXT_WHITELIST: Dict[str, Any] = {
+from src.collector.corpus_bundle import build_document_version_metadata
+
+_DEFAULT_CTEXT_WHITELIST_PATH = Path(__file__).resolve().parents[2] / "data" / "ctext_whitelist.json"
+
+_FALLBACK_CTEXT_WHITELIST: Dict[str, Any] = {
     "version": "1.1.0",
     "updated_at": "2026-03-27",
     "groups": {
@@ -62,18 +68,91 @@ DEFAULT_CTEXT_WHITELIST: Dict[str, Any] = {
 }
 
 
+def _normalize_whitelist_item(item: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(item, dict):
+        return None
+
+    title = str(item.get("title") or "").strip()
+    urn = str(item.get("urn") or "").strip()
+    url = str(item.get("url") or "").strip()
+    source_ref = urn or url
+    if not source_ref:
+        return None
+
+    metadata = build_document_version_metadata(
+        title=title,
+        source_type="ctext",
+        source_ref=source_ref,
+        metadata={
+            **(item.get("metadata") if isinstance(item.get("metadata"), dict) else {}),
+            "work_title": item.get("work_title"),
+            "fragment_title": item.get("fragment_title") or title,
+            "edition": item.get("edition"),
+            "author": item.get("author"),
+            "dynasty": item.get("dynasty"),
+            "catalog_id": item.get("catalog_id") or urn or url,
+            "source_name": item.get("source_name") or "ctext",
+            "source_type": "ctext",
+        },
+    )
+    version_metadata = dict(metadata.get("version_metadata") or {})
+
+    return {
+        **item,
+        "title": title,
+        "urn": urn,
+        "url": url,
+        "priority": item.get("priority", "medium"),
+        "source_type": "ctext",
+        "catalog_id": str(version_metadata.get("catalog_id") or "").strip(),
+        "edition": str(version_metadata.get("edition") or "").strip(),
+        "author": str(version_metadata.get("author") or "").strip(),
+        "dynasty": str(version_metadata.get("dynasty") or "").strip(),
+        "work_title": str(version_metadata.get("work_title") or title).strip(),
+        "fragment_title": str(version_metadata.get("fragment_title") or title).strip(),
+        "metadata": metadata,
+        "version_metadata": version_metadata,
+    }
+
+
+def _normalize_whitelist(whitelist: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = deepcopy(whitelist)
+    groups = normalized.get("groups", {})
+    if not isinstance(groups, dict):
+        raise ValueError("白名单配置格式无效，缺少 groups")
+
+    for group in groups.values():
+        if not isinstance(group, dict):
+            continue
+        normalized_items: List[Dict[str, Any]] = []
+        for item in group.get("items", []) if isinstance(group.get("items"), list) else []:
+            normalized_item = _normalize_whitelist_item(item)
+            if normalized_item is not None:
+                normalized_items.append(normalized_item)
+        group["items"] = normalized_items
+    return normalized
+
+
+def _load_default_whitelist() -> Dict[str, Any]:
+    try:
+        with _DEFAULT_CTEXT_WHITELIST_PATH.open("r", encoding="utf-8") as f:
+            return _normalize_whitelist(json.load(f))
+    except Exception:
+        return _normalize_whitelist(_FALLBACK_CTEXT_WHITELIST)
+
+
+DEFAULT_CTEXT_WHITELIST: Dict[str, Any] = _load_default_whitelist()
+
+
 def load_whitelist(path: Optional[str] = None) -> Dict[str, Any]:
     """加载白名单配置，优先使用外部 JSON 文件。"""
     if not path:
-        return DEFAULT_CTEXT_WHITELIST
+        return deepcopy(DEFAULT_CTEXT_WHITELIST)
 
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    if not isinstance(data, dict) or "groups" not in data:
-        raise ValueError("白名单配置格式无效，缺少 groups")
-
-    return data
+    return _normalize_whitelist(data)
 
 
 def build_batch_manifest(
@@ -81,7 +160,8 @@ def build_batch_manifest(
     selected_groups: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """根据白名单生成批量采集清单。"""
-    groups = whitelist.get("groups", {})
+    normalized_whitelist = _normalize_whitelist(whitelist)
+    groups = normalized_whitelist.get("groups", {})
     if not isinstance(groups, dict):
         raise ValueError("白名单 groups 必须为对象")
 
@@ -105,7 +185,7 @@ def build_batch_manifest(
 
     return {
         "generated_at": datetime.now().isoformat(),
-        "whitelist_version": whitelist.get("version", "unknown"),
+        "whitelist_version": normalized_whitelist.get("version", "unknown"),
         "selected_groups": target_groups,
         "count": len(entries),
         "entries": entries
@@ -143,7 +223,16 @@ def _build_manifest_entry(group_key: str, group_name: str, item: Any) -> Optiona
         "title": item.get("title", ""),
         "urn": urn,
         "url": url,
-        "priority": item.get("priority", "medium")
+        "priority": item.get("priority", "medium"),
+        "source_type": item.get("source_type", "ctext"),
+        "catalog_id": item.get("catalog_id", ""),
+        "edition": item.get("edition", ""),
+        "author": item.get("author", ""),
+        "dynasty": item.get("dynasty", ""),
+        "work_title": item.get("work_title", item.get("title", "")),
+        "fragment_title": item.get("fragment_title", item.get("title", "")),
+        "metadata": dict(item.get("metadata") or {}),
+        "version_metadata": dict(item.get("version_metadata") or {}),
     }
 
 

@@ -16,9 +16,8 @@ from src.infrastructure.runtime_config_assembler import (
     RuntimeAssembly,
     build_runtime_assembly,
 )
-from src.orchestration.research_orchestrator import OrchestrationResult
-from src.orchestration.research_runtime_service import ResearchRuntimeService
 from src.web.ops.job_store import PersistentJobStore
+from src.web.ops.research_job_runner import StreamingResearchRunner
 
 TerminalStatus = {"completed", "partial", "failed"}
 DEFAULT_JOB_STORAGE_DIR = Path(__file__).resolve().parent.parent / "output" / "web_console_jobs"
@@ -93,42 +92,6 @@ class ResearchJob:
             "job": self.snapshot(),
             "events": list(self.events),
         }
-
-
-class StreamingResearchRunner:
-    """按阶段驱动 ResearchPipeline，并对外发射进度事件。"""
-
-    def __init__(self, orchestrator_config: Optional[Dict[str, Any]] = None):
-        self.runtime_service = ResearchRuntimeService(orchestrator_config or {})
-
-    def run(
-        self,
-        payload: Dict[str, Any],
-        emit: Optional[Callable[[str, Dict[str, Any]], None]] = None,
-    ) -> OrchestrationResult:
-        def _optional_text(value: Any) -> Optional[str]:
-            text = str(value or "").strip()
-            return text or None
-
-        topic = str(payload.get("topic") or "").strip()
-        if not topic:
-            raise ValueError("topic 不能为空")
-
-        runtime_result = self.runtime_service.run(
-            topic,
-            phase_contexts=payload.get("phase_contexts") or {},
-            cycle_name=payload.get("cycle_name"),
-            description=payload.get("description"),
-            scope=payload.get("scope"),
-            study_type=_optional_text(payload.get("study_type")),
-            primary_outcome=_optional_text(payload.get("primary_outcome")),
-            intervention=_optional_text(payload.get("intervention")),
-            comparison=_optional_text(payload.get("comparison")),
-            emit=emit,
-        )
-        return runtime_result.orchestration_result
-
-
 class ResearchJobManager:
     """支持持久化恢复的研究任务管理器。"""
 
@@ -149,6 +112,7 @@ class ResearchJobManager:
                     settings=settings,
                     config_path=config_path,
                     environment=environment,
+                    entrypoint="web",
                 )
 
         resolved_storage_dir = storage_dir

@@ -1,5 +1,7 @@
 # TCMAutoResearch 架构评估与重构设计（2026-04-08）
 
+> 历史重构设计快照（2026-04-08）：除文中后续新增的“同步说明”外，本文里的“当前系统/当前架构/现状/建议”均默认指 2026-04-08 的设计评估语境，不应直接视为 2026-04-14 的现态判断。
+
 ## 1. 评估范围与证据来源
 
 本次评估基于两类证据：
@@ -36,6 +38,7 @@
 - 当前主链已经演进为 Observe → Hypothesis → Experiment → ExperimentExecution → Analyze → Publish → Reflect。
 - 当前阶段边界应理解为：`experiment = protocol design`，`experiment_execution = external execution import`。
 - 若按当前主链复跑研究流程，`--research-phases` 中应显式包含 `experiment_execution`。
+- 涉及 PostgreSQL / Neo4j、降级策略、监控或 schema drift 的现态判读，2026-04-14 起统一沿用 README 的结构化存储状态词汇表：双写完成、仅 PG 模式、待回填、schema drift 待治理；不要把“后端能力可选”直接等同于完整双写成功。
 
 ## 2. 执行结论
 
@@ -50,7 +53,7 @@
    `config.yml`、环境覆盖、secret 分层和 root_path 解析已经形成体系，后续继续工程化成本较低。
 
 3. 存储设计方向是对的。
-   SQLite、PostgreSQL、Neo4j 的后端工厂和降级策略说明系统已经在向“多后端能力平台”演进，而不是把数据写死在单一实现中。
+   SQLite、PostgreSQL、Neo4j 的后端工厂和降级策略说明系统已经在向“多后端能力平台”演进，而不是把数据写死在单一实现中；按 2026-04-14 现态再判读时，应继续区分双写完成、仅 PG 模式、待回填与 schema drift 待治理，而不是只看“是否接了 PG/Neo4j”。
 
 4. 研究流程已形成阶段化语义。
    历史基线已经形成不含 `experiment_execution` 的前置阶段边界；当前主链则进一步演进为 Observe、Hypothesis、Experiment、ExperimentExecution、Analyze、Publish、Reflect，其中 Experiment 负责方案设计，ExperimentExecution 负责外部执行结果导入。
@@ -61,7 +64,7 @@
 ### 当前系统的主要问题
 
 1. 编排层重复，系统中心不唯一。
-   `run_cycle_demo.py`、`src/cycle/cycle_runner.py`、`src/cycle/cycle_research_session.py`、`src/research/research_pipeline.py` 共同承担“流程编排”职责，存在多中心问题。
+   以 2026-04-08 的架构快照看，`run_cycle_demo.py`、`src/cycle/cycle_runner.py`、`src/cycle/cycle_research_session.py`、`src/research/research_pipeline.py` 共同承担“流程编排”职责，存在多中心问题。
 
 2. Web 入口分裂。
    `src/web/app.py` 与 `web_console/app.py` 同时存在且路由面不一致，导致 `/login`、`/dashboard`、`/console` 的部署语义不统一。
@@ -194,11 +197,13 @@ flowchart LR
 
 问题：同一件事存在多个控制中心，导致行为分散、排错困难、测试难以聚焦。
 
+同步说明（2026-04-14）：这里描述的是 2026-04-08 当时的编排面；截至 2026-04-14，`src/cycle/cycle_research_session.py` 已继续收口为 shared runtime profile 选择与参数透传，不再持有本地报告导出、结果 DTO 组装或 demo profile 默认值。
+
 建议：
 
 - `run_cycle_demo.py` 只保留 CLI 参数解析与调用。
 - `src/research/research_pipeline.py` 成为唯一研究编排内核。
-- `src/cycle/*` 收缩为应用服务层，负责“启动一个 session、记录进度、导出结果”，不再重复实现研究流程。
+- 以 2026-04-08 的设计目标看，`src/cycle/*` 应收缩为应用服务层，负责“启动一个 session、记录进度、导出结果”，不再重复实现研究流程；截至 2026-04-14，当前真实状态已进一步收口到 assembler + shared runtime 决定 profile/defaults，`cycle_research_session.py` 本身不再持有结果导出职责。
 
 #### B. Web 入口
 
@@ -235,7 +240,7 @@ flowchart LR
 
 1. CLI 参数解析与命令路由。
 2. 真实模块链执行与阶段桥接。
-3. research session 执行、报告导出与存储落盘。
+3. 这条“research session 执行、报告导出与存储落盘”职责反映的是 2026-04-08 设计评估时的观察；截至 2026-04-14，`src/cycle/cycle_research_session.py` 已进一步收口为 shared runtime profile 选择与参数透传，报告导出与会话落盘不再由该入口持有。
 
 仍需持续关注的只剩 demo/plugin 类运行时封装是否还能进一步合并，而不是继续维护旧 iteration 子系统。
 

@@ -6,7 +6,7 @@ import argparse
 import logging
 from typing import Any, Callable, Dict
 
-from .cycle_runtime_config import build_cycle_runtime_config
+from .cycle_runtime_config import build_cycle_orchestrator_config
 
 
 def execute_research_branch(
@@ -22,13 +22,13 @@ def execute_research_branch(
     phases_str = args.research_phases.strip()
     phase_names = [p.strip() for p in phases_str.split(',') if p.strip()]
     report_formats = args.report_format or ["markdown"]
-    runtime_config = build_cycle_runtime_config(
+    orchestrator_config = build_cycle_orchestrator_config(
         config_path=args.config_path,
         environment=args.environment,
     )
     result = run_research_session_fn(
         question=args.question,
-        config=runtime_config,
+        config=orchestrator_config,
         phase_names=phase_names,
         export_report_formats=report_formats if args.export_report else None,
         report_output_dir=args.report_output_dir,

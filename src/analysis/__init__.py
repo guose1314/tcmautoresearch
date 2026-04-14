@@ -5,6 +5,7 @@
 
 公共导出：
 * :class:`DocumentPreprocessor`  — 文档预处理（jieba + opencc）
+* :class:`PhilologyService`      — 文献学服务（术语标准化/版本对勘）
 * :class:`AdvancedEntityExtractor` — TCM 实体抽取
 * :class:`SemanticGraphBuilder`  — 语义图构建
 * :class:`ReasoningEngine`       — 推理分析
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
         ModernPharmacologyDatabase,
         PharmacologicalData,
     )
+    from src.analysis.philology_service import PhilologyService
     from src.analysis.preprocessor import DocumentPreprocessor
     from src.analysis.reasoning_engine import ReasoningEngine
     from src.analysis.research_scoring import ResearchScoringPanel
@@ -48,6 +50,7 @@ if TYPE_CHECKING:
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "DocumentPreprocessor": ("src.analysis.preprocessor", "DocumentPreprocessor"),
+    "PhilologyService": ("src.analysis.philology_service", "PhilologyService"),
     "AdvancedEntityExtractor": ("src.analysis.entity_extractor", "AdvancedEntityExtractor"),
     "SemanticGraphBuilder": ("src.analysis.semantic_graph", "SemanticGraphBuilder"),
     "ReasoningEngine": ("src.analysis.reasoning_engine", "ReasoningEngine"),

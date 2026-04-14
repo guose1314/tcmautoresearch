@@ -75,6 +75,8 @@ class TestCTextCorpusCollector(unittest.TestCase):
             self.assertEqual(root["subsections"], ["ctp:analects/xue-er"])
             self.assertEqual(len(root["children"]), 1)
             self.assertEqual(root["children"][0]["title"], "学而")
+            self.assertEqual(root["metadata"]["version_metadata"]["catalog_id"], "ctp:analects")
+            self.assertEqual(root["children"][0]["metadata"]["version_metadata"]["fragment_title"], "学而")
 
             output_file = result.get("output_file")
             self.assertTrue(output_file)

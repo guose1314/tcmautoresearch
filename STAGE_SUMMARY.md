@@ -1,6 +1,100 @@
 # 阶段性推进摘要
 
+<!-- markdownlint-configure-file {"MD022": false, "MD024": false, "MD032": false, "MD060": false} -->
+
+## 阶段性收口（2026-04-14）
+
+同步说明（2026-04-14）：
+
+- 本节是当前总续接入口；如需从任意一天继续接手，优先读本节，再回看更早日期条目。
+- 涉及 PostgreSQL / Neo4j、回填工具、监控摘要与 drift 治理的现态判读，统一沿用 README 的结构化存储状态词汇表：双写完成、仅 PG 模式、待回填、schema drift 待治理。
+- 下文提到的历史设计、历史治理或历史 checkpoint，只代表对应日期的观察基线；当前实现真相以最新源码、测试、架构审计和本节为准。
+
+### 本轮收口目标
+
+- 把 shared runtime / entrypoint / Web session contract 继续收口，避免 API、Web、Web Console 与 demo/cycle 再各自维护一套局部入口语义。
+- 把 Observe 文献学能力从 collect、pipeline、structured persist、graph、dashboard 到文档口径全部打通，而不是只停留在某一层的局部 DTO。
+- 把结构化存储当前状态统一压成一套稳定词汇，并同步到 README、审计、部署、Helm、阶段摘要与历史架构文档，防止运维和架构文档继续分叉。
+- 形成一份可直接提交、可从任意日期续接的阶段摘要，让后续接手者不用再从更旧的六阶段或“已连接即已双写完成”旧口径重新判题。
+
+### 当前已落地成果
+
+#### 1. shared runtime 与入口装配继续收口
+
+- `src/infrastructure/runtime_config_assembler.py` 已显式固化 entrypoint -> runtime_profile 映射：`web` 对应 `web_research`，`demo` 对应 `demo_research`；未知 entrypoint 不再隐式注入 profile。
+- `src/api/app.py`、`src/web/app.py`、`web_console/app.py` 现在都会把 `runtime_assembly` 挂到 `app.state`，并统一走 assembly 产出的 orchestrator config，而不是在各入口重复拼接本地默认值。
+- `src/cycle/cycle_runtime_config.py` 新增 `build_cycle_runtime_assembly()` 与 `build_cycle_orchestrator_config()`；`src/cycle/cycle_research_handler.py`、`src/cycle/cycle_research_session.py` 现已改成 shared runtime 的薄包装，不再本地声明 demo 入口默认阶段、cycle_name、scope 或 JSON 导出逻辑。
+- `src/orchestration/research_runtime_service.py` 已进一步内建 shared runtime profile 默认值、publish report policy 合并逻辑与 `session_result` 契约输出；`run_cycle_demo`、Web 异步 job 和 REST 入口都复用同一条主链。
+
+#### 2. Legacy Web 兼容壳已经删掉，session contract 改走 repository-backed 主线
+
+- `src/web/ops/legacy_research_runtime.py` 已删除；不再通过内存态 legacy store 对 Web 路由做兼容包装。
+- 新增 `src/web/ops/research_job_runner.py`、`src/web/ops/research_session_contract.py`、`src/web/ops/research_session_service.py`，分别承接 shared runtime 执行、Web-facing session contract 归一和 repository-backed session 读写。
+- `src/web/routes/research.py`、`src/web/routes/analysis.py`、`src/web/routes/dashboard.py` 已改为直接消费新的 session service / contract，不再回落到 legacy runtime store。
+- 兼容契约测试也已迁移：`tests/unit/test_legacy_research_runtime.py` 已删除，对应覆盖改由 `tests/unit/test_research_route_contract.py` 与 `tests/unit/test_research_session_service.py` 承接。
+
+#### 3. Observe 文献学主链已经打通到 collect -> pipeline -> persist -> graph -> UI
+
+- 新增 `src/analysis/philology_service.py`，并在 `config.yml`、`src/core/ports.py`、`src/core/adapters.py`、`src/research/research_pipeline.py` 中接入 `philology_service`，使 Observe 子流程可以在预处理前后输出术语标准化、异写识别、版本对勘与文献学资产。
+- `src/research/phases/observe_phase.py` 现已支持文献学处理、版本 witness 选择、术语标准表聚合、校勘条目聚合与 annotation report 产出；`src/research/observe_philology.py` 负责统一 observe 文献学资产的归并、artifact DTO 与多来源解析。
+- `src/collector/corpus_bundle.py`、`src/collector/ctext_corpus_collector.py`、`src/collector/ctext_whitelist.py`、`src/collector/local_collector.py`、`src/collector/multi_source_corpus.py` 已补齐显式 `version_metadata` 生成逻辑，包括 `work_title`、`fragment_title`、`catalog_id`、`work_fragment_key`、`version_lineage_key`、`witness_key` 等字段。
+- `src/orchestration/research_orchestrator.py`、`src/orchestration/research_runtime_service.py`、`src/api/schemas.py`、`src/api/research_utils.py`、`web_console/static/index.html` 都已把 `observe_philology` 纳入标准结果、dashboard payload 和 Web Console 观察面板。
+
+#### 4. Observe 文献学资产已经落到结构化存储与图回填层
+
+- `src/infrastructure/persistence.py` 的 `Document` 表已新增文献版本谱系相关列：`document_urn`、`document_title`、`source_type`、`catalog_id`、`work_title`、`fragment_title`、`work_fragment_key`、`version_lineage_key`、`witness_key`、`dynasty`、`author`、`edition`、`version_metadata_json`；对应迁移已新增到 `alembic/versions/e4c6d2b7a9f1_add_document_version_lineage_fields.py`。
+- `src/infrastructure/research_session_repo.py` 现在不仅能持久化 observe 文档图，还能回填 legacy 行的 `version_metadata`、列出 `observe version lineages`、补写 observe 文献学 artifact，并把 `observe_philology` 聚合回完整 snapshot。
+- `src/research/research_session_graph_backfill.py` 与 `src/research/phase_orchestrator.py` 已扩展 Neo4j 图投影：Observe 文档除实体图外，还会生成 `VersionLineage` / `VersionWitness` 节点和 `OBSERVED_WITNESS` / `BELONGS_TO_LINEAGE` 边。
+- `tools/backfill_research_session_nodes.py` 已增加 PG writeback 开关，可在 Neo4j 图回填前选择是否先回补 observe 版本元数据与文献学 artifact；这些工具当前应明确理解为“待回填”治理链，而不是默认主写路径的一部分。
+
+#### 5. Dashboard / 项目页已经可以展开查看文献学明细
+
+- `src/web/routes/dashboard.py` 已支持项目详情面板、侧边抽屉、分页查看术语标准表、分页查看校勘条目、按文献标题筛选，以及 base / witness 上下文跳转到原始文档片段预览。
+- `src/web/templates/dashboard.html` 已增加 session detail drawer 与 fragment preview modal，并补齐对应前端交互函数。
+- `tests/unit/test_dashboard_copy.py` 已补针对结构化 session detail、分页、筛选、fragment preview 和模板挂载点的覆盖，确保 dashboard 扩展不是只在模板里“看起来存在”。
+
+#### 6. 文档治理与结构化存储状态口径统一完成一轮 sweep
+
+- `ARCHITECTURE_TCM_RESEARCH_METHOD_AUDIT_2026_04_12.md` 的 P1 存储事务边界问题已按当前事实重写：主路径已存在事务协调，真实剩余问题集中在仅 PG 模式、待回填、schema drift 待治理与观测治理，而不是“主链仍未接线”。
+- `README.md` 已新增“结构化存储状态词汇表”，把“双写完成 / 仅 PG 模式 / 待回填 / schema drift 待治理”固定为仓库统一术语。
+- `STORAGE_ARCHITECTURE.md`、`STORAGE_DELIVERY.md`、`STORAGE_PLAN_SUMMARY.md`、`STORAGE_FINAL_REPORT.md`、`STORAGE_TEST_SUMMARY.md`、`STORAGE_PERFORMANCE_REPORT.md`、`STORAGE_QUERIES.md`、`STORAGE_INTEGRATION.md`、`STORAGE_DEPLOYMENT.md`、`DOCKER_DEPLOYMENT.md` 均已同步到同一状态口径。
+- 更早文档也已补同步说明：`ARCHITECTURE_AUDIT_2026_04_06.md`、`ARCHITECTURE_REDESIGN_2026_04_08.md`、`docs/architecture/architecture-design.md`、`deploy/helm/tcmautoresearch/README.md`、以及本文件 `STAGE_SUMMARY.md` 都已注明历史基线与当前现态的边界。
+- `STAGE_SUMMARY.md` 当前继续采用文件级 `markdownlint-configure-file` 局部关闭重复标题结构规则，这是对“按日期聚合 checkpoint”文档更合适的治理方式，不再尝试为消除告警而重写历史结构。
+
+### 关键验证记录
+
+- shared runtime / runtime profile / cycle 入口相关测试已补到 `tests/test_config_loader.py`、`tests/unit/test_cycle_command_executor.py`、`tests/unit/test_cycle_research_handler.py`、`tests/unit/test_cycle_demo_contract.py`、`tests/unit/test_research_runtime_service.py`。
+- Observe 文献学与版本谱系相关测试已补到 `tests/unit/test_philology_service.py`、`tests/test_research_pipeline_observe.py`、`tests/test_corpus_bundle.py`、`tests/test_ctext_corpus_collector.py`、`tests/test_ctext_whitelist.py`、`tests/test_multi_source_corpus.py`。
+- structured persist / graph / repo writeback 相关覆盖已补到 `tests/test_research_pipeline_persist.py`、`tests/test_research_session_graph_backfill.py`、`tests/test_research_session_repo.py`。
+- Web contract 与 dashboard 扩展覆盖已补到 `tests/unit/test_research_route_contract.py`、`tests/unit/test_research_session_service.py`、`tests/unit/test_dashboard_copy.py`、`tests/test_research_utils.py`、`tests/test_rest_api.py`、`tests/test_web_console_api.py`。
+- 文档面最近一次诊断已确认 `STAGE_SUMMARY.md`、`docs/architecture/architecture-design.md`、`deploy/helm/tcmautoresearch/README.md` 返回 `No errors found`；`STORAGE_DEPLOYMENT.md` 的主要内容与风格问题已收口到只剩末尾样式尾项。
+
+### 当前续接锚点
+
+- 入口治理这条线当前已经不该回到“每个 wrapper 单独拼默认 runtime_profile / phase / cycle_name”的旧模式；后续若继续收口，应优先扫剩余 direct pipeline shortcut 或旁路 orchestrator 的地方。
+- Observe 文献学主链已经不是单纯的局部实验能力，而是 collect、observe、session DTO、structured persist、Neo4j、dashboard、Web Console 和回填工具共同消费的主链资产；后续新增字段必须按这条全链思维推进。
+- 结构化存储主路径已存在，后续重点不是再证明“有没有接线”，而是继续治理仅 PG 模式、待回填与 schema drift 待治理，并把观测/验收口径持续压到 README 词汇表上。
+- 文档治理方面，新的风险不在“缺少一份审计报告”，而在于历史文档继续用 present tense 描述旧事实；后续再改文档时，优先追加同步说明而不是把历史观察硬改成当前事实。
+
+### 任意日期继续接手建议
+
+1. 先读本节“阶段性收口（2026-04-14）”，再读 `README.md` 的结构化存储状态词汇表，先把 runtime / storage / observe_philology 的当前口径锁住。
+2. 如果要接代码主链，优先从 `src/infrastructure/runtime_config_assembler.py`、`src/orchestration/research_runtime_service.py`、`src/research/phases/observe_phase.py`、`src/infrastructure/research_session_repo.py` 四个点建立上下文。
+3. 如果要接 Web 与运维面，优先看 `src/web/ops/research_session_service.py`、`src/web/routes/dashboard.py`、`src/web/templates/dashboard.html`、`deploy/helm/tcmautoresearch/README.md`。
+4. 如果要继续做结构化存储治理，先区分当前目标属于“双写完成”“仅 PG 模式”“待回填”还是“schema drift 待治理”，不要再用“已连接”“已 ready”“hook 成功”代替运行态结论。
+5. 如果要继续扫文档，优先检查剩余历史架构文档、部署示例注释和 `STORAGE_DEPLOYMENT.md` 末尾样式尾项，而不是重开新的口径体系。
+
+### 提交边界说明
+
+- 本次提交应覆盖 shared runtime / entrypoint 收口、Legacy Web 兼容层删除、Observe 文献学主链接入、版本谱系结构化持久化与图回填、dashboard 文献学详情扩展、以及结构化存储状态词汇表同步与历史文档收口。
+- Alembic 迁移、repo/writeback/backfill 工具、Web contract 迁移、dashboard 扩展、README/审计/部署文档同步和相关测试均属于正式交付面，不再视作临时脚手架或实验补丁。
+
 ## 阶段性收口（2026-04-13）
+
+同步说明（2026-04-14）：
+
+- 涉及 PostgreSQL / Neo4j、监控摘要、schema drift 与回填工具链的现态判读，统一沿用 README 的结构化存储状态词汇表：双写完成、仅 PG 模式、待回填、schema drift 待治理。
+- 下文提到的 backfill / writeback 工具，应理解为“待回填”治理资产，而不是默认依赖的隐式主路径。
 
 ### 本轮收口目标
 
@@ -17,7 +111,7 @@
 - 新增 src/orchestration/research_runtime_service.py，作为 CLI、Web、Legacy Web 共享的研究运行时控制面，统一 cycle 生命周期、phase emit 与 orchestration 汇总。
 - 新增 src/cycle/cycle_runtime_config.py、src/api/main.py，并让 src/web/main.py、web_console/main.py、run_cycle_demo.py 相关分支都支持 config/environment 显式注入。
 - src/web/app.py、web_console/app.py、src/web/ops/job_manager.py 已改为复用 runtime assembly，而不是各自拼接一套局部配置。
-- Legacy Web 已不再直接绑定 in-memory ResearchPipeline 单例；src/web/ops/legacy_research_runtime.py 提供兼容 store，dashboard / analysis / research 路由都改为走统一 runtime + session store。
+- 截至 2026-04-13，Legacy Web 已不再直接绑定 in-memory ResearchPipeline 单例；当时仍由 src/web/ops/legacy_research_runtime.py 提供兼容 store，dashboard / analysis / research 路由改走统一 runtime + session store。该文件已在 2026-04-14 删除，现由 src/web/ops/research_session_service.py 直接承接 repository-backed 读写。
 
 #### 2. 七阶段主链与实验语义拆分已经落到实现面
 
@@ -31,9 +125,9 @@
 
 - src/research/phase_orchestrator.py 已新增 structured persistence 主路径：ResearchSession / PhaseExecution / Artifact 写入 PostgreSQL，Neo4j 图投影与 legacy sqlite fallback 清晰分层。
 - src/infrastructure/research_session_repo.py 现已支持外部事务 session 复用，并新增 observe 文档、实体、关系的结构化落库与快照回读。
-- 新增 src/research/research_session_graph_backfill.py、tools/backfill_research_session_nodes.py、tools/backfill_research_graph_nodes.py，补齐历史研究会话到 Neo4j 的节点/边回填工具。
+- 新增 src/research/research_session_graph_backfill.py、tools/backfill_research_session_nodes.py、tools/backfill_research_graph_nodes.py，补齐历史研究会话到 Neo4j 的节点/边回填工具；这些工具当前应按“待回填”治理资产理解，而不是默认主写路径的一部分。
 - src/storage/transaction.py、src/storage/neo4j_driver.py 已继续收口查询与写入规范：split MATCH、scoped CALL、可选关系读取去噪，避免把旧的 Neo4j 通知模式重新带回主链。
-- src/infrastructure/monitoring.py 与相关测试已把 schema drift / structured storage 暴露到健康检查与监控摘要中。
+- src/infrastructure/monitoring.py 与相关测试已把 schema drift / structured storage 暴露到健康检查与监控摘要中；运维判读应统一落到双写完成、仅 PG 模式、待回填、schema drift 待治理这四类状态上。
 
 #### 4. 配置、迁移、部署与密钥解析已经补齐配套
 
@@ -51,7 +145,7 @@
 
 ### 关键验证记录
 
-- 定向回归已通过：tests/unit/test_research_runtime_service.py、tests/unit/test_legacy_research_runtime.py、tests/test_research_pipeline_experiment.py、tests/test_research_pipeline_persist.py、tests/test_config_loader.py、tests/test_alembic_runtime.py、tests/test_research_session_graph_backfill.py、tests/unit/test_backend_factory.py、tests/test_research_session_repo.py、tests/unit/test_neo4j_driver.py，共 264 passed。
+- 当时定向回归已通过：tests/unit/test_research_runtime_service.py、tests/unit/test_legacy_research_runtime.py、tests/test_research_pipeline_experiment.py、tests/test_research_pipeline_persist.py、tests/test_config_loader.py、tests/test_alembic_runtime.py、tests/test_research_session_graph_backfill.py、tests/unit/test_backend_factory.py、tests/test_research_session_repo.py、tests/unit/test_neo4j_driver.py，共 264 passed。后续这组 legacy Web 兼容覆盖已迁到 tests/unit/test_research_route_contract.py 与 tests/unit/test_research_session_service.py。
 - 真实持久化回归：integration_tests/test_experiment_execution_persistence_e2e.py 已在开发 PostgreSQL + Neo4j 上通过，结果为 2 passed in 22.36s。
 - 真实语义锁定：该回归已明确断言 experiment_execution 无输入时持久化为 skipped，有输入时持久化为 completed。
 - 文档最终收口：上述 5 份 STORAGE 历史文档最后一轮 diagnostics 已全部返回 No errors found。
@@ -60,7 +154,7 @@
 
 - 运行时统一这条线当前已不该再回到“每个入口各装配一遍配置”的旧模式；后续若继续收口，应优先找剩余 direct pipeline shortcut 与 legacy 壳。
 - experiment / experiment_execution 的语义边界已经在代码、测试、文档、Web 文案和持久化层同时落地；后续不要再把 experiment 写回“真实实验执行”。
-- 结构化持久化已经接入主研究链，下一阶段重点不是“是否接线”，而是事务边界、fallback 治理、schema drift 与可观测性继续收敛。
+- 结构化持久化已经接入主研究链，下一阶段重点不是“是否接线”，而是事务边界、仅 PG 模式 / 待回填 / schema drift 待治理与可观测性继续收敛。
 - 文档治理已完成一轮大收口；若后续继续扫尾，优先检查历史根文档是否还有六阶段旧表述、历史图示未标注，或 markdownlint 残留的 MD047 / MD034。
 
 ### 任意日期继续接手建议
@@ -156,7 +250,7 @@
 #### 1. 历史科研主链与 `run_cycle_demo` 收口（当前主链已演进为七阶段）
 - `run_cycle_demo.py` 大幅瘦身，主文件从“大而全脚本”拆到 `src/cycle/` 下的桥接/插件/研究会话/存储持久化/子进程模块。
 - 新增 `src/cycle/cycle_pipeline_bridge.py`，让 `cycle_runner` 默认通过真实 `ResearchPipeline` 执行当时主链迭代，而不是继续堆积在 CLI 文件内；后续主链已在 `experiment` 与 `analyze` 之间补入 `experiment_execution`。
-- 新增 `src/cycle/cycle_research_session.py`，把 research mode 的 session 生命周期、结果序列化、报告导出从入口脚本中抽离。
+- 2026-04-08 时新增 `src/cycle/cycle_research_session.py`，把当时 research mode 的 session 生命周期、结果序列化、报告导出从入口脚本中抽离；截至 2026-04-14，该入口已继续收口为消费 `entrypoint=demo` 装配结果后的 shared runtime 参数透传，不再本地持有 demo profile 默认值。
 - 新增 `src/cycle/cycle_plugin_workflows.py`、`src/cycle/cycle_storage_persist.py`、`src/cycle/cycle_subprocess.py`，把插件工作流、双库存档、subprocess 安全包装单独封装。
 
 #### 2. Pipeline/Phase 显式化与降级路径补齐

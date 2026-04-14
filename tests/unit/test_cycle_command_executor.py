@@ -84,8 +84,11 @@ class TestCycleCommandExecutor(unittest.TestCase):
             return {"status": "completed"}
 
         with patch(
-            "src.cycle.cycle_research_handler.build_cycle_runtime_config",
-            return_value={"runtime": {"environment": "test"}},
+            "src.cycle.cycle_research_handler.build_cycle_orchestrator_config",
+            return_value={
+                "pipeline_config": {"runtime": {"environment": "test"}},
+                "runtime_profile": "demo_research",
+            },
         ) as runtime_builder:
             rc = execute_cycle_demo_command(
                 args=args,
@@ -107,7 +110,13 @@ class TestCycleCommandExecutor(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         self.assertEqual(captured["question"], "测试问题")
-        self.assertEqual(captured["config"], {"runtime": {"environment": "test"}})
+        self.assertEqual(
+            captured["config"],
+            {
+                "pipeline_config": {"runtime": {"environment": "test"}},
+                "runtime_profile": "demo_research",
+            },
+        )
         self.assertEqual(captured["phase_names"], ["observe"])
         self.assertEqual(captured["export_report_formats"], ["markdown", "docx"])
         self.assertEqual(captured["report_output_dir"], "./output/research_reports_custom")

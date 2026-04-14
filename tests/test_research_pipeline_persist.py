@@ -464,6 +464,19 @@ class TestStructuredPersistResult(unittest.TestCase):
                 "phase_execution_id": "phase-observe",
                 "urn": "doc:observe:1",
                 "title": "桂枝汤观察文档",
+                "source_type": "ctext",
+                "catalog_id": "ctp:guizhi-tang",
+                "version_metadata": {
+                    "work_title": "伤寒论",
+                    "fragment_title": "桂枝汤",
+                    "work_fragment_key": "伤寒论|桂枝汤",
+                    "version_lineage_key": "伤寒论|桂枝汤|东汉|张仲景|宋本",
+                    "catalog_id": "ctp:guizhi-tang",
+                    "dynasty": "东汉",
+                    "author": "张仲景",
+                    "edition": "宋本",
+                    "witness_key": "ctext:doc:observe:1",
+                },
                 "entity_count": 2,
                 "relationship_count": 1,
                 "entities": [
@@ -552,6 +565,8 @@ class TestStructuredPersistResult(unittest.TestCase):
         self.assertIn("ResearchArtifact", labels)
         self.assertIn("Formula", labels)
         self.assertIn("Herb", labels)
+        self.assertIn("VersionWitness", labels)
+        self.assertIn("VersionLineage", labels)
 
         session_nodes = [node for node in nodes if node.label == "ResearchSession"]
         self.assertEqual(len(session_nodes), 1)
@@ -580,6 +595,8 @@ class TestStructuredPersistResult(unittest.TestCase):
         self.assertIn("GENERATED", relationship_types)
         self.assertIn("CONTAINS", relationship_types)
         self.assertIn("CAPTURED", relationship_types)
+        self.assertIn("OBSERVED_WITNESS", relationship_types)
+        self.assertIn("BELONGS_TO_LINEAGE", relationship_types)
 
     def test_projects_session_phase_nodes_to_neo4j_without_observe_documents(self):
         pipeline = ResearchPipeline(
@@ -658,6 +675,113 @@ class TestStructuredPersistResult(unittest.TestCase):
         edges = fake_txn.neo4j_batch_edges.call_args.args[0]
         relationship_types = {edge.relationship_type for edge, _, _ in edges}
         self.assertEqual(relationship_types, {"HAS_PHASE"})
+
+    def test_persists_observe_structured_philology_artifacts(self):
+        pipeline = ResearchPipeline(
+            {
+                "database": {"type": "postgresql", "host": "postgres", "name": "tcmautoresearch"},
+                "neo4j": {"enabled": False},
+            }
+        )
+        cycle = _make_cycle("cycle_structured_philology")
+        cycle.phase_executions = {
+            ResearchPhase.OBSERVE: _make_phase_execution(
+                "observe",
+                {
+                    "phase": "observe",
+                    "status": "completed",
+                    "results": {"ingestion_pipeline": {"aggregate": {}}},
+                    "artifacts": [
+                        {
+                            "name": "observe_philology_terminology_table",
+                            "artifact_type": "dataset",
+                            "mime_type": "application/json",
+                            "description": "Observe 阶段文献学术语标准表",
+                            "content": {"row_count": 2, "rows": [{"canonical": "黄芪"}, {"canonical": "当归"}]},
+                            "metadata": {"asset_kind": "terminology_standard_table", "row_count": 2},
+                        },
+                        {
+                            "name": "observe_philology_collation_entries",
+                            "artifact_type": "analysis",
+                            "mime_type": "application/json",
+                            "description": "Observe 阶段文献学校勘条目",
+                            "content": {"entry_count": 1, "entries": [{"base_text": "黃芪", "witness_text": "黃耆"}]},
+                            "metadata": {"asset_kind": "collation_entries", "entry_count": 1},
+                        },
+                        {
+                            "name": "observe_philology_annotation_report",
+                            "artifact_type": "report",
+                            "mime_type": "application/json",
+                            "description": "Observe 阶段文献学汇总报告",
+                            "content": {"summary": {"processed_document_count": 1}},
+                            "metadata": {"asset_kind": "annotation_report", "document_count": 1},
+                        },
+                    ],
+                    "metadata": {},
+                    "error": None,
+                },
+                context={"question": "验证文献学持久化产物"},
+            ),
+        }
+
+        fake_factory = MagicMock()
+        fake_factory.initialize.return_value = {
+            "db_type": "postgresql",
+            "pg_status": "active",
+            "neo4j_status": "skipped",
+        }
+        fake_factory.db_manager = object()
+        fake_factory.neo4j_driver = None
+        fake_txn = MagicMock()
+        fake_txn.pg_session = object()
+        fake_factory.transaction.return_value.__enter__.return_value = fake_txn
+        fake_factory.transaction.return_value.__exit__.return_value = False
+
+        fake_repo = MagicMock()
+        fake_repo.get_session.return_value = None
+        fake_repo.save_from_cycle.return_value = {
+            "id": "session-philology-artifacts",
+            "cycle_id": cycle.cycle_id,
+            "created_at": "2026-04-14T18:00:00",
+        }
+        fake_repo.add_phase_execution.return_value = {
+            "id": "phase-observe-philology-artifacts",
+            "phase": "observe",
+            "status": "completed",
+            "created_at": "2026-04-14T18:00:01",
+        }
+        fake_repo.replace_observe_document_graphs.return_value = []
+        fake_repo.add_artifact.side_effect = lambda cycle_id, payload, session=None: {
+            "id": f"artifact-{payload['name']}",
+            "phase_execution_id": payload.get("phase_execution_id"),
+            "name": payload["name"],
+            "artifact_type": payload["artifact_type"],
+            "mime_type": payload.get("mime_type"),
+            "metadata": payload.get("metadata"),
+            "content": payload.get("content"),
+        }
+
+        with patch("src.storage.StorageBackendFactory", return_value=fake_factory), patch(
+            "src.infrastructure.research_session_repo.ResearchSessionRepository",
+            return_value=fake_repo,
+        ):
+            result = pipeline._persist_result(cycle)
+
+        self.assertTrue(result)
+        self.assertEqual(fake_repo.add_artifact.call_count, 3)
+        artifact_payloads = [call.args[1] for call in fake_repo.add_artifact.call_args_list]
+        self.assertEqual(
+            [payload["artifact_type"] for payload in artifact_payloads],
+            ["dataset", "analysis", "report"],
+        )
+        self.assertTrue(all(payload["mime_type"] == "application/json" for payload in artifact_payloads))
+        self.assertEqual(artifact_payloads[0]["content"]["row_count"], 2)
+        self.assertEqual(artifact_payloads[1]["content"]["entry_count"], 1)
+        self.assertEqual(artifact_payloads[2]["content"]["summary"]["processed_document_count"], 1)
+        self.assertEqual(artifact_payloads[0]["metadata"]["asset_kind"], "terminology_standard_table")
+        self.assertEqual(artifact_payloads[1]["metadata"]["asset_kind"], "collation_entries")
+        self.assertEqual(artifact_payloads[2]["metadata"]["asset_kind"], "annotation_report")
+        self.assertTrue(all(payload["size_bytes"] > 0 for payload in artifact_payloads))
 
 
 if __name__ == "__main__":

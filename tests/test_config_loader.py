@@ -13,12 +13,16 @@ import yaml
 from fastapi.testclient import TestClient
 
 from src.api.app import create_app
+from src.cycle.cycle_runtime_config import build_cycle_orchestrator_config
 from src.infrastructure.config_loader import (
     load_secret_section,
     load_settings,
     load_settings_section,
 )
-from src.infrastructure.runtime_config_assembler import build_runtime_assembly
+from src.infrastructure.runtime_config_assembler import (
+    _ENTRYPOINT_RUNTIME_PROFILES,
+    build_runtime_assembly,
+)
 from src.web.app import create_app as create_legacy_web_app
 from web_console.app import create_app as create_web_console_app
 from web_console.job_manager import ResearchJobManager
@@ -250,11 +254,14 @@ class TestConfigLoader(unittest.TestCase):
         assembly = build_runtime_assembly(settings=settings)
 
         self.assertIs(assembly.settings, settings)
+        self.assertEqual(assembly.entrypoint, "")
+        self.assertIsNone(assembly.runtime_profile)
         self.assertEqual(assembly.runtime_config["models"]["llm"]["api_key"], "test-llm-api-key")
         self.assertEqual(
             assembly.orchestrator_config["pipeline_config"]["literature_retrieval"]["pubmed_api_key"],
             "pubmed-secret-key",
         )
+        self.assertNotIn("runtime_profile", assembly.orchestrator_config)
 
         assembly.runtime_config["models"]["llm"]["api_key"] = "mutated-runtime-key"
         self.assertEqual(
@@ -262,10 +269,54 @@ class TestConfigLoader(unittest.TestCase):
             "test-llm-api-key",
         )
 
+    def test_build_runtime_assembly_applies_web_entrypoint_runtime_profile(self) -> None:
+        settings = load_settings(root_path=self.root, environment="test")
+
+        assembly = build_runtime_assembly(settings=settings, entrypoint="web")
+
+        self.assertEqual(assembly.entrypoint, "web")
+        self.assertEqual(assembly.runtime_profile, "web_research")
+        self.assertEqual(assembly.orchestrator_config["runtime_profile"], "web_research")
+
+    def test_runtime_entrypoint_profile_catalog_is_explicit_and_limited(self) -> None:
+        settings = load_settings(root_path=self.root, environment="test")
+
+        self.assertEqual(
+            _ENTRYPOINT_RUNTIME_PROFILES,
+            {
+                "web": "web_research",
+                "demo": "demo_research",
+            },
+        )
+
+        for entrypoint, expected_profile in _ENTRYPOINT_RUNTIME_PROFILES.items():
+            assembly = build_runtime_assembly(settings=settings, entrypoint=entrypoint)
+            self.assertEqual(assembly.entrypoint, entrypoint)
+            self.assertEqual(assembly.runtime_profile, expected_profile)
+            self.assertEqual(assembly.orchestrator_config["runtime_profile"], expected_profile)
+
+        unknown_entry_assembly = build_runtime_assembly(settings=settings, entrypoint="batch")
+        self.assertEqual(unknown_entry_assembly.entrypoint, "batch")
+        self.assertIsNone(unknown_entry_assembly.runtime_profile)
+        self.assertNotIn("runtime_profile", unknown_entry_assembly.orchestrator_config)
+
+    def test_build_cycle_orchestrator_config_applies_demo_entrypoint_runtime_profile(self) -> None:
+        orchestrator_config = build_cycle_orchestrator_config(
+            config_path=self.root / "config.yml",
+            environment="test",
+        )
+
+        self.assertEqual(orchestrator_config["runtime_profile"], "demo_research")
+        self.assertEqual(
+            orchestrator_config["pipeline_config"]["models"]["llm"]["api_key"],
+            "test-llm-api-key",
+        )
+
     def test_job_manager_uses_runtime_assembly_when_settings_provided(self) -> None:
         settings = load_settings(root_path=self.root, environment="test")
         manager = ResearchJobManager(settings=settings)
         try:
+            self.assertEqual(manager._default_orchestrator_config["runtime_profile"], "web_research")
             self.assertEqual(
                 manager._default_orchestrator_config["pipeline_config"]["models"]["llm"]["api_key"],
                 "test-llm-api-key",
@@ -360,6 +411,8 @@ class TestConfigLoader(unittest.TestCase):
                 client.app.state.job_manager._default_orchestrator_config["pipeline_config"]["models"]["llm"]["api_key"],
                 "test-llm-api-key",
             )
+            self.assertEqual(client.app.state.runtime_assembly.runtime_profile, "web_research")
+            self.assertEqual(client.app.state.job_manager._default_orchestrator_config["runtime_profile"], "web_research")
             self.assertEqual(
                 client.app.state.job_manager._default_orchestrator_config["pipeline_config"]["literature_retrieval"]["pubmed_api_key"],
                 "pubmed-secret-key",
@@ -370,6 +423,8 @@ class TestConfigLoader(unittest.TestCase):
 
         with TestClient(create_web_console_app(settings=settings)) as client:
             self.assertEqual(client.get("/health").status_code, 200)
+            self.assertEqual(client.app.state.runtime_assembly.runtime_profile, "web_research")
+            self.assertEqual(client.app.state.job_manager._default_orchestrator_config["runtime_profile"], "web_research")
             self.assertEqual(
                 client.app.state.job_manager._default_orchestrator_config["pipeline_config"]["models"]["llm"]["api_key"],
                 "test-llm-api-key",
@@ -382,6 +437,7 @@ class TestConfigLoader(unittest.TestCase):
     def test_app_entrypoints_accept_config_path_and_environment(self) -> None:
         with TestClient(create_app(config_path=self.root / "config.yml", environment="test")) as api_client:
             self.assertEqual(api_client.get("/health").json()["environment"], "test")
+            self.assertEqual(api_client.app.state.runtime_assembly.runtime_profile, "web_research")
             self.assertEqual(
                 api_client.app.state.job_manager._default_orchestrator_config["pipeline_config"]["models"]["llm"]["api_key"],
                 "test-llm-api-key",
@@ -389,6 +445,7 @@ class TestConfigLoader(unittest.TestCase):
 
         with TestClient(create_web_console_app(config_path=self.root / "config.yml", environment="test")) as web_client:
             self.assertEqual(web_client.get("/health").json()["environment"], "test")
+            self.assertEqual(web_client.app.state.runtime_assembly.runtime_profile, "web_research")
             self.assertEqual(
                 web_client.app.state.job_manager._default_orchestrator_config["pipeline_config"]["literature_retrieval"]["pubmed_api_key"],
                 "pubmed-secret-key",
@@ -397,6 +454,7 @@ class TestConfigLoader(unittest.TestCase):
         with TestClient(create_legacy_web_app(config_path=self.root / "config.yml", environment="test")) as legacy_client:
             self.assertEqual(legacy_client.get("/health").json()["environment"], "test")
             self.assertEqual(legacy_client.app.state.settings.environment, "test")
+            self.assertEqual(legacy_client.app.state.runtime_assembly.runtime_profile, "web_research")
             self.assertEqual(
                 legacy_client.app.state.config["models"]["llm"]["api_key"],
                 "test-llm-api-key",

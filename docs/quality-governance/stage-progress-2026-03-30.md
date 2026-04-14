@@ -1,5 +1,7 @@
 # 阶段性摘要（2026-03-30）
 
+> 历史阶段摘要（2026-03-30）。本文中的“当前”“现状”“下一步”等表述默认指向 2026-03-30 当日的治理快照，不代表 2026-04-14 的现行实现；当前入口治理与 runtime/profile 事实请以共享 runtime、RuntimeConfigAssembler 及最新测试为准。
+
 ## 1. 当前落点
 
 - 当前分支：stage2-s2_1-preprocessor-opt
@@ -106,7 +108,9 @@
 - 已补一类 improving residual-risk 样本：`inventory_trend.status = improving` 但 `uncategorized_root_script` 当前仍为 1。当前该语义已在模块级单测、end-to-end、quality_gate replay harness 三层验证为“feedback 继续产生 quality-governance draft，stage1/stage2 runners 仍不抬升 governance_alerts”，且 issue draft 正文不会误带 `## Inventory Trend` 区块。
 - 已把 issue index、feedback `report_metadata`、导出 `issue_drafts[*]` 中仍保留的平铺 issue 字段统一改为从 `issue_body.summary / inventory_context / action_items / acceptance_checks / artifact_references` 反向投影，确保正文语义与兼容字段共享单一事实源。
 - 已在 `issue_body` 中补齐稳定的 `inventory_context`，使 improving / stable 等非 regressing 样本即便不渲染 `## Inventory Trend`，也能为兼容平铺字段与回放护栏提供统一来源。
-- 已补一类 improving mixed residual-risk 样本：`missing_contract_count = 1` 且 `uncategorized_root_script = 1` 同时残留。当前该语义已在模块级单测、end-to-end、quality_gate replay harness 三层验证为“feedback 继续产生 quality-governance draft 且保留有序双 action，stage1/stage2 runners 仍不抬升 governance_alerts”。- 已移除 issue index (`quality-feedback-issues.json`) 的 `report_metadata` 自引用块，issue index 顶层缩减为 `{"count": N, "items": [...]}`。原 `report_metadata.issue_index_path`（自引用）与 `report_metadata.issue_dir`（与每条 item artifact_references 重复）均由 feedback `report_metadata` 和 per-item `artifact_references` 取代。跨文件同构护栏已从 issue index `report_metadata` 改为对比 item `artifact_references` 与 feedback `report_metadata`。
+- 已补一类 improving mixed residual-risk 样本：`missing_contract_count = 1` 且 `uncategorized_root_script = 1` 同时残留。当前该语义已在模块级单测、end-to-end、quality_gate replay harness 三层验证为“feedback 继续产生 quality-governance draft 且保留有序双 action，stage1/stage2 runners 仍不抬升 governance_alerts”。
+- 已移除 issue index (`quality-feedback-issues.json`) 的 `report_metadata` 自引用块，issue index 顶层缩减为 `{"count": N, "items": [...]}`。原 `report_metadata.issue_index_path`（自引用）与 `report_metadata.issue_dir`（与每条 item artifact_references 重复）均由 feedback `report_metadata` 和 per-item `artifact_references` 取代。跨文件同构护栏已从 issue index `report_metadata` 改为对比 item `artifact_references` 与 feedback `report_metadata`。
+
 ### 2.3 Stage runner 治理
 
 - tools/stage1_d1_d10_runner.ps1 已扩展到 D67，并在 day/global 汇总中按需暴露 inventory 回退治理提示。

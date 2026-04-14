@@ -8,6 +8,8 @@
 - 本文保留 2026-03-28 的早期存储设计基线与当时的目标架构草案。
 - 当前主科研链已经接入 PostgreSQL / Neo4j 结构化持久化，不再只是“待集成的存储方案设计”。
 - 下文 ASCII 架构块与数据流块若无额外说明，均应理解为 historical baseline 或历史设计目标，而不是 2026-04-12 的当前实现拓扑。
+- 当前结构化存储运行态统一使用“双写完成 / 仅 PG 模式 / 待回填 / schema drift 待治理”四个词汇。
+- 当前主科研链的主写路径以 `StorageBackendFactory.transaction()` + `TransactionCoordinator` 为准；文中的 `UnifiedStorageDriver` / 双库写入图示主要用于保留 2026-03-28 方案设计背景。
 
 ---
 
@@ -388,7 +390,7 @@ databases:
 | db_models.py | `src/storage/` | SQLAlchemy ORM 模型定义 |
 | db_manager.py | `src/storage/` | 数据库连接管理 |
 | neo4j_driver.py | `src/storage/` | Neo4j 连接和操作 |
-| storage_driver.py | `src/storage/` | 统一存储驱动接口 |
+| storage_driver.py | `src/storage/` | 历史统一存储驱动接口示例；当前主链以 `backend_factory` + `transaction` 为准 |
 | query_service.py | `src/storage/` | 查询服务层 |
 
 ---
@@ -397,9 +399,9 @@ databases:
 
 | 风险 | 影响 | 缓解措施 |
 | --- | --- | --- |
-| 数据库连接失败 | 系统无法启动 | 实现重试机制、降级策略（Fallback to JSON） |
+| 数据库连接失败 | 可能进入降级态或阻塞图投影 | 显式进入“仅 PG 模式”或阻止发布，并补充告警、回填判定与健康检查 |
 | 性能瓶颈 | 处理速度下降 | 异步批量写入、连接池优化、查询索引 |
-| 数据一致性 | 不同库间数据不同步 | 事务管理、同步写入、数据验证脚本 |
+| 数据一致性 | PG 事实、图投影与历史补齐状态判断不一致 | `TransactionCoordinator`、health-check / backfill 校验与统一状态上抛 |
 | 存储容量溢出 | 磁盘满 | 定期备份、数据清理策略、分区表 |
 
 ---

@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from src.collector.corpus_bundle import build_document_version_metadata
 from src.infrastructure.persistence import (
     ArtifactTypeEnum,
     DatabaseManager,
@@ -37,6 +38,10 @@ from src.infrastructure.persistence import (
     SessionStatusEnum,
     _json_dumps,
     _json_loads,
+)
+from src.research.observe_philology import (
+    build_observe_philology_artifact_payloads,
+    resolve_observe_philology_assets,
 )
 
 logger = logging.getLogger(__name__)
@@ -471,6 +476,41 @@ class ResearchSessionRepository:
         with self._db.session_scope() as session:
             return self._list_observe_document_graphs(session, cycle_id)
 
+    def list_observe_version_lineages(self, cycle_id: str) -> List[Dict[str, Any]]:
+        with self._db.session_scope() as session:
+            documents = self._list_observe_document_graphs(session, cycle_id)
+            return self._group_observe_version_lineages(documents)
+
+    def backfill_observe_document_version_metadata(
+        self,
+        cycle_id: Optional[str] = None,
+        *,
+        batch_size: int = 500,
+        session: Optional[Session] = None,
+    ) -> Dict[str, Any]:
+        with self._session_scope(session) as db_session:
+            query = (
+                self._observe_document_query(db_session, cycle_id)
+                .order_by(Document.processing_timestamp.asc(), Document.created_at.asc())
+            )
+            effective_batch_size = max(int(batch_size or 0), 1)
+            scanned_document_count = 0
+            updated_document_count = 0
+
+            for document in query.yield_per(effective_batch_size):
+                scanned_document_count += 1
+                if self._writeback_observe_document_version_metadata(document):
+                    updated_document_count += 1
+
+            db_session.flush()
+            return {
+                "cycle_id": cycle_id,
+                "batch_size": effective_batch_size,
+                "scanned_document_count": scanned_document_count,
+                "updated_document_count": updated_document_count,
+                "skipped_document_count": scanned_document_count - updated_document_count,
+            }
+
     # ---- 快照（含阶段 + 工件） -------------------------------------------
 
     def get_full_snapshot(self, cycle_id: str) -> Optional[Dict[str, Any]]:
@@ -487,7 +527,102 @@ class ResearchSessionRepository:
                 self._artifact_to_dict(a) for a in rs.artifacts
             ]
             result["observe_documents"] = self._list_observe_document_graphs(session, cycle_id)
+            result["version_lineages"] = self._group_observe_version_lineages(result["observe_documents"])
+            result["observe_philology"] = resolve_observe_philology_assets(
+                artifacts=result["artifacts"],
+                observe_phase_result=self._phase_output_by_name(result["phase_executions"], "observe"),
+                observe_documents=result["observe_documents"],
+            )
             return result
+
+    def backfill_observe_philology_artifacts(
+        self,
+        cycle_id: Optional[str] = None,
+        *,
+        batch_size: int = 200,
+        artifact_output: Optional[Mapping[str, Any]] = None,
+        session: Optional[Session] = None,
+    ) -> Dict[str, Any]:
+        with self._session_scope(session) as db_session:
+            query = (
+                db_session.query(PhaseExecution, ResearchSession.cycle_id)
+                .join(ResearchSession, PhaseExecution.session_id == ResearchSession.id)
+                .filter(PhaseExecution.phase == "observe")
+                .order_by(PhaseExecution.created_at.asc())
+            )
+            if cycle_id:
+                query = query.filter(ResearchSession.cycle_id == cycle_id)
+
+            effective_batch_size = max(int(batch_size or 0), 1)
+            scanned_phase_count = 0
+            updated_phase_count = 0
+            created_artifact_count = 0
+            observe_documents_cache: Dict[str, List[Dict[str, Any]]] = {}
+
+            for phase_execution, phase_cycle_id in query.yield_per(effective_batch_size):
+                scanned_phase_count += 1
+                normalized_cycle_id = str(phase_cycle_id or "").strip()
+                if not normalized_cycle_id:
+                    continue
+
+                existing_artifacts = (
+                    db_session.query(ResearchArtifact)
+                    .filter(ResearchArtifact.phase_execution_id == phase_execution.id)
+                    .order_by(ResearchArtifact.created_at.asc())
+                    .all()
+                )
+                existing_artifact_records = [self._artifact_to_dict(artifact) for artifact in existing_artifacts]
+                existing_artifact_names = {
+                    str(record.get("name") or "").strip()
+                    for record in existing_artifact_records
+                    if str(record.get("name") or "").strip()
+                }
+
+                if normalized_cycle_id not in observe_documents_cache:
+                    observe_documents_cache[normalized_cycle_id] = self._list_observe_document_graphs(
+                        db_session,
+                        normalized_cycle_id,
+                    )
+
+                observe_philology = resolve_observe_philology_assets(
+                    artifacts=existing_artifact_records,
+                    observe_phase_result=_json_loads(phase_execution.output_json, {}),
+                    observe_documents=observe_documents_cache[normalized_cycle_id],
+                )
+                artifact_payloads = [
+                    payload
+                    for payload in build_observe_philology_artifact_payloads(observe_philology, artifact_output)
+                    if str(payload.get("name") or "").strip() not in existing_artifact_names
+                ]
+                if not artifact_payloads:
+                    continue
+
+                for payload in artifact_payloads:
+                    saved = self.add_artifact(
+                        normalized_cycle_id,
+                        {
+                            **dict(payload),
+                            "phase_execution_id": str(phase_execution.id),
+                            "size_bytes": self._estimate_artifact_size(
+                                payload.get("content"),
+                                payload.get("file_path"),
+                            ),
+                        },
+                        session=db_session,
+                    )
+                    if isinstance(saved, dict):
+                        created_artifact_count += 1
+                updated_phase_count += 1
+
+            db_session.flush()
+            return {
+                "cycle_id": cycle_id,
+                "batch_size": effective_batch_size,
+                "scanned_phase_count": scanned_phase_count,
+                "updated_phase_count": updated_phase_count,
+                "created_artifact_count": created_artifact_count,
+                "skipped_phase_count": scanned_phase_count - updated_phase_count,
+            }
 
     # ---- ResearchCycle dataclass 互转 ------------------------------------
 
@@ -576,6 +711,30 @@ class ResearchSessionRepository:
         }
 
     @staticmethod
+    def _phase_output_by_name(
+        phase_executions: Sequence[Mapping[str, Any]],
+        phase_name: str,
+    ) -> Dict[str, Any]:
+        normalized_phase_name = str(phase_name or "").strip().lower()
+        for phase_execution in phase_executions:
+            if not isinstance(phase_execution, Mapping):
+                continue
+            current_phase = str(phase_execution.get("phase") or "").strip().lower()
+            if current_phase != normalized_phase_name:
+                continue
+            return dict(phase_execution.get("output") or {}) if isinstance(phase_execution.get("output"), Mapping) else {}
+        return {}
+
+    @staticmethod
+    def _estimate_artifact_size(content: Any, file_path: Any = None) -> int:
+        file_path_text = str(file_path or "").strip()
+        if file_path_text:
+            return 0
+        if content in (None, "", [], {}):
+            return 0
+        return len(_json_dumps(content, "{}").encode("utf-8"))
+
+    @staticmethod
     def _artifact_to_dict(a: ResearchArtifact) -> Dict[str, Any]:
         return {
             "id": str(a.id),
@@ -651,6 +810,10 @@ class ResearchSessionRepository:
         phase_execution_id: Optional[str],
         document_index: int,
         payload: Mapping[str, Any],
+        *,
+        source_type: str,
+        document_metadata: Mapping[str, Any],
+        version_metadata: Mapping[str, Any],
     ) -> str:
         note_payload = {
             "cycle_id": cycle_id,
@@ -659,9 +822,20 @@ class ResearchSessionRepository:
             "document_index": document_index,
             "urn": str(payload.get("urn") or "").strip(),
             "title": str(payload.get("title") or "").strip(),
+            "source_type": source_type,
+            "catalog_id": str(version_metadata.get("catalog_id") or document_metadata.get("catalog_id") or "").strip(),
             "raw_text_preview": str(payload.get("raw_text_preview") or "")[:240],
             "processed_text_preview": str(payload.get("processed_text_preview") or "")[:240],
             "processed_text_size": int(payload.get("processed_text_size") or 0),
+            "metadata": dict(document_metadata or {}),
+            "version_metadata": dict(version_metadata or {}),
+            "philology": payload.get("philology") if isinstance(payload.get("philology"), dict) else {},
+            "philology_notes": [
+                str(note)
+                for note in (payload.get("philology_notes") or [])
+                if str(note).strip()
+            ] if isinstance(payload.get("philology_notes"), list) else [],
+            "philology_assets": payload.get("philology_assets") if isinstance(payload.get("philology_assets"), dict) else {},
             "output_generation": payload.get("output_generation") if isinstance(payload.get("output_generation"), dict) else {},
         }
         return _json_dumps(note_payload, "{}")
@@ -680,19 +854,77 @@ class ResearchSessionRepository:
         document_index: int,
         payload: Mapping[str, Any],
     ) -> Document:
+        document_metadata = self._extract_observe_document_metadata(payload)
+        version_metadata = self._extract_observe_document_version_metadata(payload, document_metadata)
+        document_metadata["version_metadata"] = version_metadata
+        source_type = str(
+            payload.get("source_type")
+            or document_metadata.get("source_type")
+            or version_metadata.get("source_type")
+            or "observe"
+        ).strip() or "observe"
         document = Document(
             source_file=self._observe_document_source_file(cycle_id, document_index, payload),
+            document_urn=str(payload.get("urn") or "").strip() or None,
+            document_title=str(payload.get("title") or "").strip() or None,
+            source_type=source_type or None,
+            catalog_id=str(version_metadata.get("catalog_id") or "").strip() or None,
+            work_title=str(version_metadata.get("work_title") or "").strip() or None,
+            fragment_title=str(version_metadata.get("fragment_title") or "").strip() or None,
+            work_fragment_key=str(version_metadata.get("work_fragment_key") or "").strip() or None,
+            version_lineage_key=str(version_metadata.get("version_lineage_key") or "").strip() or None,
+            witness_key=str(version_metadata.get("witness_key") or "").strip() or None,
+            dynasty=str(version_metadata.get("dynasty") or "").strip() or None,
+            author=str(version_metadata.get("author") or "").strip() or None,
+            edition=str(version_metadata.get("edition") or "").strip() or None,
+            version_metadata_json=version_metadata,
             processing_timestamp=_parse_datetime(payload.get("processing_timestamp")) or datetime.utcnow(),
             objective=research_session.research_objective or research_session.description or None,
             raw_text_size=int(payload.get("raw_text_size") or 0),
             entities_extracted_count=int(payload.get("entity_count") or 0),
             process_status=ProcessStatusEnum.COMPLETED,
             quality_score=0.0,
-            notes=self._build_observe_document_notes(cycle_id, phase_execution_id, document_index, payload),
+            notes=self._build_observe_document_notes(
+                cycle_id,
+                phase_execution_id,
+                document_index,
+                payload,
+                source_type=source_type,
+                document_metadata=document_metadata,
+                version_metadata=version_metadata,
+            ),
         )
         session.add(document)
         session.flush()
         return document
+
+    @staticmethod
+    def _extract_observe_document_metadata(payload: Mapping[str, Any]) -> Dict[str, Any]:
+        metadata = dict(payload.get("metadata") or {}) if isinstance(payload.get("metadata"), Mapping) else {}
+        version_metadata = payload.get("version_metadata") if isinstance(payload.get("version_metadata"), Mapping) else {}
+        if version_metadata and not isinstance(metadata.get("version_metadata"), dict):
+            metadata["version_metadata"] = dict(version_metadata)
+        return metadata
+
+    def _extract_observe_document_version_metadata(
+        self,
+        payload: Mapping[str, Any],
+        metadata: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        existing_version_metadata = metadata.get("version_metadata") if isinstance(metadata.get("version_metadata"), Mapping) else {}
+        source_type = str(payload.get("source_type") or metadata.get("source_type") or "observe").strip() or "observe"
+        source_ref = str(payload.get("urn") or metadata.get("source_file") or payload.get("title") or "observe").strip()
+        enriched_metadata = build_document_version_metadata(
+            title=str(payload.get("title") or "").strip(),
+            source_type=source_type,
+            source_ref=source_ref,
+            metadata={
+                **dict(metadata),
+                "version_metadata": dict(existing_version_metadata or {}),
+                "catalog_id": metadata.get("catalog_id") or existing_version_metadata.get("catalog_id"),
+            },
+        )
+        return dict(enriched_metadata.get("version_metadata") or {})
 
     def _persist_observe_entities(
         self,
@@ -797,10 +1029,8 @@ class ResearchSessionRepository:
         return relationships
 
     def _list_observe_document_graphs(self, session: Session, cycle_id: str) -> List[Dict[str, Any]]:
-        prefix = f"{self._observe_document_source_prefix(cycle_id)}%"
         documents = (
-            session.query(Document)
-            .filter(Document.source_file.like(prefix))
+            self._observe_document_query(session, cycle_id)
             .order_by(Document.processing_timestamp.asc(), Document.created_at.asc())
             .all()
         )
@@ -826,6 +1056,13 @@ class ResearchSessionRepository:
         relationships: Sequence[EntityRelationship],
     ) -> Dict[str, Any]:
         notes = self._parse_observe_document_notes(document.notes)
+        version_metadata = self._document_version_metadata(document, notes)
+        metadata = dict(notes.get("metadata") or {}) if isinstance(notes.get("metadata"), dict) else {}
+        metadata["version_metadata"] = version_metadata
+        if document.source_type and not metadata.get("source_type"):
+            metadata["source_type"] = document.source_type
+        if document.catalog_id and not metadata.get("catalog_id"):
+            metadata["catalog_id"] = document.catalog_id
         entity_dicts = [self._entity_to_dict(entity) for entity in entities]
         relationship_dicts = [self._relationship_to_dict(relationship) for relationship in relationships]
         return {
@@ -841,11 +1078,26 @@ class ResearchSessionRepository:
             "phase": notes.get("phase"),
             "phase_execution_id": notes.get("phase_execution_id"),
             "document_index": notes.get("document_index"),
-            "urn": notes.get("urn"),
-            "title": notes.get("title"),
+            "urn": document.document_urn or notes.get("urn"),
+            "title": document.document_title or notes.get("title"),
+            "source_type": document.source_type or notes.get("source_type") or version_metadata.get("source_type"),
+            "catalog_id": document.catalog_id or notes.get("catalog_id") or version_metadata.get("catalog_id"),
+            "work_title": document.work_title or version_metadata.get("work_title"),
+            "fragment_title": document.fragment_title or version_metadata.get("fragment_title"),
+            "work_fragment_key": document.work_fragment_key or version_metadata.get("work_fragment_key"),
+            "version_lineage_key": document.version_lineage_key or version_metadata.get("version_lineage_key"),
+            "witness_key": document.witness_key or version_metadata.get("witness_key"),
+            "dynasty": document.dynasty or version_metadata.get("dynasty"),
+            "author": document.author or version_metadata.get("author"),
+            "edition": document.edition or version_metadata.get("edition"),
             "raw_text_preview": notes.get("raw_text_preview"),
             "processed_text_preview": notes.get("processed_text_preview"),
             "processed_text_size": notes.get("processed_text_size"),
+            "metadata": metadata,
+            "version_metadata": version_metadata,
+            "philology": notes.get("philology") if isinstance(notes.get("philology"), dict) else {},
+            "philology_notes": notes.get("philology_notes") if isinstance(notes.get("philology_notes"), list) else [],
+            "philology_assets": notes.get("philology_assets") if isinstance(notes.get("philology_assets"), dict) else {},
             "output_generation": notes.get("output_generation") if isinstance(notes.get("output_generation"), dict) else {},
             "entities": entity_dicts,
             "semantic_relationships": relationship_dicts,
@@ -853,9 +1105,236 @@ class ResearchSessionRepository:
             "relationship_count": len(relationship_dicts),
         }
 
+    def _writeback_observe_document_version_metadata(self, document: Document) -> bool:
+        notes = self._parse_observe_document_notes(document.notes)
+        version_metadata = self._document_version_metadata(document, notes)
+
+        document_urn = str(
+            document.document_urn
+            or notes.get("urn")
+            or version_metadata.get("source_ref")
+            or ""
+        ).strip() or None
+        document_title = str(
+            document.document_title
+            or notes.get("title")
+            or version_metadata.get("fragment_title")
+            or version_metadata.get("work_title")
+            or ""
+        ).strip() or None
+        source_type = str(
+            document.source_type
+            or notes.get("source_type")
+            or version_metadata.get("source_type")
+            or self._infer_legacy_observe_source_type(document_urn or document.source_file)
+            or "observe"
+        ).strip() or None
+
+        updated = False
+        updated |= self._assign_if_changed(document, "document_urn", document_urn)
+        updated |= self._assign_if_changed(document, "document_title", document_title)
+        updated |= self._assign_if_changed(document, "source_type", source_type)
+        updated |= self._assign_if_changed(document, "catalog_id", self._optional_version_value(version_metadata, "catalog_id"))
+        updated |= self._assign_if_changed(document, "work_title", self._optional_version_value(version_metadata, "work_title"))
+        updated |= self._assign_if_changed(document, "fragment_title", self._optional_version_value(version_metadata, "fragment_title"))
+        updated |= self._assign_if_changed(document, "work_fragment_key", self._optional_version_value(version_metadata, "work_fragment_key"))
+        updated |= self._assign_if_changed(document, "version_lineage_key", self._optional_version_value(version_metadata, "version_lineage_key"))
+        updated |= self._assign_if_changed(document, "witness_key", self._optional_version_value(version_metadata, "witness_key"))
+        updated |= self._assign_if_changed(document, "dynasty", self._optional_version_value(version_metadata, "dynasty"))
+        updated |= self._assign_if_changed(document, "author", self._optional_version_value(version_metadata, "author"))
+        updated |= self._assign_if_changed(document, "edition", self._optional_version_value(version_metadata, "edition"))
+        updated |= self._assign_if_changed(document, "version_metadata_json", dict(version_metadata))
+
+        note_payload = dict(notes)
+        if document_urn:
+            note_payload["urn"] = document_urn
+        if document_title:
+            note_payload["title"] = document_title
+        if source_type:
+            note_payload["source_type"] = source_type
+        catalog_id = str(version_metadata.get("catalog_id") or "").strip()
+        if catalog_id:
+            note_payload["catalog_id"] = catalog_id
+
+        note_metadata = dict(note_payload.get("metadata") or {}) if isinstance(note_payload.get("metadata"), dict) else {}
+        if source_type:
+            note_metadata["source_type"] = source_type
+        if catalog_id:
+            note_metadata["catalog_id"] = catalog_id
+        note_metadata["version_metadata"] = dict(version_metadata)
+        note_payload["metadata"] = note_metadata
+        note_payload["version_metadata"] = dict(version_metadata)
+
+        serialized_notes = _json_dumps(note_payload, "{}")
+        if document.notes != serialized_notes:
+            document.notes = serialized_notes
+            updated = True
+        return updated
+
+    @staticmethod
+    def _assign_if_changed(document: Document, field_name: str, value: Any) -> bool:
+        if getattr(document, field_name) == value:
+            return False
+        setattr(document, field_name, value)
+        return True
+
+    @staticmethod
+    def _optional_version_value(version_metadata: Mapping[str, Any], key: str) -> Optional[str]:
+        value = str(version_metadata.get(key) or "").strip()
+        return value or None
+
+    @staticmethod
+    def _document_version_metadata(document: Document, notes: Mapping[str, Any]) -> Dict[str, Any]:
+        version_metadata = dict(document.version_metadata_json or {})
+        note_version_metadata = notes.get("version_metadata") if isinstance(notes.get("version_metadata"), dict) else {}
+        if not version_metadata and note_version_metadata:
+            version_metadata = dict(note_version_metadata)
+
+        note_metadata = dict(notes.get("metadata") or {}) if isinstance(notes.get("metadata"), dict) else {}
+        if note_version_metadata:
+            note_metadata["version_metadata"] = {
+                **dict(note_metadata.get("version_metadata") or {}),
+                **note_version_metadata,
+                **version_metadata,
+            }
+
+        column_mapping = {
+            "source_ref": document.document_urn,
+            "source_type": document.source_type,
+            "catalog_id": document.catalog_id,
+            "work_title": document.work_title,
+            "fragment_title": document.fragment_title,
+            "work_fragment_key": document.work_fragment_key,
+            "version_lineage_key": document.version_lineage_key,
+            "witness_key": document.witness_key,
+            "dynasty": document.dynasty,
+            "author": document.author,
+            "edition": document.edition,
+        }
+        for key, value in column_mapping.items():
+            if value not in (None, ""):
+                version_metadata[key] = value
+
+        source_ref = str(
+            version_metadata.get("source_ref")
+            or document.document_urn
+            or notes.get("urn")
+            or document.source_file
+            or ""
+        ).strip()
+        source_type = str(
+            version_metadata.get("source_type")
+            or document.source_type
+            or notes.get("source_type")
+            or ResearchSessionRepository._infer_legacy_observe_source_type(source_ref)
+            or "observe"
+        ).strip() or "observe"
+        title = str(
+            version_metadata.get("fragment_title")
+            or document.document_title
+            or notes.get("title")
+            or ""
+        ).strip()
+        catalog_id = str(version_metadata.get("catalog_id") or notes.get("catalog_id") or note_metadata.get("catalog_id") or "").strip()
+        if catalog_id:
+            note_metadata["catalog_id"] = catalog_id
+
+        normalized_metadata = build_document_version_metadata(
+            title=title,
+            source_type=source_type,
+            source_ref=source_ref or title or document.source_file,
+            metadata={
+                **note_metadata,
+                "version_metadata": version_metadata,
+            },
+        )
+        return dict(normalized_metadata.get("version_metadata") or version_metadata)
+
+    @staticmethod
+    def _infer_legacy_observe_source_type(source_ref: str) -> str:
+        normalized = str(source_ref or "").strip().lower()
+        if not normalized:
+            return "observe"
+        if normalized.startswith("ctp:") or "ctext.org" in normalized:
+            return "ctext"
+        if normalized.endswith(".pdf"):
+            return "pdf"
+        if normalized.endswith((".txt", ".md", ".markdown", ".json", ".xml", ".html", ".htm")):
+            return "local"
+        if "\\" in normalized or "/" in normalized:
+            return "local"
+        return "observe"
+
+    @staticmethod
+    def _group_observe_version_lineages(documents: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+        grouped: Dict[str, Dict[str, Any]] = {}
+        seen_witnesses: set[tuple[str, str]] = set()
+
+        for document in documents:
+            if not isinstance(document, Mapping):
+                continue
+            version_metadata = document.get("version_metadata") if isinstance(document.get("version_metadata"), Mapping) else {}
+            lineage_key = str(
+                version_metadata.get("version_lineage_key")
+                or version_metadata.get("work_fragment_key")
+                or version_metadata.get("witness_key")
+                or document.get("id")
+                or ""
+            ).strip()
+            if not lineage_key:
+                continue
+
+            witness_key = str(version_metadata.get("witness_key") or document.get("id") or document.get("urn") or "").strip()
+            if witness_key:
+                seen_key = (lineage_key, witness_key)
+                if seen_key in seen_witnesses:
+                    continue
+                seen_witnesses.add(seen_key)
+
+            group = grouped.setdefault(
+                lineage_key,
+                {
+                    "cycle_id": document.get("cycle_id"),
+                    "version_lineage_key": str(version_metadata.get("version_lineage_key") or lineage_key).strip(),
+                    "work_fragment_key": str(version_metadata.get("work_fragment_key") or "").strip(),
+                    "work_title": str(version_metadata.get("work_title") or document.get("work_title") or "").strip(),
+                    "fragment_title": str(version_metadata.get("fragment_title") or document.get("fragment_title") or "").strip(),
+                    "dynasty": str(version_metadata.get("dynasty") or document.get("dynasty") or "").strip(),
+                    "author": str(version_metadata.get("author") or document.get("author") or "").strip(),
+                    "edition": str(version_metadata.get("edition") or document.get("edition") or "").strip(),
+                    "witnesses": [],
+                },
+            )
+            group["witnesses"].append(
+                {
+                    "document_id": document.get("id"),
+                    "urn": document.get("urn"),
+                    "title": document.get("title"),
+                    "source_type": document.get("source_type"),
+                    "catalog_id": version_metadata.get("catalog_id") or document.get("catalog_id"),
+                    "witness_key": witness_key,
+                    "dynasty": version_metadata.get("dynasty") or document.get("dynasty"),
+                    "author": version_metadata.get("author") or document.get("author"),
+                    "edition": version_metadata.get("edition") or document.get("edition"),
+                }
+            )
+
+        ordered = sorted(grouped.values(), key=lambda item: str(item.get("version_lineage_key") or item.get("work_fragment_key") or ""))
+        for item in ordered:
+            item["witness_count"] = len(item.get("witnesses") or [])
+        return ordered
+
+    @classmethod
+    def _observe_document_query(
+        cls,
+        session: Session,
+        cycle_id: Optional[str] = None,
+    ):
+        source_pattern = f"{cls._observe_document_source_prefix(cycle_id)}%" if cycle_id else "research://%/observe/%"
+        return session.query(Document).filter(Document.source_file.like(source_pattern))
+
     def _delete_observe_document_graphs(self, session: Session, cycle_id: str) -> None:
-        prefix = f"{self._observe_document_source_prefix(cycle_id)}%"
-        document_ids = [row[0] for row in session.query(Document.id).filter(Document.source_file.like(prefix)).all()]
+        document_ids = [row[0] for row in self._observe_document_query(session, cycle_id).with_entities(Document.id).all()]
         if not document_ids:
             return
 

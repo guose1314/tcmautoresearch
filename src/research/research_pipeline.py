@@ -44,6 +44,7 @@ _OPTIONAL_RUNTIME_IMPORTS = {
     "PaperWriter": ("src.generation.paper_writer", "PaperWriter"),
     "OutputGenerator": ("src.generation.output_formatter", "OutputGenerator"),
     "ReportGenerator": ("src.generation.report_generator", "ReportGenerator"),
+    "PhilologyService": ("src.analysis.philology_service", "PhilologyService"),
     "AdvancedEntityExtractor": ("src.analysis.entity_extractor", "AdvancedEntityExtractor"),
     "DocumentPreprocessor": ("src.analysis.preprocessor", "DocumentPreprocessor"),
     "SemanticGraphBuilder": ("src.analysis.semantic_graph", "SemanticGraphBuilder"),
@@ -98,6 +99,7 @@ OutputGenerator = _try_import("src.generation.output_formatter", "OutputGenerato
 ReportGenerator = _try_import("src.generation.report_generator", "ReportGenerator")
 
 # 分析模块 — 延迟导入，支持依赖注入
+PhilologyService = _try_import("src.analysis.philology_service", "PhilologyService")
 AdvancedEntityExtractor = _try_import("src.analysis.entity_extractor", "AdvancedEntityExtractor")
 DocumentPreprocessor = _try_import("src.analysis.preprocessor", "DocumentPreprocessor")
 SemanticGraphBuilder = _try_import(
@@ -121,6 +123,7 @@ class ResearchPipeline:
     CTextCorpusCollector = CTextCorpusCollector
     LiteratureRetriever = LiteratureRetriever
     DocumentPreprocessor = DocumentPreprocessor
+    PhilologyService = PhilologyService
     AdvancedEntityExtractor = AdvancedEntityExtractor
     SemanticGraphBuilder = SemanticGraphBuilder
     ReasoningEngine = ReasoningEngine
@@ -132,6 +135,7 @@ class ResearchPipeline:
         "literature_retriever": "LiteratureRetriever",
         "local_corpus_collector": "LocalCorpusCollector",
         "ctext_corpus_collector": "CTextCorpusCollector",
+        "philology_service": "PhilologyService",
         "document_preprocessor": "DocumentPreprocessor",
         "entity_extractor": "AdvancedEntityExtractor",
         "semantic_graph_builder": "SemanticGraphBuilder",
@@ -147,6 +151,7 @@ class ResearchPipeline:
         config: Optional[Dict[str, Any]] = None,
         *,
         preprocessor: Optional[Any] = None,
+        philology_service: Optional[Any] = None,
         extractor: Optional[Any] = None,
         graph_builder: Optional[Any] = None,
         reasoning_engine: Optional[Any] = None,
@@ -158,6 +163,8 @@ class ResearchPipeline:
 
         # 保存注入的实例，供工厂优先使用
         self._injected: Dict[str, Any] = {}
+        if philology_service is not None:
+            self._injected["philology_service"] = philology_service
         if preprocessor is not None:
             self._injected["document_preprocessor"] = preprocessor
         if extractor is not None:

@@ -1,5 +1,7 @@
 # TCM Auto Research — 全架构审计报告
 
+> 历史审计快照（2026-04-06）：除后续“同步说明”外，本文中的“当前/现状/系统概览/成熟度/技术债”均默认指 2026-04-06 审计当时的仓库状态，不应直接替代 2026-04-14 的当前主链实现判断。
+
 **日期**: 2026-04-06  
 **分支**: `stage2-s2_1-preprocessor-opt`  
 **审计范围**: 全部 src/ 源码 (210 文件, ~60,500 行), tests/ (106 文件), tools/ (17 文件)
@@ -9,12 +11,13 @@
 - 本文保留 2026-04-06 的历史审计结论与当时的阶段样本。
 - 当前主链已经演进为 Observe → Hypothesis → Experiment → ExperimentExecution → Analyze → Publish → Reflect。
 - 当前阶段边界应理解为：experiment = protocol design，experiment_execution = external execution import。
+- 涉及 PostgreSQL / Neo4j、监控摘要、schema drift 或回填链路的现态判读，2026-04-14 起统一沿用 README 的结构化存储状态词汇表：双写完成、仅 PG 模式、待回填、schema drift 待治理；不要再把“可选后端”或“监控已接线”直接理解成完整双写成功。
 
 ---
 
 ## 一、系统概览
 
-基于 T/C IATCM 098-2023 标准的中医古籍全自动研究系统。本地部署 Qwen1.5-7B-Chat (Q8_0 GGUF)，数据存储于 SQLite/PostgreSQL + Neo4j (可选)。
+基于 T/C IATCM 098-2023 标准的中医古籍全自动研究系统。本地部署 Qwen1.5-7B-Chat (Q8_0 GGUF)；本文中的 SQLite/PostgreSQL + Neo4j (可选) 属于 2026-04-06 审计时点描述，按 2026-04-14 现态应进一步区分双写完成、仅 PG 模式、待回填与 schema drift 待治理。
 
 ### 1.1 技术栈
 

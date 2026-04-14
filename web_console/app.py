@@ -38,6 +38,7 @@ def create_app(
         settings=settings,
         config_path=config_path,
         environment=environment,
+        entrypoint="web",
     )
     resolved_settings = runtime_assembly.settings
     app = FastAPI(title=resolved_settings.web_console_title, version=resolved_settings.web_console_version)
