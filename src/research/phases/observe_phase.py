@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping
 
 if TYPE_CHECKING:
@@ -14,7 +13,16 @@ from src.collector.corpus_bundle import (
     is_corpus_bundle,
 )
 from src.cycle.cycle_runner import execute_real_module_pipeline
-from src.research.observe_philology import build_observe_philology_artifact_payloads
+from src.research.learning_strategy import (
+    has_learning_strategy,
+    resolve_learning_flag,
+    resolve_learning_strategy,
+    resolve_numeric_learning_parameter,
+)
+from src.research.observe_philology import (
+    build_observe_philology_artifact_payloads,
+    extract_observe_philology_assets_from_phase_result,
+)
 from src.research.phase_result import build_phase_result
 
 
@@ -275,8 +283,9 @@ class ObservePhaseMixin:
             ingestion_ok,
         )
         ingestion_aggregate = (ingestion_result or {}).get("aggregate") or {}
+        learning_strategy_applied = has_learning_strategy(context, self.pipeline.config)
 
-        return {
+        metadata = {
             "data_source": self._resolve_observe_data_source(context),
             "observation_count": len(observations),
             "finding_count": len(findings),
@@ -298,7 +307,89 @@ class ObservePhaseMixin:
             "literature_retrieval": literature_ok,
             "evidence_matrix": self._has_observe_evidence_matrix(literature_result, literature_ok),
             "clinical_gap_analysis": bool(literature_ok and clinical_gap.get("report")),
+            "learning_strategy_applied": learning_strategy_applied,
         }
+        if learning_strategy_applied:
+            metadata["entity_confidence_threshold"] = round(
+                self._resolve_observe_entity_confidence_threshold(context),
+                4,
+            )
+        return metadata
+
+    def _resolve_observe_literature_max_results(
+        self,
+        literature_config: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> int:
+        base_value = int(literature_config.get("max_results_per_source", 5) or 5)
+        if not has_learning_strategy(context, self.pipeline.config):
+            return base_value
+
+        quality_threshold = resolve_numeric_learning_parameter(
+            "quality_threshold",
+            0.7,
+            context,
+            self.pipeline.config,
+            min_value=0.3,
+            max_value=0.95,
+        )
+        if quality_threshold >= 0.82:
+            return min(50, max(base_value + 2, int(round(base_value * 1.3))))
+        if quality_threshold >= 0.74:
+            return min(50, base_value + 1)
+        if quality_threshold <= 0.55:
+            return max(1, base_value - 1)
+        return base_value
+
+    def _resolve_observe_max_texts(self, context: Dict[str, Any]) -> int:
+        base_value = 3
+        if not has_learning_strategy(context, self.pipeline.config):
+            return base_value
+
+        quality_threshold = resolve_numeric_learning_parameter(
+            "quality_threshold",
+            0.7,
+            context,
+            self.pipeline.config,
+            min_value=0.3,
+            max_value=0.95,
+        )
+        if quality_threshold >= 0.82:
+            return 5
+        if quality_threshold >= 0.74:
+            return 4
+        if quality_threshold <= 0.55:
+            return 2
+        return base_value
+
+    def _resolve_observe_entity_confidence_threshold(self, context: Dict[str, Any]) -> float:
+        if not has_learning_strategy(context, self.pipeline.config):
+            return 0.0
+
+        return resolve_numeric_learning_parameter(
+            "confidence_threshold",
+            0.7,
+            context,
+            self.pipeline.config,
+            min_value=0.0,
+            max_value=1.0,
+        )
+
+    def _resolve_observe_flag(
+        self,
+        context: Dict[str, Any],
+        flag_name: str,
+        default: bool,
+    ) -> bool:
+        if flag_name in context:
+            return bool(context.get(flag_name))
+
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        observe_flag_name = f"observe_{flag_name}"
+        if observe_flag_name in strategy:
+            return bool(strategy.get(observe_flag_name))
+
+        return resolve_learning_flag(flag_name, default, context, self.pipeline.config)
 
     def _is_ctext_corpus_collected(self, corpus_result: Dict[str, Any] | None) -> bool:
         if not corpus_result:
@@ -375,7 +466,9 @@ class ObservePhaseMixin:
             ["pubmed", "semantic_scholar", "plos_one", "arxiv"],
         )
         query = context.get("literature_query") or context.get("query") or "traditional chinese medicine"
-        raw_max_results = context.get("literature_max_results", literature_config.get("max_results_per_source", 5))
+        raw_max_results = context.get("literature_max_results")
+        if raw_max_results is None:
+            raw_max_results = self._resolve_observe_literature_max_results(literature_config, context)
         max_results = max(1, min(int(raw_max_results), 50))
         offline_plan_only = bool(
             context.get(
@@ -530,9 +623,14 @@ class ObservePhaseMixin:
 
     def _run_observe_ingestion_pipeline(self, corpus_result: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         text_entries = self.pipeline._extract_corpus_text_entries(corpus_result)
-        max_texts = max(1, min(int(context.get("max_texts", 3)), 20))
+        raw_max_texts = context.get("max_texts")
+        if raw_max_texts is None:
+            raw_max_texts = self._resolve_observe_max_texts(context)
+        max_texts = max(1, min(int(raw_max_texts), 20))
         max_chars_per_text = max(200, min(int(context.get("max_chars_per_text", 1200)), 4000))
         selected_entries = text_entries[:max_texts]
+        entity_confidence_threshold = self._resolve_observe_entity_confidence_threshold(context)
+        learning_filter_active = entity_confidence_threshold > 0.0
 
         if not selected_entries:
             return {
@@ -618,13 +716,25 @@ class ObservePhaseMixin:
                         philology_notes.append(note_text)
 
                 entities = extraction_result.get("entities", [])
-                total_entities += len(entities)
-                confidence_values.extend(entity.get("confidence", 0.0) for entity in entities)
+                filtered_entities = self._deduplicate_entities(
+                    entities,
+                    confidence_threshold=entity_confidence_threshold,
+                ) if learning_filter_active else self._deduplicate_entities(entities)
+                total_entities += len(filtered_entities) if learning_filter_active else len(entities)
+                confidence_values.extend(
+                    entity.get("confidence", 0.0)
+                    for entity in (filtered_entities if learning_filter_active else entities)
+                )
                 graph_stats = semantic_result.get("graph_statistics", {})
                 semantic_relationships = self._merge_relationship_sources(
                     self._extract_semantic_relationships(semantic_result),
-                    self._extract_reasoning_relationships(reasoning_result, semantic_result, entities),
+                    self._extract_reasoning_relationships(reasoning_result, semantic_result, filtered_entities),
                 )
+                if learning_filter_active:
+                    semantic_relationships = self._deduplicate_relationships(
+                        semantic_relationships,
+                        confidence_threshold=entity_confidence_threshold,
+                    )
                 reasoning_summary = self._extract_reasoning_summary(reasoning_result)
                 total_semantic_nodes += graph_stats.get("nodes_count", 0)
                 total_semantic_edges += graph_stats.get("edges_count", 0)
@@ -642,8 +752,13 @@ class ObservePhaseMixin:
                             if rec_str and rec_str not in output_recommendations:
                                 output_recommendations.append(rec_str)
 
-                for entity_type, count in extraction_result.get("statistics", {}).get("by_type", {}).items():
-                    entity_type_counts[entity_type] = entity_type_counts.get(entity_type, 0) + count
+                if learning_filter_active:
+                    for entity in filtered_entities:
+                        entity_type = str(entity.get("type") or entity.get("entity_type") or "other").strip().lower()
+                        entity_type_counts[entity_type] = entity_type_counts.get(entity_type, 0) + 1
+                else:
+                    for entity_type, count in extraction_result.get("statistics", {}).get("by_type", {}).items():
+                        entity_type_counts[entity_type] = entity_type_counts.get(entity_type, 0) + count
 
                 document_results.append(
                     {
@@ -658,10 +773,21 @@ class ObservePhaseMixin:
                         "philology_assets": philology_assets,
                         "processed_text_preview": preprocess_result.get("processed_text", "")[:120],
                         "processed_text_size": len(str(preprocess_result.get("processed_text", "") or "")),
-                        "entities": self._deduplicate_entities(entities),
-                        "entity_count": len(entities),
-                        "entity_types": extraction_result.get("statistics", {}).get("by_type", {}),
-                        "average_confidence": extraction_result.get("confidence_scores", {}).get("average_confidence", 0.0),
+                        "entities": filtered_entities,
+                        "entity_count": len(filtered_entities) if learning_filter_active else len(entities),
+                        "entity_types": {
+                            str(entity.get("type") or entity.get("entity_type") or "other").strip().lower(): sum(
+                                1
+                                for candidate in filtered_entities
+                                if str(candidate.get("type") or candidate.get("entity_type") or "other").strip().lower()
+                                == str(entity.get("type") or entity.get("entity_type") or "other").strip().lower()
+                            )
+                            for entity in filtered_entities
+                        } if learning_filter_active else extraction_result.get("statistics", {}).get("by_type", {}),
+                        "average_confidence": round(
+                            sum(float(entity.get("confidence") or 0.0) for entity in filtered_entities) / len(filtered_entities),
+                            4,
+                        ) if learning_filter_active and filtered_entities else extraction_result.get("confidence_scores", {}).get("average_confidence", 0.0),
                         "semantic_graph_nodes": graph_stats.get("nodes_count", 0),
                         "semantic_graph_edges": graph_stats.get("edges_count", 0),
                         "relationship_types": graph_stats.get("relationships_by_type", {}),
@@ -680,7 +806,8 @@ class ObservePhaseMixin:
                     if isinstance(document, dict)
                     for entity in (document.get("entities") or [])
                     if isinstance(entity, dict)
-                ]
+                ],
+                confidence_threshold=entity_confidence_threshold,
             )
             terminology_standard_table = self._aggregate_observe_terminology_standard_table(document_results)
             collation_entries = self._aggregate_observe_collation_entries(document_results)
@@ -783,13 +910,13 @@ class ObservePhaseMixin:
             raise RuntimeError("语义图构建器初始化失败")
         module_chain.append(("SemanticModeler", semantic_builder))
 
-        if bool(context.get("run_reasoning", True)):
+        if self._resolve_observe_flag(context, "run_reasoning", True):
             if reasoning_engine.initialize():
                 module_chain.append(("ReasoningEngine", reasoning_engine))
             else:
                 self.pipeline.logger.warning("推理引擎初始化失败，继续使用语义图关系")
 
-        if bool(context.get("run_output_generation", True)):
+        if self._resolve_observe_flag(context, "run_output_generation", True):
             if output_generator.initialize():
                 module_chain.append(("OutputGenerator", output_generator))
             else:
@@ -802,8 +929,13 @@ class ObservePhaseMixin:
             return []
 
         artifact_config = self.pipeline.config.get("philology_service", {}).get("artifact_output", {})
-        aggregate = ingestion_result.get("aggregate") if isinstance(ingestion_result, dict) else {}
-        philology_assets = aggregate.get("philology_assets") if isinstance(aggregate, dict) else {}
+        philology_assets = extract_observe_philology_assets_from_phase_result(
+            {
+                "results": {
+                    "ingestion_pipeline": ingestion_result,
+                }
+            }
+        )
         return build_observe_philology_artifact_payloads(philology_assets, artifact_config)
 
     def _aggregate_observe_terminology_standard_table(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1234,7 +1366,11 @@ class ObservePhaseMixin:
                 merged.extend(group)
         return self._deduplicate_relationships(merged)
 
-    def _deduplicate_entities(self, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _deduplicate_entities(
+        self,
+        entities: List[Dict[str, Any]],
+        confidence_threshold: float = 0.0,
+    ) -> List[Dict[str, Any]]:
         deduplicated_map: Dict[tuple[str, str], Dict[str, Any]] = {}
         for entity in entities:
             if not isinstance(entity, dict):
@@ -1243,21 +1379,32 @@ class ObservePhaseMixin:
             entity_type = str(entity.get("type") or entity.get("entity_type") or "other").strip().lower()
             if not name:
                 continue
+            try:
+                candidate_confidence = float(entity.get("confidence") or 0.0)
+            except (TypeError, ValueError):
+                candidate_confidence = 0.0
+            if confidence_threshold > 0.0 and candidate_confidence < confidence_threshold:
+                continue
             key = (name, entity_type or "other")
             current = deduplicated_map.get(key)
             if current is None:
                 deduplicated_map[key] = entity
                 continue
             current_confidence = float(current.get("confidence") or 0.0)
-            candidate_confidence = float(entity.get("confidence") or 0.0)
             if candidate_confidence >= current_confidence:
                 deduplicated_map[key] = entity
         return list(deduplicated_map.values())
 
-    def _deduplicate_relationships(self, relationships: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _deduplicate_relationships(
+        self,
+        relationships: List[Dict[str, Any]],
+        confidence_threshold: float = 0.0,
+    ) -> List[Dict[str, Any]]:
         deduplicated_map: Dict[tuple[str, str, str], Dict[str, Any]] = {}
         for relation in relationships:
             if not isinstance(relation, dict):
+                continue
+            if not self._relationship_meets_confidence_threshold(relation, confidence_threshold):
                 continue
             key = (
                 str(relation.get("source") or ""),
@@ -1377,4 +1524,18 @@ class ObservePhaseMixin:
             return float(metadata.get("confidence") or 0.0)
         except (TypeError, ValueError):
             return 0.0
+
+    def _relationship_meets_confidence_threshold(
+        self,
+        relation: Dict[str, Any],
+        confidence_threshold: float,
+    ) -> bool:
+        if confidence_threshold <= 0.0:
+            return True
+
+        metadata = relation.get("metadata") or {}
+        has_explicit_confidence = "confidence" in metadata or "confidence" in relation
+        if not has_explicit_confidence:
+            return True
+        return self._relationship_confidence(relation) >= confidence_threshold
 

@@ -67,6 +67,18 @@ class _FakePipeline:
         self.cleaned = True
         return True
 
+    def get_learning_strategy(self):
+        learning_strategy = self.config.get("learning_strategy")
+        if isinstance(learning_strategy, dict):
+            return dict(learning_strategy)
+        return {}
+
+    def get_previous_iteration_feedback(self):
+        previous_feedback = self.config.get("previous_iteration_feedback")
+        if isinstance(previous_feedback, dict):
+            return dict(previous_feedback)
+        return {}
+
     def _serialize_cycle(self, cycle):
         return {
             "cycle_id": cycle.cycle_id,
@@ -313,3 +325,37 @@ class TestResearchRuntimeService(unittest.TestCase):
         self.assertEqual(orchestration.phases[1].phase, "experiment_execution")
         self.assertEqual(orchestration.phases[1].status, "skipped")
         self.assertEqual(result.phase_results["experiment_execution"]["status"], "skipped")
+
+    def test_run_injects_learning_strategy_into_phase_context(self):
+        service = ResearchRuntimeService(
+            {
+                "pipeline_config": {
+                    "learning_strategy": {
+                        "strategy_source": "self_learning_engine",
+                        "tuned_parameters": {"quality_threshold": 0.74},
+                    },
+                    "previous_iteration_feedback": {
+                        "iteration_number": 3,
+                        "learning_summary": {"cycle_trend": "improving"},
+                    },
+                },
+                "phases": ["observe"],
+            }
+        )
+
+        research_pipeline_module = import_module("src.research.research_pipeline")
+
+        original_pipeline = research_pipeline_module.ResearchPipeline
+        try:
+            research_pipeline_module.ResearchPipeline = _FakePipeline
+            result = service.run("桂枝汤研究")
+        finally:
+            research_pipeline_module.ResearchPipeline = original_pipeline
+
+        observe_context = result.phase_results["observe"]["metadata"]["received_phase_context"]
+        self.assertEqual(
+            observe_context["learning_strategy"]["tuned_parameters"]["quality_threshold"],
+            0.74,
+        )
+        self.assertEqual(observe_context["previous_iteration_feedback"]["iteration_number"], 3)
+        self.assertTrue(result.orchestration_result.pipeline_metadata["learning_strategy_active"])

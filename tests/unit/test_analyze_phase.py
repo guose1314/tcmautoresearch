@@ -15,7 +15,7 @@ import unittest
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from src.research.phase_result import get_phase_deprecated_fallbacks, get_phase_value
 from src.research.phases.analyze_phase import AnalyzePhaseMixin
@@ -29,6 +29,7 @@ class _Phase(Enum):
     OBSERVE = "observe"
     HYPOTHESIS = "hypothesis"
     EXPERIMENT = "experiment"
+    EXPERIMENT_EXECUTION = "experiment_execution"
     ANALYZE = "analyze"
     PUBLISH = "publish"
     REFLECT = "reflect"
@@ -345,6 +346,74 @@ class TestAnalyzeHypothesisFallback(unittest.TestCase):
         mixin = _AnalyzeMixin(_FakePipeline())
         result = mixin.execute_analyze_phase(cycle, {})
         self.assertEqual(result["metadata"]["record_count"], 0)
+
+
+class TestAnalyzeLearningStrategy(unittest.TestCase):
+
+    def test_learning_strategy_adjusts_significance_and_sample_threshold(self):
+        mixin = _AnalyzeMixin(_FakePipeline())
+        records = _sample_records() + [
+            {"formula": "四逆汤", "syndrome": "少阴", "herbs": ["附子", "干姜", "甘草"]},
+        ]
+
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(),
+            {
+                "analysis_records": records,
+                "learning_strategy": {"tuned_parameters": {"quality_threshold": 0.9}},
+            },
+        )
+
+        self.assertEqual(result["metadata"]["significance_level"], 0.03)
+        self.assertEqual(result["metadata"]["minimum_sample_size"], 6)
+        self.assertTrue(
+            any(
+                "建议至少 6" in limitation
+                for limitation in result["results"]["statistical_analysis"]["limitations"]
+            )
+        )
+
+    def test_learning_strategy_filters_low_confidence_reasoning_inputs(self):
+        pipeline = _FakePipeline()
+        pipeline.analysis_port.create_reasoning_engine.side_effect = None
+        pipeline.analysis_port.create_reasoning_engine.return_value = MagicMock()
+        mixin = _AnalyzeMixin(pipeline)
+
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(),
+            {
+                "analysis_records": _sample_records(),
+                "relationships": [
+                    {
+                        "source": "麻黄",
+                        "source_type": "herb",
+                        "target": "风寒",
+                        "target_type": "syndrome",
+                        "type": "治疗",
+                        "metadata": {"confidence": 0.6},
+                    }
+                ],
+                "learning_strategy": {"tuned_parameters": {"confidence_threshold": 0.8}},
+            },
+        )
+
+        self.assertEqual(result["results"]["reasoning_results"], {})
+        pipeline.analysis_port.create_reasoning_engine.assert_not_called()
+
+    def test_learning_strategy_can_disable_evidence_grading(self):
+        mixin = _AnalyzeMixin(_FakePipeline())
+
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(),
+            {
+                "analysis_records": _sample_records(),
+                "literature_records": [{"title": "test paper"}],
+                "learning_strategy": {"analyze_grade_evidence": False},
+            },
+        )
+
+        self.assertFalse(result["metadata"]["evidence_grade_generated"])
+        self.assertNotIn("evidence_grade_error", result["metadata"])
 
 
 if __name__ == "__main__":

@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List
 
+from src.research.learning_strategy import (
+    has_learning_strategy,
+    resolve_learning_flag,
+    resolve_learning_strategy,
+    resolve_numeric_learning_parameter,
+)
 from src.research.phase_result import build_phase_result, get_phase_value
 
 if TYPE_CHECKING:
@@ -46,26 +52,42 @@ class ExperimentExecutionPhaseMixin:
                     "reason": "missing_protocol_design",
                     "execution_status": "not_executed",
                     "real_world_validation_status": "not_started",
+                    "learning_strategy_applied": has_learning_strategy(context, self.pipeline.config),
                 },
             )
 
+        document_fallback_enabled = self._resolve_execution_flag(
+            context,
+            "allow_document_fallback_import",
+            True,
+        )
         execution_documents = self._resolve_execution_documents(context)
-        execution_records = self._resolve_execution_records(context, execution_documents)
-        execution_relationships = self._resolve_execution_relationships(context, execution_documents)
+        execution_records = self._resolve_execution_records(
+            context,
+            execution_documents,
+            document_fallback_enabled,
+        )
+        execution_relationships = self._resolve_execution_relationships(
+            context,
+            execution_documents,
+            document_fallback_enabled,
+        )
         sampling_events = self._resolve_sampling_events(context)
         execution_summary = self._resolve_execution_summary(context)
         execution_artifacts = self._resolve_execution_artifacts(context)
         output_files = self._build_execution_output_file_map(context, execution_artifacts)
 
-        has_external_inputs = any(
+        has_structured_external_inputs = any(
             (
                 execution_records,
                 execution_relationships,
                 sampling_events,
                 execution_summary,
                 output_files,
-                execution_documents,
             )
+        )
+        has_external_inputs = has_structured_external_inputs or (
+            document_fallback_enabled and bool(execution_documents)
         )
         execution_status = str(
             context.get("execution_status")
@@ -96,8 +118,11 @@ class ExperimentExecutionPhaseMixin:
             "imported_relationship_count": len(execution_relationships),
             "sampling_event_count": len(sampling_events),
             "imported_artifact_count": len(output_files),
+            "document_count": len(execution_documents),
             "execution_status": execution_status,
             "real_world_validation_status": real_world_validation_status,
+            "learning_strategy_applied": has_learning_strategy(context, self.pipeline.config),
+            "document_fallback_import_enabled": document_fallback_enabled,
         }
 
         return build_phase_result(
@@ -152,27 +177,32 @@ class ExperimentExecutionPhaseMixin:
         self,
         context: Dict[str, Any],
         execution_documents: List[Dict[str, Any]],
+        allow_document_fallback_import: bool,
     ) -> List[Dict[str, Any]]:
+        normalized_records: List[Dict[str, Any]] = []
         for key in ("analysis_records", "execution_records", "imported_records", "result_records", "records"):
             candidate = context.get(key)
             if not isinstance(candidate, list):
                 continue
             normalized_records = self._normalize_analyze_records(candidate)
             if normalized_records:
-                return normalized_records
+                break
 
-        records: List[Dict[str, Any]] = []
-        for index, document in enumerate(execution_documents, start=1):
-            record = self._build_analyze_record_from_document(document, index)
-            if record:
-                records.append(record)
-        return records
+        if not normalized_records and allow_document_fallback_import:
+            for index, document in enumerate(execution_documents, start=1):
+                record = self._build_analyze_record_from_document(document, index)
+                if record:
+                    normalized_records.append(record)
+
+        return normalized_records[: self._resolve_execution_max_records(context)]
 
     def _resolve_execution_relationships(
         self,
         context: Dict[str, Any],
         execution_documents: List[Dict[str, Any]],
+        allow_document_fallback_import: bool,
     ) -> List[Dict[str, Any]]:
+        relationships: List[Dict[str, Any]] = []
         for key in (
             "analysis_relationships",
             "execution_relationships",
@@ -182,18 +212,24 @@ class ExperimentExecutionPhaseMixin:
         ):
             candidate = context.get(key)
             if isinstance(candidate, list) and candidate:
-                return self._deduplicate_analyze_relationships(
+                relationships = self._deduplicate_analyze_relationships(
                     [item for item in candidate if isinstance(item, dict)]
                 )
+                break
 
-        relationships: List[Dict[str, Any]] = []
-        for document in execution_documents:
-            relationships.extend(
-                item for item in (document.get("semantic_relationships") or []) if isinstance(item, dict)
-            )
+        if not relationships and allow_document_fallback_import:
+            for document in execution_documents:
+                relationships.extend(
+                    item for item in (document.get("semantic_relationships") or []) if isinstance(item, dict)
+                )
         if not relationships:
             return []
-        return self._deduplicate_analyze_relationships(relationships)
+
+        filtered_relationships = self._filter_execution_relationships_by_confidence(
+            self._deduplicate_analyze_relationships(relationships),
+            context,
+        )
+        return filtered_relationships[: self._resolve_execution_max_relationships(context)]
 
     def _resolve_sampling_events(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
         for key in ("sampling_events", "samples", "sampling_records"):
@@ -207,7 +243,7 @@ class ExperimentExecutionPhaseMixin:
                 elif item not in (None, ""):
                     normalized_events.append({"event": str(item), "index": index})
             if normalized_events:
-                return normalized_events
+                return normalized_events[: self._resolve_execution_max_sampling_events(context)]
         return []
 
     def _resolve_execution_summary(self, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -252,3 +288,165 @@ class ExperimentExecutionPhaseMixin:
             if name and path:
                 output_files[name] = path
         return output_files
+
+    def _resolve_execution_flag(
+        self,
+        context: Dict[str, Any],
+        flag_name: str,
+        default: bool,
+    ) -> bool:
+        prefixed_context_key = f"experiment_execution_{flag_name}"
+        if prefixed_context_key in context:
+            return bool(context.get(prefixed_context_key))
+        if flag_name in context:
+            return bool(context.get(flag_name))
+
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        strategy_flag_name = f"experiment_execution_{flag_name}"
+        if strategy_flag_name in strategy:
+            return bool(strategy.get(strategy_flag_name))
+
+        return resolve_learning_flag(flag_name, default, context, self.pipeline.config)
+
+    def _resolve_execution_max_records(self, context: Dict[str, Any]) -> int:
+        return self._resolve_execution_volume_limit(
+            context,
+            context_keys=("experiment_execution_max_records", "max_execution_records"),
+            strategy_key="experiment_execution_max_records",
+            default_without_strategy=200,
+            low_quality_value=12,
+            medium_quality_value=24,
+            high_quality_value=40,
+            very_high_quality_value=60,
+            min_value=1,
+            max_value=500,
+        )
+
+    def _resolve_execution_max_relationships(self, context: Dict[str, Any]) -> int:
+        return self._resolve_execution_volume_limit(
+            context,
+            context_keys=("experiment_execution_max_relationships", "max_execution_relationships"),
+            strategy_key="experiment_execution_max_relationships",
+            default_without_strategy=400,
+            low_quality_value=24,
+            medium_quality_value=48,
+            high_quality_value=80,
+            very_high_quality_value=120,
+            min_value=1,
+            max_value=1000,
+        )
+
+    def _resolve_execution_max_sampling_events(self, context: Dict[str, Any]) -> int:
+        return self._resolve_execution_volume_limit(
+            context,
+            context_keys=("experiment_execution_max_sampling_events", "max_execution_sampling_events"),
+            strategy_key="experiment_execution_max_sampling_events",
+            default_without_strategy=50,
+            low_quality_value=6,
+            medium_quality_value=10,
+            high_quality_value=16,
+            very_high_quality_value=20,
+            min_value=1,
+            max_value=100,
+        )
+
+    def _resolve_execution_volume_limit(
+        self,
+        context: Dict[str, Any],
+        *,
+        context_keys: tuple[str, ...],
+        strategy_key: str,
+        default_without_strategy: int,
+        low_quality_value: int,
+        medium_quality_value: int,
+        high_quality_value: int,
+        very_high_quality_value: int,
+        min_value: int,
+        max_value: int,
+    ) -> int:
+        for key in context_keys:
+            explicit_value = context.get(key)
+            if explicit_value is None:
+                continue
+            try:
+                return max(min_value, min(int(explicit_value), max_value))
+            except (TypeError, ValueError):
+                break
+
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        strategy_value = strategy.get(strategy_key)
+        if strategy_value is not None:
+            try:
+                return max(min_value, min(int(strategy_value), max_value))
+            except (TypeError, ValueError):
+                pass
+
+        if not has_learning_strategy(context, self.pipeline.config):
+            return default_without_strategy
+
+        quality_threshold = resolve_numeric_learning_parameter(
+            "quality_threshold",
+            0.7,
+            context,
+            self.pipeline.config,
+            min_value=0.3,
+            max_value=0.95,
+        )
+        if quality_threshold >= 0.82:
+            return very_high_quality_value
+        if quality_threshold >= 0.74:
+            return high_quality_value
+        if quality_threshold <= 0.55:
+            return low_quality_value
+        return medium_quality_value
+
+    def _filter_execution_relationships_by_confidence(
+        self,
+        relationships: List[Dict[str, Any]],
+        context: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        explicit_threshold = None
+        for key in ("experiment_execution_confidence_threshold", "execution_confidence_threshold"):
+            if context.get(key) is not None:
+                explicit_threshold = context.get(key)
+                break
+
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        if explicit_threshold is None and strategy.get("experiment_execution_confidence_threshold") is not None:
+            explicit_threshold = strategy.get("experiment_execution_confidence_threshold")
+
+        if explicit_threshold is None and not has_learning_strategy(context, self.pipeline.config):
+            return relationships
+
+        if explicit_threshold is None:
+            confidence_threshold = resolve_numeric_learning_parameter(
+                "confidence_threshold",
+                0.7,
+                context,
+                self.pipeline.config,
+                min_value=0.0,
+                max_value=1.0,
+            )
+        else:
+            try:
+                confidence_threshold = min(1.0, max(0.0, float(explicit_threshold)))
+            except (TypeError, ValueError):
+                confidence_threshold = 0.0
+
+        if confidence_threshold <= 0.0:
+            return relationships
+
+        filtered_relationships: List[Dict[str, Any]] = []
+        for relationship in relationships:
+            metadata = relationship.get("metadata") or {}
+            has_explicit_confidence = "confidence" in metadata or "confidence" in relationship
+            if not has_explicit_confidence:
+                filtered_relationships.append(relationship)
+                continue
+            try:
+                confidence = float(metadata.get("confidence", relationship.get("confidence") or 0.0))
+            except (TypeError, ValueError):
+                confidence = 0.0
+            if confidence >= confidence_threshold:
+                filtered_relationships.append(relationship)
+        return filtered_relationships

@@ -187,6 +187,8 @@ class ResearchRuntimeService:
         observe_philology: Dict[str, Any] = {}
 
         pipeline = ResearchPipeline(self.pipeline_config)
+        learning_strategy = self._extract_learning_strategy(pipeline)
+        previous_iteration_feedback = self._extract_previous_iteration_feedback(pipeline)
         cycle = pipeline.create_research_cycle(
             cycle_id=resolved_cycle_id,
             cycle_name=resolved_cycle_name,
@@ -238,6 +240,8 @@ class ResearchRuntimeService:
                     normalized_topic,
                     phase,
                     normalized_phase_contexts,
+                    learning_strategy=learning_strategy,
+                    previous_iteration_feedback=previous_iteration_feedback,
                     study_type=study_type,
                     primary_outcome=primary_outcome,
                     intervention=intervention,
@@ -340,6 +344,12 @@ class ResearchRuntimeService:
                 "scope": resolved_scope,
                 "phases_requested": [phase.value for phase in phases],
                 "protocol_inputs": protocol_inputs,
+                "learning_strategy_active": bool(learning_strategy),
+                "learned_parameter_count": len(
+                    learning_strategy.get("tuned_parameters", {})
+                    if isinstance(learning_strategy.get("tuned_parameters"), dict)
+                    else {}
+                ),
             },
             analysis_results=publish_highlights.get("analysis_results") or {},
             research_artifact=publish_highlights.get("research_artifact") or {},
@@ -388,6 +398,8 @@ class ResearchRuntimeService:
         phase: Any,
         phase_contexts: Dict[str, Dict[str, Any]],
         *,
+        learning_strategy: Optional[Dict[str, Any]],
+        previous_iteration_feedback: Optional[Dict[str, Any]],
         study_type: Optional[str],
         primary_outcome: Optional[str],
         intervention: Optional[str],
@@ -407,7 +419,50 @@ class ResearchRuntimeService:
         config_key = f"default_{phase.value}_context"
         config_override = self.config.get(config_key) if isinstance(self.config.get(config_key), dict) else {}
         call_override = phase_contexts.get(phase.value) if isinstance(phase_contexts.get(phase.value), dict) else {}
-        return {**base, **dict(config_override), **dict(call_override)}
+        merged = {**base, **dict(config_override), **dict(call_override)}
+        if isinstance(learning_strategy, dict) and learning_strategy and "learning_strategy" not in merged:
+            merged["learning_strategy"] = deepcopy(learning_strategy)
+        if (
+            isinstance(previous_iteration_feedback, dict)
+            and previous_iteration_feedback
+            and "previous_iteration_feedback" not in merged
+        ):
+            merged["previous_iteration_feedback"] = deepcopy(previous_iteration_feedback)
+        return merged
+
+    @staticmethod
+    def _extract_learning_strategy(pipeline: Any) -> Dict[str, Any]:
+        getter = getattr(pipeline, "get_learning_strategy", None)
+        if callable(getter):
+            try:
+                strategy = getter()
+            except Exception as exc:
+                logger.warning("提取学习策略快照失败: %s", exc)
+            else:
+                if isinstance(strategy, dict):
+                    return dict(strategy)
+
+        pipeline_config = getattr(pipeline, "config", None)
+        if isinstance(pipeline_config, dict) and isinstance(pipeline_config.get("learning_strategy"), dict):
+            return dict(pipeline_config.get("learning_strategy") or {})
+        return {}
+
+    @staticmethod
+    def _extract_previous_iteration_feedback(pipeline: Any) -> Dict[str, Any]:
+        getter = getattr(pipeline, "get_previous_iteration_feedback", None)
+        if callable(getter):
+            try:
+                previous_feedback = getter()
+            except Exception as exc:
+                logger.warning("提取上一轮学习反馈失败: %s", exc)
+            else:
+                if isinstance(previous_feedback, dict):
+                    return dict(previous_feedback)
+
+        pipeline_config = getattr(pipeline, "config", None)
+        if isinstance(pipeline_config, dict) and isinstance(pipeline_config.get("previous_iteration_feedback"), dict):
+            return dict(pipeline_config.get("previous_iteration_feedback") or {})
+        return {}
 
     @staticmethod
     def _normalize_phase_contexts(raw_phase_contexts: Optional[Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, Any]]:

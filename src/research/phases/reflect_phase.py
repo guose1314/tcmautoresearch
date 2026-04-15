@@ -63,6 +63,17 @@ class ReflectPhaseMixin:
 
         # ---- 5. SelfLearningEngine 反馈（可选） ----
         learning_summary = self._feed_self_learning(cycle_assessment)
+        if learning_summary is not None:
+            refresh_learning_runtime_feedback = getattr(
+                self.pipeline,
+                "refresh_learning_runtime_feedback",
+                None,
+            )
+            if callable(refresh_learning_runtime_feedback):
+                try:
+                    refresh_learning_runtime_feedback()
+                except Exception as exc:
+                    logger.warning("刷新默认学习策略快照失败: %s", exc)
 
         quality_assessment = {
             "overall_cycle_score": cycle_assessment["overall_cycle_score"],

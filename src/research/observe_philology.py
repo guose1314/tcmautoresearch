@@ -5,11 +5,13 @@ from typing import Any, Dict, List, Mapping, Sequence
 OBSERVE_PHILOLOGY_TERMINOLOGY_TABLE_ARTIFACT = "observe_philology_terminology_table"
 OBSERVE_PHILOLOGY_COLLATION_ENTRIES_ARTIFACT = "observe_philology_collation_entries"
 OBSERVE_PHILOLOGY_ANNOTATION_REPORT_ARTIFACT = "observe_philology_annotation_report"
+OBSERVE_PHILOLOGY_CATALOG_SUMMARY_ARTIFACT = "observe_philology_catalog_summary"
 OBSERVE_PHILOLOGY_ARTIFACT_NAMES = frozenset(
     {
         OBSERVE_PHILOLOGY_TERMINOLOGY_TABLE_ARTIFACT,
         OBSERVE_PHILOLOGY_COLLATION_ENTRIES_ARTIFACT,
         OBSERVE_PHILOLOGY_ANNOTATION_REPORT_ARTIFACT,
+        OBSERVE_PHILOLOGY_CATALOG_SUMMARY_ARTIFACT,
     }
 )
 _TERMINOLOGY_COLUMNS = [
@@ -23,6 +25,19 @@ _TERMINOLOGY_COLUMNS = [
     "sources",
     "notes",
 ]
+_CATALOG_CORE_FIELDS = (
+    "catalog_id",
+    "work_title",
+    "fragment_title",
+    "version_lineage_key",
+    "witness_key",
+)
+_CATALOG_FILTER_FIELDS = (
+    "document_title",
+    "work_title",
+    "version_lineage_key",
+    "witness_key",
+)
 
 
 def _as_dict(value: Any) -> Dict[str, Any]:
@@ -54,6 +69,1283 @@ def _safe_int(value: Any, default: int = 0) -> int:
     return numeric
 
 
+def _as_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _normalize_count_mapping(value: Any) -> Dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    counts: Dict[str, int] = {}
+    for raw_key, raw_count in value.items():
+        key = _as_text(raw_key)
+        if not key:
+            continue
+        count = _safe_int(raw_count, 0)
+        if count <= 0:
+            continue
+        counts[key] = count
+    return {key: counts[key] for key in sorted(counts)}
+
+
+def _count_values(items: Sequence[Mapping[str, Any]], field_name: str) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for item in items:
+        key = _as_text(item.get(field_name))
+        if not key:
+            continue
+        counts[key] = counts.get(key, 0) + 1
+    return {key: counts[key] for key in sorted(counts)}
+
+
+def _unique_texts(values: Sequence[Any]) -> List[str]:
+    seen: set[str] = set()
+    items: List[str] = []
+    for value in values:
+        normalized = _as_text(value)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        items.append(normalized)
+    return items
+
+
+def _normalize_review_status(value: Any) -> str:
+    normalized = _as_text(value).lower()
+    if normalized in {"pending", "accepted", "rejected", "needs_source"}:
+        return normalized
+    return ""
+
+
+def _normalize_temporal_semantics(
+    value: Any,
+    *,
+    dynasty: str = "",
+    author: str = "",
+    edition: str = "",
+) -> Dict[str, Any]:
+    payload = _as_dict(value)
+    dynasties = _unique_texts([*_as_string_list(payload.get("dynasties")), payload.get("dynasty"), dynasty])
+    authors = _unique_texts([*_as_string_list(payload.get("authors")), payload.get("author"), author])
+    editions = _unique_texts([*_as_string_list(payload.get("editions")), payload.get("edition"), edition])
+    semantic_hint = _as_text(payload.get("semantic_hint"))
+    note = _as_text(payload.get("note"))
+
+    if not semantic_hint:
+        semantic_hint = " / ".join(part for part in (dynasties[:1] + authors[:1] + editions[:1]) if part)
+
+    normalized: Dict[str, Any] = {}
+    if dynasties:
+        normalized["dynasties"] = dynasties
+        normalized["dynasty"] = dynasties[0]
+    if authors:
+        normalized["authors"] = authors
+        normalized["author"] = authors[0]
+    if editions:
+        normalized["editions"] = editions
+        normalized["edition"] = editions[0]
+    if semantic_hint:
+        normalized["semantic_hint"] = semantic_hint
+    if note:
+        normalized["note"] = note
+    return normalized
+
+
+def _normalize_exegesis_entries(value: Any) -> List[Dict[str, Any]]:
+    entries: List[Dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in _as_dict_list(value):
+        canonical = _as_text(item.get("canonical"))
+        semantic_scope = _as_text(item.get("semantic_scope") or item.get("label"))
+        identity = (canonical, semantic_scope)
+        if not canonical or identity in seen:
+            continue
+        seen.add(identity)
+        review_status = _normalize_review_status(item.get("review_status")) or "pending"
+        review_reasons = _unique_texts(_as_string_list(item.get("review_reasons")))
+        if not review_reasons:
+            review_reasons = ["catalog_summary_machine_generated"]
+        entry: Dict[str, Any] = {
+            "canonical": canonical,
+            "label": _as_text(item.get("label") or semantic_scope),
+            "definition": _as_text(item.get("definition")),
+            "definition_source": _as_text(item.get("definition_source")),
+            "semantic_scope": semantic_scope,
+            "observed_forms": _as_string_list(item.get("observed_forms")),
+            "configured_variants": _as_string_list(item.get("configured_variants")),
+            "sources": _as_string_list(item.get("sources")),
+            "notes": _as_string_list(item.get("notes")),
+            "dynasty_usage": _unique_texts(_as_string_list(item.get("dynasty_usage"))),
+            "disambiguation_basis": _unique_texts(
+                [*_as_string_list(item.get("disambiguation_basis")), *_as_string_list(item.get("sources"))]
+            ),
+            "review_status": review_status,
+            "needs_manual_review": bool(item.get("needs_manual_review", True)),
+            "review_reasons": review_reasons,
+        }
+        entries.append(entry)
+    return entries
+
+
+def _catalog_entry_has_baseline_fields(entry: Mapping[str, Any]) -> bool:
+    for key in (
+        "catalog_id",
+        "work_title",
+        "fragment_title",
+        "work_fragment_key",
+        "version_lineage_key",
+        "witness_key",
+        "dynasty",
+        "author",
+        "edition",
+    ):
+        if _as_text(entry.get(key)):
+            return True
+    return False
+
+
+def _normalize_catalog_document(record: Mapping[str, Any]) -> Dict[str, Any]:
+    normalized = {
+        "document_id": _as_text(record.get("document_id") or record.get("id")),
+        "document_title": _as_text(record.get("document_title") or record.get("title")),
+        "document_urn": _as_text(record.get("document_urn") or record.get("urn")),
+        "source_type": _as_text(record.get("source_type")),
+        "catalog_id": _as_text(record.get("catalog_id")),
+        "work_title": _as_text(record.get("work_title")),
+        "fragment_title": _as_text(record.get("fragment_title")),
+        "work_fragment_key": _as_text(record.get("work_fragment_key")),
+        "version_lineage_key": _as_text(record.get("version_lineage_key")),
+        "witness_key": _as_text(record.get("witness_key")),
+        "dynasty": _as_text(record.get("dynasty")),
+        "author": _as_text(record.get("author")),
+        "edition": _as_text(record.get("edition")),
+        "lineage_source": _as_text(record.get("lineage_source")),
+    }
+    missing_core_fields = [field_name for field_name in _CATALOG_CORE_FIELDS if not normalized[field_name]]
+    normalized["missing_core_fields"] = missing_core_fields
+    normalized["metadata_completeness"] = round(
+        (len(_CATALOG_CORE_FIELDS) - len(missing_core_fields)) / len(_CATALOG_CORE_FIELDS),
+        3,
+    )
+    temporal_semantics = _normalize_temporal_semantics(
+        record.get("temporal_semantics"),
+        dynasty=normalized["dynasty"],
+        author=normalized["author"],
+        edition=normalized["edition"],
+    )
+    if temporal_semantics:
+        normalized["temporal_semantics"] = temporal_semantics
+
+    exegesis_entries = _normalize_exegesis_entries(record.get("exegesis_entries"))
+    if exegesis_entries:
+        normalized["exegesis_entries"] = exegesis_entries
+
+    review_status = _normalize_review_status(record.get("review_status"))
+    review_reasons = _unique_texts(
+        [*_as_string_list(record.get("review_reasons")), *[f"missing:{field_name}" for field_name in missing_core_fields]]
+    )
+    needs_manual_review = bool(record.get("needs_manual_review")) or bool(review_status == "pending") or bool(review_reasons)
+    if review_status:
+        normalized["review_status"] = review_status
+    elif needs_manual_review:
+        normalized["review_status"] = "pending"
+    if needs_manual_review:
+        normalized["needs_manual_review"] = True
+    if review_reasons:
+        normalized["review_reasons"] = review_reasons
+
+    related_collation_entry_count = _safe_int(record.get("related_collation_entry_count"), 0)
+    if related_collation_entry_count > 0:
+        normalized["related_collation_entry_count"] = related_collation_entry_count
+    return normalized
+
+
+def _normalize_catalog_witness(record: Mapping[str, Any]) -> Dict[str, Any]:
+    normalized = {
+        "document_id": _as_text(record.get("document_id") or record.get("id")),
+        "urn": _as_text(record.get("urn") or record.get("document_urn")),
+        "title": _as_text(record.get("title") or record.get("document_title")),
+        "source_type": _as_text(record.get("source_type")),
+        "catalog_id": _as_text(record.get("catalog_id")),
+        "witness_key": _as_text(record.get("witness_key")),
+        "dynasty": _as_text(record.get("dynasty")),
+        "author": _as_text(record.get("author")),
+        "edition": _as_text(record.get("edition")),
+    }
+    temporal_semantics = _normalize_temporal_semantics(
+        record.get("temporal_semantics"),
+        dynasty=normalized["dynasty"],
+        author=normalized["author"],
+        edition=normalized["edition"],
+    )
+    if temporal_semantics:
+        normalized["temporal_semantics"] = temporal_semantics
+
+    review_status = _normalize_review_status(record.get("review_status"))
+    review_reasons = _unique_texts(_as_string_list(record.get("review_reasons")))
+    needs_manual_review = bool(record.get("needs_manual_review")) or bool(review_status == "pending") or bool(review_reasons)
+    if review_status:
+        normalized["review_status"] = review_status
+    elif needs_manual_review:
+        normalized["review_status"] = "pending"
+    if needs_manual_review:
+        normalized["needs_manual_review"] = True
+    if review_reasons:
+        normalized["review_reasons"] = review_reasons
+    return normalized
+
+
+def _normalize_catalog_documents(raw_documents: Any) -> List[Dict[str, Any]]:
+    documents: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in _as_dict_list(raw_documents):
+        if not _catalog_entry_has_baseline_fields(item):
+            continue
+        normalized = _normalize_catalog_document(item)
+        identity = _as_text(
+            normalized.get("document_id")
+            or normalized.get("witness_key")
+            or normalized.get("document_urn")
+            or normalized.get("document_title")
+        )
+        if not identity or identity in seen:
+            continue
+        seen.add(identity)
+        documents.append(normalized)
+    documents.sort(
+        key=lambda item: (
+            str(item.get("work_title") or ""),
+            str(item.get("fragment_title") or ""),
+            str(item.get("edition") or ""),
+            str(item.get("document_title") or ""),
+            str(item.get("document_urn") or ""),
+        )
+    )
+    return documents
+
+
+def _build_catalog_lineages(documents: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    grouped: Dict[str, Dict[str, Any]] = {}
+    seen_witnesses: set[tuple[str, str]] = set()
+
+    for document in documents:
+        lineage_key = _as_text(
+            document.get("version_lineage_key")
+            or document.get("work_fragment_key")
+            or document.get("witness_key")
+            or document.get("document_urn")
+            or document.get("document_title")
+        )
+        if not lineage_key:
+            continue
+
+        group = grouped.setdefault(
+            lineage_key,
+            {
+                "version_lineage_key": _as_text(document.get("version_lineage_key") or lineage_key),
+                "work_fragment_key": _as_text(document.get("work_fragment_key")),
+                "work_title": _as_text(document.get("work_title")),
+                "fragment_title": _as_text(document.get("fragment_title")),
+                "dynasty": _as_text(document.get("dynasty")),
+                "author": _as_text(document.get("author")),
+                "edition": _as_text(document.get("edition")),
+                "witnesses": [],
+            },
+        )
+
+        witness = _normalize_catalog_witness(document)
+        witness_identity = _as_text(
+            witness.get("witness_key")
+            or witness.get("document_id")
+            or witness.get("urn")
+            or witness.get("title")
+            or witness.get("catalog_id")
+        )
+        if witness_identity:
+            seen_key = (lineage_key, witness_identity)
+            if seen_key in seen_witnesses:
+                continue
+            seen_witnesses.add(seen_key)
+        group["witnesses"].append(witness)
+
+    ordered = sorted(
+        grouped.values(),
+        key=lambda item: (
+            str(item.get("work_title") or ""),
+            str(item.get("fragment_title") or ""),
+            str(item.get("edition") or ""),
+            str(item.get("version_lineage_key") or ""),
+        ),
+    )
+    for item in ordered:
+        witnesses = [dict(witness) for witness in item.get("witnesses") or [] if isinstance(witness, Mapping)]
+        witnesses.sort(
+            key=lambda witness: (
+                str(witness.get("source_type") or ""),
+                str(witness.get("title") or ""),
+                str(witness.get("urn") or ""),
+                str(witness.get("witness_key") or ""),
+            )
+        )
+        item["witnesses"] = witnesses
+        item["witness_count"] = len(witnesses)
+    return ordered
+
+
+def _normalize_catalog_lineages(raw_lineages: Any) -> List[Dict[str, Any]]:
+    normalized_documents: List[Dict[str, Any]] = []
+    for item in _as_dict_list(raw_lineages):
+        base_fields = {
+            "work_title": item.get("work_title"),
+            "fragment_title": item.get("fragment_title"),
+            "work_fragment_key": item.get("work_fragment_key"),
+            "version_lineage_key": item.get("version_lineage_key"),
+            "dynasty": item.get("dynasty"),
+            "author": item.get("author"),
+            "edition": item.get("edition"),
+        }
+        for witness in _as_dict_list(item.get("witnesses")):
+            normalized_documents.append(
+                _normalize_catalog_document(
+                    {
+                        **base_fields,
+                        "document_id": witness.get("document_id") or witness.get("id"),
+                        "document_title": witness.get("title") or witness.get("document_title"),
+                        "document_urn": witness.get("urn") or witness.get("document_urn"),
+                        "source_type": witness.get("source_type"),
+                        "catalog_id": witness.get("catalog_id"),
+                        "witness_key": witness.get("witness_key"),
+                    }
+                )
+            )
+    if normalized_documents:
+        return _build_catalog_lineages(_normalize_catalog_documents(normalized_documents))
+    return []
+
+
+def _build_catalog_summary_metrics(
+    documents: Sequence[Mapping[str, Any]],
+    version_lineages: Sequence[Mapping[str, Any]],
+    base_summary: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    summary = dict(base_summary or {})
+    witnesses: List[Dict[str, Any]] = []
+    for lineage in version_lineages:
+        witnesses.extend(_as_dict_list(lineage.get("witnesses")))
+
+    if documents:
+        catalog_document_count = len(documents)
+        work_count = len({_as_text(item.get("work_title")) for item in documents if _as_text(item.get("work_title"))})
+        work_fragment_count = len(
+            {
+                _as_text(item.get("work_fragment_key") or f"{_as_text(item.get('work_title'))}|{_as_text(item.get('fragment_title'))}")
+                for item in documents
+                if _as_text(item.get("work_fragment_key") or item.get("work_title") or item.get("fragment_title"))
+            }
+        )
+        version_lineage_count = len(version_lineages)
+        witness_count = len(
+            {
+                _as_text(item.get("witness_key") or item.get("document_id") or item.get("document_urn") or item.get("document_title"))
+                for item in documents
+                if _as_text(item.get("witness_key") or item.get("document_id") or item.get("document_urn") or item.get("document_title"))
+            }
+        )
+        catalog_id_count = len({_as_text(item.get("catalog_id")) for item in documents if _as_text(item.get("catalog_id"))})
+        missing_core_metadata_count = sum(1 for item in documents if item.get("missing_core_fields"))
+        source_type_counts = _count_values(documents, "source_type")
+        lineage_source_counts = _count_values(documents, "lineage_source")
+    elif version_lineages:
+        catalog_document_count = sum(
+            max(_safe_int(item.get("witness_count"), 0), len(_as_dict_list(item.get("witnesses"))))
+            for item in version_lineages
+        )
+        work_count = len({_as_text(item.get("work_title")) for item in version_lineages if _as_text(item.get("work_title"))})
+        work_fragment_count = len(
+            {
+                _as_text(item.get("work_fragment_key") or f"{_as_text(item.get('work_title'))}|{_as_text(item.get('fragment_title'))}")
+                for item in version_lineages
+                if _as_text(item.get("work_fragment_key") or item.get("work_title") or item.get("fragment_title"))
+            }
+        )
+        version_lineage_count = len(version_lineages)
+        witness_count = len(
+            {
+                _as_text(item.get("witness_key") or item.get("document_id") or item.get("urn") or item.get("title") or item.get("catalog_id"))
+                for item in witnesses
+                if _as_text(item.get("witness_key") or item.get("document_id") or item.get("urn") or item.get("title") or item.get("catalog_id"))
+            }
+        )
+        catalog_id_count = len({_as_text(item.get("catalog_id")) for item in witnesses if _as_text(item.get("catalog_id"))})
+        missing_core_metadata_count = _safe_int(summary.get("missing_core_metadata_count"), 0)
+        source_type_counts = _count_values(witnesses, "source_type")
+        lineage_source_counts = _normalize_count_mapping(summary.get("lineage_source_counts"))
+    else:
+        catalog_document_count = _safe_int(summary.get("catalog_document_count"), 0)
+        work_count = _safe_int(summary.get("work_count"), 0)
+        work_fragment_count = _safe_int(summary.get("work_fragment_count"), 0)
+        version_lineage_count = _safe_int(summary.get("version_lineage_count"), 0)
+        witness_count = _safe_int(summary.get("witness_count"), 0)
+        catalog_id_count = _safe_int(summary.get("catalog_id_count"), 0)
+        missing_core_metadata_count = _safe_int(summary.get("missing_core_metadata_count"), 0)
+        source_type_counts = _normalize_count_mapping(summary.get("source_type_counts"))
+        lineage_source_counts = _normalize_count_mapping(summary.get("lineage_source_counts"))
+
+    dynasty_counts: Dict[str, int] = {}
+    exegesis_identities: set[tuple[str, str]] = set()
+    temporal_semantic_count = 0
+    review_status_counts: Dict[str, int] = {}
+    needs_manual_review_count = 0
+    for item in documents:
+        temporal_semantics = _as_dict(item.get("temporal_semantics"))
+        dynasties = _unique_texts([*_as_string_list(temporal_semantics.get("dynasties")), item.get("dynasty")])
+        if dynasties or temporal_semantics:
+            temporal_semantic_count += 1
+        for dynasty in dynasties:
+            dynasty_counts[dynasty] = dynasty_counts.get(dynasty, 0) + 1
+        for entry in _as_dict_list(item.get("exegesis_entries")):
+            canonical = _as_text(entry.get("canonical"))
+            semantic_scope = _as_text(entry.get("semantic_scope") or entry.get("label"))
+            if canonical:
+                exegesis_identities.add((canonical, semantic_scope))
+        review_status = _normalize_review_status(item.get("review_status"))
+        if review_status:
+            review_status_counts[review_status] = review_status_counts.get(review_status, 0) + 1
+        if bool(item.get("needs_manual_review")):
+            needs_manual_review_count += 1
+
+    summary.update(
+        {
+            "catalog_document_count": catalog_document_count,
+            "work_count": work_count,
+            "work_fragment_count": work_fragment_count,
+            "version_lineage_count": version_lineage_count,
+            "witness_count": witness_count,
+            "catalog_id_count": catalog_id_count,
+            "missing_core_metadata_count": missing_core_metadata_count,
+            "source_type_counts": source_type_counts,
+            "lineage_source_counts": lineage_source_counts,
+            "exegesis_entry_count": len(exegesis_identities),
+            "temporal_semantic_count": temporal_semantic_count,
+            "dynasty_counts": {key: dynasty_counts[key] for key in sorted(dynasty_counts)},
+            "review_status_counts": {key: review_status_counts[key] for key in sorted(review_status_counts)},
+            "pending_review_count": review_status_counts.get("pending", 0),
+            "needs_manual_review_count": needs_manual_review_count,
+        }
+    )
+    return summary
+
+
+def _normalize_catalog_summary(raw_catalog_summary: Any) -> Dict[str, Any]:
+    payload = _as_dict(raw_catalog_summary)
+    raw_summary = _as_dict(payload.get("summary"))
+    documents = _normalize_catalog_documents(payload.get("documents"))
+    version_lineages = _build_catalog_lineages(documents) if documents else _normalize_catalog_lineages(payload.get("version_lineages"))
+
+    if not documents and not version_lineages and not raw_summary:
+        return {}
+
+    return {
+        "summary": _build_catalog_summary_metrics(documents, version_lineages, raw_summary),
+        "documents": documents,
+        "version_lineages": version_lineages,
+    }
+
+
+def _extract_document_catalog_entry(document: Mapping[str, Any]) -> Dict[str, Any]:
+    metadata = _as_dict(document.get("metadata"))
+    version_metadata = _as_dict(metadata.get("version_metadata"))
+    if not version_metadata and isinstance(document.get("version_metadata"), Mapping):
+        version_metadata = _as_dict(document.get("version_metadata"))
+
+    raw_entry = {
+        "document_id": document.get("id"),
+        "document_title": document.get("title") or document.get("document_title"),
+        "document_urn": document.get("urn") or document.get("document_urn"),
+        "source_type": version_metadata.get("source_type") or document.get("source_type"),
+        "catalog_id": version_metadata.get("catalog_id") or document.get("catalog_id"),
+        "work_title": version_metadata.get("work_title") or document.get("work_title"),
+        "fragment_title": version_metadata.get("fragment_title") or document.get("fragment_title"),
+        "work_fragment_key": version_metadata.get("work_fragment_key") or document.get("work_fragment_key"),
+        "version_lineage_key": version_metadata.get("version_lineage_key") or document.get("version_lineage_key"),
+        "witness_key": version_metadata.get("witness_key") or document.get("witness_key"),
+        "dynasty": version_metadata.get("dynasty") or document.get("dynasty"),
+        "author": version_metadata.get("author") or document.get("author"),
+        "edition": version_metadata.get("edition") or document.get("edition"),
+        "lineage_source": version_metadata.get("lineage_source"),
+    }
+    if not _catalog_entry_has_baseline_fields(raw_entry):
+        return {}
+    return _normalize_catalog_document(raw_entry)
+
+
+def _build_catalog_summary_from_documents(observe_documents: Sequence[Mapping[str, Any]] | None) -> Dict[str, Any]:
+    catalog_documents: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for document in observe_documents or []:
+        if not isinstance(document, Mapping):
+            continue
+        catalog_entry = _extract_document_catalog_entry(document)
+        if not catalog_entry:
+            continue
+        identity = _as_text(
+            catalog_entry.get("document_id")
+            or catalog_entry.get("witness_key")
+            or catalog_entry.get("document_urn")
+            or catalog_entry.get("document_title")
+        )
+        if not identity or identity in seen:
+            continue
+        seen.add(identity)
+        catalog_documents.append(catalog_entry)
+
+    if not catalog_documents:
+        return {}
+
+    catalog_documents = _normalize_catalog_documents(catalog_documents)
+    version_lineages = _build_catalog_lineages(catalog_documents)
+    return {
+        "summary": _build_catalog_summary_metrics(catalog_documents, version_lineages),
+        "documents": catalog_documents,
+        "version_lineages": version_lineages,
+    }
+
+
+def _catalog_lookup_token(prefix: str, value: Any) -> str:
+    normalized = _as_text(value)
+    if not normalized:
+        return ""
+    return f"{prefix}:{normalized}"
+
+
+def _catalog_document_lookup_keys(
+    record: Mapping[str, Any],
+    *,
+    title_key: str = "document_title",
+    urn_key: str = "document_urn",
+    witness_key_key: str = "witness_key",
+    catalog_id_key: str = "catalog_id",
+    document_id_key: str = "document_id",
+) -> List[str]:
+    keys = []
+    for prefix, raw_value in (
+        ("document", record.get(document_id_key) or record.get("id")),
+        ("witness", record.get(witness_key_key)),
+        ("urn", record.get(urn_key) or record.get("urn")),
+        ("title", record.get(title_key) or record.get("title")),
+        ("catalog", record.get(catalog_id_key)),
+    ):
+        token = _catalog_lookup_token(prefix, raw_value)
+        if token and token not in keys:
+            keys.append(token)
+    return keys
+
+
+def _build_catalog_document_lookup(documents: Sequence[Mapping[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    lookup: Dict[str, Dict[str, Any]] = {}
+    for document in documents:
+        normalized_document = dict(document)
+        for key in _catalog_document_lookup_keys(normalized_document):
+            lookup.setdefault(key, normalized_document)
+    return lookup
+
+
+def _lookup_catalog_document(
+    record: Mapping[str, Any],
+    lookup: Mapping[str, Mapping[str, Any]],
+    *,
+    title_key: str = "document_title",
+    urn_key: str = "document_urn",
+    witness_key_key: str = "witness_key",
+    catalog_id_key: str = "catalog_id",
+    document_id_key: str = "document_id",
+) -> Dict[str, Any]:
+    for key in _catalog_document_lookup_keys(
+        record,
+        title_key=title_key,
+        urn_key=urn_key,
+        witness_key_key=witness_key_key,
+        catalog_id_key=catalog_id_key,
+        document_id_key=document_id_key,
+    ):
+        match = lookup.get(key)
+        if isinstance(match, Mapping):
+            return dict(match)
+    return {}
+
+
+def _merge_text_lists(*value_groups: Sequence[Any]) -> List[str]:
+    values: List[str] = []
+    for group in value_groups:
+        values.extend(_unique_texts(group))
+    return _unique_texts(values)
+
+
+def _merge_exegesis_entries(entries: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    merged: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for raw_entry in entries:
+        for entry in _normalize_exegesis_entries([raw_entry]):
+            identity = (_as_text(entry.get("canonical")), _as_text(entry.get("semantic_scope") or entry.get("label")))
+            current = merged.get(identity)
+            if current is None:
+                merged[identity] = dict(entry)
+                continue
+
+            for field_name in (
+                "observed_forms",
+                "configured_variants",
+                "sources",
+                "notes",
+                "dynasty_usage",
+                "disambiguation_basis",
+                "review_reasons",
+            ):
+                current[field_name] = _merge_text_lists(
+                    current.get(field_name) or [],
+                    entry.get(field_name) or [],
+                )
+            if not current.get("definition") and entry.get("definition"):
+                current["definition"] = entry["definition"]
+            if not current.get("definition_source") and entry.get("definition_source"):
+                current["definition_source"] = entry["definition_source"]
+            current["needs_manual_review"] = bool(current.get("needs_manual_review")) or bool(entry.get("needs_manual_review"))
+            current["review_status"] = _normalize_review_status(current.get("review_status") or entry.get("review_status")) or "pending"
+
+    return [
+        merged[key]
+        for key in sorted(
+            merged,
+            key=lambda item: (
+                item[0],
+                item[1],
+            ),
+        )
+    ]
+
+
+def _build_exegesis_entry_from_row(row: Mapping[str, Any], *, dynasty: str = "") -> Dict[str, Any]:
+    canonical = _as_text(row.get("canonical"))
+    if not canonical:
+        return {}
+
+    label = _as_text(row.get("label") or row.get("category") or "待判定义项")
+    observed_forms = _as_string_list(row.get("observed_forms"))
+    configured_variants = _as_string_list(row.get("configured_variants"))
+    sources = _as_string_list(row.get("sources"))
+    notes = _as_string_list(row.get("notes"))
+    definition = _as_text(notes[0] if notes else "")
+    definition_source = "terminology_note" if definition else "canonical_fallback"
+    if not definition:
+        if observed_forms:
+            definition = f"{canonical} 暂据术语标准表归并自 {observed_forms[0]}"
+        else:
+            definition = f"{canonical} 暂据术语标准表归入 {label}"
+
+    review_reasons = ["exegesis_machine_derived"]
+    if _as_text(row.get("status")).lower() and _as_text(row.get("status")).lower() != "standardized":
+        review_reasons.append("terminology_not_fully_standardized")
+
+    return {
+        "canonical": canonical,
+        "label": label,
+        "definition": definition,
+        "definition_source": definition_source,
+        "semantic_scope": label,
+        "observed_forms": observed_forms,
+        "configured_variants": configured_variants,
+        "sources": sources,
+        "notes": notes,
+        "dynasty_usage": _unique_texts([dynasty, row.get("dynasty")]),
+        "disambiguation_basis": _merge_text_lists(sources, notes[:1], observed_forms[:1]),
+        "review_status": "pending",
+        "needs_manual_review": True,
+        "review_reasons": review_reasons,
+    }
+
+
+def _resolve_review_state(
+    record: Mapping[str, Any],
+    *,
+    related_collation_entry_count: int,
+    exegesis_count: int,
+    missing_core_fields: Sequence[str],
+) -> tuple[str, bool, List[str]]:
+    review_status = _normalize_review_status(record.get("review_status"))
+    review_reasons = _merge_text_lists(
+        _as_string_list(record.get("review_reasons")),
+        [f"missing:{field_name}" for field_name in missing_core_fields],
+    )
+    if related_collation_entry_count > 0:
+        review_reasons = _merge_text_lists(review_reasons, ["version_collation_present"])
+    if exegesis_count > 0:
+        review_reasons = _merge_text_lists(review_reasons, ["exegesis_machine_derived"])
+
+    needs_manual_review = bool(record.get("needs_manual_review")) or bool(review_reasons) or review_status in {"pending", "needs_source"}
+    if needs_manual_review and not review_reasons:
+        review_reasons = ["catalog_summary_machine_generated"]
+    if not review_status and needs_manual_review:
+        review_status = "pending"
+    return review_status, needs_manual_review, review_reasons
+
+
+def _catalog_record_matches_document(
+    record: Mapping[str, Any],
+    document: Mapping[str, Any],
+) -> bool:
+    document_keys = set(_catalog_document_lookup_keys(document))
+    if document_keys.intersection(_catalog_document_lookup_keys(record)):
+        return True
+    if document_keys.intersection(
+        _catalog_document_lookup_keys(
+            record,
+            title_key="witness_title",
+            urn_key="witness_urn",
+            witness_key_key="witness_witness_key",
+            catalog_id_key="witness_catalog_id",
+            document_id_key="witness_document_id",
+        )
+    ):
+        return True
+    return False
+
+
+def _enrich_terminology_rows_with_catalog_metadata(
+    rows: Sequence[Mapping[str, Any]],
+    documents: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    lookup = _build_catalog_document_lookup(documents)
+    enriched_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        merged = dict(row)
+        match = _lookup_catalog_document(row, lookup)
+        if match:
+            for field_name in (
+                "catalog_id",
+                "work_title",
+                "fragment_title",
+                "work_fragment_key",
+                "version_lineage_key",
+                "witness_key",
+                "dynasty",
+                "author",
+                "edition",
+                "lineage_source",
+            ):
+                if not _as_text(merged.get(field_name)) and _as_text(match.get(field_name)):
+                    merged[field_name] = match[field_name]
+        enriched_rows.append(merged)
+    return enriched_rows
+
+
+def _enrich_collation_entries_with_catalog_metadata(
+    entries: Sequence[Mapping[str, Any]],
+    documents: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    lookup = _build_catalog_document_lookup(documents)
+    enriched_entries: List[Dict[str, Any]] = []
+    for entry in entries:
+        merged = dict(entry)
+        base_document = _lookup_catalog_document(entry, lookup)
+        witness_document = _lookup_catalog_document(
+            entry,
+            lookup,
+            title_key="witness_title",
+            urn_key="witness_urn",
+            witness_key_key="witness_witness_key",
+            catalog_id_key="witness_catalog_id",
+            document_id_key="witness_document_id",
+        )
+        if base_document:
+            for field_name in (
+                "catalog_id",
+                "work_title",
+                "fragment_title",
+                "work_fragment_key",
+                "version_lineage_key",
+                "witness_key",
+                "dynasty",
+                "author",
+                "edition",
+                "lineage_source",
+            ):
+                if not _as_text(merged.get(field_name)) and _as_text(base_document.get(field_name)):
+                    merged[field_name] = base_document[field_name]
+                if _as_text(base_document.get(field_name)):
+                    merged[f"base_{field_name}"] = base_document[field_name]
+        if witness_document:
+            for field_name in (
+                "catalog_id",
+                "work_title",
+                "fragment_title",
+                "work_fragment_key",
+                "version_lineage_key",
+                "witness_key",
+                "dynasty",
+                "author",
+                "edition",
+                "lineage_source",
+                "document_id",
+            ):
+                if _as_text(witness_document.get(field_name)):
+                    merged[f"witness_{field_name}"] = witness_document[field_name]
+        enriched_entries.append(merged)
+    return enriched_entries
+
+
+def _enrich_document_reports_with_catalog_metadata(
+    document_reports: Sequence[Mapping[str, Any]],
+    documents: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    lookup = _build_catalog_document_lookup(documents)
+    enriched_reports: List[Dict[str, Any]] = []
+    for report in document_reports:
+        merged = dict(report)
+        match = _lookup_catalog_document(report, lookup)
+        if match:
+            for field_name in (
+                "catalog_id",
+                "work_title",
+                "fragment_title",
+                "work_fragment_key",
+                "version_lineage_key",
+                "witness_key",
+                "dynasty",
+                "author",
+                "edition",
+                "lineage_source",
+            ):
+                if not _as_text(merged.get(field_name)) and _as_text(match.get(field_name)):
+                    merged[field_name] = match[field_name]
+        enriched_reports.append(merged)
+    return enriched_reports
+
+
+def _enrich_catalog_summary(
+    catalog_summary: Mapping[str, Any],
+    terminology_rows: Sequence[Mapping[str, Any]],
+    collation_entries: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    catalog_payload = _as_dict(catalog_summary)
+    documents = _normalize_catalog_documents(catalog_payload.get("documents"))
+    if not documents:
+        version_lineages = _normalize_catalog_lineages(catalog_payload.get("version_lineages"))
+        if not version_lineages:
+            return catalog_payload
+        summary = _build_catalog_summary_metrics([], version_lineages, _as_dict(catalog_payload.get("summary")))
+        return {
+            "summary": summary,
+            "documents": [],
+            "version_lineages": version_lineages,
+        }
+
+    enriched_documents: List[Dict[str, Any]] = []
+    document_lookup = _build_catalog_document_lookup(documents)
+    for document in documents:
+        document_rows = [row for row in terminology_rows if _catalog_record_matches_document(row, document)]
+        document_collations = [entry for entry in collation_entries if _catalog_record_matches_document(entry, document)]
+        exegesis_entries = _merge_exegesis_entries(
+            [
+                _build_exegesis_entry_from_row(row, dynasty=_as_text(document.get("dynasty")))
+                for row in document_rows
+                if _build_exegesis_entry_from_row(row, dynasty=_as_text(document.get("dynasty")))
+            ]
+        )
+        temporal_semantics = _normalize_temporal_semantics(
+            document.get("temporal_semantics"),
+            dynasty=_as_text(document.get("dynasty")),
+            author=_as_text(document.get("author")),
+            edition=_as_text(document.get("edition")),
+        )
+        review_status, needs_manual_review, review_reasons = _resolve_review_state(
+            document,
+            related_collation_entry_count=len(document_collations),
+            exegesis_count=len(exegesis_entries),
+            missing_core_fields=_as_string_list(document.get("missing_core_fields")),
+        )
+        enriched_document = dict(document)
+        if exegesis_entries:
+            enriched_document["exegesis_entries"] = exegesis_entries
+        if temporal_semantics:
+            enriched_document["temporal_semantics"] = temporal_semantics
+        if review_status:
+            enriched_document["review_status"] = review_status
+        if needs_manual_review:
+            enriched_document["needs_manual_review"] = True
+        if review_reasons:
+            enriched_document["review_reasons"] = review_reasons
+        if document_collations:
+            enriched_document["related_collation_entry_count"] = len(document_collations)
+        enriched_documents.append(_normalize_catalog_document(enriched_document))
+
+    version_lineages = _build_catalog_lineages(enriched_documents)
+    enriched_lineages: List[Dict[str, Any]] = []
+    for lineage in version_lineages:
+        lineage_key = _as_text(lineage.get("version_lineage_key") or lineage.get("work_fragment_key"))
+        lineage_documents = [
+            document
+            for document in enriched_documents
+            if _as_text(document.get("version_lineage_key") or document.get("work_fragment_key")) == lineage_key
+        ]
+        lineage_collations = [
+            entry
+            for entry in collation_entries
+            if any(_catalog_record_matches_document(entry, document) for document in lineage_documents)
+        ]
+        lineage_exegesis = _merge_exegesis_entries(
+            [
+                entry
+                for document in lineage_documents
+                for entry in _as_dict_list(document.get("exegesis_entries"))
+            ]
+        )
+        lineage_temporal_semantics = _normalize_temporal_semantics(
+            {
+                "dynasties": _unique_texts(
+                    [
+                        dynasty
+                        for document in lineage_documents
+                        for dynasty in _as_string_list(_as_dict(document.get("temporal_semantics")).get("dynasties"))
+                    ]
+                ),
+                "authors": _unique_texts(
+                    [
+                        author
+                        for document in lineage_documents
+                        for author in _as_string_list(_as_dict(document.get("temporal_semantics")).get("authors"))
+                    ]
+                ),
+                "editions": _unique_texts(
+                    [
+                        edition
+                        for document in lineage_documents
+                        for edition in _as_string_list(_as_dict(document.get("temporal_semantics")).get("editions"))
+                    ]
+                ),
+            },
+            dynasty=_as_text(lineage.get("dynasty")),
+            author=_as_text(lineage.get("author")),
+            edition=_as_text(lineage.get("edition")),
+        )
+        review_status, needs_manual_review, review_reasons = _resolve_review_state(
+            lineage,
+            related_collation_entry_count=len(lineage_collations),
+            exegesis_count=len(lineage_exegesis),
+            missing_core_fields=[],
+        )
+        witnesses: List[Dict[str, Any]] = []
+        for witness in _as_dict_list(lineage.get("witnesses")):
+            witness_document = _lookup_catalog_document(
+                witness,
+                document_lookup,
+                title_key="title",
+                urn_key="urn",
+                witness_key_key="witness_key",
+                catalog_id_key="catalog_id",
+                document_id_key="document_id",
+            )
+            enriched_witness = dict(witness)
+            if witness_document:
+                if witness_document.get("temporal_semantics"):
+                    enriched_witness["temporal_semantics"] = witness_document["temporal_semantics"]
+                if witness_document.get("review_status"):
+                    enriched_witness["review_status"] = witness_document["review_status"]
+                if witness_document.get("needs_manual_review"):
+                    enriched_witness["needs_manual_review"] = True
+                if witness_document.get("review_reasons"):
+                    enriched_witness["review_reasons"] = witness_document["review_reasons"]
+            witnesses.append(_normalize_catalog_witness(enriched_witness))
+
+        enriched_lineage = dict(lineage)
+        if lineage_exegesis:
+            enriched_lineage["exegesis_entries"] = lineage_exegesis
+        if lineage_temporal_semantics:
+            enriched_lineage["temporal_semantics"] = lineage_temporal_semantics
+        if review_status:
+            enriched_lineage["review_status"] = review_status
+        elif any(witness.get("review_status") == "pending" for witness in witnesses):
+            enriched_lineage["review_status"] = "pending"
+        if needs_manual_review or any(witness.get("needs_manual_review") for witness in witnesses):
+            enriched_lineage["needs_manual_review"] = True
+        if review_reasons:
+            enriched_lineage["review_reasons"] = review_reasons
+        if lineage_collations:
+            enriched_lineage["related_collation_entry_count"] = len(lineage_collations)
+        enriched_lineage["witnesses"] = witnesses
+        enriched_lineage["witness_count"] = len(witnesses)
+        enriched_lineages.append(enriched_lineage)
+
+    summary = _build_catalog_summary_metrics(
+        enriched_documents,
+        enriched_lineages,
+        _as_dict(catalog_payload.get("summary")),
+    )
+    return {
+        "summary": summary,
+        "documents": enriched_documents,
+        "version_lineages": enriched_lineages,
+    }
+
+
+def _record_filter_candidates(record: Mapping[str, Any], field_name: str) -> List[str]:
+    if field_name == "document_title":
+        return _unique_texts([
+            record.get("document_title"),
+            record.get("title"),
+            record.get("witness_title"),
+        ])
+    if field_name == "work_title":
+        return _unique_texts([
+            record.get("work_title"),
+            record.get("base_work_title"),
+            record.get("witness_work_title"),
+        ])
+    if field_name == "version_lineage_key":
+        return _unique_texts([
+            record.get("version_lineage_key"),
+            record.get("base_version_lineage_key"),
+            record.get("witness_version_lineage_key"),
+        ])
+    if field_name == "witness_key":
+        return _unique_texts([
+            record.get("witness_key"),
+            record.get("base_witness_key"),
+            record.get("witness_witness_key"),
+        ])
+    return []
+
+
+def _record_matches_catalog_filters(record: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:
+    for field_name in _CATALOG_FILTER_FIELDS:
+        expected = _as_text(filters.get(field_name))
+        if not expected:
+            continue
+        candidates = _record_filter_candidates(record, field_name)
+        if expected not in candidates:
+            return False
+    return True
+
+
+def _filter_catalog_lineages(
+    version_lineages: Sequence[Mapping[str, Any]],
+    filters: Mapping[str, Any],
+) -> List[Dict[str, Any]]:
+    filtered_lineages: List[Dict[str, Any]] = []
+    for lineage in version_lineages:
+        witnesses = [
+            _normalize_catalog_witness(witness)
+            for witness in _as_dict_list(lineage.get("witnesses"))
+            if _record_matches_catalog_filters(
+                {
+                    **dict(lineage),
+                    **dict(witness),
+                    "document_title": witness.get("title") or witness.get("document_title"),
+                    "document_urn": witness.get("urn") or witness.get("document_urn"),
+                },
+                filters,
+            )
+        ]
+        lineage_payload = dict(lineage)
+        lineage_payload["witnesses"] = witnesses
+        lineage_payload["witness_count"] = len(witnesses)
+        if witnesses or _record_matches_catalog_filters(lineage_payload, filters):
+            filtered_lineages.append(lineage_payload)
+    return filtered_lineages
+
+
+def normalize_observe_philology_filters(raw_filters: Any) -> Dict[str, str]:
+    filters = _as_dict(raw_filters)
+    return {
+        field_name: _as_text(filters.get(field_name))
+        for field_name in _CATALOG_FILTER_FIELDS
+        if _as_text(filters.get(field_name))
+    }
+
+
+def filter_observe_philology_assets(
+    observe_philology: Any,
+    filters: Any = None,
+) -> Dict[str, Any]:
+    normalized = normalize_observe_philology_assets(observe_philology)
+    normalized_filters = normalize_observe_philology_filters(filters)
+    if not normalized_filters:
+        return normalized
+
+    terminology_rows = [
+        row
+        for row in _as_dict_list(normalized.get("terminology_standard_table"))
+        if _record_matches_catalog_filters(row, normalized_filters)
+    ]
+    collation_entries = [
+        entry
+        for entry in _as_dict_list(normalized.get("collation_entries"))
+        if _record_matches_catalog_filters(entry, normalized_filters)
+    ]
+    annotation_report = _as_dict(normalized.get("annotation_report"))
+    summary = _as_dict(annotation_report.get("summary"))
+    document_reports = [
+        report
+        for report in _as_dict_list(annotation_report.get("documents"))
+        if _record_matches_catalog_filters(report, normalized_filters)
+    ]
+    catalog_summary = _as_dict(normalized.get("catalog_summary"))
+    catalog_documents = [
+        document
+        for document in _as_dict_list(catalog_summary.get("documents"))
+        if _record_matches_catalog_filters(document, normalized_filters)
+    ]
+    filtered_catalog_summary: Dict[str, Any] = {}
+    if catalog_documents:
+        filtered_catalog_summary["documents"] = catalog_documents
+    elif _as_dict_list(catalog_summary.get("version_lineages")):
+        filtered_lineages = _filter_catalog_lineages(
+            _as_dict_list(catalog_summary.get("version_lineages")),
+            normalized_filters,
+        )
+        if filtered_lineages:
+            filtered_catalog_summary["version_lineages"] = filtered_lineages
+
+    filtered_summary = dict(summary)
+    if filtered_summary or document_reports or terminology_rows or collation_entries or filtered_catalog_summary:
+        filtered_summary["processed_document_count"] = max(
+            len(document_reports),
+            len(catalog_documents),
+        )
+        filtered_summary["terminology_standard_table_count"] = len(terminology_rows)
+        filtered_summary["collation_entry_count"] = len(collation_entries)
+
+    filtered_assets: Dict[str, Any] = {
+        "terminology_standard_table": terminology_rows,
+        "collation_entries": collation_entries,
+        "annotation_report": {
+            "summary": filtered_summary,
+            "documents": document_reports,
+        },
+        "catalog_summary": filtered_catalog_summary,
+    }
+    if _as_text(normalized.get("source")):
+        filtered_assets["source"] = normalized["source"]
+    if _as_string_list(normalized.get("sources")):
+        filtered_assets["sources"] = _as_string_list(normalized.get("sources"))
+    return normalize_observe_philology_assets(filtered_assets)
+
+
+def _format_lineage_option_label(record: Mapping[str, Any]) -> str:
+    work_title = _as_text(record.get("work_title")) or "未标注作品"
+    fragment_title = _as_text(record.get("fragment_title")) or "未标注章节"
+    edition = _as_text(record.get("edition")) or _as_text(record.get("dynasty")) or _as_text(record.get("version_lineage_key"))
+    parts = [work_title, fragment_title]
+    if edition:
+        parts.append(edition)
+    return " / ".join(parts)
+
+
+def _format_witness_option_label(record: Mapping[str, Any]) -> str:
+    title = _as_text(record.get("document_title") or record.get("title") or record.get("witness_key"))
+    meta = " · ".join(part for part in (_as_text(record.get("edition")), _as_text(record.get("dynasty"))) if part)
+    if meta:
+        return f"{title} · {meta}"
+    return title
+
+
+def build_observe_philology_filter_contract(
+    observe_philology: Any,
+    filters: Any = None,
+) -> Dict[str, Any]:
+    normalized = normalize_observe_philology_assets(observe_philology)
+    active_filters = normalize_observe_philology_filters(filters)
+    catalog_summary = _as_dict(normalized.get("catalog_summary"))
+    catalog_documents = _as_dict_list(catalog_summary.get("documents"))
+    terminology_rows = _as_dict_list(normalized.get("terminology_standard_table"))
+    collation_entries = _as_dict_list(normalized.get("collation_entries"))
+
+    option_maps: Dict[str, Dict[str, Dict[str, Any]]] = {field_name: {} for field_name in _CATALOG_FILTER_FIELDS}
+
+    def _add_option(field_name: str, value: Any, label: str) -> None:
+        normalized_value = _as_text(value)
+        if not normalized_value:
+            return
+        bucket = option_maps[field_name].setdefault(
+            normalized_value,
+            {
+                "value": normalized_value,
+                "label": label or normalized_value,
+                "count": 0,
+            },
+        )
+        bucket["count"] += 1
+
+    for document in catalog_documents:
+        _add_option("document_title", document.get("document_title"), _as_text(document.get("document_title")))
+        _add_option("work_title", document.get("work_title"), _as_text(document.get("work_title")))
+        _add_option(
+            "version_lineage_key",
+            document.get("version_lineage_key"),
+            _format_lineage_option_label(document),
+        )
+        _add_option("witness_key", document.get("witness_key"), _format_witness_option_label(document))
+
+    for row in terminology_rows:
+        _add_option("document_title", row.get("document_title"), _as_text(row.get("document_title")))
+        _add_option("work_title", row.get("work_title"), _as_text(row.get("work_title")))
+        _add_option("version_lineage_key", row.get("version_lineage_key"), _format_lineage_option_label(row))
+        _add_option("witness_key", row.get("witness_key"), _format_witness_option_label(row))
+
+    for entry in collation_entries:
+        _add_option("document_title", entry.get("document_title"), _as_text(entry.get("document_title")))
+        _add_option("document_title", entry.get("witness_title"), _as_text(entry.get("witness_title")))
+        for field_name in ("work_title", "version_lineage_key", "witness_key"):
+            for candidate in _record_filter_candidates(entry, field_name):
+                label = candidate
+                if field_name == "version_lineage_key":
+                    label = _format_lineage_option_label(entry)
+                if field_name == "witness_key":
+                    label = _format_witness_option_label(entry)
+                _add_option(field_name, candidate, label)
+
+    return {
+        "active_filters": active_filters,
+        "options": {
+            field_name: sorted(
+                option_maps[field_name].values(),
+                key=lambda item: (str(item.get("label") or ""), str(item.get("value") or "")),
+            )
+            for field_name in _CATALOG_FILTER_FIELDS
+            if option_maps[field_name]
+        },
+    }
+
+
+def _merge_philology_candidates(
+    candidates: Sequence[tuple[str, Mapping[str, Any]]],
+    *,
+    include_sources: bool,
+) -> Dict[str, Any]:
+    resolved_payload: Dict[str, Any] = {}
+    sources: List[str] = []
+    for source_name, candidate in candidates:
+        if not candidate.get("available"):
+            continue
+        sources.append(source_name)
+        for field_name in (
+            "terminology_standard_table",
+            "collation_entries",
+            "annotation_report",
+            "catalog_summary",
+        ):
+            if not resolved_payload.get(field_name) and candidate.get(field_name):
+                resolved_payload[field_name] = candidate[field_name]
+
+    normalized = normalize_observe_philology_assets(resolved_payload)
+    if include_sources:
+        if sources:
+            normalized["source"] = sources[0]
+            normalized["sources"] = sources
+        else:
+            normalized["source"] = "unavailable"
+            normalized["sources"] = []
+    return normalized
+
+
 def _unique_document_identifiers(*groups: Sequence[Mapping[str, Any]]) -> List[str]:
     identifiers: List[str] = []
     for group in groups:
@@ -71,34 +1363,47 @@ def _unique_document_identifiers(*groups: Sequence[Mapping[str, Any]]) -> List[s
 
 def normalize_observe_philology_assets(raw_assets: Any) -> Dict[str, Any]:
     assets = _as_dict(raw_assets)
+    source = _as_text(assets.get("source"))
+    sources = _as_string_list(assets.get("sources"))
     terminology_rows = _as_dict_list(assets.get("terminology_standard_table"))
     collation_entries = _as_dict_list(assets.get("collation_entries"))
     annotation_report = _as_dict(assets.get("annotation_report"))
+    catalog_summary = _normalize_catalog_summary(assets.get("catalog_summary"))
     summary = _as_dict(annotation_report.get("summary"))
     document_reports = _as_dict_list(annotation_report.get("documents"))
+
+    catalog_documents = _as_dict_list(catalog_summary.get("documents"))
+    terminology_rows = _enrich_terminology_rows_with_catalog_metadata(terminology_rows, catalog_documents)
+    collation_entries = _enrich_collation_entries_with_catalog_metadata(collation_entries, catalog_documents)
+    document_reports = _enrich_document_reports_with_catalog_metadata(document_reports, catalog_documents)
+    catalog_summary = _enrich_catalog_summary(catalog_summary, terminology_rows, collation_entries)
+    catalog_metrics = _as_dict(catalog_summary.get("summary"))
 
     document_identifiers = _unique_document_identifiers(terminology_rows, collation_entries, document_reports)
     document_count = _safe_int(summary.get("processed_document_count") or summary.get("document_count"), 0)
     if document_count <= 0:
         document_count = len(document_identifiers)
+    if document_count <= 0:
+        document_count = _safe_int(catalog_metrics.get("catalog_document_count"), 0)
 
     philology_notes = _as_string_list(summary.get("philology_notes"))
-    if philology_notes or summary:
+    should_materialize_summary = bool(summary or terminology_rows or collation_entries or document_reports)
+    if philology_notes or should_materialize_summary:
         summary["philology_notes"] = philology_notes
-    if summary or document_count:
+    if should_materialize_summary:
         summary.setdefault("processed_document_count", document_count)
         summary.setdefault("terminology_standard_table_count", len(terminology_rows))
         summary.setdefault("collation_entry_count", len(collation_entries))
 
     normalized_report = dict(annotation_report)
-    if summary or "summary" in annotation_report:
+    if should_materialize_summary or "summary" in annotation_report:
         normalized_report["summary"] = summary
     if document_reports or "documents" in annotation_report:
         normalized_report["documents"] = document_reports
 
     asset_count = sum(
         1
-        for payload in (terminology_rows, collation_entries, normalized_report)
+        for payload in (terminology_rows, collation_entries, normalized_report, catalog_summary)
         if payload not in ({}, [], None, "")
     )
     available = bool(asset_count)
@@ -112,7 +1417,14 @@ def normalize_observe_philology_assets(raw_assets: Any) -> Dict[str, Any]:
         "collation_entries": collation_entries,
         "collation_entry_count": len(collation_entries),
         "annotation_report": normalized_report,
+        "catalog_summary": catalog_summary,
+        "catalog_document_count": _safe_int(catalog_metrics.get("catalog_document_count"), len(_as_dict_list(catalog_summary.get("documents")))),
+        "version_lineage_count": _safe_int(catalog_metrics.get("version_lineage_count"), len(_as_dict_list(catalog_summary.get("version_lineages")))),
+        "witness_count": _safe_int(catalog_metrics.get("witness_count"), 0),
+        "missing_catalog_metadata_count": _safe_int(catalog_metrics.get("missing_core_metadata_count"), 0),
         "philology_note_count": len(philology_notes),
+        "source": source or "",
+        "sources": sources,
     }
 
 
@@ -187,6 +1499,22 @@ def build_observe_philology_artifact_payloads(
                 },
             }
         )
+    if config.get("include_catalog_summary", True) and assets.get("catalog_summary"):
+        artifacts.append(
+            {
+                "name": OBSERVE_PHILOLOGY_CATALOG_SUMMARY_ARTIFACT,
+                "artifact_type": "dataset",
+                "mime_type": "application/json",
+                "description": "Observe 阶段目录学目录基线摘要",
+                "content": assets["catalog_summary"],
+                "metadata": {
+                    "asset_kind": "catalog_summary",
+                    "catalog_document_count": assets["catalog_document_count"],
+                    "version_lineage_count": assets["version_lineage_count"],
+                    "phase": "observe",
+                },
+            }
+        )
     return artifacts
 
 
@@ -204,6 +1532,8 @@ def _resolve_artifact_kind(artifact: Mapping[str, Any]) -> str:
         return "collation_entries"
     if name == OBSERVE_PHILOLOGY_ANNOTATION_REPORT_ARTIFACT:
         return "annotation_report"
+    if name == OBSERVE_PHILOLOGY_CATALOG_SUMMARY_ARTIFACT:
+        return "catalog_summary"
     return ""
 
 
@@ -224,6 +1554,8 @@ def extract_observe_philology_assets_from_artifacts(artifacts: Sequence[Mapping[
                 collected["collation_entries"] = entries
         elif asset_kind == "annotation_report" and content:
             collected["annotation_report"] = content
+        elif asset_kind == "catalog_summary" and content:
+            collected["catalog_summary"] = content
     return normalize_observe_philology_assets(collected)
 
 
@@ -267,6 +1599,8 @@ def extract_observe_philology_assets_from_documents(
     documents = [dict(item) for item in (observe_documents or []) if isinstance(item, Mapping)]
     if not documents:
         return normalize_observe_philology_assets({})
+
+    catalog_summary = _build_catalog_summary_from_documents(documents)
 
     terminology_rows: List[Dict[str, Any]] = []
     collation_entries: List[Dict[str, Any]] = []
@@ -350,13 +1684,14 @@ def extract_observe_philology_assets_from_documents(
             }
         )
 
-    if not terminology_rows and not collation_entries and not document_reports:
+    if not terminology_rows and not collation_entries and not document_reports and not catalog_summary:
         return normalize_observe_philology_assets({})
 
     return normalize_observe_philology_assets(
         {
             "terminology_standard_table": terminology_rows,
             "collation_entries": collation_entries,
+            "catalog_summary": catalog_summary,
             "annotation_report": {
                 "summary": {
                     "processed_document_count": len(document_reports),
@@ -379,22 +1714,21 @@ def extract_observe_philology_assets_from_documents(
 def extract_observe_philology_assets_from_phase_result(observe_phase_result: Mapping[str, Any] | None) -> Dict[str, Any]:
     phase_result = _as_dict(observe_phase_result)
     phase_artifacts = extract_observe_philology_assets_from_artifacts(_as_dict_list(phase_result.get("artifacts")))
-    if phase_artifacts["available"]:
-        return phase_artifacts
-
     results = _as_dict(phase_result.get("results"))
     ingestion_pipeline = _as_dict(results.get("ingestion_pipeline") or phase_result.get("ingestion_pipeline"))
     aggregate = _as_dict(ingestion_pipeline.get("aggregate"))
     assets = normalize_observe_philology_assets(aggregate.get("philology_assets"))
-    if assets["available"]:
-        return assets
-
     document_assets = extract_observe_philology_assets_from_documents(
         _as_dict_list(ingestion_pipeline.get("documents")),
     )
-    if document_assets["available"]:
-        return document_assets
-    return normalize_observe_philology_assets({})
+    return _merge_philology_candidates(
+        [
+            ("artifacts", phase_artifacts),
+            ("aggregate", assets),
+            ("documents", document_assets),
+        ],
+        include_sources=False,
+    )
 
 
 def resolve_observe_philology_assets(
@@ -410,25 +1744,4 @@ def resolve_observe_philology_assets(
         ("phase_output", extract_observe_philology_assets_from_phase_result(observe_phase_result)),
         ("observe_documents", extract_observe_philology_assets_from_documents(observe_documents)),
     ]
-
-    resolved_payload: Dict[str, Any] = {}
-    sources: List[str] = []
-    for source_name, candidate in source_candidates:
-        if not candidate.get("available"):
-            continue
-        sources.append(source_name)
-        if not resolved_payload.get("terminology_standard_table") and candidate.get("terminology_standard_table"):
-            resolved_payload["terminology_standard_table"] = candidate["terminology_standard_table"]
-        if not resolved_payload.get("collation_entries") and candidate.get("collation_entries"):
-            resolved_payload["collation_entries"] = candidate["collation_entries"]
-        if not resolved_payload.get("annotation_report") and candidate.get("annotation_report"):
-            resolved_payload["annotation_report"] = candidate["annotation_report"]
-
-    normalized = normalize_observe_philology_assets(resolved_payload)
-    if sources:
-        normalized["source"] = sources[0]
-        normalized["sources"] = sources
-    else:
-        normalized["source"] = "unavailable"
-        normalized["sources"] = []
-    return normalized
+    return _merge_philology_candidates(source_candidates, include_sources=True)

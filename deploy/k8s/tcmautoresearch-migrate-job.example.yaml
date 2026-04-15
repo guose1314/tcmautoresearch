@@ -1,3 +1,9 @@
+# K8s 示例清单状态口径（2026-04-15）：
+# - Job 成功只表示 Alembic 迁移动作已执行，不自动等同于结构化存储处于“双写完成”。
+# - 迁移后 PostgreSQL 可写但 Neo4j 未启用、初始化失败或当前不可用时，环境仍应记为“仅 PG 模式”。
+# - 历史图投影、Observe 版本元数据或文献学结构化资产仍需 writeback / backfill 时，应继续记为“待回填”。
+# - 迁移后 health check 或 drift 诊断若仍有告警，应记为“schema drift 待治理”。
+# - 统一术语来源：README 的“结构化存储状态词汇表”。
 # 可选：独立的数据库迁移 Job。
 # 推荐场景：原生 Kubernetes 部署，不使用 Helm hook，但又希望避免手工 exec 进应用 Pod。
 # 默认命令会走统一配置中心：

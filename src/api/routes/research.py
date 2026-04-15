@@ -17,19 +17,19 @@ from fastapi.responses import Response, StreamingResponse
 from src.api import websocket as websocket_streaming
 from src.api.dependencies import get_job_manager, require_management_api_key
 from src.api.research_utils import (
-    build_research_dashboard_payload,
     build_artifact_file_response,
     build_markdown_report,
     build_report_stem,
+    build_research_dashboard_payload,
     normalize_research_request,
     resolve_preferred_report_artifact,
 )
 from src.api.schemas import (
+    ResearchDashboardResponse,
     ResearchJobAccepted,
     ResearchJobDeletionResponse,
     ResearchJobListResponse,
     ResearchJobSnapshot,
-    ResearchDashboardResponse,
     ResearchResult,
     ResearchRunRequest,
 )
@@ -101,13 +101,25 @@ def get_research_job(
 @router.get("/jobs/{job_id}/dashboard")
 def get_research_job_dashboard(
     job_id: str,
+    document_title: str=Query(""),
+    work_title: str=Query(""),
+    version_lineage_key: str=Query(""),
+    witness_key: str=Query(""),
     manager: ResearchJobManager=Depends(get_job_manager),
     _: None=Depends(require_management_api_key),
 ) -> ResearchDashboardResponse:
     job = manager.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job 不存在")
-    return build_research_dashboard_payload(job.snapshot())
+    return build_research_dashboard_payload(
+        job.snapshot(),
+        philology_filters={
+            "document_title": document_title,
+            "work_title": work_title,
+            "version_lineage_key": version_lineage_key,
+            "witness_key": witness_key,
+        },
+    )
 
 
 @router.delete("/jobs/{job_id}")

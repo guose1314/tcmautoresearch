@@ -43,6 +43,12 @@ try:
 except Exception:
     EvidenceGrader = None
 
+from src.research.learning_strategy import (
+    has_learning_strategy,
+    resolve_learning_flag,
+    resolve_learning_strategy,
+    resolve_numeric_learning_parameter,
+)
 from src.research.phase_result import (
     build_phase_result,
     get_phase_results,
@@ -101,11 +107,12 @@ class PublishPhaseMixin:
         analyze_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.ANALYZE, {}).get("result", {})
         literature_pipeline = get_phase_value(observe_result, "literature_pipeline", {}) or {}
         citation_records = self._collect_citation_records(cycle, context, literature_pipeline)
+        generate_paper = self._resolve_publish_flag(context, "generate_paper", True)
+        generate_reports = self._resolve_publish_flag(context, "generate_reports", True)
 
         citation_manager = self._create_citation_manager()
         citation_result = self._execute_citation_manager(citation_manager, citation_records)
 
-        paper_writer = self._create_paper_writer()
         paper_context = self._build_publish_paper_context(
             cycle,
             context,
@@ -117,7 +124,11 @@ class PublishPhaseMixin:
             citation_records,
             citation_result,
         )
-        paper_result = self._execute_paper_writer(paper_writer, paper_context)
+        if generate_paper:
+            paper_writer = self._create_paper_writer()
+            paper_result = self._execute_paper_writer(paper_writer, paper_context)
+        else:
+            paper_result = {}
         paper_output_files = paper_result.get("output_files") if isinstance(paper_result, dict) else {}
         citation_output_files = citation_result.get("output_files")
         merged_output_files = self._merge_publish_output_files(
@@ -137,15 +148,25 @@ class PublishPhaseMixin:
             citation_result,
             merged_output_files,
         )
-        report_generation_result = self._generate_publish_reports(report_session_payload, context)
+        if generate_reports:
+            report_generation_result = self._generate_publish_reports(report_session_payload, context)
+        else:
+            report_generation_result = {"reports": {}, "output_files": {}, "errors": []}
         report_output_files = report_generation_result.get("output_files") if isinstance(report_generation_result, dict) else {}
         merged_output_files = self._merge_publish_output_files(
             merged_output_files,
             report_output_files if isinstance(report_output_files, dict) else {},
         )
 
-        publications = self._build_publications_from_paper_result(
-            cycle, context, paper_context, paper_result if isinstance(paper_result, dict) else {}
+        publications = (
+            self._build_publications_from_paper_result(
+                cycle,
+                context,
+                paper_context,
+                paper_result if isinstance(paper_result, dict) else {},
+            )
+            if generate_paper
+            else []
         )
 
         deliverables = [
@@ -176,6 +197,9 @@ class PublishPhaseMixin:
             "paper_review_summary": copy.deepcopy(paper_result.get("review_summary", {})) if isinstance(paper_result, dict) and isinstance(paper_result.get("review_summary"), dict) else {},
             "report_count": len(report_generation_result.get("reports", {})) if isinstance(report_generation_result, dict) else 0,
             "report_error_count": len(report_generation_result.get("errors", [])) if isinstance(report_generation_result, dict) else 0,
+            "learning_strategy_applied": has_learning_strategy(context, self.pipeline.config),
+            "paper_generation_enabled": generate_paper,
+            "report_generation_enabled": generate_reports,
         }
         report_errors = report_generation_result.get("errors", []) if isinstance(report_generation_result, dict) else []
         status = "degraded" if report_errors else "completed"
@@ -250,7 +274,7 @@ class PublishPhaseMixin:
         if not isinstance(text_entries, list) or not text_entries:
             return []
 
-        raw_max_records = context.get("max_local_citation_records", 20)
+        raw_max_records = self._resolve_publish_max_local_citation_records(context)
         try:
             max_records = max(1, min(int(raw_max_records), 200))
         except (TypeError, ValueError):
@@ -319,9 +343,63 @@ class PublishPhaseMixin:
 
         return citations
 
+    def _resolve_publish_flag(
+        self,
+        context: Dict[str, Any],
+        flag_name: str,
+        default: bool,
+    ) -> bool:
+        if flag_name in context:
+            return bool(context.get(flag_name))
+
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        publish_flag_name = f"publish_{flag_name}"
+        if publish_flag_name in strategy:
+            return bool(strategy.get(publish_flag_name))
+
+        return resolve_learning_flag(flag_name, default, context, self.pipeline.config)
+
+    def _resolve_publish_max_local_citation_records(
+        self,
+        context: Dict[str, Any],
+    ) -> int:
+        explicit_max_records = context.get("max_local_citation_records")
+        if explicit_max_records is not None:
+            return explicit_max_records
+
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        strategy_max_records = strategy.get("publish_max_local_citation_records")
+        if strategy_max_records is not None:
+            return strategy_max_records
+
+        if not has_learning_strategy(context, self.pipeline.config):
+            return 20
+
+        quality_threshold = resolve_numeric_learning_parameter(
+            "quality_threshold",
+            0.7,
+            context,
+            self.pipeline.config,
+            min_value=0.3,
+            max_value=0.95,
+        )
+        if quality_threshold >= 0.82:
+            return 32
+        if quality_threshold >= 0.74:
+            return 24
+        if quality_threshold <= 0.55:
+            return 12
+        return 20
+
     def _should_allow_pipeline_citation_fallback(self, context: Dict[str, Any]) -> bool:
         if "allow_pipeline_citation_fallback" in context:
             return bool(context.get("allow_pipeline_citation_fallback"))
+
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        if "publish_allow_pipeline_citation_fallback" in strategy:
+            return bool(strategy.get("publish_allow_pipeline_citation_fallback"))
+        if "allow_pipeline_citation_fallback" in strategy:
+            return bool(strategy.get("allow_pipeline_citation_fallback"))
 
         publish_config = self.pipeline.config.get("publish", {})
         return bool(publish_config.get("allow_pipeline_citation_fallback", True))
@@ -490,7 +568,11 @@ class PublishPhaseMixin:
             data_mining_result,
             research_perspectives,
         )
-        structured_output = self._execute_publish_output_generator(publish_output_context)
+        structured_output = (
+            self._execute_publish_output_generator(publish_output_context)
+            if self._resolve_publish_flag(context, "generate_structured_output", True)
+            else {}
+        )
         structured_payload_raw = structured_output.get("output_data") if isinstance(structured_output, dict) else {}
         structured_payload = structured_payload_raw if isinstance(structured_payload_raw, dict) else {}
         research_artifact = structured_payload.get("research_artifact") if isinstance(structured_payload, dict) else {}
@@ -1258,6 +1340,9 @@ class PublishPhaseMixin:
         analyze_results: Dict[str, Any],
         research_artifact: Dict[str, Any],
     ) -> Dict[str, Any]:
+        if not self._resolve_publish_flag(context, "include_evidence_grade", True):
+            return {}
+
         containers = [context, analyze_result, analyze_results]
         direct = self._resolve_publish_dict_field(containers, ("evidence_grade_summary",))
         if direct:

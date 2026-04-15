@@ -28,6 +28,7 @@ class _Phase(Enum):
     OBSERVE = "observe"
     HYPOTHESIS = "hypothesis"
     EXPERIMENT = "experiment"
+    EXPERIMENT_EXECUTION = "experiment_execution"
     ANALYZE = "analyze"
     PUBLISH = "publish"
     REFLECT = "reflect"
@@ -127,6 +128,7 @@ def _minimal_phase_executions():
         _Phase.OBSERVE: {"result": {}},
         _Phase.HYPOTHESIS: {"result": {"hypotheses": []}},
         _Phase.EXPERIMENT: {"result": {}},
+        _Phase.EXPERIMENT_EXECUTION: {"result": {}},
         _Phase.ANALYZE: {"result": {}},
     }
 
@@ -512,6 +514,94 @@ class TestPublishDeliverablesDynamic(unittest.TestCase):
         cycle = _FakeCycle(phase_executions=_minimal_phase_executions())
         result = handler.execute(cycle, {"citation_records": []})
         self.assertIn("Markdown 论文初稿", result["results"]["deliverables"])
+
+
+class TestPublishLearningStrategy(unittest.TestCase):
+
+    def test_learning_strategy_can_disable_paper_and_report_generation(self):
+        pipeline = _FakePipeline()
+        handler = _make_handler(pipeline)
+        cycle = _FakeCycle(phase_executions=_minimal_phase_executions())
+
+        result = handler.execute(
+            cycle,
+            {
+                "citation_records": [{"title": "本草纲目"}],
+                "learning_strategy": {
+                    "publish_generate_paper": False,
+                    "publish_generate_reports": False,
+                },
+            },
+        )
+
+        pipeline.output_port.create_paper_writer.assert_not_called()
+        pipeline.output_port.create_report_generator.assert_not_called()
+        self.assertEqual(result["results"]["publications"], [])
+        self.assertTrue(result["metadata"]["learning_strategy_applied"])
+        self.assertFalse(result["metadata"]["paper_generation_enabled"])
+        self.assertFalse(result["metadata"]["report_generation_enabled"])
+
+    def test_learning_strategy_can_disable_pipeline_citation_fallback(self):
+        pipeline = _FakePipeline()
+        handler = _make_handler(pipeline)
+        cycle = _FakeCycle(
+            phase_executions=_minimal_phase_executions(),
+            outcomes=[{"phase": "observe", "result": {"title": "fallback citation"}}],
+        )
+
+        handler.execute(
+            cycle,
+            {
+                "learning_strategy": {
+                    "publish_allow_pipeline_citation_fallback": False,
+                }
+            },
+        )
+
+        citation_records = pipeline.output_port.create_citation_manager.return_value.execute.call_args.args[0]["records"]
+        self.assertEqual(citation_records, [])
+
+    def test_learning_strategy_limits_local_citation_records_and_hides_evidence_grade(self):
+        pipeline = _FakePipeline()
+        pipeline._extract_corpus_text_entries = MagicMock(
+            return_value=[
+                {"title": f"文献{i}", "urn": f"urn:{i}", "source_type": "local"}
+                for i in range(1, 30)
+            ]
+        )
+        handler = _make_handler(pipeline)
+        cycle = _FakeCycle(
+            phase_executions={
+                _Phase.OBSERVE: {"result": {"results": {"corpus_collection": {"documents": [{}]}}}},
+                _Phase.HYPOTHESIS: {"result": {"results": {"hypotheses": []}}},
+                _Phase.EXPERIMENT: {"result": {"results": {}}},
+                _Phase.EXPERIMENT_EXECUTION: {"result": {"results": {}}},
+                _Phase.ANALYZE: {
+                    "result": {
+                        "results": {
+                            "statistical_analysis": {
+                                "evidence_grade_summary": {"overall_grade": "high"},
+                            }
+                        }
+                    }
+                },
+            }
+        )
+
+        handler.execute(
+            cycle,
+            {
+                "learning_strategy": {
+                    "tuned_parameters": {"quality_threshold": 0.52},
+                    "publish_include_evidence_grade": False,
+                }
+            },
+        )
+
+        citation_records = pipeline.output_port.create_citation_manager.return_value.execute.call_args.args[0]["records"]
+        self.assertEqual(len(citation_records), 12)
+        paper_context = pipeline.output_port.create_paper_writer.return_value.execute.call_args.args[0]
+        self.assertEqual(paper_context["evidence_grade_summary"], {})
 
 
 if __name__ == "__main__":

@@ -51,11 +51,46 @@ class _StructuredStore:
                 "source": "observe_philology",
                 "terminology_standard_table_count": 1,
                 "collation_entry_count": 1,
+                "catalog_document_count": 1,
+                "version_lineage_count": 1,
+                "witness_count": 1,
                 "annotation_report": {
                     "summary": {
                         "processed_document_count": 1,
                         "philology_notes": ["输出 1 条可复用校勘条目"],
                     }
+                },
+                "catalog_summary": {
+                    "summary": {
+                        "catalog_document_count": 1,
+                        "work_count": 1,
+                        "work_fragment_count": 1,
+                        "version_lineage_count": 1,
+                        "witness_count": 1,
+                        "missing_core_metadata_count": 0,
+                        "source_type_counts": {"local": 1},
+                    },
+                    "version_lineages": [
+                        {
+                            "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                            "work_fragment_key": "补血汤|补血汤",
+                            "work_title": "补血汤",
+                            "fragment_title": "补血汤",
+                            "dynasty": "明",
+                            "author": "李时珍",
+                            "edition": "宋本",
+                            "witness_count": 1,
+                            "witnesses": [
+                                {
+                                    "title": "补血汤宋本",
+                                    "urn": "doc:structured:1",
+                                    "source_type": "local",
+                                    "catalog_id": "local:catalog:1",
+                                    "witness_key": "local:doc:structured:1",
+                                }
+                            ],
+                        }
+                    ],
                 },
                 "terminology_standard_table": [
                     {
@@ -172,6 +207,7 @@ class TestDashboardCopy(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         text = response.text
         self.assertIn("project-detail-panel", text)
+        self.assertIn("目录学基线", text)
         self.assertIn("术语标准表", text)
         self.assertIn("校勘条目明细", text)
         self.assertIn("查看详情", text)
@@ -306,6 +342,90 @@ class TestDashboardCopy(unittest.TestCase):
         self.assertIn("黄芪", text)
         self.assertNotIn("当归", text)
         self.assertIn("跳到原始片段", text)
+
+    def test_project_detail_endpoint_filters_by_catalog_query_params(self):
+        session = {
+            "cycle_id": "cycle-catalog-filter-1",
+            "cycle_name": "目录筛选研究",
+            "research_objective": "目录学筛选测试",
+            "status": "completed",
+            "current_phase": "reflect",
+            "phase_executions": {"observe": {"result": {}}, "publish": {"result": {}}},
+            "observe_philology": {
+                "catalog_summary": {
+                    "documents": [
+                        {
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:catalog:1",
+                            "source_type": "local",
+                            "catalog_id": "catalog:1",
+                            "work_title": "补血汤",
+                            "fragment_title": "补血汤",
+                            "work_fragment_key": "补血汤|补血汤",
+                            "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                            "witness_key": "witness:1",
+                            "dynasty": "明",
+                            "author": "李时珍",
+                            "edition": "宋本",
+                        },
+                        {
+                            "document_title": "十全大补汤影印本",
+                            "document_urn": "doc:catalog:2",
+                            "source_type": "scan",
+                            "catalog_id": "catalog:2",
+                            "work_title": "十全大补汤",
+                            "fragment_title": "十全大补汤",
+                            "work_fragment_key": "十全大补汤|十全大补汤",
+                            "version_lineage_key": "十全大补汤|十全大补汤|清|佚名|影印本",
+                            "witness_key": "witness:2",
+                            "dynasty": "清",
+                            "author": "佚名",
+                            "edition": "影印本",
+                        },
+                    ]
+                },
+                "terminology_standard_table": [
+                    {
+                        "document_title": "补血汤宋本",
+                        "document_urn": "doc:catalog:1",
+                        "canonical": "黄芪",
+                        "label": "本草药名",
+                        "notes": ["黃芪 统一为 黄芪（本草药名）"],
+                    },
+                    {
+                        "document_title": "十全大补汤影印本",
+                        "document_urn": "doc:catalog:2",
+                        "canonical": "当归",
+                        "label": "本草药名",
+                        "notes": ["當歸 统一为 当归（本草药名）"],
+                    },
+                ],
+                "annotation_report": {"summary": {"processed_document_count": 2}},
+            },
+        }
+
+        with patch("src.web.routes.dashboard.get_research_session", return_value=session):
+            with self._build_client() as client:
+                work_response = client.get("/api/projects/cycle-catalog-filter-1/detail?work_title=%E8%A1%A5%E8%A1%80%E6%B1%A4")
+                lineage_response = client.get(
+                    "/api/projects/cycle-catalog-filter-1/detail?version_lineage_key=%E5%8D%81%E5%85%A8%E5%A4%A7%E8%A1%A5%E6%B1%A4%7C%E5%8D%81%E5%85%A8%E5%A4%A7%E8%A1%A5%E6%B1%A4%7C%E6%B8%85%7C%E4%BD%9A%E5%90%8D%7C%E5%BD%B1%E5%8D%B0%E6%9C%AC"
+                )
+                witness_response = client.get("/api/projects/cycle-catalog-filter-1/detail?witness_key=witness%3A1")
+
+        self.assertEqual(work_response.status_code, 200)
+        self.assertIn("当前筛选：补血汤", work_response.text)
+        self.assertIn("黄芪", work_response.text)
+        self.assertNotIn("当归", work_response.text)
+
+        self.assertEqual(lineage_response.status_code, 200)
+        self.assertIn("当前筛选：十全大补汤", lineage_response.text)
+        self.assertIn("当归", lineage_response.text)
+        self.assertNotIn("黄芪", lineage_response.text)
+
+        self.assertEqual(witness_response.status_code, 200)
+        self.assertIn("当前筛选：补血汤宋本", witness_response.text)
+        self.assertIn("黄芪", witness_response.text)
+        self.assertNotIn("当归", witness_response.text)
 
     def test_fragment_preview_endpoint_uses_local_source_text_when_available(self):
         with TemporaryDirectory() as tmp:

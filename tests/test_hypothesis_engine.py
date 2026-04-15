@@ -226,6 +226,92 @@ class TestHypothesisEngine(unittest.TestCase):
         self.assertEqual(result["metadata"]["has_llm"], False)
         self.assertEqual(result["metadata"]["selected_hypothesis_id"], result["hypotheses"][0]["hypothesis_id"])
 
+    def test_learning_strategy_can_disable_llm_generation(self):
+        engine = HypothesisEngine(
+            {"max_hypotheses": 5},
+            llm_engine=FakeLLMEngine(),
+            knowledge_graph=self.graph,
+        )
+        engine.initialize()
+        self.addCleanup(engine.cleanup)
+
+        resolved_engine = engine._resolve_llm_engine(
+            {
+                "learning_strategy": {
+                    "hypothesis_use_llm_generation": False,
+                }
+            }
+        )
+
+        self.assertIsNone(resolved_engine)
+
+    def test_learning_strategy_filters_low_support_hypotheses_and_caps_output(self):
+        engine = HypothesisEngine({"max_hypotheses": 5}, knowledge_graph=self.graph)
+        engine.initialize()
+        self.addCleanup(engine.cleanup)
+
+        strategy_context = {
+            **self.context,
+            "learning_strategy": {
+                "tuned_parameters": {
+                    "quality_threshold": 0.85,
+                    "confidence_threshold": 0.78,
+                }
+            },
+            "reasoning_summary": {
+                "inference_confidence": 0.92,
+                "knowledge_patterns": {
+                    "common_entities": ["黄芪", "脾气虚证", "补气"],
+                    "most_shared_efficacies": ["补气"],
+                    "entity_groups": {"herb": ["黄芪"], "syndrome": ["脾气虚证"]},
+                },
+            },
+            "knowledge_patterns": {
+                "common_entities": ["黄芪", "脾气虚证", "补气"],
+                "most_shared_efficacies": ["补气"],
+                "entity_groups": {"herb": ["黄芪"], "syndrome": ["脾气虚证"]},
+            },
+            "inference_confidence": 0.92,
+        }
+        candidates = [
+            Hypothesis(
+                hypothesis_id="low_support",
+                title="低支持假设",
+                statement="低支持假设",
+                rationale="",
+                novelty=0.93,
+                feasibility=0.9,
+                evidence_support=0.45,
+                confidence=0.0,
+                source_gap_type="custom",
+                source_entities=["黄芪", "脾气虚证"],
+                keywords=["黄芪", "脾气虚证"],
+            )
+        ]
+        for index in range(1, 6):
+            candidates.append(
+                Hypothesis(
+                    hypothesis_id=f"kept_{index}",
+                    title=f"保留假设{index}",
+                    statement=f"保留假设{index}",
+                    rationale="",
+                    novelty=0.94,
+                    feasibility=0.9,
+                    evidence_support=0.78,
+                    confidence=0.0,
+                    source_gap_type="custom",
+                    source_entities=["黄芪", "脾气虚证"],
+                    keywords=["黄芪", "脾气虚证", "补气"],
+                )
+            )
+
+        enriched = engine._enrich_hypotheses(candidates, strategy_context)
+
+        self.assertEqual(len(enriched), 4)
+        self.assertNotIn("low_support", {item.hypothesis_id for item in enriched})
+        self.assertTrue(all(item.evidence_support >= 0.78 for item in enriched))
+        self.assertTrue(all(item.status in {"active", "validated"} for item in enriched))
+
 
 # ---------------------------------------------------------------------------
 # P3.2  KG 增强假设生成测试

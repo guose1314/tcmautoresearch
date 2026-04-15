@@ -183,6 +183,24 @@ class FakeRunner:
                             "philology_notes": ["输出 1 条可复用校勘条目"],
                         }
                     },
+                    "catalog_summary": {
+                        "documents": [
+                            {
+                                "document_title": "补血汤宋本",
+                                "document_urn": "doc:console:1",
+                                "source_type": "local",
+                                "catalog_id": "console:catalog:1",
+                                "work_title": "补血汤",
+                                "fragment_title": "补血汤",
+                                "work_fragment_key": "补血汤|补血汤",
+                                "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                                "witness_key": "console:witness:1",
+                                "dynasty": "明",
+                                "author": "李时珍",
+                                "edition": "宋本",
+                            }
+                        ]
+                    },
                 },
                 "phases": [
                     {"phase": "observe", "status": "completed", "duration_sec": 0.01, "error": "", "summary": {"observation_count": 2}},
@@ -735,8 +753,12 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertEqual(payload["evidence_board"]["data_mining_methods"], ["association_rules", "clustering"])
         self.assertEqual(payload["evidence_board"]["terminology_standard_table_count"], 1)
         self.assertEqual(payload["evidence_board"]["collation_entry_count"], 1)
+        self.assertEqual(payload["evidence_board"]["catalog_document_count"], 1)
         self.assertEqual(payload["evidence_board"]["philology"]["terminology_standard_table"][0]["canonical"], "黄芪")
         self.assertEqual(payload["evidence_board"]["philology"]["collation_entries"][0]["witness_text"], "黃耆")
+        self.assertEqual(payload["evidence_board"]["catalog_summary"]["documents"][0]["review_status"], "pending")
+        self.assertEqual(payload["evidence_board"]["active_catalog_filters"], {})
+        self.assertEqual(payload["evidence_board"]["catalog_filter_options"]["work_title"][0]["value"], "补血汤")
 
         self.assertEqual(payload["knowledge_graph_board"]["source"], "research_artifact.similar_formula_graph_evidence_summary")
         self.assertEqual(payload["knowledge_graph_board"]["stats"]["node_count"], 2)
@@ -750,6 +772,29 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertEqual(payload["protocol_inputs"]["primary_outcome"], "症状评分")
         self.assertEqual(payload["protocol_inputs"]["intervention"], "桂枝汤")
         self.assertEqual(payload["protocol_inputs"]["comparison"], "常规治疗")
+
+    def test_dashboard_endpoint_accepts_catalog_filter_query_params(self):
+        create_response = self.client.post("/api/research/jobs", json={"topic": "目录筛选看板"})
+        self.assertEqual(create_response.status_code, 202)
+        job_id = create_response.json()["job_id"]
+
+        for _ in range(20):
+            status_response = self.client.get(f"/api/research/jobs/{job_id}")
+            status_payload = status_response.json()
+            if status_payload["status"] in {"completed", "partial", "failed"}:
+                break
+            time.sleep(0.01)
+
+        dashboard_response = self.client.get(
+            f"/api/research/jobs/{job_id}/dashboard?work_title=%E8%A1%A5%E8%A1%80%E6%B1%A4&witness_key=console%3Awitness%3A1"
+        )
+        self.assertEqual(dashboard_response.status_code, 200)
+        payload = dashboard_response.json()
+
+        self.assertEqual(payload["evidence_board"]["active_catalog_filters"]["work_title"], "补血汤")
+        self.assertEqual(payload["evidence_board"]["active_catalog_filters"]["witness_key"], "console:witness:1")
+        self.assertEqual(payload["evidence_board"]["catalog_document_count"], 1)
+        self.assertEqual(payload["evidence_board"]["catalog_summary"]["documents"][0]["work_title"], "补血汤")
 
     def test_list_jobs_endpoint_returns_recent_persisted_jobs(self):
         first_job = self.client.post("/api/research/jobs", json={"topic": "最近任务 A"}).json()["job_id"]

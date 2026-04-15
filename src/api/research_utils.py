@@ -10,7 +10,11 @@ from typing import Any, Dict, Iterable, Optional
 
 from fastapi.responses import FileResponse
 
-from src.research.observe_philology import resolve_observe_philology_assets
+from src.research.observe_philology import (
+    build_observe_philology_filter_contract,
+    filter_observe_philology_assets,
+    resolve_observe_philology_assets,
+)
 from src.research.phase_result import get_phase_artifact_map, get_phase_value
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -813,9 +817,18 @@ def _build_dashboard_evidence_board(
     data_mining_summary: Dict[str, Any],
     data_mining_methods: list[str],
     observe_philology: Dict[str, Any],
+    philology_filter_contract: Dict[str, Any],
 ) -> Dict[str, Any]:
     evidence_records = _as_list(evidence_protocol.get("evidence_records"))
     claims = _as_list(evidence_protocol.get("claims"))
+    catalog_summary = _as_dict(observe_philology.get("catalog_summary"))
+    catalog_metrics = _as_dict(catalog_summary.get("summary"))
+    catalog_document_count = int(
+        _safe_float(
+            observe_philology.get("catalog_document_count") or catalog_metrics.get("catalog_document_count"),
+            0.0,
+        )
+    )
     return {
         "evidence_count": len(evidence_records),
         "claim_count": len(claims),
@@ -827,7 +840,27 @@ def _build_dashboard_evidence_board(
         "philology": observe_philology,
         "terminology_standard_table_count": int(_safe_float(observe_philology.get("terminology_standard_table_count"), 0.0)),
         "collation_entry_count": int(_safe_float(observe_philology.get("collation_entry_count"), 0.0)),
-        "philology_document_count": int(_safe_float(observe_philology.get("document_count"), 0.0)),
+        "philology_document_count": max(
+            int(_safe_float(observe_philology.get("document_count"), 0.0)),
+            catalog_document_count,
+        ),
+        "catalog_summary": catalog_summary,
+        "catalog_document_count": catalog_document_count,
+        "version_lineage_count": int(
+            _safe_float(observe_philology.get("version_lineage_count") or catalog_metrics.get("version_lineage_count"), 0.0)
+        ),
+        "witness_count": int(
+            _safe_float(observe_philology.get("witness_count") or catalog_metrics.get("witness_count"), 0.0)
+        ),
+        "missing_catalog_metadata_count": int(
+            _safe_float(
+                observe_philology.get("missing_catalog_metadata_count")
+                or catalog_metrics.get("missing_core_metadata_count"),
+                0.0,
+            )
+        ),
+        "active_catalog_filters": _as_dict(philology_filter_contract.get("active_filters")),
+        "catalog_filter_options": _as_dict(philology_filter_contract.get("options")),
     }
 
 
@@ -840,7 +873,11 @@ def _build_dashboard_protocol_inputs(protocol_inputs: Dict[str, Any]) -> Dict[st
     }
 
 
-def build_research_dashboard_payload(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+def build_research_dashboard_payload(
+    snapshot: Dict[str, Any],
+    *,
+    philology_filters: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Build a visualization-friendly dashboard payload from a job snapshot."""
 
     job_id = str(snapshot.get("job_id") or "").strip()
@@ -869,7 +906,9 @@ def build_research_dashboard_payload(snapshot: Dict[str, Any]) -> Dict[str, Any]
     primary_association = _resolve_primary_association(analysis_results, research_artifact)
     data_mining_summary = _resolve_data_mining_summary(analysis_results, research_artifact)
     data_mining_methods = _resolve_dashboard_data_mining_methods(analysis_results, data_mining_summary)
-    observe_philology = _resolve_observe_philology(result)
+    observe_philology_raw = _resolve_observe_philology(result)
+    philology_filter_contract = build_observe_philology_filter_contract(observe_philology_raw, philology_filters)
+    observe_philology = filter_observe_philology_assets(observe_philology_raw, philology_filters)
     knowledge_graph_board = _build_knowledge_graph_board(result)
     phase_items = _build_dashboard_phase_items(phases)
 
@@ -910,6 +949,7 @@ def build_research_dashboard_payload(snapshot: Dict[str, Any]) -> Dict[str, Any]
             data_mining_summary,
             data_mining_methods,
             observe_philology,
+            philology_filter_contract,
         ),
         "knowledge_graph_board": knowledge_graph_board,
         "protocol_inputs": _build_dashboard_protocol_inputs(protocol_inputs),

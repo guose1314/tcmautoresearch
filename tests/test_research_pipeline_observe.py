@@ -644,7 +644,27 @@ class TestResearchPipelineObserve(unittest.TestCase):
 
         ingestion_result = {
             "processed_document_count": 1,
-            "documents": [],
+            "documents": [
+                {
+                    "urn": "doc:1",
+                    "title": "补血汤宋本",
+                    "source_type": "local",
+                    "metadata": {
+                        "version_metadata": {
+                            "catalog_id": "local:catalog:1",
+                            "work_title": "补血汤",
+                            "fragment_title": "补血汤",
+                            "work_fragment_key": "补血汤|补血汤",
+                            "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                            "witness_key": "local:doc:1",
+                            "dynasty": "明",
+                            "author": "李时珍",
+                            "edition": "宋本",
+                            "lineage_source": "explicit_metadata",
+                        }
+                    },
+                }
+            ],
             "aggregate": {
                 "philology_document_count": 1,
                 "term_mapping_count": 1,
@@ -705,7 +725,7 @@ class TestResearchPipelineObserve(unittest.TestCase):
             result = pipeline.phase_handlers.execute_observe_phase(cycle, {})
 
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(len(result["artifacts"]), 3)
+        self.assertEqual(len(result["artifacts"]), 4)
         artifact_names = {item["name"] for item in result["artifacts"]}
         self.assertEqual(
             artifact_names,
@@ -713,6 +733,7 @@ class TestResearchPipelineObserve(unittest.TestCase):
                 "observe_philology_terminology_table",
                 "observe_philology_collation_entries",
                 "observe_philology_annotation_report",
+                "observe_philology_catalog_summary",
             },
         )
         terminology_artifact = next(item for item in result["artifacts"] if item["name"] == "observe_philology_terminology_table")
@@ -721,6 +742,107 @@ class TestResearchPipelineObserve(unittest.TestCase):
         report_artifact = next(item for item in result["artifacts"] if item["name"] == "observe_philology_annotation_report")
         self.assertEqual(report_artifact["artifact_type"], "report")
         self.assertEqual(report_artifact["content"]["summary"]["processed_document_count"], 1)
+        catalog_artifact = next(item for item in result["artifacts"] if item["name"] == "observe_philology_catalog_summary")
+        self.assertEqual(catalog_artifact["artifact_type"], "dataset")
+        self.assertEqual(catalog_artifact["content"]["summary"]["catalog_document_count"], 1)
+        self.assertEqual(catalog_artifact["content"]["summary"]["version_lineage_count"], 1)
+
+    @patch("src.research.research_pipeline.OutputGenerator.cleanup")
+    @patch("src.research.research_pipeline.OutputGenerator.initialize")
+    @patch("src.research.research_pipeline.ReasoningEngine.cleanup")
+    @patch("src.research.research_pipeline.ReasoningEngine.initialize")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.cleanup")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.execute")
+    @patch("src.research.research_pipeline.SemanticGraphBuilder.initialize")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.cleanup")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.execute")
+    @patch("src.research.research_pipeline.AdvancedEntityExtractor.initialize")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.cleanup")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.execute")
+    @patch("src.research.research_pipeline.DocumentPreprocessor.initialize")
+    def test_observe_ingestion_applies_learning_strategy_thresholds_and_branches(
+        self,
+        mock_pre_init,
+        mock_pre_exec,
+        mock_pre_clean,
+        mock_ex_init,
+        mock_ex_exec,
+        mock_ex_clean,
+        mock_sem_init,
+        mock_sem_exec,
+        mock_sem_clean,
+        mock_reason_init,
+        mock_reason_clean,
+        mock_out_init,
+        mock_out_clean,
+    ):
+        mock_pre_init.return_value = True
+        mock_pre_clean.return_value = True
+        mock_pre_exec.side_effect = lambda context: {"processed_text": context["raw_text"]}
+
+        mock_ex_init.return_value = True
+        mock_ex_clean.return_value = True
+        mock_ex_exec.return_value = {
+            "entities": [
+                {"name": "黄芪", "type": "herb", "confidence": 0.91},
+                {"name": "噪声实体", "type": "other", "confidence": 0.62},
+            ],
+            "statistics": {"by_type": {"herb": 1, "other": 1}},
+            "confidence_scores": {"average_confidence": 0.765},
+        }
+
+        mock_sem_init.return_value = True
+        mock_sem_clean.return_value = True
+        mock_sem_exec.return_value = {
+            "semantic_graph": {
+                "nodes": [],
+                "edges": [
+                    {
+                        "source": "herb:黄芪",
+                        "target": "other:噪声实体",
+                        "attributes": {"relationship_type": "related_to", "confidence": 0.61},
+                    }
+                ],
+            },
+            "graph_statistics": {"nodes_count": 2, "edges_count": 1, "relationships_by_type": {"related_to": {"count": 1}}},
+        }
+
+        mock_reason_init.return_value = True
+        mock_reason_clean.return_value = True
+        mock_out_init.return_value = True
+        mock_out_clean.return_value = True
+
+        pipeline = ResearchPipeline({})
+        result = pipeline.phase_handlers.run_observe_ingestion_pipeline(
+            {
+                "sources": ["local"],
+                "stats": {"total_documents": 4},
+                "documents": [
+                    {"text": f"文档{i} 黄芪", "urn": f"doc:{i}", "title": f"doc{i}"}
+                    for i in range(1, 5)
+                ],
+            },
+            {
+                "learning_strategy": {
+                    "tuned_parameters": {
+                        "quality_threshold": 0.82,
+                        "confidence_threshold": 0.8,
+                    },
+                    "observe_run_reasoning": False,
+                    "observe_run_output_generation": False,
+                }
+            },
+        )
+
+        self.assertEqual(result["processed_document_count"], 4)
+        self.assertEqual(result["aggregate"]["total_entities"], 4)
+        self.assertEqual(result["aggregate"]["semantic_relationships"], [])
+        self.assertEqual({entity["name"] for entity in result["aggregate"]["entities"]}, {"黄芪"})
+        self.assertTrue(all(document["entity_count"] == 1 for document in result["documents"]))
+        self.assertTrue(all(document["entities"][0]["name"] == "黄芪" for document in result["documents"]))
+        self.assertTrue(all(document.get("output_generation") is None for document in result["documents"]))
+        mock_reason_init.assert_not_called()
+        mock_out_init.assert_not_called()
 
 
 if __name__ == "__main__":

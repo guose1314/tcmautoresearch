@@ -30,6 +30,10 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
+from src.research.observe_philology import (
+    build_observe_philology_filter_contract,
+    filter_observe_philology_assets,
+)
 from src.web.auth import get_current_user
 from src.web.ops.research_session_service import (
     get_research_session,
@@ -205,14 +209,23 @@ def _project_detail_url(
     collation_page: int = 1,
     drawer: bool = False,
     document_title: str = "",
+    work_title: str = "",
+    version_lineage_key: str = "",
+    witness_key: str = "",
 ) -> str:
     query = [
         f"terminology_page={max(1, terminology_page)}",
         f"collation_page={max(1, collation_page)}",
     ]
-    normalized_document_title = str(document_title or "").strip()
-    if normalized_document_title:
-        query.append(f"document_title={quote(normalized_document_title, safe='')}")
+    for key, value in (
+        ("document_title", document_title),
+        ("work_title", work_title),
+        ("version_lineage_key", version_lineage_key),
+        ("witness_key", witness_key),
+    ):
+        normalized_value = str(value or "").strip()
+        if normalized_value:
+            query.append(f"{key}={quote(normalized_value, safe='')}")
     if drawer:
         query.append("drawer=1")
     return f"/api/projects/{quote(str(cycle_id or '').strip(), safe='')}/detail?{'&'.join(query)}"
@@ -276,6 +289,9 @@ def _render_detail_pagination(
     collation_page: int,
     drawer: bool,
     document_title: str,
+    work_title: str,
+    version_lineage_key: str,
+    witness_key: str,
 ) -> str:
     if total_count <= 0:
         return ""
@@ -305,6 +321,9 @@ def _render_detail_pagination(
         collation_page=prev_collation_page,
         drawer=drawer,
         document_title=document_title,
+        work_title=work_title,
+        version_lineage_key=version_lineage_key,
+        witness_key=witness_key,
     )
     next_url = _project_detail_url(
         cycle_id,
@@ -312,6 +331,9 @@ def _render_detail_pagination(
         collation_page=next_collation_page,
         drawer=drawer,
         document_title=document_title,
+        work_title=work_title,
+        version_lineage_key=version_lineage_key,
+        witness_key=witness_key,
     )
     return f"""
     <div class="mt-3 flex items-center justify-between gap-3 text-xs text-gray-500">
@@ -324,48 +346,74 @@ def _render_detail_pagination(
     """
 
 
-def _document_label(item: Dict[str, Any], *, witness: bool = False) -> str:
-    title_key = "witness_title" if witness else "document_title"
-    urn_key = "witness_urn" if witness else "document_urn"
-    return str(item.get(title_key) or item.get(urn_key) or "").strip()
-
-
-def _item_matches_document_filter(item: Dict[str, Any], document_title: str) -> bool:
-    normalized = str(document_title or "").strip()
-    if not normalized:
-        return True
-    candidates = {
-        _document_label(item),
-        _document_label(item, witness=True),
+def _render_catalog_review_badge(status: str) -> str:
+    mapping = {
+        "pending": ("待核", "bg-amber-50 text-amber-700"),
+        "accepted": ("已核", "bg-emerald-50 text-emerald-700"),
+        "rejected": ("驳回", "bg-rose-50 text-rose-700"),
+        "needs_source": ("待补据", "bg-slate-100 text-slate-700"),
     }
-    return normalized in {candidate for candidate in candidates if candidate}
+    label, cls = mapping.get(str(status or "").strip().lower(), (str(status or "待核").strip() or "待核", "bg-amber-50 text-amber-700"))
+    return f'<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium {cls}">{_safe_html(label)}</span>'
 
 
-def _collect_document_filter_options(
-    terminology_rows: List[Dict[str, Any]],
-    collation_entries: List[Dict[str, Any]],
-) -> List[str]:
-    options: List[str] = []
-    for item in [*terminology_rows, *collation_entries]:
-        for candidate in (_document_label(item), _document_label(item, witness=True)):
-            if candidate and candidate not in options:
-                options.append(candidate)
-    return options
+def _format_active_catalog_filter_summary(filter_contract: Dict[str, Any]) -> str:
+    active_filters = filter_contract.get("active_filters") if isinstance(filter_contract.get("active_filters"), dict) else {}
+    options = filter_contract.get("options") if isinstance(filter_contract.get("options"), dict) else {}
+    option_labels = {
+        field_name: {
+            str(item.get("value") or ""): str(item.get("label") or item.get("value") or "")
+            for item in value
+            if isinstance(item, dict)
+        }
+        for field_name, value in options.items()
+        if isinstance(value, list)
+    }
+    active_items = []
+    for field_name, field_label in (
+        ("work_title", "作品"),
+        ("version_lineage_key", "版本谱系"),
+        ("witness_key", "见证本"),
+        ("document_title", "文献标题"),
+    ):
+        value = str(active_filters.get(field_name) or "").strip()
+        if not value:
+            continue
+        label = option_labels.get(field_name, {}).get(value, value)
+        active_items.append((field_label, label))
+    if not active_items:
+        return "按作品、版本谱系、见证本与文献标题同步筛选 Observe 文献学资产"
+    if len(active_items) == 1:
+        return f"当前筛选：{active_items[0][1]}"
+    return "当前筛选：" + " / ".join(f"{field_label}={label}" for field_label, label in active_items)
 
 
-def _render_document_filter_chips(
+def _render_catalog_filter_chips(
     cycle_id: str,
     *,
-    document_options: List[str],
-    selected_document_title: str,
+    filter_contract: Dict[str, Any],
     drawer: bool,
 ) -> str:
-    if not document_options:
+    options = filter_contract.get("options") if isinstance(filter_contract.get("options"), dict) else {}
+    active_filters = filter_contract.get("active_filters") if isinstance(filter_contract.get("active_filters"), dict) else {}
+    if not options:
         return ""
 
     target_id = "#session-detail-drawer-content" if drawer else "#project-detail-panel"
 
-    def _chip(label: str, *, active: bool, document_title: str) -> str:
+    def _build_chip_url(next_filters: Dict[str, str]) -> str:
+        return _project_detail_url(
+            cycle_id,
+            terminology_page=1,
+            collation_page=1,
+            drawer=drawer,
+            document_title=str(next_filters.get("document_title") or ""),
+            work_title=str(next_filters.get("work_title") or ""),
+            version_lineage_key=str(next_filters.get("version_lineage_key") or ""),
+            witness_key=str(next_filters.get("witness_key") or ""),
+        )
+
+    def _chip(label: str, *, active: bool, next_filters: Dict[str, str]) -> str:
         base_class = "inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium border transition"
         cls = (
             "bg-emerald-600 border-emerald-600 text-white"
@@ -374,30 +422,54 @@ def _render_document_filter_chips(
         )
         return (
             f'<button type="button" class="{base_class} {cls}" '
-            f'hx-get="{_safe_html(_project_detail_url(cycle_id, terminology_page=1, collation_page=1, drawer=drawer, document_title=document_title))}" '
+            f'hx-get="{_safe_html(_build_chip_url(next_filters))}" '
             f'hx-target="{target_id}" hx-swap="outerHTML">{_safe_html(label)}</button>'
         )
 
-    summary = (
-        f'<span class="text-xs text-emerald-700">当前筛选：{_safe_html(selected_document_title)}</span>'
-        if selected_document_title
-        else '<span class="text-xs text-gray-500">按文献标题切换术语表与校勘条目明细</span>'
-    )
-    chips = [_chip("全部文献", active=not selected_document_title, document_title="")]
-    chips.extend(
-        _chip(option, active=option == selected_document_title, document_title=option)
-        for option in document_options
-    )
+    sections_html = []
+    for field_name, heading in (
+        ("work_title", "作品"),
+        ("version_lineage_key", "版本谱系"),
+        ("witness_key", "见证本"),
+        ("document_title", "文献标题"),
+    ):
+        field_options = [item for item in options.get(field_name, []) if isinstance(item, dict)]
+        if not field_options:
+            continue
+        current_value = str(active_filters.get(field_name) or "").strip()
+        chips = [
+            _chip(
+                f"全部{heading}",
+                active=not current_value,
+                next_filters={**active_filters, field_name: ""},
+            )
+        ]
+        chips.extend(
+            _chip(
+                str(option.get("label") or option.get("value") or ""),
+                active=str(option.get("value") or "") == current_value,
+                next_filters={**active_filters, field_name: str(option.get("value") or "")},
+            )
+            for option in field_options
+        )
+        sections_html.append(
+            f'<div class="space-y-2"><h5 class="text-xs font-semibold uppercase tracking-wide text-gray-500">{_safe_html(heading)}</h5><div class="flex flex-wrap gap-2">{"".join(chips)}</div></div>'
+        )
+
+    if not sections_html:
+        return ""
+
+    summary = _format_active_catalog_filter_summary(filter_contract)
     return f"""
-    <div class="rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
+    <div class="rounded-2xl border border-gray-100 bg-gray-50/60 p-4 space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
-                <h4 class="text-sm font-semibold text-gray-800">按文献标题筛选</h4>
-                <p class="text-sm text-gray-400 mt-1">术语标准表与校勘条目会按同一文献标题同步过滤</p>
+                <h4 class="text-sm font-semibold text-gray-800">目录学筛选</h4>
+                <p class="text-sm text-gray-400 mt-1">作品、版本谱系、见证本与文献标题共用同一套过滤条件</p>
             </div>
-            {summary}
+            <span class="text-xs text-emerald-700">{_safe_html(summary)}</span>
         </div>
-        <div class="mt-3 flex flex-wrap gap-2">{''.join(chips)}</div>
+        {''.join(sections_html)}
     </div>
     """
 
@@ -576,6 +648,9 @@ def _render_session_detail_panel(
     collation_page: int = 1,
     drawer: bool = False,
     document_title: str = "",
+    work_title: str = "",
+    version_lineage_key: str = "",
+    witness_key: str = "",
     error_message: str = "",
 ) -> str:
     panel_id = "session-detail-drawer-content" if drawer else "project-detail-panel"
@@ -615,10 +690,52 @@ def _render_session_detail_panel(
     cycle_id = str(session.get("cycle_id") or "").strip()
     phases = _session_phases(session)
     observe = session.get("observe_philology") if isinstance(session.get("observe_philology"), dict) else {}
+    observe_filter_contract = build_observe_philology_filter_contract(
+        observe,
+        {
+            "document_title": document_title,
+            "work_title": work_title,
+            "version_lineage_key": version_lineage_key,
+            "witness_key": witness_key,
+        },
+    )
+    observe = filter_observe_philology_assets(
+        observe,
+        {
+            "document_title": document_title,
+            "work_title": work_title,
+            "version_lineage_key": version_lineage_key,
+            "witness_key": witness_key,
+        },
+    )
     annotation_report = observe.get("annotation_report") if isinstance(observe.get("annotation_report"), dict) else {}
     summary = annotation_report.get("summary") if isinstance(annotation_report.get("summary"), dict) else {}
+    catalog_summary = observe.get("catalog_summary") if isinstance(observe.get("catalog_summary"), dict) else {}
+    catalog_metrics = catalog_summary.get("summary") if isinstance(catalog_summary.get("summary"), dict) else {}
+    catalog_version_lineages = sorted(
+        [dict(item) for item in catalog_summary.get("version_lineages") or [] if isinstance(item, dict)],
+        key=lambda item: (
+            str(item.get("work_title") or ""),
+            str(item.get("fragment_title") or ""),
+            str(item.get("edition") or ""),
+            str(item.get("version_lineage_key") or ""),
+        ),
+    )
+    catalog_source_type_counts = {
+        str(key): int(value)
+        for key, value in (catalog_metrics.get("source_type_counts") or {}).items()
+        if str(key).strip()
+    }
+    catalog_review_status_counts = {
+        str(key): int(value)
+        for key, value in (catalog_metrics.get("review_status_counts") or {}).items()
+        if str(key).strip()
+    }
     notes = summary.get("philology_notes") if isinstance(summary.get("philology_notes"), list) else []
     selected_document_title = str(document_title or "").strip()
+    selected_work_title = str(work_title or "").strip()
+    selected_version_lineage_key = str(version_lineage_key or "").strip()
+    selected_witness_key = str(witness_key or "").strip()
 
     terminology_rows_all = sorted(
         [dict(item) for item in observe.get("terminology_standard_table") or [] if isinstance(item, dict)],
@@ -635,9 +752,8 @@ def _render_session_detail_panel(
             str(item.get("base_text") or ""),
         ),
     )
-    document_options = _collect_document_filter_options(terminology_rows_all, collation_entries_all)
-    terminology_rows = [item for item in terminology_rows_all if _item_matches_document_filter(item, selected_document_title)]
-    collation_entries = [item for item in collation_entries_all if _item_matches_document_filter(item, selected_document_title)]
+    terminology_rows = terminology_rows_all
+    collation_entries = collation_entries_all
 
     term_page = _paginate_items(terminology_rows, terminology_page, _PHILOLOGY_TERMINOLOGY_PAGE_SIZE)
     collation_page_data = _paginate_items(collation_entries, collation_page, _PHILOLOGY_COLLATION_PAGE_SIZE)
@@ -645,19 +761,130 @@ def _render_session_detail_panel(
     status = _render_session_status_badge(str(session.get("status") or "pending").strip().lower())
     duration = float(session.get("duration") or 0.0)
     source = str(observe.get("source") or "unavailable").strip() or "unavailable"
-    document_count = int(summary.get("processed_document_count") or observe.get("document_count") or 0)
+    catalog_document_count = int(observe.get("catalog_document_count") or catalog_metrics.get("catalog_document_count") or 0)
+    version_lineage_count = int(observe.get("version_lineage_count") or catalog_metrics.get("version_lineage_count") or len(catalog_version_lineages))
+    witness_count = int(observe.get("witness_count") or catalog_metrics.get("witness_count") or 0)
+    missing_catalog_metadata_count = int(
+        observe.get("missing_catalog_metadata_count") or catalog_metrics.get("missing_core_metadata_count") or 0
+    )
+    document_count = max(int(summary.get("processed_document_count") or observe.get("document_count") or 0), catalog_document_count)
     terminology_count = int(observe.get("terminology_standard_table_count") or len(terminology_rows))
     collation_count = int(observe.get("collation_entry_count") or len(collation_entries))
     notes_html = "".join(
         f'<span class="inline-flex items-center px-2 py-1 rounded-full bg-amber-50 text-amber-700 text-xs">{_safe_html(note)}</span>'
         for note in notes[:8]
     ) or '<span class="text-xs text-gray-400">暂无文献学说明</span>'
-    filter_chips_html = _render_document_filter_chips(
+    filter_chips_html = _render_catalog_filter_chips(
         cycle_id,
-        document_options=document_options,
-        selected_document_title=selected_document_title,
+        filter_contract=observe_filter_contract,
         drawer=drawer,
     )
+    catalog_semantic_badges_html = "".join(
+        badge
+        for badge in (
+            f'<span class="inline-flex items-center px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs">义项 {int(catalog_metrics.get("exegesis_entry_count") or 0)}</span>'
+            if int(catalog_metrics.get("exegesis_entry_count") or 0) > 0
+            else "",
+            f'<span class="inline-flex items-center px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs">时代语义 {int(catalog_metrics.get("temporal_semantic_count") or 0)}</span>'
+            if int(catalog_metrics.get("temporal_semantic_count") or 0) > 0
+            else "",
+            f'<span class="inline-flex items-center px-2 py-1 rounded-full bg-amber-50 text-amber-700 text-xs">待核 {int(catalog_metrics.get("pending_review_count") or 0)}</span>'
+            if int(catalog_metrics.get("pending_review_count") or 0) > 0
+            else "",
+        )
+        if badge
+    )
+    catalog_review_badges_html = "".join(
+        f'<span class="inline-flex items-center px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-xs">{_safe_html(review_status)} x {count}</span>'
+        for review_status, count in sorted(catalog_review_status_counts.items())
+    )
+    catalog_source_badges_html = "".join(
+        f'<span class="inline-flex items-center px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-xs">{_safe_html(source_type)} x {count}</span>'
+        for source_type, count in sorted(catalog_source_type_counts.items())
+    ) or '<span class="text-xs text-gray-400">暂无来源分布</span>'
+    catalog_lineage_cards_html = ""
+    for lineage in catalog_version_lineages[:6]:
+        lineage_witness_count = int(lineage.get("witness_count") or len(lineage.get("witnesses") or []))
+        lineage_temporal_semantics = lineage.get("temporal_semantics") if isinstance(lineage.get("temporal_semantics"), dict) else {}
+        lineage_semantic_hint = str(lineage_temporal_semantics.get("semantic_hint") or "").strip()
+        if not lineage_semantic_hint:
+            lineage_semantic_hint = " · ".join(
+                part
+                for part in (
+                    str(lineage.get("dynasty") or "").strip(),
+                    str(lineage.get("author") or "").strip(),
+                    str(lineage.get("edition") or "").strip(),
+                )
+                if part
+            ) or "目录学元数据待补充"
+        lineage_exegesis_preview = "、".join(
+            str(entry.get("canonical") or "").strip()
+            for entry in (lineage.get("exegesis_entries") or [])[:3]
+            if isinstance(entry, dict) and str(entry.get("canonical") or "").strip()
+        )
+        lineage_meta = " · ".join(
+            part
+            for part in (
+                str(lineage.get("dynasty") or "").strip(),
+                str(lineage.get("author") or "").strip(),
+                str(lineage.get("edition") or "").strip(),
+            )
+            if part
+        ) or "目录学元数据待补充"
+        catalog_lineage_cards_html += f"""
+        <article class="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-2">
+            <div class="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                    <h5 class="text-sm font-semibold text-gray-800">{_safe_html(lineage.get("work_title") or '未标注作品')}</h5>
+                    <p class="text-xs text-gray-500 mt-1">{_safe_html(lineage.get("fragment_title") or '未标注章节')}</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="inline-flex items-center px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs">见证 {lineage_witness_count}</span>
+                    {_render_catalog_review_badge(str(lineage.get("review_status") or "pending"))}
+                </div>
+            </div>
+            <p class="text-xs text-gray-500">{_safe_html(lineage_meta)}</p>
+            <p class="text-xs text-gray-500">时代语义：{_safe_html(lineage_semantic_hint)}</p>
+            <p class="text-xs text-gray-500">训诂义项：{_safe_html(lineage_exegesis_preview or '待补充')}</p>
+            <p class="text-[11px] text-gray-400 break-all">{_safe_html(lineage.get("version_lineage_key") or lineage.get("work_fragment_key") or '未生成谱系键')}</p>
+        </article>
+        """
+    if not catalog_lineage_cards_html:
+        catalog_lineage_cards_html = _empty_state("📚", "暂无目录学谱系", "当前会话尚未汇总可复用的版本谱系。")
+    catalog_section_html = ""
+    if catalog_summary or catalog_document_count or version_lineage_count or witness_count:
+        catalog_section_html = f"""
+        <section class="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h4 class="text-base font-semibold text-gray-800">目录学基线</h4>
+                    <p class="text-sm text-gray-400 mt-1">汇总作品-章节-版本谱系-见证，作为后续训诂、辑佚、考据的公共底座</p>
+                </div>
+                <span class="text-xs text-gray-500">缺失核心字段 {missing_catalog_metadata_count}</span>
+            </div>
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 text-center">
+                <div class="rounded-xl bg-white border border-slate-100 p-3">
+                    <p class="text-[11px] uppercase tracking-wide text-gray-400">目录文献</p>
+                    <p class="text-lg font-semibold text-gray-800 mt-1">{catalog_document_count}</p>
+                </div>
+                <div class="rounded-xl bg-white border border-slate-100 p-3">
+                    <p class="text-[11px] uppercase tracking-wide text-gray-400">版本谱系</p>
+                    <p class="text-lg font-semibold text-gray-800 mt-1">{version_lineage_count}</p>
+                </div>
+                <div class="rounded-xl bg-white border border-slate-100 p-3">
+                    <p class="text-[11px] uppercase tracking-wide text-gray-400">版本见证</p>
+                    <p class="text-lg font-semibold text-gray-800 mt-1">{witness_count}</p>
+                </div>
+                <div class="rounded-xl bg-white border border-slate-100 p-3">
+                    <p class="text-[11px] uppercase tracking-wide text-gray-400">作品数</p>
+                    <p class="text-lg font-semibold text-gray-800 mt-1">{int(catalog_metrics.get('work_count') or 0)}</p>
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-2">{catalog_source_badges_html}</div>
+            <div class="flex flex-wrap gap-2">{catalog_semantic_badges_html}{catalog_review_badges_html}</div>
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">{catalog_lineage_cards_html}</div>
+        </section>
+        """
 
     terminology_rows_html = ""
     status_labels = {"standardized": "已规范化", "configured": "仅配置", "recognized": "已识别"}
@@ -790,6 +1017,8 @@ def _render_session_detail_panel(
             <div class="mt-3 flex flex-wrap gap-2">{notes_html}</div>
         </div>
 
+        {catalog_section_html}
+
         {filter_chips_html}
 
         <section class="rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
@@ -827,6 +1056,9 @@ def _render_session_detail_panel(
                 collation_page=collation_page_data["page"],
                 drawer=drawer,
                 document_title=selected_document_title,
+                work_title=selected_work_title,
+                version_lineage_key=selected_version_lineage_key,
+                witness_key=selected_witness_key,
             )}
         </section>
 
@@ -849,6 +1081,9 @@ def _render_session_detail_panel(
                 collation_page=collation_page_data["page"],
                 drawer=drawer,
                 document_title=selected_document_title,
+                work_title=selected_work_title,
+                version_lineage_key=selected_version_lineage_key,
+                witness_key=selected_witness_key,
             )}
         </section>
     </div>
@@ -1445,6 +1680,9 @@ async def project_detail_panel(
     terminology_page: int = 1,
     collation_page: int = 1,
     document_title: str = "",
+    work_title: str = "",
+    version_lineage_key: str = "",
+    witness_key: str = "",
     drawer: int = 0,
     user: Dict[str, Any] = Depends(get_current_user),
 ) -> HTMLResponse:
@@ -1459,6 +1697,9 @@ async def project_detail_panel(
                 collation_page=collation_page,
                 drawer=bool(drawer),
                 document_title=document_title,
+                work_title=work_title,
+                version_lineage_key=version_lineage_key,
+                witness_key=witness_key,
                 error_message=f"加载研究任务详情失败: {exc}",
             )
         )
@@ -1470,6 +1711,9 @@ async def project_detail_panel(
             collation_page=collation_page,
             drawer=bool(drawer),
             document_title=document_title,
+            work_title=work_title,
+            version_lineage_key=version_lineage_key,
+            witness_key=witness_key,
             error_message=f"未找到研究任务: {cycle_id}",
         )
     )

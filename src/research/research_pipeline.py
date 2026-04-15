@@ -97,6 +97,7 @@ CitationManager = _try_import("src.generation.citation_manager", "CitationManage
 PaperWriter = _try_import("src.generation.paper_writer", "PaperWriter")
 OutputGenerator = _try_import("src.generation.output_formatter", "OutputGenerator")
 ReportGenerator = _try_import("src.generation.report_generator", "ReportGenerator")
+SelfLearningEngine = _try_import("src.learning.self_learning_engine", "SelfLearningEngine")
 
 # 分析模块 — 延迟导入，支持依赖注入
 PhilologyService = _try_import("src.analysis.philology_service", "PhilologyService")
@@ -130,6 +131,7 @@ class ResearchPipeline:
     PaperWriter = PaperWriter
     OutputGenerator = OutputGenerator
     ReportGenerator = ReportGenerator
+    SelfLearningEngine = SelfLearningEngine
 
     _MODULE_KEYS = {
         "literature_retriever": "LiteratureRetriever",
@@ -156,6 +158,7 @@ class ResearchPipeline:
         graph_builder: Optional[Any] = None,
         reasoning_engine: Optional[Any] = None,
         llm_engine: Optional[Any] = None,
+        self_learning_engine: Optional[Any] = None,
     ):
         self.config = config or {}
         self.event_bus = EventBus()
@@ -177,6 +180,12 @@ class ResearchPipeline:
             self._injected["llm_engine"] = llm_engine
             # 同时写入 config 供 hypothesis_engine 等组件使用
             self.config.setdefault("llm_engine", llm_engine)
+        if self_learning_engine is not None:
+            self.config["self_learning_engine"] = self_learning_engine
+
+        self.self_learning_engine = self._bootstrap_self_learning_engine()
+        self._learning_strategy: Dict[str, Any] = {}
+        self.refresh_learning_runtime_feedback()
 
         self._register_default_module_providers()
 
@@ -191,10 +200,23 @@ class ResearchPipeline:
 
     def _bootstrap_infrastructure(self) -> None:
         """基础设施初始化：线程池、治理配置、会话管理、审计绑定。"""
+        learned_runtime_parameters = self._resolve_learned_runtime_parameters()
+        learned_max_workers = learned_runtime_parameters.get("max_concurrent_tasks")
+        configured_max_workers = self.config.get("max_workers")
+        max_workers = configured_max_workers
+        if max_workers is None and learned_max_workers is not None:
+            try:
+                max_workers = max(1, int(round(float(learned_max_workers))))
+            except (TypeError, ValueError):
+                max_workers = None
+
         # 使用全局共享线程池，与 BaseModule 保持一致
-        self.executor = get_global_executor(max_workers=4)
+        self.executor = get_global_executor(max_workers=max_workers or 4)
         self.logger = logging.getLogger(__name__)
         self._failed_operations: List[Dict[str, Any]] = []
+        minimum_stable_completion_rate = self.config.get("minimum_stable_completion_rate")
+        if minimum_stable_completion_rate is None:
+            minimum_stable_completion_rate = learned_runtime_parameters.get("quality_threshold", 0.8)
         self._metadata: Dict[str, Any] = {
             "phase_history": [],
             "phase_timings": {},
@@ -209,9 +231,7 @@ class ResearchPipeline:
                 "persist_failed_operations",
                 self.config.get("persist_failed_cycles", True),
             ),
-            "minimum_stable_completion_rate": float(
-                self.config.get("minimum_stable_completion_rate", 0.8)
-            ),
+            "minimum_stable_completion_rate": float(minimum_stable_completion_rate),
             "export_contract_version": self.config.get("export_contract_version", "d44.v1"),
         }
 
@@ -266,6 +286,82 @@ class ResearchPipeline:
                 return cls(cfg)
 
             self.module_factory.register(key, _provider)
+
+    def _bootstrap_self_learning_engine(self) -> Any:
+        learning_engine = self.config.get("self_learning_engine")
+        if learning_engine is None:
+            learning_engine = self._build_default_self_learning_engine()
+            if learning_engine is not None:
+                self.config["self_learning_engine"] = learning_engine
+
+        if learning_engine is None:
+            return None
+
+        initialize = getattr(learning_engine, "initialize", None)
+        if callable(initialize) and not getattr(learning_engine, "initialized", False):
+            try:
+                initialize({})
+            except Exception as exc:
+                logger.warning("SelfLearningEngine 默认初始化失败: %s", exc)
+        return learning_engine
+
+    def _build_default_self_learning_engine(self) -> Any:
+        learning_config = self.config.get("self_learning")
+        if not isinstance(learning_config, dict):
+            return None
+        if not bool(learning_config.get("enabled", False)):
+            return None
+        if SelfLearningEngine is None:
+            logger.warning("SelfLearningEngine 不可用，跳过默认学习闭环接线")
+            return None
+        return SelfLearningEngine(dict(learning_config))
+
+    def _resolve_learned_runtime_parameters(self) -> Dict[str, Any]:
+        learned_runtime_parameters = self.config.get("learned_runtime_parameters")
+        if isinstance(learned_runtime_parameters, dict):
+            return dict(learned_runtime_parameters)
+        return {}
+
+    def refresh_learning_runtime_feedback(self) -> Dict[str, Any]:
+        learning_engine = self.config.get("self_learning_engine")
+        strategy: Dict[str, Any] = {}
+        if learning_engine is not None and hasattr(learning_engine, "get_learning_strategy"):
+            try:
+                raw_strategy = learning_engine.get_learning_strategy()
+                if isinstance(raw_strategy, dict):
+                    strategy = dict(raw_strategy)
+            except Exception as exc:
+                logger.warning("刷新学习策略快照失败: %s", exc)
+
+        self._learning_strategy = strategy
+        if strategy:
+            self.config["learning_strategy"] = dict(strategy)
+            tuned_parameters = strategy.get("tuned_parameters")
+            if isinstance(tuned_parameters, dict) and tuned_parameters:
+                self.config["learned_runtime_parameters"] = dict(tuned_parameters)
+                for key, value in tuned_parameters.items():
+                    self.config.setdefault(key, value)
+
+        if learning_engine is not None and hasattr(learning_engine, "build_previous_iteration_feedback"):
+            try:
+                previous_feedback = learning_engine.build_previous_iteration_feedback()
+            except Exception as exc:
+                logger.warning("构建上一轮学习反馈失败: %s", exc)
+            else:
+                if isinstance(previous_feedback, dict) and previous_feedback:
+                    self.config["previous_iteration_feedback"] = dict(previous_feedback)
+
+        return dict(self._learning_strategy)
+
+    def get_learning_strategy(self) -> Dict[str, Any]:
+        return self.refresh_learning_runtime_feedback()
+
+    def get_previous_iteration_feedback(self) -> Dict[str, Any]:
+        self.refresh_learning_runtime_feedback()
+        previous_feedback = self.config.get("previous_iteration_feedback")
+        if isinstance(previous_feedback, dict):
+            return dict(previous_feedback)
+        return {}
 
     @staticmethod
     def _is_unavailable_default_module_class(candidate: Any) -> bool:
@@ -589,6 +685,8 @@ class ResearchPipeline:
 
     def cleanup(self) -> bool:
         try:
+            if self.self_learning_engine is not None and hasattr(self.self_learning_engine, "cleanup"):
+                self.self_learning_engine.cleanup()
             self.hypothesis_engine.cleanup()
             self.audit_history.detach_from_event_bus()
             self.research_cycles.clear()

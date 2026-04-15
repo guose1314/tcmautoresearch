@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
+from src.research.learning_strategy import resolve_learning_strategy
 from src.research.phase_result import build_phase_result, get_phase_value
 from src.storage.graph_interface import IKnowledgeGraph
 from src.storage.neo4j_driver import create_knowledge_graph
@@ -71,6 +72,7 @@ class HypothesisPhaseMixin:
             "hypotheses",
             [],
         )
+        learning_strategy = resolve_learning_strategy(context, self.pipeline.config)
 
         observations = get_phase_value(observe_result, "observations", [])
         findings = get_phase_value(observe_result, "findings", [])
@@ -107,11 +109,25 @@ class HypothesisPhaseMixin:
             "knowledge_patterns": (reasoning_summary.get("knowledge_patterns") or {}),
             "inference_confidence": float(reasoning_summary.get("inference_confidence") or 0.0),
             "existing_hypotheses": existing_hypotheses,
-            "use_llm_generation": context.get("use_llm_generation", False),
+            "use_llm_generation": self._resolve_hypothesis_use_llm_generation(context, learning_strategy),
             "llm_service": context.get("llm_service"),
             "knowledge_graph": knowledge_graph,
             "knowledge_gap": knowledge_gap,
+            "learning_strategy": learning_strategy,
         }
+
+    def _resolve_hypothesis_use_llm_generation(
+        self,
+        context: Dict[str, Any],
+        learning_strategy: Dict[str, Any],
+    ) -> bool:
+        if "use_llm_generation" in context:
+            return bool(context.get("use_llm_generation"))
+        if "hypothesis_use_llm_generation" in learning_strategy:
+            return bool(learning_strategy.get("hypothesis_use_llm_generation"))
+        if "use_llm_generation" in learning_strategy:
+            return bool(learning_strategy.get("use_llm_generation"))
+        return False
 
     def _extract_hypothesis_reasoning_summary(
         self,

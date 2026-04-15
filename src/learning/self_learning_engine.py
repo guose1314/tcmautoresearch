@@ -76,6 +76,7 @@ class SelfLearningEngine(BaseModule):
         self._pattern_recognizer = None
         self._adaptive_tuner = None
         self._dimension_trends: Dict[str, List[float]] = {}
+        self._persisted_tuned_parameters: Dict[str, float] = {}
 
     def _do_initialize(self) -> bool:
         try:
@@ -104,8 +105,31 @@ class SelfLearningEngine(BaseModule):
             self._adaptive_tuner = AdaptiveTuner(
                 performance_target=self.config.get("performance_target", 0.80)
             )
+            self._restore_tuned_parameters()
         except Exception:
             self.logger.warning("AdaptiveTuner 初始化失败，跳过自适应调参")
+
+    def _restore_tuned_parameters(self) -> None:
+        if not self._persisted_tuned_parameters:
+            return
+
+        if self._adaptive_tuner is not None:
+            for name, value in self._persisted_tuned_parameters.items():
+                try:
+                    self._adaptive_tuner.set_parameter(name, float(value))
+                except Exception as exc:
+                    self.logger.warning("恢复调参快照失败 %s=%s: %s", name, value, exc)
+
+        self._apply_threshold_overrides(self._persisted_tuned_parameters)
+
+    def _apply_threshold_overrides(self, tuned_parameters: Dict[str, Any]) -> None:
+        learning_threshold = tuned_parameters.get("learning_threshold")
+        if learning_threshold is not None:
+            self.learning_threshold = float(learning_threshold)
+
+        quality_threshold = tuned_parameters.get("quality_threshold")
+        if quality_threshold is not None:
+            self.min_performance_for_improvement = float(quality_threshold)
 
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         self._record_learning_data(context)
@@ -580,10 +604,95 @@ class SelfLearningEngine(BaseModule):
             self.logger.warning("反思阶段自适应调参失败: %s", exc)
             return {}
 
-        return dict(self._adaptive_tuner.current_values())
+        tuned_parameters = dict(self._adaptive_tuner.current_values())
+        self._persisted_tuned_parameters = dict(tuned_parameters)
+        self._apply_threshold_overrides(tuned_parameters)
+        return tuned_parameters
+
+    def get_tuned_parameters(self) -> Dict[str, float]:
+        if self._adaptive_tuner is not None:
+            try:
+                tuned_parameters = dict(self._adaptive_tuner.current_values())
+            except Exception as exc:
+                self.logger.warning("读取 AdaptiveTuner 当前参数失败: %s", exc)
+            else:
+                self._persisted_tuned_parameters = dict(tuned_parameters)
+                return tuned_parameters
+        return dict(self._persisted_tuned_parameters)
+
+    def has_learning_state(self) -> bool:
+        return bool(
+            self.learning_records
+            or self.model_improvement_log
+            or self._persisted_tuned_parameters
+            or self._ewma_score is not None
+        )
+
+    def get_learning_strategy(self) -> Dict[str, Any]:
+        if not self.has_learning_state():
+            return {}
+
+        cycle_logs = [
+            entry for entry in self.model_improvement_log
+            if entry.get("type") == "cycle_reflection"
+        ]
+        last_cycle = cycle_logs[-1] if cycle_logs else {}
+        tuned_parameters = self.get_tuned_parameters()
+        strategy: Dict[str, Any] = {
+            "strategy_source": "self_learning_engine",
+            "strategy_version": "self_learning.v1",
+            "learning_threshold": round(float(self.learning_threshold), 6),
+            "min_performance_for_improvement": round(
+                float(self.min_performance_for_improvement),
+                6,
+            ),
+            "ewma_performance": round(float(self._ewma_score), 4)
+            if self._ewma_score is not None
+            else None,
+            "cycle_reflection_count": len(cycle_logs),
+            "last_updated_at": last_cycle.get("timestamp")
+            or (self.model_improvement_log[-1].get("timestamp") if self.model_improvement_log else None),
+            "tuned_parameters": tuned_parameters,
+        }
+        if last_cycle:
+            strategy["last_cycle_score"] = float(last_cycle.get("overall_score", 0.0))
+            strategy["recorded_phases"] = list(last_cycle.get("recorded_phases") or [])
+            strategy["weak_phase_count"] = int(last_cycle.get("weak_phase_count", 0))
+        return strategy
+
+    def build_previous_iteration_feedback(self) -> Dict[str, Any]:
+        strategy = self.get_learning_strategy()
+        if not strategy:
+            return {}
+
+        last_cycle_score = strategy.get("last_cycle_score")
+        feedback: Dict[str, Any] = {
+            "status": "completed",
+            "iteration_number": int(strategy.get("cycle_reflection_count", 0)),
+            "learning_summary": {
+                "recorded_phases": list(strategy.get("recorded_phases") or []),
+                "weak_phase_count": int(strategy.get("weak_phase_count", 0)),
+                "cycle_trend": self._compute_cycle_trend(float(last_cycle_score or 0.0)),
+                "tuned_parameters": dict(strategy.get("tuned_parameters") or {}),
+            },
+        }
+        if last_cycle_score is not None:
+            feedback["cycle_quality_score"] = float(last_cycle_score)
+            feedback["quality_assessment"] = {
+                "overall_cycle_score": float(last_cycle_score),
+            }
+        return feedback
 
     def _save_learning_data(self) -> None:
         try:
+            tuned_parameters = dict(self._persisted_tuned_parameters)
+            if self.has_learning_state() and self._adaptive_tuner is not None:
+                try:
+                    tuned_parameters = dict(self._adaptive_tuner.current_values())
+                except Exception as exc:
+                    self.logger.warning("保存学习数据时读取调参快照失败: %s", exc)
+                else:
+                    self._persisted_tuned_parameters = dict(tuned_parameters)
             with open(self.config.get("learning_data_file", "learning_data.pkl"), "wb") as f:
                 pickle.dump(
                     {
@@ -592,6 +701,7 @@ class SelfLearningEngine(BaseModule):
                         "model_improvement_log": self.model_improvement_log,
                         "ewma_score": self._ewma_score,
                         "dimension_trends": dict(self._dimension_trends),
+                        "tuned_parameters": tuned_parameters,
                     },
                     f,
                 )
@@ -610,6 +720,8 @@ class SelfLearningEngine(BaseModule):
             self.model_improvement_log = list(data.get("model_improvement_log", []))
             self._ewma_score = data.get("ewma_score")
             self._dimension_trends = data.get("dimension_trends", {})
+            self._persisted_tuned_parameters = dict(data.get("tuned_parameters", {}))
+            self._apply_threshold_overrides(self._persisted_tuned_parameters)
             self.logger.info("加载了 %d 条学习记录", len(self.learning_records))
         except FileNotFoundError:
             self.logger.info("未找到学习数据文件，将创建新的学习记录")

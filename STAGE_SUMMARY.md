@@ -2,6 +2,96 @@
 
 <!-- markdownlint-configure-file {"MD022": false, "MD024": false, "MD032": false, "MD060": false} -->
 
+## 阶段性收口（2026-04-16）
+
+同步说明（2026-04-16）：
+
+- 本节取代 2026-04-14 条目，成为当前总续接入口；如果后续只够读一节，优先读本节。
+- 本轮推进已经把 2026-04-14 的 shared runtime / Observe 文献学主线，继续推进到“默认学习闭环首轮接线 + 多阶段策略消费 + 目录学底座进入 dashboard/API 查询契约”。
+- 涉及 PostgreSQL / Neo4j、回填工具、结构化存储健康态的现态判读，仍统一沿用 README 的结构化存储状态词汇表：双写完成、仅 PG 模式、待回填、schema drift 待治理。
+- 当前文献学语义里新增的训诂义项、时代语义和 review 状态属于“可展示、可筛选、待人工校核”的首轮落地，不应被误读为已具备权威词典级释义库。
+
+### 本轮收口目标
+
+- 把 reflect -> 下一轮 runtime context 的默认学习闭环真正打通，不再停留在“可以注入学习器，但默认运行不生效”的状态。
+- 让 `learning_strategy` 从 pipeline config / 反思快照进入 Observe、Hypothesis、Analyze、Experiment、ExperimentExecution、Publish 的真实阈值和行为分支。
+- 先把目录学这一块做成文献学公共底座，并贯通 Observe artifact、repository snapshot / backfill、dashboard JSON 和 HTML 详情面板。
+- 把作品、版本谱系、见证本筛选真正接入 dashboard/API 查询参数，并与旧的文献标题筛选收敛成同一套共享契约。
+- 在现有 `catalog_summary` 键空间上补训诂义项、时代语义和人工待核状态，让后续训诂、辑佚、考据不必重新发明摘要结构。
+
+### 当前已落地成果
+
+#### 1. 默认学习闭环已完成首轮主链接线
+
+- `src/research/research_pipeline.py` 现在会按 `self_learning.enabled` 默认装配并初始化 `SelfLearningEngine`，并在 pipeline 启动与 reflect 后刷新学习策略快照；默认运行不再依赖调用方手工注入学习器。
+- `src/learning/self_learning_engine.py` 已支持持久化 / 恢复 `tuned_parameters`，并新增 `get_learning_strategy()`、`build_previous_iteration_feedback()`、`has_learning_state()` 等接口，能把调参结果和上一轮反馈显式暴露给 runtime。
+- `src/orchestration/research_runtime_service.py` 会自动把 `learning_strategy` 与 `previous_iteration_feedback` 注入每个 phase context；`src/research/phases/reflect_phase.py` 在反思完成后会刷新 pipeline 内部的学习运行时反馈。
+- `src/research/learning_strategy.py` 已新增统一解析 helper，避免每个 phase 各自手工拆 `learning_strategy` / `tuned_parameters` / `previous_iteration_feedback`。
+
+#### 2. 主研究链多阶段已开始消费真实学习策略
+
+- Observe 现在会按学习策略调节 literature retrieval 规模、ingestion 最大文本数、实体置信度过滤、reasoning / output generation 开关，并把 `learning_strategy_applied` 和实际阈值写入 metadata。
+- Hypothesis 现在会按学习策略调整候选上限、score weights、最小证据支持、最小置信度和 validated / active 阈值，也支持按策略关闭 LLM 生成。
+- Analyze 现在会按学习策略调整显著性阈值、最小样本量、低置信度关系过滤，以及 reasoning / evidence grading 开关。
+- Experiment 现在会按学习策略调节 protocol LLM 开关、sample size、duration、methodology；ExperimentExecution 会按学习策略控制 document fallback import、relationship confidence 过滤和 records / relationships / sampling_events 限流。
+- Publish 现在会按学习策略控制 paper / report / structured output / evidence grade 开关，以及 citation fallback 和本地 citation 记录上限。
+
+#### 3. 目录学基线已接入 Observe 文献学主线
+
+- `src/research/observe_philology.py` 已新增 `observe_philology_catalog_summary` artifact，并把 `catalog_summary` 统一定义为 `summary + documents + version_lineages` 三段结构。
+- Observe 文献学资产现在不仅输出术语标准表、校勘条目和 annotation report，也会从文档 `version_metadata` 中提取 `catalog_id`、`work_title`、`fragment_title`、`work_fragment_key`、`version_lineage_key`、`witness_key`、`dynasty`、`author`、`edition` 等目录学字段，形成可复用的目录学事实层。
+- `src/research/observe_philology.py` 已支持从 artifacts、aggregate、observe documents 三个来源归并目录学数据，并在 normalization 过程中统一 enrich terminology / collation / document report 的目录学元数据。
+- `tests/test_research_pipeline_observe.py` 与 `tests/test_research_session_repo.py` 已补 catalog_summary artifact、snapshot 回填与 repo writeback 覆盖，确保目录学基线不是只存在于单点 DTO。
+
+#### 4. Dashboard / API 现已共享目录学过滤契约
+
+- `src/api/routes/research.py` 的 `/api/research/jobs/{job_id}/dashboard` 现在接受 `document_title`、`work_title`、`version_lineage_key`、`witness_key` 四个查询参数；本轮改动前存在用户或格式化器更新，当前文件已按现态重新核对，无需回退。
+- `src/api/research_utils.py` 现在在 dashboard payload 中同时输出 `active_catalog_filters` 与 `catalog_filter_options`，并在 payload 构建时通过共享 helper 过滤 Observe 文献学资产。
+- `src/web/routes/dashboard.py` 已把详情面板、分页和 HTMX URL 统一到相同的 catalog filter contract；HTML 详情页不再只支持 `document_title`，而是支持作品、版本谱系、见证本、文献标题四类同步筛选。
+- 这意味着 JSON dashboard 与 HTML detail panel 现在共享一份过滤语义，后续不能再把筛选逻辑写回路由局部 helper。
+
+#### 5. `catalog_summary` 已补首轮训诂 / 时代语义 / review 元数据
+
+- `src/research/observe_philology.py` 现已在 `catalog_summary` 下补入 `temporal_semantics`、`exegesis_entries`、`review_status`、`needs_manual_review`、`review_reasons` 等字段，并按 document / lineage / witness 三层归并。
+- summary 层现已补齐 `exegesis_entry_count`、`temporal_semantic_count`、`dynasty_counts`、`review_status_counts`、`pending_review_count`、`needs_manual_review_count` 等指标，方便 dashboard 与 API 直接消费。
+- 当前训诂义项与时代语义仍以术语标准表、dynasty / author / edition 元数据和校勘上下文的 fallback 推导为主；因此默认 review 状态偏向 `pending` / `needs_manual_review`，避免把机器归纳结果直接包装成确定事实。
+- `src/web/routes/dashboard.py` 已增加目录学基线卡片、review badge、时代语义提示和训诂义项预览，dashboard 现在能把 catalog_summary 当作可读主视图，而不是埋在 artifact JSON 内部。
+
+#### 6. 审计文档与部署示例口径已同步到当前现态
+
+- `ARCHITECTURE_TCM_RESEARCH_METHOD_AUDIT_2026_04_12.md` 已同步更新默认学习闭环、主研究链策略消费和文献学推进现态，不再把 reflect 继续描述成“默认未学习”，也不再把文献学简单描述成“尚无入口”。
+- `deploy/k8s/tcmautoresearch-deployment.example.yaml` 与 `deploy/k8s/tcmautoresearch-migrate-job.example.yaml` 已补结构化存储状态口径注释，明确 readiness / Job 成功不自动等同于“双写完成”。
+- 这些文档同步的作用不是重复架构设计，而是防止部署验收和架构审计继续使用旧口径误判当前状态。
+
+### 关键验证记录
+
+- 2026-04-16 已定向复跑默认学习闭环与阶段级策略消费相关测试：`tests/unit/test_default_self_learning_loop.py`、`tests/unit/test_research_runtime_service.py`、`tests/test_hypothesis_engine.py`、`tests/unit/test_analyze_phase.py`、`tests/test_research_pipeline_experiment.py`、`tests/unit/test_experiment_execution_phase.py`、`tests/unit/test_publish_phase.py`，共 172 passed。
+- 2026-04-16 已定向复跑目录学基线、repo snapshot / backfill、dashboard payload 与 HTML / API 筛选相关测试：`tests/test_research_pipeline_observe.py`、`tests/test_research_session_repo.py`、`tests/test_research_utils.py`、`tests/unit/test_dashboard_copy.py`、`tests/test_web_console_api.py`，共 240 passed。
+- 默认学习闭环与 runtime 注入相关回归已补到 `tests/unit/test_default_self_learning_loop.py` 与 `tests/unit/test_research_runtime_service.py`。
+- 多阶段策略消费相关覆盖已补到 `tests/test_hypothesis_engine.py`、`tests/unit/test_analyze_phase.py`、`tests/test_research_pipeline_experiment.py`、`tests/unit/test_experiment_execution_phase.py`、`tests/unit/test_publish_phase.py`。
+- 目录学基线、repo snapshot / backfill、dashboard payload 和 HTML / API 筛选覆盖已补到 `tests/test_research_pipeline_observe.py`、`tests/test_research_session_repo.py`、`tests/test_research_utils.py`、`tests/unit/test_dashboard_copy.py`、`tests/test_web_console_api.py`。
+- 若未来从任意日期继续接手，优先复跑这批测试，而不是只看 UI 表面效果。
+
+### 当前续接锚点
+
+- 默认学习闭环这条线，当前瓶颈已经从“是否默认启用”转为“策略可观测性、跨阶段一致性、反馈资产治理是否继续收口”。
+- 文献学这条线，`src/research/observe_philology.py` 现已成为目录学摘要、筛选契约、语义 enrich 和 review 元数据的共享入口；后续不要再在 route 层各自拼一份过滤逻辑。
+- `catalog_summary` 当前已经可以承载目录学、训诂义项、时代语义和 review 状态，但 review 仍是只读展示语义；下一步最自然的落点，是把 review decision 写回 repository snapshot 或显式 review artifact。
+- 训诂义项与时代语义当前仍是 fallback / machine-derived 结果，后续若继续深化，应优先补权威词条源与人工审核 writeback，而不是直接提高展示复杂度。
+
+### 任意日期继续接手建议
+
+1. 先读本节，再回看 2026-04-14 条目和 README 的结构化存储状态词汇表，先把当前 runtime / learning / philology 的三条主线口径锁住。
+2. 如果要接默认学习闭环，优先从 `src/research/research_pipeline.py`、`src/learning/self_learning_engine.py`、`src/orchestration/research_runtime_service.py`、`src/research/learning_strategy.py` 建立上下文。
+3. 如果要接文献学和目录学，优先从 `src/research/observe_philology.py`、`src/research/phases/observe_phase.py`、`src/api/research_utils.py`、`src/web/routes/dashboard.py` 建立上下文。
+4. 如果要继续 dashboard/API 这条线，优先守住“共享 filter contract + catalog_summary 单一键空间”两条约束，不要再把筛选和摘要拆成两份并行 DTO。
+5. 如果要继续做 review workflow，建议先把最小 writeback 路径补到 repository snapshot / review artifact，再谈更复杂的工作台交互。
+
+### 提交边界说明
+
+- 本次提交应覆盖默认学习闭环首轮接线、主研究链阶段级策略消费、目录学基线 artifact / snapshot / dashboard / API 连通、catalog_summary 语义 enrich / review 元数据、以及对应架构审计与部署注释同步。
+- 这批改动已经超出“局部修补”范围，应视为一组完整阶段推进结果统一提交，而不是拆成零散 feature fix。
+
 ## 阶段性收口（2026-04-14）
 
 同步说明（2026-04-14）：
@@ -60,6 +150,13 @@
 - `STORAGE_ARCHITECTURE.md`、`STORAGE_DELIVERY.md`、`STORAGE_PLAN_SUMMARY.md`、`STORAGE_FINAL_REPORT.md`、`STORAGE_TEST_SUMMARY.md`、`STORAGE_PERFORMANCE_REPORT.md`、`STORAGE_QUERIES.md`、`STORAGE_INTEGRATION.md`、`STORAGE_DEPLOYMENT.md`、`DOCKER_DEPLOYMENT.md` 均已同步到同一状态口径。
 - 更早文档也已补同步说明：`ARCHITECTURE_AUDIT_2026_04_06.md`、`ARCHITECTURE_REDESIGN_2026_04_08.md`、`docs/architecture/architecture-design.md`、`deploy/helm/tcmautoresearch/README.md`、以及本文件 `STAGE_SUMMARY.md` 都已注明历史基线与当前现态的边界。
 - `STAGE_SUMMARY.md` 当前继续采用文件级 `markdownlint-configure-file` 局部关闭重复标题结构规则，这是对“按日期聚合 checkpoint”文档更合适的治理方式，不再尝试为消除告警而重写历史结构。
+
+#### 7. 默认学习闭环已完成首轮接线
+
+- `src/research/research_pipeline.py` 现在会按 `self_learning.enabled` 默认装配并初始化 `SelfLearningEngine`，不再要求调用方手工注入 `self_learning_engine` 才能让 reflect 把质量评估喂给学习模块。
+- `src/learning/self_learning_engine.py` 已开始持久化 / 恢复 `tuned_parameters`，`src/orchestration/research_runtime_service.py` 会把 `learning_strategy` 与 `previous_iteration_feedback` 自动回写到下一轮 phase context，默认学习闭环已经从“只总结”推进到“默认下一轮可带策略”。
+- 对应回归覆盖已补到 `tests/unit/test_default_self_learning_loop.py` 与 `tests/unit/test_research_runtime_service.py`；后续若继续推进，这条线的重点不再是“是否默认启用”，而是各阶段对 `learning_strategy` 的细粒度消费深度。
+- 截至本阶段，`src/research/phases/observe_phase.py`、`src/research/hypothesis_engine.py`、`src/research/phases/analyze_phase.py`、`src/research/phases/experiment_phase.py`、`src/research/phases/experiment_execution_phase.py`、`src/research/phases/publish_phase.py` 已开始消费 `learning_strategy` 的真实阈值与行为分支：Observe 会调整 ingestion / literature 规模并按 `confidence_threshold` 过滤实体关系，Hypothesis 会收紧候选数量与证据/置信度门槛，Analyze 会动态解析显著性阈值、最小样本量，并支持推理 / 证据分级分支控制，Experiment 会调节 protocol 的 sample_size / duration / methodology / LLM 开关，ExperimentExecution 会控制 document fallback import、关系置信度过滤以及 execution records / relationships / sampling_events 的导入规模，Publish 会控制 citation fallback、本地 citation 规模以及 paper / report / evidence-grade 分支。
 
 ### 关键验证记录
 

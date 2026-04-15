@@ -9,6 +9,11 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
 from src.core.module_base import BaseModule
+from src.research.learning_strategy import (
+	has_learning_strategy,
+	resolve_learning_strategy,
+	resolve_numeric_learning_parameter,
+)
 from src.storage.graph_interface import IKnowledgeGraph, KnowledgeGap
 from src.storage.neo4j_driver import create_knowledge_graph
 
@@ -146,11 +151,16 @@ class HypothesisEngine(BaseModule):
 		self.knowledge_graph = knowledge_graph or create_knowledge_graph(
 			self.config, preload_formulas=False
 		)
-		self.max_hypotheses = int(self.config.get("max_hypotheses", 5))
+		self.base_max_hypotheses = int(self.config.get("max_hypotheses", 5))
+		self.max_hypotheses = self.base_max_hypotheses
 		self.score_weights = {
 			**self.DEFAULT_SCORE_WEIGHTS,
 			**(self.config.get("score_weights") or {}),
 		}
+		self.minimum_confidence = float(self.config.get("minimum_confidence", 0.0))
+		self.minimum_evidence_support = float(self.config.get("minimum_evidence_support", 0.0))
+		self.active_confidence_threshold = float(self.config.get("active_confidence_threshold", 0.65))
+		self.validation_confidence_threshold = float(self.config.get("validation_confidence_threshold", 0.8))
 		self.system_prompt = str(self.config.get("system_prompt") or self.DEFAULT_SYSTEM_PROMPT)
 		self.prompt_template = str(
 			self.config.get("hypothesis_prompt_template") or self.DEFAULT_HYPOTHESIS_PROMPT
@@ -169,7 +179,7 @@ class HypothesisEngine(BaseModule):
 
 		try:
 			hypotheses = self.generate_hypotheses(knowledge_gap=knowledge_gap, context=context)
-			ranked = self._enrich_hypotheses(self.rank_hypotheses(hypotheses), context)
+			ranked = self._enrich_hypotheses(self.rank_hypotheses(hypotheses, context), context)
 		finally:
 			self.knowledge_graph = previous_graph
 
@@ -217,32 +227,131 @@ class HypothesisEngine(BaseModule):
 				)
 				if kg_hypotheses:
 					return self._enrich_hypotheses(
-						self.rank_hypotheses(kg_hypotheses), prepared_context,
+						self.rank_hypotheses(kg_hypotheses, prepared_context), prepared_context,
 					)
 
 		# --- 原有 LLM 路径 ---
 		if active_llm_engine is not None:
 			llm_hypotheses = self._generate_with_llm(gap, prepared_context, active_llm_engine)
 			if llm_hypotheses:
-				return self._enrich_hypotheses(self.rank_hypotheses(llm_hypotheses), prepared_context)
+				return self._enrich_hypotheses(self.rank_hypotheses(llm_hypotheses, prepared_context), prepared_context)
 		return self._enrich_hypotheses(
-			self.rank_hypotheses(self._generate_with_rules(gap, prepared_context)),
+			self.rank_hypotheses(self._generate_with_rules(gap, prepared_context), prepared_context),
 			prepared_context,
 		)
 
-	def rank_hypotheses(self, hypotheses: List[Hypothesis]) -> List[Hypothesis]:
+	def rank_hypotheses(
+		self,
+		hypotheses: List[Hypothesis],
+		context: Optional[Dict[str, Any]] = None,
+	) -> List[Hypothesis]:
 		ranked = list(hypotheses)
+		score_weights = self._resolve_hypothesis_score_weights(context or {})
 		for item in ranked:
 			mechanism_completeness = item.scores.get("mechanism_completeness", 0.0)
 			item.confidence = round(
-				item.novelty * self.score_weights["novelty"]
-				+ item.feasibility * self.score_weights["feasibility"]
-				+ item.evidence_support * self.score_weights["evidence_support"]
-				+ mechanism_completeness * self.score_weights["mechanism_completeness"],
+				item.novelty * score_weights["novelty"]
+				+ item.feasibility * score_weights["feasibility"]
+				+ item.evidence_support * score_weights["evidence_support"]
+				+ mechanism_completeness * score_weights["mechanism_completeness"],
 				4,
 			)
 		ranked.sort(key=lambda item: item.confidence, reverse=True)
-		return ranked[: self.max_hypotheses]
+		return ranked[: self._resolve_hypothesis_max_hypotheses(context or {})]
+
+	def _resolve_hypothesis_score_weights(self, context: Dict[str, Any]) -> Dict[str, float]:
+		weights = dict(self.score_weights)
+		strategy = resolve_learning_strategy(context, self.config)
+		strategy_weights = strategy.get("score_weights") or {}
+		if isinstance(strategy_weights, dict):
+			for key, value in strategy_weights.items():
+				if key not in weights:
+					continue
+				try:
+					weights[key] = max(0.0, float(value))
+				except (TypeError, ValueError):
+					continue
+
+		total_weight = sum(weights.values())
+		if total_weight <= 0:
+			return dict(self.DEFAULT_SCORE_WEIGHTS)
+		return {
+			key: round(value / total_weight, 6)
+			for key, value in weights.items()
+		}
+
+	def _resolve_hypothesis_max_hypotheses(self, context: Dict[str, Any]) -> int:
+		explicit_max_hypotheses = context.get("max_hypotheses")
+		if explicit_max_hypotheses is not None:
+			try:
+				return max(1, min(int(explicit_max_hypotheses), 10))
+			except (TypeError, ValueError):
+				pass
+
+		if not has_learning_strategy(context, self.config):
+			return self.base_max_hypotheses
+
+		quality_threshold = resolve_numeric_learning_parameter(
+			"quality_threshold",
+			0.7,
+			context,
+			self.config,
+			min_value=0.3,
+			max_value=0.95,
+		)
+		if quality_threshold >= 0.82:
+			return max(2, self.base_max_hypotheses - 1)
+		if quality_threshold <= 0.55:
+			return min(8, self.base_max_hypotheses + 1)
+		return self.base_max_hypotheses
+
+	def _resolve_minimum_hypothesis_confidence(self, context: Dict[str, Any]) -> float:
+		base_value = max(0.0, min(1.0, self.minimum_confidence))
+		if not has_learning_strategy(context, self.config):
+			return base_value
+
+		confidence_threshold = resolve_numeric_learning_parameter(
+			"confidence_threshold",
+			0.7,
+			context,
+			self.config,
+			min_value=0.0,
+			max_value=1.0,
+		)
+		return round(max(base_value, confidence_threshold - 0.05), 4)
+
+	def _resolve_minimum_evidence_support(self, context: Dict[str, Any]) -> float:
+		base_value = max(0.0, min(1.0, self.minimum_evidence_support))
+		if not has_learning_strategy(context, self.config):
+			return base_value
+
+		quality_threshold = resolve_numeric_learning_parameter(
+			"quality_threshold",
+			0.7,
+			context,
+			self.config,
+			min_value=0.3,
+			max_value=0.95,
+		)
+		return round(max(base_value, min(0.85, 0.2 + quality_threshold * 0.45)), 4)
+
+	def _resolve_status_thresholds(self, context: Dict[str, Any]) -> tuple[float, float]:
+		validated_threshold = self.validation_confidence_threshold
+		active_threshold = self.active_confidence_threshold
+		if not has_learning_strategy(context, self.config):
+			return validated_threshold, active_threshold
+
+		confidence_threshold = resolve_numeric_learning_parameter(
+			"confidence_threshold",
+			0.7,
+			context,
+			self.config,
+			min_value=0.0,
+			max_value=1.0,
+		)
+		active_threshold = round(max(active_threshold, min(0.85, confidence_threshold)), 4)
+		validated_threshold = round(max(validated_threshold, min(0.95, active_threshold + 0.1)), 4)
+		return validated_threshold, active_threshold
 
 	def _generate_with_llm(
 		self,
@@ -734,6 +843,12 @@ class HypothesisEngine(BaseModule):
 	def _resolve_llm_engine(self, context: Dict[str, Any]) -> Any:
 		if "use_llm_generation" in context and not context.get("use_llm_generation"):
 			return None
+		strategy = resolve_learning_strategy(context, self.config)
+		if "use_llm_generation" not in context:
+			if "hypothesis_use_llm_generation" in strategy and not strategy.get("hypothesis_use_llm_generation"):
+				return None
+			if "use_llm_generation" in strategy and not strategy.get("use_llm_generation"):
+				return None
 		return context.get("llm_service") or context.get("llm_engine") or self.llm_engine
 
 	def _estimate_evidence_support(
@@ -843,6 +958,11 @@ class HypothesisEngine(BaseModule):
 		domain = str(context.get("research_domain") or "integrative_research")
 		supporting_signals = self._context_strings(context)[:3]
 		contradiction_signals = self._ensure_text_list(context.get("contradictions"))[:3]
+		score_weights = self._resolve_hypothesis_score_weights(context)
+		minimum_confidence = self._resolve_minimum_hypothesis_confidence(context)
+		minimum_evidence_support = self._resolve_minimum_evidence_support(context)
+		validated_threshold, active_threshold = self._resolve_status_thresholds(context)
+		enriched: List[Hypothesis] = []
 		for item in hypotheses:
 			mechanism_completeness = self._estimate_mechanism_completeness(item, context)
 			item.domain = item.domain or domain
@@ -855,20 +975,24 @@ class HypothesisEngine(BaseModule):
 				"mechanism_completeness": mechanism_completeness,
 			}
 			item.confidence = round(
-				item.novelty * self.score_weights["novelty"]
-				+ item.feasibility * self.score_weights["feasibility"]
-				+ item.evidence_support * self.score_weights["evidence_support"]
-				+ mechanism_completeness * self.score_weights["mechanism_completeness"],
+				item.novelty * score_weights["novelty"]
+				+ item.feasibility * score_weights["feasibility"]
+				+ item.evidence_support * score_weights["evidence_support"]
+				+ mechanism_completeness * score_weights["mechanism_completeness"],
 				4,
 			)
 			item.final_score = round(item.confidence, 4)
-			if item.confidence >= 0.8:
+			if item.evidence_support < minimum_evidence_support or item.confidence < minimum_confidence:
+				item.status = "rejected"
+				continue
+			if item.confidence >= validated_threshold:
 				item.status = "validated"
-			elif item.confidence >= 0.65:
+			elif item.confidence >= active_threshold:
 				item.status = "active"
 			else:
 				item.status = "draft"
-		return hypotheses
+			enriched.append(item)
+		return enriched[: self._resolve_hypothesis_max_hypotheses(context)]
 
 	def _estimate_testability(self, validation_plan: str) -> float:
 		measurable_terms = ["验证", "比较", "抽取", "回顾", "分析", "检索", "复核"]

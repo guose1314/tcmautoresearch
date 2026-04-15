@@ -4,6 +4,28 @@ from unittest.mock import patch
 from src.research.research_pipeline import ResearchPhase, ResearchPipeline
 
 
+class _ExperimentPhaseFakeLLM:
+        def generate(self, prompt: str, system_prompt: str = "") -> str:
+                return """{
+    "title": "学习策略增强实验协议",
+    "objective": "验证实验协议增强路径",
+    "primary_outcome": "主要结局变化",
+    "secondary_outcomes": ["安全性"],
+    "pico": {
+        "population": "脾气虚证患者",
+        "intervention": "四君子汤",
+        "comparison": "常规治疗",
+        "outcome": "主要结局变化"
+    },
+    "sample_size": {
+        "estimated_n": 72,
+        "outcome_type": "continuous",
+        "effect_size": 0.5,
+        "dropout_rate": 0.1
+    }
+}"""
+
+
 class TestResearchPipelineExperimentPhase(unittest.TestCase):
 
     def setUp(self):
@@ -415,3 +437,278 @@ class TestResearchPipelineExperimentPhase(unittest.TestCase):
         self.assertEqual(experiment_result["results"]["gap_priority_summary"]["highest_priority"], "高")
         self.assertEqual(experiment_result["metadata"]["highest_gap_priority"], "高")
         self.assertGreaterEqual(experiment_result["results"]["sample_size"], 100)
+
+    def test_experiment_phase_learning_strategy_can_disable_llm_protocol_generation(self):
+        pipeline = ResearchPipeline({"llm_engine": _ExperimentPhaseFakeLLM()})
+        self.addCleanup(pipeline.cleanup)
+
+        cycle = pipeline.create_research_cycle(
+            cycle_name="experiment-learning-strategy-llm-off",
+            description="experiment learning strategy llm disable",
+            objective="验证实验协议 LLM 开关",
+            scope="中医古籍方剂研究",
+            researchers=["tester"],
+        )
+        cycle.phase_executions[pipeline.ResearchPhase.OBSERVE] = {
+            "result": {
+                "phase": "observe",
+                "results": {
+                    "literature_pipeline": {
+                        "evidence_matrix": {"records": [], "dimension_count": 0, "record_count": 0},
+                        "clinical_gap_analysis": {},
+                    }
+                },
+            }
+        }
+        cycle.phase_executions[pipeline.ResearchPhase.HYPOTHESIS] = {
+            "result": {
+                "phase": "hypothesis",
+                "results": {
+                    "hypotheses": [
+                        {
+                            "hypothesis_id": "hyp-1",
+                            "title": "四君子汤改善脾气虚证",
+                            "statement": "四君子汤可改善脾气虚证主要结局",
+                            "validation_plan": "对照验证",
+                            "domain": "formula_research",
+                            "confidence": 0.82,
+                            "keywords": ["四君子汤", "脾气虚证"],
+                        }
+                    ]
+                },
+                "metadata": {"selected_hypothesis_id": "hyp-1"},
+            }
+        }
+
+        experiment_result = pipeline.phase_handlers.execute_experiment_phase(
+            cycle,
+            {
+                "learning_strategy": {
+                    "experiment_use_llm_protocol_generation": False,
+                }
+            },
+        )
+
+        self.assertEqual(experiment_result["results"]["study_protocol"]["protocol_source"], "template")
+        self.assertFalse(experiment_result["metadata"]["protocol_llm_generation_enabled"])
+        self.assertTrue(experiment_result["metadata"]["learning_strategy_applied"])
+
+    def test_experiment_phase_learning_strategy_expands_sample_size_and_duration(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="experiment-learning-strategy-sizing",
+            description="experiment learning strategy sizing",
+            objective="验证实验协议样本量与时长调节",
+            scope="中医古籍方剂研究",
+            researchers=["tester"],
+        )
+        cycle.phase_executions[self.pipeline.ResearchPhase.OBSERVE] = {
+            "result": {
+                "phase": "observe",
+                "results": {
+                    "literature_pipeline": {
+                        "evidence_matrix": {
+                            "records": [
+                                {"title": "e1", "source": "pubmed", "coverage_score": 4.0},
+                                {"title": "e2", "source": "arxiv", "coverage_score": 3.0},
+                            ],
+                            "dimension_count": 4,
+                            "record_count": 2,
+                        },
+                        "source_stats": {
+                            "pubmed": {"count": 1, "source_name": "PubMed"},
+                            "arxiv": {"count": 1, "source_name": "arXiv"},
+                        },
+                        "clinical_gap_analysis": {},
+                    }
+                },
+            }
+        }
+        cycle.phase_executions[self.pipeline.ResearchPhase.HYPOTHESIS] = {
+            "result": {
+                "phase": "hypothesis",
+                "results": {
+                    "hypotheses": [
+                        {
+                            "hypothesis_id": "hyp-2",
+                            "title": "四君子汤改善脾气虚证",
+                            "statement": "四君子汤可改善脾气虚证主要结局",
+                            "validation_plan": "对照验证",
+                            "domain": "formula_research",
+                            "confidence": 0.8,
+                            "keywords": ["四君子汤", "脾气虚证"],
+                            "contradiction_signals": ["存在个别样本偏差"],
+                        }
+                    ]
+                },
+                "metadata": {"selected_hypothesis_id": "hyp-2"},
+            }
+        }
+
+        baseline_result = self.pipeline.phase_handlers.execute_experiment_phase(cycle, {})
+        strategy_result = self.pipeline.phase_handlers.execute_experiment_phase(
+            cycle,
+            {
+                "learning_strategy": {
+                    "tuned_parameters": {
+                        "quality_threshold": 0.84,
+                        "confidence_threshold": 0.83,
+                    }
+                }
+            },
+        )
+
+        self.assertGreater(strategy_result["results"]["sample_size"], baseline_result["results"]["sample_size"])
+        self.assertGreater(strategy_result["results"]["duration_days"], baseline_result["results"]["duration_days"])
+        self.assertEqual(strategy_result["results"]["methodology"], "multisource_weighted_comparative_analysis")
+        self.assertTrue(strategy_result["metadata"]["learning_strategy_applied"])
+
+    def test_experiment_execution_learning_strategy_filters_relationships_and_caps_imports(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="experiment-execution-learning-strategy-caps",
+            description="experiment execution learning strategy caps",
+            objective="验证实验执行导入策略过滤与限流",
+            scope="中医古籍方剂研究",
+            researchers=["tester"],
+        )
+        cycle.phase_executions[self.pipeline.ResearchPhase.EXPERIMENT] = {
+            "result": {
+                "phase": "experiment",
+                "status": "completed",
+                "results": {
+                    "protocol_design": {
+                        "hypothesis_id": "hyp-exec-1",
+                        "protocol_source": "template",
+                    },
+                    "selected_hypothesis": {
+                        "hypothesis_id": "hyp-exec-1",
+                        "title": "四君子汤改善脾气虚证",
+                    },
+                    "study_protocol": {"protocol_source": "template"},
+                },
+                "metadata": {"protocol_source": "template"},
+                "error": None,
+            }
+        }
+
+        execution_result = self.pipeline.phase_handlers.execute_experiment_execution_phase(
+            cycle,
+            {
+                "analysis_records": [
+                    {"formula": "四君子汤", "syndrome": "脾气虚证", "herbs": ["党参", "白术"]},
+                    {"formula": "补中益气汤", "syndrome": "中气下陷", "herbs": ["黄芪", "人参"]},
+                    {"formula": "理中汤", "syndrome": "脾胃虚寒", "herbs": ["干姜", "人参"]},
+                ],
+                "analysis_relationships": [
+                    {
+                        "source": "四君子汤",
+                        "target": "党参",
+                        "type": "contains",
+                        "source_type": "formula",
+                        "target_type": "herb",
+                        "metadata": {"confidence": 0.61, "source": "observe_semantic_graph"},
+                    },
+                    {
+                        "source": "补中益气汤",
+                        "target": "黄芪",
+                        "type": "contains",
+                        "source_type": "formula",
+                        "target_type": "herb",
+                        "metadata": {"confidence": 0.86, "source": "observe_semantic_graph"},
+                    },
+                    {
+                        "source": "理中汤",
+                        "target": "干姜",
+                        "type": "contains",
+                        "source_type": "formula",
+                        "target_type": "herb",
+                        "metadata": {"confidence": 0.91, "source": "observe_semantic_graph"},
+                    },
+                ],
+                "sampling_events": [
+                    {"batch": "b1", "size": 12},
+                    {"batch": "b2", "size": 10},
+                ],
+                "learning_strategy": {
+                    "tuned_parameters": {"confidence_threshold": 0.8},
+                    "experiment_execution_max_records": 2,
+                    "experiment_execution_max_relationships": 1,
+                    "experiment_execution_max_sampling_events": 1,
+                },
+            },
+        )
+
+        cycle.phase_executions[self.pipeline.ResearchPhase.EXPERIMENT_EXECUTION] = {
+            "result": execution_result,
+        }
+        analyze_result = self.pipeline.phase_handlers.execute_analyze_phase(cycle, {})
+
+        self.assertEqual(execution_result["status"], "completed")
+        self.assertEqual(len(execution_result["results"]["analysis_records"]), 2)
+        self.assertEqual(len(execution_result["results"]["analysis_relationships"]), 1)
+        self.assertEqual(len(execution_result["results"]["sampling_events"]), 1)
+        self.assertTrue(execution_result["metadata"]["learning_strategy_applied"])
+        self.assertEqual(analyze_result["metadata"]["record_count"], 2)
+
+    def test_experiment_execution_learning_strategy_can_disable_document_fallback_import(self):
+        cycle = self.pipeline.create_research_cycle(
+            cycle_name="experiment-execution-learning-strategy-doc-fallback",
+            description="experiment execution learning strategy document fallback",
+            objective="验证实验执行 document fallback 开关",
+            scope="中医古籍方剂研究",
+            researchers=["tester"],
+        )
+        cycle.phase_executions[self.pipeline.ResearchPhase.EXPERIMENT] = {
+            "result": {
+                "phase": "experiment",
+                "status": "completed",
+                "results": {
+                    "protocol_design": {
+                        "hypothesis_id": "hyp-exec-2",
+                        "protocol_source": "template",
+                    },
+                    "selected_hypothesis": {
+                        "hypothesis_id": "hyp-exec-2",
+                        "title": "四君子汤改善脾气虚证",
+                    },
+                    "study_protocol": {"protocol_source": "template"},
+                },
+                "metadata": {"protocol_source": "template"},
+                "error": None,
+            }
+        }
+
+        execution_result = self.pipeline.phase_handlers.execute_experiment_execution_phase(
+            cycle,
+            {
+                "documents": [
+                    {
+                        "title": "外部实验文档",
+                        "semantic_relationships": [
+                            {
+                                "source": "四君子汤",
+                                "target": "党参",
+                                "type": "contains",
+                                "source_type": "formula",
+                                "target_type": "herb",
+                            },
+                            {
+                                "source": "四君子汤",
+                                "target": "脾气虚证",
+                                "type": "targets",
+                                "source_type": "formula",
+                                "target_type": "syndrome",
+                            },
+                        ],
+                    }
+                ],
+                "learning_strategy": {
+                    "experiment_execution_allow_document_fallback_import": False,
+                },
+            },
+        )
+
+        self.assertEqual(execution_result["status"], "skipped")
+        self.assertEqual(execution_result["results"]["analysis_records"], [])
+        self.assertEqual(execution_result["results"]["analysis_relationships"], [])
+        self.assertFalse(execution_result["metadata"]["document_fallback_import_enabled"])
+        self.assertTrue(execution_result["metadata"]["learning_strategy_applied"])

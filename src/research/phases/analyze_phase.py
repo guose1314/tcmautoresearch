@@ -4,6 +4,12 @@ from math import erfc, sqrt
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from src.research.data_miner import StatisticalDataMiner
+from src.research.learning_strategy import (
+    has_learning_strategy,
+    resolve_learning_flag,
+    resolve_learning_strategy,
+    resolve_numeric_learning_parameter,
+)
 from src.research.phase_result import build_phase_result, get_phase_value
 
 if TYPE_CHECKING:
@@ -30,6 +36,7 @@ class AnalyzePhaseMixin:
 
     def execute_analyze_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
         context = context or {}
+        significance_level = self._resolve_analyze_significance_level(context)
         analyze_records = self._collect_analyze_records(cycle, context)
         analyze_relationships = self._collect_analyze_relationships(cycle, context)
         reasoning_results = self._run_analyze_reasoning(context, analyze_relationships)
@@ -38,6 +45,7 @@ class AnalyzePhaseMixin:
             analyze_records,
             reasoning_results,
             data_mining_result,
+            context,
         )
 
         evidence_grade_payload, evidence_grade_error = self._grade_analyze_evidence(cycle, context)
@@ -49,15 +57,17 @@ class AnalyzePhaseMixin:
 
         metadata = {
             "analysis_type": "statistical_analysis",
-            "significance_level": 0.05,
+            "significance_level": significance_level,
             "analysis_modules": self._resolve_analyze_modules(reasoning_results, data_mining_result),
             "record_count": len(analyze_records),
+            "minimum_sample_size": self._resolve_analyze_min_sample_size(context),
             "syndrome_count": len({record.get("syndrome") for record in analyze_records if record.get("syndrome") and record.get("syndrome") != "unknown"}),
             "reasoning_engine_used": bool(reasoning_results),
             "reasoning_relationship_count": len(((reasoning_results.get("reasoning_results") or {}).get("entity_relationships") or [])),
             "data_mining_methods": list(data_mining_result.get("methods_executed") or []),
             "evidence_grade_generated": bool(evidence_grade_payload),
             "evidence_study_count": int(evidence_grade_payload.get("study_count") or 0) if evidence_grade_payload else 0,
+            "learning_strategy_applied": has_learning_strategy(context, self.pipeline.config),
         }
         if evidence_grade_error:
             metadata["evidence_grade_error"] = evidence_grade_error
@@ -85,6 +95,108 @@ class AnalyzePhaseMixin:
         if data_mining_result.get("methods_executed"):
             modules.append("statistical_data_miner")
         return modules
+
+    def _resolve_analyze_flag(
+        self,
+        context: Dict[str, Any],
+        flag_name: str,
+        default: bool,
+    ) -> bool:
+        if flag_name in context:
+            return bool(context.get(flag_name))
+
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        analyze_flag_name = f"analyze_{flag_name}"
+        if analyze_flag_name in strategy:
+            return bool(strategy.get(analyze_flag_name))
+
+        return resolve_learning_flag(flag_name, default, context, self.pipeline.config)
+
+    def _resolve_analyze_significance_level(self, context: Dict[str, Any]) -> float:
+        explicit_level = context.get("significance_level")
+        if explicit_level is not None:
+            try:
+                return round(min(0.2, max(0.01, float(explicit_level))), 4)
+            except (TypeError, ValueError):
+                return 0.05
+
+        if not has_learning_strategy(context, self.pipeline.config):
+            return 0.05
+
+        quality_threshold = resolve_numeric_learning_parameter(
+            "quality_threshold",
+            0.7,
+            context,
+            self.pipeline.config,
+            min_value=0.3,
+            max_value=0.95,
+        )
+        return round(min(0.1, max(0.01, 0.12 - quality_threshold * 0.1)), 4)
+
+    def _resolve_analyze_min_sample_size(self, context: Dict[str, Any]) -> int:
+        explicit_value = context.get("minimum_sample_size")
+        if explicit_value is None:
+            explicit_value = context.get("min_sample_size")
+        if explicit_value is not None:
+            try:
+                return max(1, min(int(explicit_value), 20))
+            except (TypeError, ValueError):
+                return 5
+
+        if not has_learning_strategy(context, self.pipeline.config):
+            return 5
+
+        quality_threshold = resolve_numeric_learning_parameter(
+            "quality_threshold",
+            0.7,
+            context,
+            self.pipeline.config,
+            min_value=0.3,
+            max_value=0.95,
+        )
+        return max(3, min(8, int(round(2 + quality_threshold * 4))))
+
+    def _filter_analyze_relationships_by_confidence(
+        self,
+        relationships: List[Dict[str, Any]],
+        context: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        explicit_threshold = context.get("analyze_confidence_threshold")
+        if explicit_threshold is None and not has_learning_strategy(context, self.pipeline.config):
+            return relationships
+
+        if explicit_threshold is None:
+            confidence_threshold = resolve_numeric_learning_parameter(
+                "confidence_threshold",
+                0.7,
+                context,
+                self.pipeline.config,
+                min_value=0.0,
+                max_value=1.0,
+            )
+        else:
+            try:
+                confidence_threshold = min(1.0, max(0.0, float(explicit_threshold)))
+            except (TypeError, ValueError):
+                confidence_threshold = 0.0
+
+        if confidence_threshold <= 0.0:
+            return relationships
+
+        filtered_relationships: List[Dict[str, Any]] = []
+        for relationship in relationships:
+            metadata = relationship.get("metadata") or {}
+            has_explicit_confidence = "confidence" in metadata or "confidence" in relationship
+            if not has_explicit_confidence:
+                filtered_relationships.append(relationship)
+                continue
+            try:
+                confidence = float(metadata.get("confidence", relationship.get("confidence") or 0.0))
+            except (TypeError, ValueError):
+                confidence = 0.0
+            if confidence >= confidence_threshold:
+                filtered_relationships.append(relationship)
+        return filtered_relationships
 
     def _collect_analyze_records(
         self,
@@ -320,10 +432,14 @@ class AnalyzePhaseMixin:
         context: Dict[str, Any],
         relationships: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
+        if not self._resolve_analyze_flag(context, "run_reasoning", True):
+            return {}
+
+        filtered_relationships = self._filter_analyze_relationships_by_confidence(relationships, context)
         explicit_graph = context.get("semantic_graph")
-        semantic_graph = explicit_graph if isinstance(explicit_graph, dict) else self._build_analyze_semantic_graph(relationships)
+        semantic_graph = explicit_graph if isinstance(explicit_graph, dict) else self._build_analyze_semantic_graph(filtered_relationships)
         explicit_entities = self._normalize_analyze_entities(context.get("entities"))
-        inferred_entities = self._build_entities_from_relationships(relationships)
+        inferred_entities = self._build_entities_from_relationships(filtered_relationships)
         entities = self._merge_analyze_entities(explicit_entities, inferred_entities)
 
         if not entities or not isinstance(semantic_graph, dict) or not (semantic_graph.get("edges") or []):
@@ -485,8 +601,9 @@ class AnalyzePhaseMixin:
         records: List[Dict[str, Any]],
         reasoning_results: Dict[str, Any],
         data_mining_result: Dict[str, Any],
+        context: Dict[str, Any],
     ) -> Dict[str, Any]:
-        statistical_analysis = self._build_statistical_analysis(records, reasoning_results, data_mining_result)
+        statistical_analysis = self._build_statistical_analysis(records, reasoning_results, data_mining_result, context)
         return {
             "statistical_analysis": dict(statistical_analysis),
         }
@@ -496,13 +613,15 @@ class AnalyzePhaseMixin:
         records: List[Dict[str, Any]],
         reasoning_results: Dict[str, Any],
         data_mining_result: Dict[str, Any],
+        context: Dict[str, Any],
     ) -> Dict[str, Any]:
         chi_square_items = ((data_mining_result.get("frequency_chi_square") or {}).get("chi_square_top") or [])
         primary_finding = self._select_primary_statistical_finding(records, chi_square_items)
         inference_confidence = float(((reasoning_results.get("reasoning_results") or {}).get("inference_confidence") or 0.0))
+        significance_level = self._resolve_analyze_significance_level(context)
 
         if not primary_finding:
-            limitations = self._build_analyze_limitations(records, reasoning_results, has_statistical_finding=False)
+            limitations = self._build_analyze_limitations(records, reasoning_results, has_statistical_finding=False, context=context)
             return {
                 "statistical_significance": False,
                 "confidence_level": round(inference_confidence, 4),
@@ -516,9 +635,9 @@ class AnalyzePhaseMixin:
         p_value = primary_finding.get("p_value")
         confidence_level = round(max(inference_confidence, 1.0 - float(p_value or 0.0)), 4)
         statistical_significance = bool(
-            p_value is not None and float(p_value) <= 0.05
+            p_value is not None and float(p_value) <= significance_level
         )
-        limitations = self._build_analyze_limitations(records, reasoning_results, has_statistical_finding=True)
+        limitations = self._build_analyze_limitations(records, reasoning_results, has_statistical_finding=True, context=context)
         interpretation = self._build_analyze_interpretation(primary_finding, reasoning_results, len(records))
         return {
             "statistical_significance": statistical_significance,
@@ -631,10 +750,14 @@ class AnalyzePhaseMixin:
         records: List[Dict[str, Any]],
         reasoning_results: Dict[str, Any],
         has_statistical_finding: bool,
+        context: Dict[str, Any],
     ) -> List[str]:
         limitations: List[str] = []
-        if len(records) < 5:
-            limitations.append("可用于统计检验的结构化记录数量偏少，显著性结论稳定性有限")
+        minimum_sample_size = self._resolve_analyze_min_sample_size(context)
+        if len(records) < minimum_sample_size:
+            limitations.append(
+                f"可用于统计检验的结构化记录数量偏少（当前 {len(records)}，建议至少 {minimum_sample_size}），显著性结论稳定性有限"
+            )
         syndrome_count = len({record.get("syndrome") for record in records if record.get("syndrome") and record.get("syndrome") != "unknown"})
         if syndrome_count < 2:
             limitations.append("证候分层不足，当前只能进行有限的二分类统计比较")
@@ -659,6 +782,9 @@ class AnalyzePhaseMixin:
         cycle: "ResearchCycle",
         context: Dict[str, Any],
     ) -> tuple[Dict[str, Any], str]:
+        if not self._resolve_analyze_flag(context, "grade_evidence", True):
+            return {}, ""
+
         literature_records = self._collect_analyze_literature_records(cycle, context)
         if not literature_records:
             return {}, ""

@@ -696,7 +696,27 @@ class TestObserveDocumentGraph:
             "status": "completed",
             "results": {
                 "ingestion_pipeline": {
-                    "documents": [],
+                    "documents": [
+                        {
+                            "urn": "doc:observe:philology:1",
+                            "title": "补血汤宋本",
+                            "source_type": "ctext",
+                            "metadata": {
+                                "version_metadata": {
+                                    "catalog_id": "ctp:buxue-tang/songben",
+                                    "work_title": "补血汤",
+                                    "fragment_title": "补血汤",
+                                    "work_fragment_key": "补血汤|补血汤",
+                                    "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                                    "witness_key": "ctext:doc:observe:philology:1",
+                                    "dynasty": "明",
+                                    "author": "李时珍",
+                                    "edition": "宋本",
+                                    "lineage_source": "explicit_metadata",
+                                }
+                            },
+                        }
+                    ],
                     "aggregate": {
                         "philology_assets": {
                             "terminology_standard_table": [
@@ -775,19 +795,22 @@ class TestObserveDocumentGraph:
 
         assert summary["scanned_phase_count"] == 1
         assert summary["updated_phase_count"] == 1
-        assert summary["created_artifact_count"] == 3
+        assert summary["created_artifact_count"] == 4
         assert set(artifacts) == {
             "observe_philology_terminology_table",
             "observe_philology_collation_entries",
             "observe_philology_annotation_report",
+            "observe_philology_catalog_summary",
         }
         assert artifacts["observe_philology_terminology_table"]["artifact_type"] == "dataset"
         assert artifacts["observe_philology_terminology_table"]["content"]["rows"][0]["canonical"] == "黄芪"
         assert artifacts["observe_philology_collation_entries"]["content"]["entries"][0]["witness_text"] == "黃耆"
         assert artifacts["observe_philology_annotation_report"]["content"]["summary"]["collation_entry_count"] == 1
+        assert artifacts["observe_philology_catalog_summary"]["content"]["summary"]["version_lineage_count"] == 1
         assert snapshot is not None
         assert snapshot["observe_philology"]["terminology_standard_table_count"] == 1
         assert snapshot["observe_philology"]["collation_entry_count"] == 1
+        assert snapshot["observe_philology"]["catalog_summary"]["summary"]["catalog_document_count"] == 1
         assert snapshot["observe_philology"]["source"] == "artifacts"
 
     def test_backfill_observe_philology_artifacts_skips_sessions_without_philology(self, repo):

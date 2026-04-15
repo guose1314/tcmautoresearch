@@ -1,3 +1,9 @@
+# K8s 示例清单状态口径（2026-04-15）：
+# - apply 成功、Deployment ready、/readiness 与 /liveness 通过，只表示部署动作和 API 进程已就绪，不自动等同于结构化存储处于“双写完成”。
+# - PostgreSQL 可写而 Neo4j 未启用、初始化失败或当前不可用时，应明确记为“仅 PG 模式”。
+# - 历史图投影、Observe 版本元数据或文献学结构化资产尚未补齐时，应继续记为“待回填”。
+# - 迁移、health check 或 drift 诊断若仍有告警，应记为“schema drift 待治理”。
+# - 统一术语来源：README 的“结构化存储状态词汇表”。
 # 运维约定：不要手工修改 alembic.ini 的 sqlalchemy.url。
 # 推荐迁移命令：
 #   kubectl exec -n <namespace> deploy/tcmautoresearch-api -- alembic -x environment=production upgrade head
@@ -63,6 +69,8 @@ spec:
           envFrom:
             - secretRef:
                 name: tcmautoresearch-secrets
+          # 探针通过只说明 API 进程可服务；不要据此把环境直接判成“双写完成”。
+          # 若 Neo4j 不可用或历史结构化资产未补齐，仍应分别记为“仅 PG 模式”或“待回填”。
           readinessProbe:
             httpGet:
               path: /readiness

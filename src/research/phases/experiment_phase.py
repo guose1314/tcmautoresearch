@@ -6,6 +6,13 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
+from src.research.learning_strategy import (
+    has_learning_strategy,
+    resolve_learning_flag,
+    resolve_learning_strategy,
+    resolve_numeric_learning_parameter,
+)
+
 try:
     from src.research.theoretical_framework import (
         HypothesisStatus,
@@ -126,6 +133,8 @@ class ExperimentPhaseMixin:
             "weighted_evidence_score": experiment_context.get("evidence_profile", {}).get("weighted_evidence_score", 0.0),
             "clinical_gap_available": experiment_context.get("evidence_profile", {}).get("clinical_gap_available", False),
             "highest_gap_priority": experiment_context.get("gap_priority_summary", {}).get("highest_priority", "低"),
+            "learning_strategy_applied": has_learning_strategy(context, self.pipeline.config),
+            "protocol_llm_generation_enabled": bool(experiment_context.get("use_llm_protocol_generation", False)),
             **selection_metadata,
         }
         return build_phase_result(
@@ -163,6 +172,11 @@ class ExperimentPhaseMixin:
         )
         gap_priority_summary = self._extract_gap_priority_summary(clinical_gap_analysis)
         derived_data_sources = self._build_experiment_data_sources(source_weights, evidence_records)
+        use_llm_protocol_generation = self._resolve_experiment_flag(
+            context,
+            "use_llm_protocol_generation",
+            True,
+        )
         return {
             "research_objective": cycle.research_objective or context.get("research_objective") or cycle.description,
             "research_scope": cycle.research_scope or context.get("research_scope") or "",
@@ -183,11 +197,184 @@ class ExperimentPhaseMixin:
             "primary_outcome": context.get("primary_outcome") or context.get("outcome") or selected_hypothesis.get("expected_outcome") or cycle.research_objective,
             "llm_engine": context.get("llm_engine") or self.pipeline.config.get("llm_engine") or self.pipeline.config.get("llm_service"),
             "llm_service": context.get("llm_service") or self.pipeline.config.get("llm_service") or self.pipeline.config.get("llm_engine"),
-            "use_llm_protocol_generation": context.get("use_llm_protocol_generation", True),
-            "sample_size": context.get("sample_size") or self._derive_experiment_sample_size(evidence_profile, selected_hypothesis, gap_priority_summary),
-            "duration_days": context.get("duration_days") or self._derive_experiment_duration(evidence_profile, selected_hypothesis),
-            "methodology": context.get("methodology") or self._derive_experiment_methodology(evidence_profile, source_weights, gap_priority_summary),
+            "use_llm_protocol_generation": use_llm_protocol_generation,
+            "sample_size": self._resolve_experiment_sample_size(context, evidence_profile, selected_hypothesis, gap_priority_summary),
+            "duration_days": self._resolve_experiment_duration_days(context, evidence_profile, selected_hypothesis),
+            "methodology": self._resolve_experiment_methodology(context, evidence_profile, source_weights, gap_priority_summary),
+            "learning_strategy": resolve_learning_strategy(context, self.pipeline.config),
         }
+
+    def _resolve_experiment_flag(
+        self,
+        context: Dict[str, Any],
+        flag_name: str,
+        default: bool,
+    ) -> bool:
+        if flag_name in context:
+            return bool(context.get(flag_name))
+
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        experiment_flag_name = f"experiment_{flag_name}"
+        if experiment_flag_name in strategy:
+            return bool(strategy.get(experiment_flag_name))
+
+        return resolve_learning_flag(flag_name, default, context, self.pipeline.config)
+
+    def _resolve_experiment_sample_size(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+        selected_hypothesis: Dict[str, Any],
+        gap_priority_summary: Dict[str, Any],
+    ) -> int:
+        explicit_value = context.get("sample_size")
+        if explicit_value is not None:
+            try:
+                return max(12, min(int(explicit_value), 400))
+            except (TypeError, ValueError):
+                pass
+
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        strategy_sample_size = strategy.get("experiment_sample_size")
+        if strategy_sample_size is not None:
+            try:
+                return max(12, min(int(strategy_sample_size), 400))
+            except (TypeError, ValueError):
+                pass
+
+        base_sample_size = self._derive_experiment_sample_size(
+            evidence_profile,
+            selected_hypothesis,
+            gap_priority_summary,
+        )
+        if not has_learning_strategy(context, self.pipeline.config):
+            return base_sample_size
+
+        multiplier = strategy.get("experiment_sample_size_multiplier")
+        if multiplier is not None:
+            try:
+                normalized_multiplier = max(0.5, min(float(multiplier), 2.0))
+            except (TypeError, ValueError):
+                normalized_multiplier = 1.0
+        else:
+            quality_threshold = resolve_numeric_learning_parameter(
+                "quality_threshold",
+                0.7,
+                context,
+                self.pipeline.config,
+                min_value=0.3,
+                max_value=0.95,
+            )
+            confidence_threshold = resolve_numeric_learning_parameter(
+                "confidence_threshold",
+                0.7,
+                context,
+                self.pipeline.config,
+                min_value=0.3,
+                max_value=0.95,
+            )
+            normalized_multiplier = 1.0
+            if quality_threshold >= 0.82:
+                normalized_multiplier = 1.2
+            elif quality_threshold >= 0.74:
+                normalized_multiplier = 1.1
+            elif quality_threshold <= 0.55:
+                normalized_multiplier = 0.9
+            if confidence_threshold >= 0.82:
+                normalized_multiplier = max(normalized_multiplier, 1.15)
+
+        return max(12, min(int(round(base_sample_size * normalized_multiplier)), 400))
+
+    def _resolve_experiment_duration_days(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+        selected_hypothesis: Dict[str, Any],
+    ) -> int:
+        explicit_value = context.get("duration_days")
+        if explicit_value is not None:
+            try:
+                return max(7, min(int(explicit_value), 120))
+            except (TypeError, ValueError):
+                pass
+
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        strategy_duration_days = strategy.get("experiment_duration_days")
+        if strategy_duration_days is not None:
+            try:
+                return max(7, min(int(strategy_duration_days), 120))
+            except (TypeError, ValueError):
+                pass
+
+        duration_days = self._derive_experiment_duration(evidence_profile, selected_hypothesis)
+        if not has_learning_strategy(context, self.pipeline.config):
+            return duration_days
+
+        extra_days = strategy.get("experiment_duration_adjustment_days")
+        if extra_days is not None:
+            try:
+                normalized_extra_days = int(extra_days)
+            except (TypeError, ValueError):
+                normalized_extra_days = 0
+        else:
+            quality_threshold = resolve_numeric_learning_parameter(
+                "quality_threshold",
+                0.7,
+                context,
+                self.pipeline.config,
+                min_value=0.3,
+                max_value=0.95,
+            )
+            if quality_threshold >= 0.82:
+                normalized_extra_days = 7
+            elif quality_threshold >= 0.74:
+                normalized_extra_days = 4
+            elif quality_threshold <= 0.55:
+                normalized_extra_days = -2
+            else:
+                normalized_extra_days = 0
+
+        return max(7, min(duration_days + normalized_extra_days, 120))
+
+    def _resolve_experiment_methodology(
+        self,
+        context: Dict[str, Any],
+        evidence_profile: Dict[str, Any],
+        source_weights: List[Dict[str, Any]],
+        gap_priority_summary: Dict[str, Any],
+    ) -> str:
+        explicit_methodology = context.get("methodology")
+        if explicit_methodology:
+            return str(explicit_methodology)
+
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        strategy_methodology = strategy.get("experiment_methodology")
+        if strategy_methodology:
+            return str(strategy_methodology)
+
+        methodology = self._derive_experiment_methodology(
+            evidence_profile,
+            source_weights,
+            gap_priority_summary,
+        )
+        if not has_learning_strategy(context, self.pipeline.config):
+            return methodology
+
+        quality_threshold = resolve_numeric_learning_parameter(
+            "quality_threshold",
+            0.7,
+            context,
+            self.pipeline.config,
+            min_value=0.3,
+            max_value=0.95,
+        )
+        if methodology == "data_analysis" and int(evidence_profile.get("record_count") or 0) > 0:
+            return "evidence_weighted_analysis"
+        if methodology == "evidence_weighted_analysis" and len(source_weights) >= 2 and quality_threshold >= 0.74:
+            return "multisource_weighted_comparative_analysis"
+        if methodology == "multisource_weighted_comparative_analysis" and quality_threshold <= 0.55:
+            return "evidence_weighted_analysis"
+        return methodology
 
     def _extract_gap_priority_summary(self, clinical_gap_analysis: Dict[str, Any]) -> Dict[str, Any]:
         summary = clinical_gap_analysis.get("priority_summary") or {}
