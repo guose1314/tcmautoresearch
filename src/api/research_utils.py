@@ -87,6 +87,33 @@ OUTPUT_FILE_VALUE_KEYS = {
     "report_path",
     "result_path",
 }
+REVIEW_WORKBENCH_SECTION_META = {
+    "catalog_version_lineage": {
+        "title": "目录谱系",
+        "description": "沿用 catalog review artifact，按作品、谱系、见证本收口目录学校核。",
+        "empty_message": "当前筛选结果下没有可审核的目录谱系。",
+    },
+    "terminology_row": {
+        "title": "术语标准表",
+        "description": "围绕 canonical、标签、见证文献与术语依据做人工复核。",
+        "empty_message": "当前筛选结果下没有术语标准表条目。",
+    },
+    "collation_entry": {
+        "title": "校勘条目",
+        "description": "对异文替换、疑似脱文和衍文条目做人工校勘。",
+        "empty_message": "当前筛选结果下没有校勘条目。",
+    },
+    "fragment_candidate": {
+        "title": "辑佚候选",
+        "description": "统一审核疑似辑佚补线索、佚文候选和引文来源候选。",
+        "empty_message": "当前筛选结果下没有辑佚候选。",
+    },
+    "claim": {
+        "title": "考据 Claim",
+        "description": "对 evidence protocol 中的候选论断做人工取舍与补据。",
+        "empty_message": "当前筛选结果下没有可审核的 claim。",
+    },
+}
 
 
 def _normalize_optional_text(value: Any) -> Optional[str]:
@@ -394,6 +421,420 @@ def _resolve_observe_philology(result: Dict[str, Any]) -> Dict[str, Any]:
         artifacts=_as_list(observe_phase_result.get("artifacts")),
         observe_phase_result=observe_phase_result,
     )
+
+
+def _as_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _as_dict_list(value: Any) -> list[Dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
+
+
+def _unique_texts(values: Iterable[Any]) -> list[str]:
+    items: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = _as_text(value)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        items.append(normalized)
+    return items
+
+
+def _normalize_workbench_review_status(value: Any) -> str:
+    normalized = _as_text(value).lower()
+    if normalized in {"pending", "accepted", "rejected", "needs_source"}:
+        return normalized
+    return "pending"
+
+
+def _build_review_workbench_asset_key(asset_type: str, *parts: tuple[str, Any]) -> str:
+    normalized_parts = [
+        f"{name}={_as_text(value)}"
+        for name, value in parts
+        if _as_text(value)
+    ]
+    return f"{asset_type}::{'|'.join(normalized_parts) if normalized_parts else 'unkeyed'}"
+
+
+def _build_filter_candidate_map(**kwargs: Any) -> Dict[str, list[str]]:
+    return {
+        field_name: _unique_texts(values if isinstance(values, list) else [values])
+        for field_name, values in kwargs.items()
+        if _unique_texts(values if isinstance(values, list) else [values])
+    }
+
+
+def _build_review_workbench_decision_lookup(observe_philology: Dict[str, Any]) -> Dict[tuple[str, str], Dict[str, Any]]:
+    lookup: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for decision in _as_dict_list(observe_philology.get("review_workbench_decisions")):
+        asset_type = _as_text(decision.get("asset_type")).lower()
+        asset_key = _as_text(decision.get("asset_key"))
+        if asset_type and asset_key:
+            lookup[(asset_type, asset_key)] = decision
+    return lookup
+
+
+def _apply_review_workbench_decision(item: Dict[str, Any], decision: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not decision:
+        return item
+    updated = dict(item)
+    updated["review_status"] = _normalize_workbench_review_status(decision.get("review_status") or item.get("review_status"))
+    updated["needs_manual_review"] = bool(decision.get("needs_manual_review"))
+    updated["review_reasons"] = _as_list(decision.get("review_reasons")) or _as_list(item.get("review_reasons"))
+    updated["review_source"] = _as_text(decision.get("review_source") or item.get("review_source") or "manual_review")
+    for field_name in ("reviewer", "reviewed_at", "decision_basis"):
+        value = _as_text(decision.get(field_name) or item.get(field_name))
+        if value:
+            updated[field_name] = value
+    return updated
+
+
+def _item_matches_catalog_filters(item: Dict[str, Any], active_filters: Dict[str, Any]) -> bool:
+    filter_candidates = _as_dict(item.get("filter_candidates"))
+    for field_name in ("document_title", "work_title", "version_lineage_key", "witness_key"):
+        expected = _as_text(active_filters.get(field_name))
+        if not expected:
+            continue
+        candidates = _unique_texts([
+            item.get(field_name),
+            *(_as_list(filter_candidates.get(field_name))),
+        ])
+        if expected not in candidates:
+            return False
+    return True
+
+
+def _build_review_workbench_section(asset_type: str, items: list[Dict[str, Any]]) -> Dict[str, Any]:
+    meta = REVIEW_WORKBENCH_SECTION_META.get(asset_type, {})
+    return {
+        "asset_type": asset_type,
+        "title": meta.get("title") or asset_type,
+        "description": meta.get("description") or "",
+        "empty_message": meta.get("empty_message") or "当前没有可审核条目。",
+        "count": len(items),
+        "items": items,
+    }
+
+
+def _build_catalog_lineage_review_items(observe_philology: Dict[str, Any]) -> list[Dict[str, Any]]:
+    catalog_summary = _as_dict(observe_philology.get("catalog_summary"))
+    lineages = _as_dict_list(catalog_summary.get("version_lineages"))
+    items: list[Dict[str, Any]] = []
+    for lineage in lineages:
+        version_lineage_key = _as_text(lineage.get("version_lineage_key") or lineage.get("work_fragment_key"))
+        if not version_lineage_key:
+            continue
+        witnesses = _as_dict_list(lineage.get("witnesses"))
+        witness_keys = _unique_texts(witness.get("witness_key") for witness in witnesses)
+        document_titles = _unique_texts((witness.get("title") or witness.get("document_title")) for witness in witnesses)
+        item = {
+            "asset_type": "catalog_version_lineage",
+            "asset_key": version_lineage_key,
+            "submission_mode": "catalog",
+            "review_status": _normalize_workbench_review_status(lineage.get("review_status")),
+            "needs_manual_review": bool(lineage.get("needs_manual_review", True)),
+            "review_reasons": _as_list(lineage.get("review_reasons")),
+            "review_source": _as_text(lineage.get("review_source")),
+            "reviewer": _as_text(lineage.get("reviewer")),
+            "reviewed_at": _as_text(lineage.get("reviewed_at")),
+            "decision_basis": _as_text(lineage.get("decision_basis")),
+            "title": _as_text(lineage.get("work_title")) or _as_text(lineage.get("fragment_title")) or "未标注作品",
+            "subtitle": " · ".join(
+                part
+                for part in (
+                    _as_text(lineage.get("fragment_title")),
+                    _as_text(lineage.get("dynasty")),
+                    _as_text(lineage.get("author")),
+                    _as_text(lineage.get("edition")),
+                )
+                if part
+            ) or version_lineage_key,
+            "summary_lines": [
+                f"见证本：{int(_safe_float(lineage.get('witness_count'), float(len(witnesses))))}",
+                f"待人工复核：{'是' if bool(lineage.get('needs_manual_review', True)) else '否'}",
+                f"谱系键：{version_lineage_key}",
+            ],
+            "work_title": _as_text(lineage.get("work_title")),
+            "fragment_title": _as_text(lineage.get("fragment_title")),
+            "version_lineage_key": version_lineage_key,
+            "witness_key": witness_keys[0] if len(witness_keys) == 1 else "",
+            "document_title": document_titles[0] if len(document_titles) == 1 else "",
+            "filter_candidates": _build_filter_candidate_map(
+                work_title=lineage.get("work_title"),
+                version_lineage_key=version_lineage_key,
+                witness_key=witness_keys,
+                document_title=document_titles,
+            ),
+        }
+        items.append(item)
+    return items
+
+
+def _build_terminology_review_items(
+    observe_philology: Dict[str, Any],
+    decision_lookup: Dict[tuple[str, str], Dict[str, Any]],
+) -> list[Dict[str, Any]]:
+    items: list[Dict[str, Any]] = []
+    for row in _as_dict_list(observe_philology.get("terminology_standard_table")):
+        asset_key = _build_review_workbench_asset_key(
+            "terminology_row",
+            ("document_urn", row.get("document_urn")),
+            ("document_title", row.get("document_title")),
+            ("version_lineage_key", row.get("version_lineage_key")),
+            ("witness_key", row.get("witness_key")),
+            ("canonical", row.get("canonical")),
+            ("label", row.get("label")),
+        )
+        observed_forms = _as_list(row.get("observed_forms"))
+        notes = _as_list(row.get("notes"))
+        item = {
+            "asset_type": "terminology_row",
+            "asset_key": asset_key,
+            "submission_mode": "generic",
+            "review_status": _normalize_workbench_review_status(row.get("review_status")),
+            "needs_manual_review": bool(row.get("needs_manual_review", True)),
+            "review_reasons": _as_list(row.get("review_reasons")) or ["terminology_machine_generated"],
+            "reviewer": _as_text(row.get("reviewer")),
+            "reviewed_at": _as_text(row.get("reviewed_at")),
+            "decision_basis": _as_text(row.get("decision_basis")),
+            "title": _as_text(row.get("canonical")) or "未命名术语",
+            "subtitle": _as_text(row.get("label")) or _as_text(row.get("status")) or "术语标准表",
+            "summary_lines": [
+                f"观测形态：{'、'.join(str(item) for item in observed_forms[:3]) if observed_forms else '-'}",
+                f"文献：{_as_text(row.get('document_title')) or '-'}",
+                f"备注：{_as_text(notes[0]) if notes else '-'}",
+            ],
+            "document_title": _as_text(row.get("document_title")),
+            "document_urn": _as_text(row.get("document_urn")),
+            "work_title": _as_text(row.get("work_title")),
+            "fragment_title": _as_text(row.get("fragment_title")),
+            "version_lineage_key": _as_text(row.get("version_lineage_key")),
+            "witness_key": _as_text(row.get("witness_key")),
+            "canonical": _as_text(row.get("canonical")),
+            "label": _as_text(row.get("label")),
+            "filter_candidates": _build_filter_candidate_map(
+                document_title=row.get("document_title"),
+                work_title=row.get("work_title"),
+                version_lineage_key=row.get("version_lineage_key"),
+                witness_key=row.get("witness_key"),
+            ),
+        }
+        items.append(_apply_review_workbench_decision(item, decision_lookup.get(("terminology_row", asset_key))))
+    return items
+
+
+def _build_collation_review_items(
+    observe_philology: Dict[str, Any],
+    decision_lookup: Dict[tuple[str, str], Dict[str, Any]],
+) -> list[Dict[str, Any]]:
+    items: list[Dict[str, Any]] = []
+    for entry in _as_dict_list(observe_philology.get("collation_entries")):
+        asset_key = _build_review_workbench_asset_key(
+            "collation_entry",
+            ("document_urn", entry.get("document_urn")),
+            ("witness_urn", entry.get("witness_urn")),
+            ("version_lineage_key", entry.get("version_lineage_key")),
+            ("witness_key", entry.get("witness_key")),
+            ("difference_type", entry.get("difference_type")),
+            ("base_text", entry.get("base_text")),
+            ("witness_text", entry.get("witness_text")),
+        )
+        item = {
+            "asset_type": "collation_entry",
+            "asset_key": asset_key,
+            "submission_mode": "generic",
+            "review_status": _normalize_workbench_review_status(entry.get("review_status")),
+            "needs_manual_review": bool(entry.get("needs_manual_review", True)),
+            "review_reasons": _as_list(entry.get("review_reasons")) or ["collation_machine_generated"],
+            "reviewer": _as_text(entry.get("reviewer")),
+            "reviewed_at": _as_text(entry.get("reviewed_at")),
+            "decision_basis": _as_text(entry.get("decision_basis")),
+            "title": f"{_as_text(entry.get('base_text')) or '-'} / {_as_text(entry.get('witness_text')) or '-'}",
+            "subtitle": _as_text(entry.get("difference_type")) or "校勘条目",
+            "summary_lines": [
+                f"底本：{_as_text(entry.get('document_title')) or '-'}",
+                f"见证本：{_as_text(entry.get('witness_title')) or _as_text(entry.get('witness_witness_key')) or '-'}",
+                f"谱系：{_as_text(entry.get('version_lineage_key')) or '-'}",
+            ],
+            "document_title": _as_text(entry.get("document_title")),
+            "document_urn": _as_text(entry.get("document_urn")),
+            "work_title": _as_text(entry.get("work_title")),
+            "fragment_title": _as_text(entry.get("fragment_title")),
+            "version_lineage_key": _as_text(entry.get("version_lineage_key")),
+            "witness_key": _as_text(entry.get("witness_key")),
+            "difference_type": _as_text(entry.get("difference_type")),
+            "base_text": _as_text(entry.get("base_text")),
+            "witness_text": _as_text(entry.get("witness_text")),
+            "filter_candidates": _build_filter_candidate_map(
+                document_title=[entry.get("document_title"), entry.get("witness_title")],
+                work_title=[entry.get("work_title"), entry.get("base_work_title"), entry.get("witness_work_title")],
+                version_lineage_key=[entry.get("version_lineage_key"), entry.get("base_version_lineage_key"), entry.get("witness_version_lineage_key")],
+                witness_key=[entry.get("witness_key"), entry.get("base_witness_key"), entry.get("witness_witness_key")],
+            ),
+        }
+        items.append(_apply_review_workbench_decision(item, decision_lookup.get(("collation_entry", asset_key))))
+    return items
+
+
+def _build_fragment_candidate_review_items(
+    observe_philology: Dict[str, Any],
+    decision_lookup: Dict[tuple[str, str], Dict[str, Any]],
+    active_filters: Dict[str, Any],
+) -> list[Dict[str, Any]]:
+    items: list[Dict[str, Any]] = []
+    for candidate_kind in ("fragment_candidates", "lost_text_candidates", "citation_source_candidates"):
+        for entry in _as_dict_list(observe_philology.get(candidate_kind)):
+            asset_key = _build_review_workbench_asset_key(
+                "fragment_candidate",
+                ("candidate_kind", candidate_kind),
+                ("fragment_candidate_id", entry.get("fragment_candidate_id") or entry.get("candidate_id") or entry.get("id")),
+                ("document_urn", entry.get("document_urn")),
+                ("version_lineage_key", entry.get("version_lineage_key")),
+                ("witness_key", entry.get("witness_key")),
+                ("fragment_title", entry.get("fragment_title") or entry.get("title")),
+            )
+            item = {
+                "asset_type": "fragment_candidate",
+                "asset_key": asset_key,
+                "submission_mode": "generic",
+                "review_status": _normalize_workbench_review_status(entry.get("review_status")),
+                "needs_manual_review": bool(entry.get("needs_manual_review", True)),
+                "review_reasons": _as_list(entry.get("review_reasons")) or ["fragment_candidate_machine_generated"],
+                "reviewer": _as_text(entry.get("reviewer")),
+                "reviewed_at": _as_text(entry.get("reviewed_at")),
+                "decision_basis": _as_text(entry.get("decision_basis")),
+                "title": _as_text(entry.get("fragment_title") or entry.get("title") or entry.get("document_title")) or "未命名辑佚候选",
+                "subtitle": candidate_kind,
+                "summary_lines": [
+                    f"匹配分：{entry.get('match_score') if entry.get('match_score') is not None else '-'}",
+                    f"依据：{_as_text(entry.get('reconstruction_basis')) or '-'}",
+                    f"来源：{'、'.join(str(item) for item in _as_list(entry.get('source_refs'))[:3]) if _as_list(entry.get('source_refs')) else '-'}",
+                ],
+                "candidate_kind": candidate_kind,
+                "document_title": _as_text(entry.get("document_title")),
+                "document_urn": _as_text(entry.get("document_urn")),
+                "work_title": _as_text(entry.get("work_title")),
+                "fragment_title": _as_text(entry.get("fragment_title")),
+                "version_lineage_key": _as_text(entry.get("version_lineage_key")),
+                "witness_key": _as_text(entry.get("witness_key")),
+                "fragment_candidate_id": _as_text(entry.get("fragment_candidate_id") or entry.get("candidate_id") or entry.get("id")),
+                "filter_candidates": _build_filter_candidate_map(
+                    document_title=[entry.get("document_title"), entry.get("witness_title")],
+                    work_title=[entry.get("work_title"), entry.get("base_work_title"), entry.get("witness_work_title")],
+                    version_lineage_key=[entry.get("version_lineage_key"), entry.get("base_version_lineage_key"), entry.get("witness_version_lineage_key")],
+                    witness_key=[entry.get("witness_key"), entry.get("base_witness_key"), entry.get("witness_witness_key")],
+                ),
+            }
+            item = _apply_review_workbench_decision(item, decision_lookup.get(("fragment_candidate", asset_key)))
+            if _item_matches_catalog_filters(item, active_filters):
+                items.append(item)
+    return items
+
+
+def _build_evidence_record_lookup(evidence_protocol: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    lookup: Dict[str, Dict[str, Any]] = {}
+    for record in _as_dict_list(evidence_protocol.get("evidence_records")):
+        evidence_id = _as_text(record.get("evidence_id") or record.get("id"))
+        if evidence_id:
+            lookup[evidence_id] = record
+    return lookup
+
+
+def _build_claim_filter_candidates(claim: Dict[str, Any], evidence_lookup: Dict[str, Dict[str, Any]]) -> Dict[str, list[str]]:
+    linked_records = [
+        evidence_lookup[evidence_id]
+        for evidence_id in (_as_list(claim.get("evidence_ids")) or [])
+        if _as_text(evidence_id) in evidence_lookup
+    ]
+    provenances = [
+        _as_dict(record.get("provenance"))
+        for record in linked_records
+    ]
+    return _build_filter_candidate_map(
+        document_title=[claim.get("document_title"), *(provenance.get("document_title") for provenance in provenances)],
+        work_title=[claim.get("work_title"), *(provenance.get("work_title") for provenance in provenances)],
+        version_lineage_key=[claim.get("version_lineage_key"), *(provenance.get("version_lineage_key") for provenance in provenances)],
+        witness_key=[claim.get("witness_key"), *(provenance.get("witness_key") for provenance in provenances)],
+    )
+
+
+def _build_claim_review_items(
+    evidence_protocol: Dict[str, Any],
+    decision_lookup: Dict[tuple[str, str], Dict[str, Any]],
+    active_filters: Dict[str, Any],
+) -> list[Dict[str, Any]]:
+    evidence_lookup = _build_evidence_record_lookup(evidence_protocol)
+    items: list[Dict[str, Any]] = []
+    for claim in _as_dict_list(evidence_protocol.get("claims")):
+        claim_id = _as_text(claim.get("claim_id") or claim.get("id"))
+        source_entity = _as_text(claim.get("source_entity") or claim.get("source"))
+        target_entity = _as_text(claim.get("target_entity") or claim.get("target"))
+        relation_type = _as_text(claim.get("relation_type") or claim.get("type") or "related")
+        evidence_ids = _as_list(claim.get("evidence_ids"))
+        filter_candidates = _build_claim_filter_candidates(claim, evidence_lookup)
+        item = {
+            "asset_type": "claim",
+            "asset_key": _build_review_workbench_asset_key(
+                "claim",
+                ("claim_id", claim_id),
+                ("source_entity", source_entity),
+                ("target_entity", target_entity),
+                ("relation_type", relation_type),
+                ("evidence_ids", ",".join(str(item) for item in evidence_ids)),
+            ),
+            "submission_mode": "generic",
+            "review_status": _normalize_workbench_review_status(claim.get("review_status")),
+            "needs_manual_review": bool(claim.get("needs_manual_review", True)),
+            "review_reasons": _as_list(claim.get("review_reasons")) or ["claim_candidate_generated"],
+            "reviewer": _as_text(claim.get("reviewer")),
+            "reviewed_at": _as_text(claim.get("reviewed_at")),
+            "decision_basis": _as_text(claim.get("decision_basis")),
+            "title": f"{source_entity or '未知源'} -> {target_entity or '未知目标'}",
+            "subtitle": relation_type or "claim",
+            "summary_lines": [
+                f"支持数：{claim.get('support_count') if claim.get('support_count') is not None else '-'}",
+                f"置信度：{claim.get('confidence') if claim.get('confidence') is not None else '-'}",
+                f"证据 IDs：{'、'.join(str(item) for item in evidence_ids[:4]) if evidence_ids else '-'}",
+            ],
+            "document_title": _unique_texts(filter_candidates.get("document_title", []))[0] if filter_candidates.get("document_title") else "",
+            "work_title": _unique_texts(filter_candidates.get("work_title", []))[0] if filter_candidates.get("work_title") else "",
+            "version_lineage_key": _unique_texts(filter_candidates.get("version_lineage_key", []))[0] if filter_candidates.get("version_lineage_key") else "",
+            "witness_key": _unique_texts(filter_candidates.get("witness_key", []))[0] if filter_candidates.get("witness_key") else "",
+            "claim_id": claim_id,
+            "source_entity": source_entity,
+            "target_entity": target_entity,
+            "relation_type": relation_type,
+            "filter_candidates": filter_candidates,
+        }
+        item = _apply_review_workbench_decision(item, decision_lookup.get(("claim", item["asset_key"])))
+        if _item_matches_catalog_filters(item, active_filters):
+            items.append(item)
+    return items
+
+
+def _build_review_workbench(
+    evidence_protocol: Dict[str, Any],
+    observe_philology: Dict[str, Any],
+    active_filters: Dict[str, Any],
+) -> Dict[str, Any]:
+    decision_lookup = _build_review_workbench_decision_lookup(observe_philology)
+    sections = [
+        _build_review_workbench_section("catalog_version_lineage", _build_catalog_lineage_review_items(observe_philology)),
+        _build_review_workbench_section("terminology_row", _build_terminology_review_items(observe_philology, decision_lookup)),
+        _build_review_workbench_section("collation_entry", _build_collation_review_items(observe_philology, decision_lookup)),
+        _build_review_workbench_section("fragment_candidate", _build_fragment_candidate_review_items(observe_philology, decision_lookup, active_filters)),
+        _build_review_workbench_section("claim", _build_claim_review_items(evidence_protocol, decision_lookup, active_filters)),
+    ]
+    return {
+        "sections": sections,
+        "section_count": len(sections),
+        "total_item_count": sum(int(section.get("count") or 0) for section in sections),
+    }
 
 
 def _iter_report_artifact_candidates(result: Dict[str, Any]) -> Iterable[tuple[str, str]]:
@@ -823,12 +1264,14 @@ def _build_dashboard_evidence_board(
     claims = _as_list(evidence_protocol.get("claims"))
     catalog_summary = _as_dict(observe_philology.get("catalog_summary"))
     catalog_metrics = _as_dict(catalog_summary.get("summary"))
+    active_catalog_filters = _as_dict(philology_filter_contract.get("active_filters"))
     catalog_document_count = int(
         _safe_float(
             observe_philology.get("catalog_document_count") or catalog_metrics.get("catalog_document_count"),
             0.0,
         )
     )
+    review_workbench = _build_review_workbench(evidence_protocol, observe_philology, active_catalog_filters)
     return {
         "evidence_count": len(evidence_records),
         "claim_count": len(claims),
@@ -852,6 +1295,7 @@ def _build_dashboard_evidence_board(
         "witness_count": int(
             _safe_float(observe_philology.get("witness_count") or catalog_metrics.get("witness_count"), 0.0)
         ),
+        "fragment_candidate_count": int(_safe_float(observe_philology.get("fragment_candidate_count"), 0.0)),
         "missing_catalog_metadata_count": int(
             _safe_float(
                 observe_philology.get("missing_catalog_metadata_count")
@@ -859,8 +1303,9 @@ def _build_dashboard_evidence_board(
                 0.0,
             )
         ),
-        "active_catalog_filters": _as_dict(philology_filter_contract.get("active_filters")),
+        "active_catalog_filters": active_catalog_filters,
         "catalog_filter_options": _as_dict(philology_filter_contract.get("options")),
+        "review_workbench": review_workbench,
     }
 
 

@@ -264,6 +264,9 @@ class TestResearchUtils(unittest.TestCase):
             "桂枝汤 -> 桂枝加葛根汤",
         )
         self.assertEqual(payload["protocol_inputs"]["study_type"], "RCT")
+        review_workbench = payload["evidence_board"]["review_workbench"]
+        section_map = {section["asset_type"]: section for section in review_workbench["sections"]}
+        self.assertEqual(section_map["claim"]["count"], 2)
 
     def test_build_research_dashboard_payload_prefers_publish_phase_result_contract(self):
         snapshot = {
@@ -484,6 +487,191 @@ class TestResearchUtils(unittest.TestCase):
         self.assertEqual(payload["evidence_board"]["catalog_summary"]["documents"][0]["review_status"], "pending")
         self.assertTrue(payload["evidence_board"]["catalog_summary"]["documents"][0]["needs_manual_review"])
         self.assertEqual(payload["evidence_board"]["catalog_summary"]["documents"][0]["exegesis_entries"][0]["canonical"], "黄芪")
+        self.assertEqual(
+            payload["evidence_board"]["catalog_summary"]["documents"][0]["exegesis_entries"][0]["definition_source"],
+            "structured_tcm_knowledge",
+        )
+        self.assertIn(
+            "补气",
+            payload["evidence_board"]["catalog_summary"]["documents"][0]["exegesis_entries"][0]["definition"],
+        )
+        self.assertIn(
+            "TCMRelationshipDefinitions.HERB_EFFICACY_MAP",
+            payload["evidence_board"]["catalog_summary"]["documents"][0]["exegesis_entries"][0]["source_refs"],
+        )
+        review_workbench = payload["evidence_board"]["review_workbench"]
+        section_map = {section["asset_type"]: section for section in review_workbench["sections"]}
+        self.assertEqual(section_map["catalog_version_lineage"]["count"], 1)
+        self.assertEqual(section_map["terminology_row"]["count"], 1)
+        self.assertEqual(section_map["collation_entry"]["count"], 1)
+        self.assertEqual(section_map["fragment_candidate"]["count"], 0)
+
+    def test_build_research_dashboard_payload_prefers_config_note_for_exegesis_definition(self):
+        snapshot = {
+            "job_id": "job-philology-config-exegesis",
+            "topic": "文献学权威义项",
+            "status": "completed",
+            "progress": 100,
+            "current_phase": "observe",
+            "result": {
+                "cycle_id": "cycle-philology-config-exegesis",
+                "phases": [
+                    {
+                        "phase": "observe",
+                        "status": "completed",
+                        "duration_sec": 3.0,
+                        "summary": {"observation_count": 1},
+                    }
+                ],
+                "pipeline_metadata": {"cycle_name": "philology-config-exegesis"},
+                "observe_philology": {
+                    "terminology_standard_table": [
+                        {
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:config:1",
+                            "canonical": "黄芪",
+                            "category": "herb",
+                            "label": "本草药名",
+                            "status": "standardized",
+                            "observed_forms": ["黃芪"],
+                            "sources": ["config_terminology_standard"],
+                            "notes": ["补气固表，托毒生肌，为补气要药。"],
+                        }
+                    ],
+                    "catalog_summary": {
+                        "summary": {
+                            "catalog_document_count": 1,
+                            "work_count": 1,
+                            "work_fragment_count": 1,
+                            "version_lineage_count": 1,
+                            "witness_count": 1,
+                            "missing_core_metadata_count": 0,
+                        },
+                        "documents": [
+                            {
+                                "document_title": "补血汤宋本",
+                                "document_urn": "doc:config:1",
+                                "source_type": "local",
+                                "catalog_id": "local:catalog:config:1",
+                                "work_title": "补血汤",
+                                "fragment_title": "补血汤",
+                                "work_fragment_key": "补血汤|补血汤",
+                                "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                                "witness_key": "local:witness:config:1",
+                                "dynasty": "明",
+                                "author": "李时珍",
+                                "edition": "宋本",
+                            }
+                        ],
+                        "version_lineages": [
+                            {
+                                "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                                "work_fragment_key": "补血汤|补血汤",
+                                "work_title": "补血汤",
+                                "fragment_title": "补血汤",
+                                "dynasty": "明",
+                                "author": "李时珍",
+                                "edition": "宋本",
+                                "witness_count": 1,
+                                "witnesses": [
+                                    {
+                                        "title": "补血汤宋本",
+                                        "urn": "doc:config:1",
+                                        "source_type": "local",
+                                        "catalog_id": "local:catalog:config:1",
+                                        "witness_key": "local:witness:config:1",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                },
+            },
+        }
+
+        payload = build_research_dashboard_payload(snapshot)
+
+        exegesis_entry = payload["evidence_board"]["catalog_summary"]["documents"][0]["exegesis_entries"][0]
+        self.assertEqual(exegesis_entry["definition_source"], "config_terminology_standard")
+        self.assertEqual(exegesis_entry["definition"], "补气固表，托毒生肌，为补气要药。")
+        self.assertEqual(exegesis_entry["source_refs"], ["config_terminology_standard"])
+
+    def test_build_research_dashboard_payload_applies_review_workbench_decisions(self):
+        snapshot = {
+            "job_id": "job-philology-review-workbench",
+            "topic": "文献学校核看板",
+            "status": "completed",
+            "progress": 100,
+            "current_phase": "observe",
+            "result": {
+                "cycle_id": "cycle-philology-review-workbench",
+                "phases": [
+                    {
+                        "phase": "observe",
+                        "status": "completed",
+                        "duration_sec": 3.0,
+                        "summary": {"observation_count": 1},
+                    }
+                ],
+                "pipeline_metadata": {"cycle_name": "philology-review-demo"},
+                "observe_philology": {
+                    "terminology_standard_table": [
+                        {
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:review-workbench:1",
+                            "canonical": "黄芪",
+                            "label": "本草药名",
+                        }
+                    ],
+                    "catalog_summary": {
+                        "documents": [
+                            {
+                                "document_title": "补血汤宋本",
+                                "document_urn": "doc:review-workbench:1",
+                                "source_type": "local",
+                                "catalog_id": "local:catalog:review-workbench:1",
+                                "work_title": "补血汤",
+                                "fragment_title": "补血汤",
+                                "work_fragment_key": "补血汤|补血汤",
+                                "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                                "witness_key": "local:witness:review-workbench:1",
+                                "dynasty": "明",
+                                "author": "李时珍",
+                                "edition": "宋本",
+                            }
+                        ]
+                    },
+                },
+            },
+        }
+
+        baseline_payload = build_research_dashboard_payload(snapshot)
+        baseline_sections = {
+            section["asset_type"]: section
+            for section in baseline_payload["evidence_board"]["review_workbench"]["sections"]
+        }
+        baseline_item = baseline_sections["terminology_row"]["items"][0]
+        snapshot["result"]["observe_philology"]["review_workbench_decisions"] = [
+            {
+                "asset_type": "terminology_row",
+                "asset_key": baseline_item["asset_key"],
+                "review_status": "accepted",
+                "reviewer": "tester",
+                "decision_basis": "人工术语复核",
+            }
+        ]
+
+        reviewed_payload = build_research_dashboard_payload(snapshot)
+        reviewed_sections = {
+            section["asset_type"]: section
+            for section in reviewed_payload["evidence_board"]["review_workbench"]["sections"]
+        }
+        reviewed_item = reviewed_sections["terminology_row"]["items"][0]
+
+        self.assertEqual(reviewed_item["review_status"], "accepted")
+        self.assertFalse(reviewed_item["needs_manual_review"])
+        self.assertEqual(reviewed_item["reviewer"], "tester")
+        self.assertEqual(reviewed_item["decision_basis"], "人工术语复核")
 
     def test_build_research_dashboard_payload_applies_catalog_filters_and_exposes_filter_options(self):
         snapshot = {
@@ -568,6 +756,100 @@ class TestResearchUtils(unittest.TestCase):
         self.assertEqual(payload["evidence_board"]["philology"]["terminology_standard_table_count"], 1)
         self.assertEqual(payload["evidence_board"]["catalog_summary"]["documents"][0]["work_title"], "补血汤")
         self.assertEqual(payload["evidence_board"]["catalog_summary"]["documents"][0]["witness_key"], "local:witness:1")
+        review_workbench = payload["evidence_board"]["review_workbench"]
+        section_map = {section["asset_type"]: section for section in review_workbench["sections"]}
+        self.assertEqual(section_map["catalog_version_lineage"]["count"], 1)
+        self.assertEqual(section_map["terminology_row"]["count"], 1)
+
+    def test_build_research_dashboard_payload_filters_fragment_candidates_by_witness_side_keys(self):
+        snapshot = {
+            "job_id": "job-fragment-filter",
+            "topic": "辑佚候选筛选看板",
+            "status": "completed",
+            "progress": 100,
+            "current_phase": "observe",
+            "result": {
+                "cycle_id": "cycle-fragment-filter",
+                "phases": [
+                    {
+                        "phase": "observe",
+                        "status": "completed",
+                        "duration_sec": 3.0,
+                        "summary": {"observation_count": 1},
+                    }
+                ],
+                "pipeline_metadata": {"cycle_name": "fragment-filter-demo"},
+                "observe_philology": {
+                    "catalog_summary": {
+                        "documents": [
+                            {
+                                "document_title": "补血汤宋本",
+                                "document_urn": "doc:fragment:1",
+                                "source_type": "local",
+                                "catalog_id": "catalog:fragment:1",
+                                "work_title": "补血汤",
+                                "fragment_title": "补血汤",
+                                "work_fragment_key": "补血汤|补血汤",
+                                "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                                "witness_key": "local:witness:fragment:1",
+                                "dynasty": "明",
+                                "author": "李时珍",
+                                "edition": "宋本",
+                            },
+                            {
+                                "document_title": "补血汤明抄本",
+                                "document_urn": "doc:fragment:2",
+                                "source_type": "local",
+                                "catalog_id": "catalog:fragment:2",
+                                "work_title": "补血汤",
+                                "fragment_title": "补血汤",
+                                "work_fragment_key": "补血汤|补血汤",
+                                "version_lineage_key": "补血汤|补血汤|明|李时珍|明抄本",
+                                "witness_key": "local:witness:fragment:2",
+                                "dynasty": "明",
+                                "author": "李时珍",
+                                "edition": "明抄本",
+                            },
+                        ]
+                    },
+                    "fragment_candidates": [
+                        {
+                            "fragment_candidate_id": "frag-filter-1",
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:fragment:1",
+                            "work_title": "补血汤",
+                            "fragment_title": "补血汤",
+                            "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                            "witness_key": "local:witness:fragment:1",
+                            "witness_title": "补血汤明抄本",
+                            "witness_urn": "doc:fragment:2",
+                            "witness_work_title": "补血汤",
+                            "witness_fragment_title": "补血汤",
+                            "witness_version_lineage_key": "补血汤|补血汤|明|李时珍|明抄本",
+                            "witness_witness_key": "local:witness:fragment:2",
+                            "match_score": 0.81,
+                            "source_refs": ["见证本:补血汤明抄本"],
+                            "reconstruction_basis": "明抄本保留补文，可作为辑佚候选。",
+                        }
+                    ],
+                },
+            },
+        }
+
+        payload = build_research_dashboard_payload(
+            snapshot,
+            philology_filters={"witness_key": "local:witness:fragment:2"},
+        )
+
+        section_map = {
+            section["asset_type"]: section
+            for section in payload["evidence_board"]["review_workbench"]["sections"]
+        }
+        self.assertEqual(section_map["fragment_candidate"]["count"], 1)
+        self.assertEqual(
+            payload["evidence_board"]["active_catalog_filters"]["witness_key"],
+            "local:witness:fragment:2",
+        )
 
     def test_dashboard_statistical_alias_helpers_require_standard_nested_fields(self):
         analysis_results = {

@@ -2,6 +2,75 @@
 
 <!-- markdownlint-configure-file {"MD022": false, "MD024": false, "MD032": false, "MD060": false} -->
 
+## 阶段性收口（2026-04-16，续）
+
+同步说明（2026-04-16）：
+
+- 本节取代下方同日早段条目，成为当前总续接入口；如果后续只能读一节，优先读本节。
+- shared runtime、默认学习闭环、目录学底座与 `catalog_summary` 基础键空间，仍沿用下方同日条目作为实现基线；本节只补这轮新增的 Observe 辑佚候选、文献学校核工作台、artifact 抽查结论与训诂义项权威源补强。
+- 当前文献学校核已经进入“可生成候选、可在控制台和项目详情页审核、可写回 repository snapshot / review artifact”的首轮闭环，但还不等于完成权威训诂库或全自动定稿链路。
+
+### 本轮收口目标
+
+- 让 Observe 不再只输出术语标准表和校勘条目，而是真正产出可审核的辑佚候选、疑似佚文补线索和引文来源候选。
+- 把 generic philology review 从控制台 dashboard 扩到项目详情面板，并打通 writeback，让目录谱系、术语、校勘、辑佚候选和 claim 都能原地审核。
+- 抽查 production-local backfill 新建的 philology artifact，确认字段和 review workbench 预期一致，并收口 `catalog_summary` 训诂义项的定义来源优先级，降低 fallback 推导占比。
+
+### 当前已落地成果
+
+#### 1. Observe 已真实产出辑佚候选资产
+
+- `src/analysis/philology_service.py` 已新增 `fragment_reconstruction` 主链，按版本对勘结果生成 `fragment_candidates`、`lost_text_candidates`、`citation_source_candidates`，并输出稳定 `fragment_candidate_id`、`match_score`、`source_refs`、`reconstruction_basis`、`review_reasons`。
+- `src/research/phases/observe_phase.py` 已把上述三类候选纳入 aggregate、annotation report 和 philology assets；Observe 汇总结果现在会显式记录 `fragment_candidate_count`、`lost_text_candidate_count`、`citation_source_candidate_count`。
+- `src/research/observe_philology.py` 已把 fragment candidate 系列资产纳入标准 normalization / filter contract / dashboard payload 共享键空间，不再作为 document 局部附属字段悬挂在单个 Observe 文档里。
+
+#### 2. 文献学校核工作台与 writeback 已形成首轮闭环
+
+- 新增 `src/research/review_workbench.py`，统一定义 generic philology review decision 的 normalize / merge / upsert 逻辑，对外稳定产出 `observe_philology_review_workbench` artifact。
+- `src/infrastructure/research_session_repo.py` 已新增 `upsert_observe_catalog_review()` 与 `upsert_observe_workbench_review()`，能把目录学校核和 generic philology review 分别写回 `observe_philology_catalog_review` / `observe_philology_review_workbench` artifact，并把更新后的状态重新汇总进 snapshot。
+- `src/api/routes/research.py`、`src/api/dependencies.py`、`src/api/schemas.py` 已新增 `/api/research/jobs/{job_id}/catalog-review` 与 `/api/research/jobs/{job_id}/philology-review`，控制台 dashboard 可以直接写回 review 决策。
+- `src/web/routes/dashboard.py`、`src/web/ops/research_session_service.py`、`src/web/ops/job_manager.py` 已把同一套 writeback 接到项目详情页和抽屉面板；项目详情页现在不仅能看 catalog baseline，也能直接审核术语、校勘、辑佚候选和 claim。
+- `web_console/static/index.html` 已新增 review board UI、catalog filter 复用、原地写回和刷新逻辑；控制台 dashboard 与项目详情页现在共享同一套 Observe philology / review contract，而不是各自拼 DTO。
+
+#### 3. production-local artifact 抽查已得出可续接结论
+
+- 实际抽查结果证明：本轮 backfill 新建的 4 个 philology artifact，并不是单个 cycle 的“四件套”，而是两个 cycle 各自新增了 `annotation_report` + `catalog_summary`。
+- 最新 production-local 样本中的 `catalog_summary.summary.exegesis_entry_count == 0`，根因不是 writeback 丢字段，而是这些 cycle 只有版本元数据，没有 terminology row，因此当前本来就不应生成训诂义项。
+- 这意味着后续如果再看到“catalog_summary 存在但 exegesis_entries 为空”，要先判定输入形状是否缺术语资产，而不是直接怀疑 repository writeback 或 review workbench 消费链路。
+- 上述结论已同步到 repo memory，后续继续查 backfill / artifact 对齐时应直接沿用这个判断基线。
+
+#### 4. `catalog_summary` 训诂义项已补首轮权威源优先级
+
+- `src/research/observe_philology.py` 现已把训诂定义来源优先级固定为：`config_terminology_standard` > `structured_tcm_knowledge` > `terminology_note` > `canonical_fallback`。
+- 结构化权威源当前直接复用 `src/semantic_modeling/tcm_relationships.py` 中的 `TCMRelationshipDefinitions.HERB_EFFICACY_MAP`、`TCMRelationshipDefinitions.HERB_PROPERTIES`、`TCMRelationshipDefinitions.FORMULA_COMPOSITIONS`，不再优先依赖机器风格术语 note。
+- 训诂义项现在会额外输出 `source_refs`，合并逻辑也会按来源强度保留更强定义来源；`review_reasons` 已区分 `exegesis_authority_resolved`、`exegesis_note_sourced` 与 `definition_source:canonical_fallback`，方便 workbench 继续做人工筛查。
+- 这一步的目标是先降低 fallback 占比并暴露来源证据，不是一次性引入新的大型外部权威词典库；后续若继续深化，应在现有优先级链上追加更高质量词条源，而不是推翻当前 contract。
+
+#### 5. 项目详情页回归与消费者链路已经重新压实
+
+- `tests/unit/test_dashboard_copy.py` 已修复因详情页新增文献学校核卡片导致的旧分页断言误报，改为按 section 粒度校验术语分页与校勘分页。
+- `tests/test_research_session_repo.py`、`tests/test_web_console_api.py`、`tests/test_research_utils.py` 已补 catalog review / workbench review 写回、dashboard payload 消费、项目详情页回显和 exegesis authority source 断言。
+- `tests/test_research_pipeline_observe.py`、`tests/unit/test_philology_service.py` 已补 fragment candidate 生成、annotation report 计数和 catalog summary 训诂义项来源覆盖，避免 Observe 只在 UI 层“看起来支持”辑佚候选。
+
+### 关键验证记录
+
+- 目录详情页分页回归修复后，`tests/unit/test_dashboard_copy.py` 已通过 28 passed。
+- 本轮训诂权威源补强后的 focused regression：`tests/test_research_pipeline_observe.py` + `tests/test_research_utils.py`，共 50 passed。
+- 本轮 consumer-path regression：`tests/test_research_session_repo.py` + `tests/test_web_console_api.py` + `tests/unit/test_dashboard_copy.py`，共 210 passed。
+- production-local 验证已完成：preflight 确认 PostgreSQL / Neo4j active；full backfill 完成 PostgreSQL / Neo4j 初始化，Neo4j 写入 208 nodes / 284 relationships，`observe_version_metadata_writeback` 扫描 13、updated 0、skipped 13，`observe_philology_artifact_writeback` 扫描 14 phases、updated 2、created 4 artifacts、skipped 12。
+
+### 当前续接锚点
+
+- `src/research/observe_philology.py` 现在同时承接 fragment candidate normalization、catalog summary exegesis enrich、catalog review 决策应用和 workbench decision 汇总；后续继续推进时，应继续把它当成单一共享 contract，而不是把 fragment / exegesis / review 各拆一份旁路 DTO。
+- 当前 production-local 样本里“catalog_summary 有目录学元数据但没有 exegesis_entries”是输入形状结论，不是 bug；后续再查库时要先看 terminology row 是否存在。
+- 目录学校核与 generic philology review 已具备首轮 writeback 闭环，下一步若继续深化，最自然的方向是完善 reviewer audit trail、批量审核与 review artifact 运维查询，而不是重新发明另一套 UI contract。
+- 目前唯一明确暴露但尚未修补的外围风险，是 `.vscode/production-local-backfill.ps1` 在 preflight 中仍会打印敏感配置 / 凭据；这属于真实安全问题，不应在后续阶段摘要里被误写成“仅日志噪声”。
+
+### 提交边界说明
+
+- 本次提交应覆盖 Observe 辑佚候选生成、review workbench / writeback 闭环、项目详情页接线、artifact 抽查结论沉淀、训诂义项权威源优先级补强，以及对应测试与阶段摘要同步。
+- `.vscode/production-local-backfill.ps1` 的敏感信息泄露问题已被记录，但本次提交不包含修补；后续若单独治理，建议作为安全修复提交独立处理。
+
 ## 阶段性收口（2026-04-16）
 
 同步说明（2026-04-16）：

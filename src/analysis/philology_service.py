@@ -43,9 +43,11 @@ class PhilologyService(BaseModule):
         self.max_recognized_terms = max(1, int(cfg.get("max_recognized_terms", 12) or 12))
         self.max_collation_diffs = max(1, int(cfg.get("max_collation_diffs", 8) or 8))
         self.max_witnesses = max(1, int(cfg.get("max_witnesses", 3) or 3))
+        self.max_fragment_candidates = max(1, int(cfg.get("max_fragment_candidates", 6) or 6))
         self.collation_context_window = max(0, int(cfg.get("collation_context_window", 12) or 12))
         self.enable_glossary = bool(cfg.get("enable_glossary", True))
         self.enable_version_collation = bool(cfg.get("enable_version_collation", True))
+        self.enable_fragment_reconstruction = bool(cfg.get("enable_fragment_reconstruction", True))
         self.asset_output_enabled = bool(artifact_output.get("enabled", True))
         self.include_terminology_asset = bool(artifact_output.get("include_terminology_standard_table", True))
         self.include_collation_asset = bool(artifact_output.get("include_collation_entries", True))
@@ -73,11 +75,13 @@ class PhilologyService(BaseModule):
             normalization_result.term_mappings,
         )
         version_collation = self._build_version_collation(raw_text, context, input_metadata)
-        philology_notes = self._build_philology_notes(term_standardization, version_collation)
+        fragment_reconstruction = self._build_fragment_reconstruction(input_metadata, version_collation)
+        philology_notes = self._build_philology_notes(term_standardization, version_collation, fragment_reconstruction)
         philology_assets = self._build_philology_assets(
             input_metadata,
             term_standardization,
             version_collation,
+            fragment_reconstruction,
             philology_notes,
         )
 
@@ -87,6 +91,7 @@ class PhilologyService(BaseModule):
             "normalization_steps": list(normalization_result.normalization_steps),
             "term_standardization": term_standardization,
             "version_collation": version_collation,
+            "fragment_reconstruction": fragment_reconstruction,
             "philology_assets": philology_assets,
             "statistics": {
                 "mapping_count": int(term_standardization.get("mapping_count") or 0),
@@ -96,6 +101,9 @@ class PhilologyService(BaseModule):
                 "collation_difference_count": int(version_collation.get("difference_count") or 0),
                 "collation_entry_count": int(version_collation.get("collation_entry_count") or 0),
                 "collation_witness_count": int(version_collation.get("witness_count") or 0),
+                "fragment_candidate_count": int(fragment_reconstruction.get("fragment_candidate_count") or 0),
+                "lost_text_candidate_count": int(fragment_reconstruction.get("lost_text_candidate_count") or 0),
+                "citation_source_candidate_count": int(fragment_reconstruction.get("citation_source_candidate_count") or 0),
                 "asset_count": int(philology_assets.get("asset_count") or 0),
             },
             "philology_notes": philology_notes,
@@ -112,6 +120,9 @@ class PhilologyService(BaseModule):
                 "collation_difference_count": int(version_collation.get("difference_count") or 0),
                 "collation_entry_count": int(version_collation.get("collation_entry_count") or 0),
                 "collation_witness_count": int(version_collation.get("witness_count") or 0),
+                "fragment_candidate_count": int(fragment_reconstruction.get("fragment_candidate_count") or 0),
+                "lost_text_candidate_count": int(fragment_reconstruction.get("lost_text_candidate_count") or 0),
+                "citation_source_candidate_count": int(fragment_reconstruction.get("citation_source_candidate_count") or 0),
                 "asset_count": int(philology_assets.get("asset_count") or 0),
                 "notes": list(philology_notes),
             },
@@ -467,6 +478,345 @@ class PhilologyService(BaseModule):
             "collation_entry_count": len(all_collation_entries),
         }
 
+    def _build_fragment_reconstruction(
+        self,
+        input_metadata: Mapping[str, Any],
+        version_collation: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        empty_payload = {
+            "enabled": bool(self.enable_fragment_reconstruction),
+            "fragment_candidates": [],
+            "lost_text_candidates": [],
+            "citation_source_candidates": [],
+            "fragment_candidate_count": 0,
+            "lost_text_candidate_count": 0,
+            "citation_source_candidate_count": 0,
+        }
+        if not self.enable_fragment_reconstruction:
+            return empty_payload
+
+        base_version_metadata = (
+            dict(input_metadata.get("version_metadata") or {})
+            if isinstance(input_metadata.get("version_metadata"), Mapping)
+            else {}
+        )
+        base_document_title = self._resolve_title(input_metadata)
+        base_document_urn = str(
+            input_metadata.get("document_urn")
+            or input_metadata.get("source_file")
+            or input_metadata.get("identifier")
+            or ""
+        ).strip()
+        fragment_candidates: List[Dict[str, Any]] = []
+        lost_text_candidates: List[Dict[str, Any]] = []
+        citation_source_candidates: List[Dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        witness_reports = [
+            dict(item)
+            for item in (version_collation.get("witnesses") or [])
+            if isinstance(item, Mapping)
+        ]
+        for witness_index, witness_report in enumerate(witness_reports, start=1):
+            witness_entries = [
+                dict(item)
+                for item in (witness_report.get("collation_entries") or [])
+                if isinstance(item, Mapping)
+            ]
+            if not witness_entries:
+                continue
+
+            witness_version_metadata = (
+                dict(witness_report.get("version_metadata") or {})
+                if isinstance(witness_report.get("version_metadata"), Mapping)
+                else {}
+            )
+            witness_title = str(witness_report.get("witness_title") or "").strip()
+            witness_urn = str(witness_report.get("witness_urn") or "").strip()
+            selection_strategy = str(witness_report.get("selection_strategy") or "").strip()
+
+            for entry_index, entry in enumerate(witness_entries, start=1):
+                diff_type = str(entry.get("difference_type") or "").strip()
+                base_text = str(entry.get("base_text") or "").strip()
+                witness_text = str(entry.get("witness_text") or "").strip()
+                if not base_text and not witness_text:
+                    continue
+
+                fragment_candidate = {
+                    "fragment_candidate_id": self._build_fragment_candidate_id(
+                        base_document_urn,
+                        witness_urn or witness_title,
+                        diff_type,
+                        witness_index,
+                        entry_index,
+                    ),
+                    "candidate_kind": "fragment_candidates",
+                    "title": f"{base_version_metadata.get('fragment_title') or base_document_title or '未命名片段'} · 疑似辑佚补线索",
+                    "document_title": base_document_title,
+                    "document_urn": base_document_urn,
+                    "source_type": str(input_metadata.get("source_type") or input_metadata.get("source") or "").strip(),
+                    "work_title": str(base_version_metadata.get("work_title") or input_metadata.get("work_title") or "").strip(),
+                    "fragment_title": str(base_version_metadata.get("fragment_title") or input_metadata.get("fragment_title") or base_document_title).strip(),
+                    "version_lineage_key": str(base_version_metadata.get("version_lineage_key") or "").strip(),
+                    "witness_key": str(base_version_metadata.get("witness_key") or "").strip(),
+                    "base_work_title": str(base_version_metadata.get("work_title") or input_metadata.get("work_title") or "").strip(),
+                    "base_fragment_title": str(base_version_metadata.get("fragment_title") or input_metadata.get("fragment_title") or base_document_title).strip(),
+                    "base_version_lineage_key": str(base_version_metadata.get("version_lineage_key") or "").strip(),
+                    "base_witness_key": str(base_version_metadata.get("witness_key") or "").strip(),
+                    "base_text": base_text,
+                    "witness_text": witness_text,
+                    "base_context": str(entry.get("base_context") or "").strip(),
+                    "witness_context": str(entry.get("witness_context") or "").strip(),
+                    "difference_type": diff_type,
+                    "witness_title": witness_title,
+                    "witness_urn": witness_urn,
+                    "witness_work_title": str(witness_version_metadata.get("work_title") or "").strip(),
+                    "witness_fragment_title": str(witness_version_metadata.get("fragment_title") or witness_title or "").strip(),
+                    "witness_version_lineage_key": str(witness_version_metadata.get("version_lineage_key") or "").strip(),
+                    "witness_witness_key": str(witness_version_metadata.get("witness_key") or "").strip(),
+                    "match_score": self._score_fragment_candidate(diff_type, base_text, witness_text, selection_strategy),
+                    "source_refs": self._build_fragment_source_refs(witness_report, witness_version_metadata),
+                    "reconstruction_basis": self._build_fragment_basis(
+                        diff_type,
+                        base_text,
+                        witness_text,
+                        witness_title or witness_urn or "平行见证",
+                    ),
+                    "needs_manual_review": True,
+                    "review_status": "pending",
+                    "review_reasons": [
+                        "fragment_candidate_machine_generated",
+                        f"fragment_candidate_type:{diff_type or 'variant'}",
+                    ],
+                }
+                fragment_candidates = self._append_fragment_candidate(
+                    fragment_candidates,
+                    fragment_candidate,
+                    seen_ids,
+                    limit=self.max_fragment_candidates,
+                )
+
+                if self._looks_like_lost_text_candidate(diff_type, base_text, witness_text):
+                    lost_text_candidate = {
+                        **fragment_candidate,
+                        "fragment_candidate_id": f"{fragment_candidate['fragment_candidate_id']}::lost-text",
+                        "candidate_kind": "lost_text_candidates",
+                        "title": f"{fragment_candidate['fragment_title'] or base_document_title or '未命名片段'} · 疑似佚文补线索",
+                        "match_score": min(0.99, round(float(fragment_candidate["match_score"]) + 0.08, 3)),
+                        "reconstruction_basis": self._build_lost_text_basis(
+                            diff_type,
+                            base_text,
+                            witness_text,
+                            witness_title or witness_urn or "平行见证",
+                        ),
+                        "review_reasons": [
+                            "fragment_candidate_machine_generated",
+                            "lost_text_candidate_generated",
+                            f"fragment_candidate_type:{diff_type or 'variant'}",
+                        ],
+                    }
+                    lost_text_candidates = self._append_fragment_candidate(
+                        lost_text_candidates,
+                        lost_text_candidate,
+                        seen_ids,
+                        limit=self.max_fragment_candidates,
+                    )
+
+            citation_candidate = self._build_citation_source_candidate(
+                base_document_title,
+                base_document_urn,
+                base_version_metadata,
+                witness_report,
+                witness_version_metadata,
+                witness_entries,
+            )
+            if citation_candidate:
+                citation_source_candidates = self._append_fragment_candidate(
+                    citation_source_candidates,
+                    citation_candidate,
+                    seen_ids,
+                    limit=self.max_fragment_candidates,
+                )
+
+        empty_payload["fragment_candidates"] = fragment_candidates
+        empty_payload["lost_text_candidates"] = lost_text_candidates
+        empty_payload["citation_source_candidates"] = citation_source_candidates
+        empty_payload["fragment_candidate_count"] = len(fragment_candidates)
+        empty_payload["lost_text_candidate_count"] = len(lost_text_candidates)
+        empty_payload["citation_source_candidate_count"] = len(citation_source_candidates)
+        return empty_payload
+
+    @staticmethod
+    def _build_fragment_candidate_id(
+        base_document_urn: str,
+        witness_ref: str,
+        diff_type: str,
+        witness_index: int,
+        entry_index: int,
+    ) -> str:
+        base_ref = base_document_urn or "base"
+        other_ref = witness_ref or f"witness-{witness_index}"
+        diff_label = diff_type or "variant"
+        return f"{base_ref}::{other_ref}::{diff_label}:{witness_index}:{entry_index}"
+
+    def _append_fragment_candidate(
+        self,
+        container: List[Dict[str, Any]],
+        candidate: Mapping[str, Any],
+        seen_ids: set[str],
+        *,
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        candidate_id = str(candidate.get("fragment_candidate_id") or "").strip()
+        if not candidate_id or candidate_id in seen_ids:
+            return container
+        if len(container) >= limit:
+            return container
+        seen_ids.add(candidate_id)
+        container.append(dict(candidate))
+        return container
+
+    def _score_fragment_candidate(
+        self,
+        difference_type: str,
+        base_text: str,
+        witness_text: str,
+        selection_strategy: str,
+    ) -> float:
+        score = 0.46
+        if difference_type == "insert":
+            score += 0.22
+        elif difference_type == "replace":
+            score += 0.14
+        elif difference_type == "delete":
+            score += 0.1
+        if selection_strategy == "version_lineage_key":
+            score += 0.16
+        elif selection_strategy == "work_fragment_key":
+            score += 0.1
+        if len(witness_text) > len(base_text):
+            score += 0.08
+        if len(witness_text) >= 3:
+            score += 0.04
+        return round(min(score, 0.98), 3)
+
+    def _build_fragment_source_refs(
+        self,
+        witness_report: Mapping[str, Any],
+        witness_version_metadata: Mapping[str, Any],
+    ) -> List[str]:
+        refs: List[str] = []
+        witness_title = str(witness_report.get("witness_title") or witness_report.get("witness_urn") or "").strip()
+        selection_strategy = str(witness_report.get("selection_strategy") or "").strip()
+        edition = str(witness_version_metadata.get("edition") or "").strip()
+        dynasty = str(witness_version_metadata.get("dynasty") or "").strip()
+        author = str(witness_version_metadata.get("author") or "").strip()
+        for item in (
+            f"见证本:{witness_title}" if witness_title else "",
+            f"选择策略:{selection_strategy}" if selection_strategy else "",
+            f"版本:{edition}" if edition else "",
+            f"时代:{dynasty}" if dynasty else "",
+            f"作者:{author}" if author else "",
+        ):
+            normalized = str(item or "").strip()
+            if normalized and normalized not in refs:
+                refs.append(normalized)
+        return refs
+
+    @staticmethod
+    def _build_fragment_basis(
+        difference_type: str,
+        base_text: str,
+        witness_text: str,
+        witness_label: str,
+    ) -> str:
+        if difference_type == "insert":
+            return f"{witness_label} 在对应位置保留 {witness_text or '补文'}，当前底本未见同段，疑似可作为辑佚补线索。"
+        if difference_type == "delete":
+            return f"当前底本保留 {base_text or '相关文字'}，而 {witness_label} 缺失对应片段，疑似存在佚脱或传抄脱漏。"
+        return f"当前底本 {base_text or '原文'} 与 {witness_label} {witness_text or '异文'} 存在换文，可作为辑佚复原与版本核勘线索。"
+
+    @staticmethod
+    def _build_lost_text_basis(
+        difference_type: str,
+        base_text: str,
+        witness_text: str,
+        witness_label: str,
+    ) -> str:
+        if difference_type == "insert":
+            return f"{witness_label} 额外保留 {witness_text or '补文'}，更像当前底本缺段而非单纯异写，建议人工核定是否属佚文补线索。"
+        return f"当前底本 {base_text or '原文'} 与 {witness_label} {witness_text or '补文'} 的差异更偏向缺段/补段，建议按疑似佚文处理并补据。"
+
+    @staticmethod
+    def _looks_like_lost_text_candidate(difference_type: str, base_text: str, witness_text: str) -> bool:
+        if difference_type == "insert" and witness_text:
+            return True
+        if difference_type == "replace" and len(witness_text) >= len(base_text) + 2:
+            return True
+        if not base_text and witness_text:
+            return True
+        return False
+
+    def _build_citation_source_candidate(
+        self,
+        base_document_title: str,
+        base_document_urn: str,
+        base_version_metadata: Mapping[str, Any],
+        witness_report: Mapping[str, Any],
+        witness_version_metadata: Mapping[str, Any],
+        witness_entries: Sequence[Mapping[str, Any]],
+    ) -> Dict[str, Any]:
+        witness_title = str(witness_report.get("witness_title") or "").strip()
+        witness_urn = str(witness_report.get("witness_urn") or "").strip()
+        selection_strategy = str(witness_report.get("selection_strategy") or "").strip()
+        if not witness_entries:
+            return {}
+        base_lineage = str(base_version_metadata.get("version_lineage_key") or "").strip()
+        witness_lineage = str(witness_version_metadata.get("version_lineage_key") or "").strip()
+        if not selection_strategy and base_lineage == witness_lineage:
+            return {}
+
+        diff_types = [str(entry.get("difference_type") or "").strip() for entry in witness_entries]
+        insert_like_count = sum(1 for diff_type in diff_types if diff_type in {"insert", "replace"})
+        if insert_like_count <= 0 and selection_strategy != "work_fragment_key":
+            return {}
+
+        citation_basis = (
+            f"{witness_title or witness_urn or '平行见证'} 与当前底本存在 {len(witness_entries)} 处可比异文，"
+            f"其中 {insert_like_count} 处涉及增补/换文，且选择策略为 {selection_strategy or 'manual'}，可疑似作为引文来源候选。"
+        )
+        return {
+            "fragment_candidate_id": f"{base_document_urn or 'base'}::{witness_urn or witness_title or 'witness'}::citation-source",
+            "candidate_kind": "citation_source_candidates",
+            "title": f"{base_version_metadata.get('fragment_title') or base_document_title or '未命名片段'} · 引文来源候选",
+            "document_title": base_document_title,
+            "document_urn": base_document_urn,
+            "source_type": str(base_version_metadata.get("source_type") or "").strip(),
+            "work_title": str(base_version_metadata.get("work_title") or "").strip(),
+            "fragment_title": str(base_version_metadata.get("fragment_title") or base_document_title).strip(),
+            "version_lineage_key": base_lineage,
+            "witness_key": str(base_version_metadata.get("witness_key") or "").strip(),
+            "base_work_title": str(base_version_metadata.get("work_title") or "").strip(),
+            "base_fragment_title": str(base_version_metadata.get("fragment_title") or base_document_title).strip(),
+            "base_version_lineage_key": base_lineage,
+            "base_witness_key": str(base_version_metadata.get("witness_key") or "").strip(),
+            "witness_title": witness_title,
+            "witness_urn": witness_urn,
+            "witness_work_title": str(witness_version_metadata.get("work_title") or "").strip(),
+            "witness_fragment_title": str(witness_version_metadata.get("fragment_title") or witness_title or "").strip(),
+            "witness_version_lineage_key": witness_lineage,
+            "witness_witness_key": str(witness_version_metadata.get("witness_key") or "").strip(),
+            "match_score": round(min(0.94, 0.48 + len(witness_entries) * 0.07 + insert_like_count * 0.05), 3),
+            "source_refs": self._build_fragment_source_refs(witness_report, witness_version_metadata),
+            "reconstruction_basis": citation_basis,
+            "needs_manual_review": True,
+            "review_status": "pending",
+            "review_reasons": [
+                "fragment_candidate_machine_generated",
+                "citation_source_candidate_generated",
+            ],
+        }
+
     def _build_collation_entry(
         self,
         difference: Mapping[str, Any],
@@ -596,20 +946,28 @@ class PhilologyService(BaseModule):
         input_metadata: Mapping[str, Any],
         term_standardization: Mapping[str, Any],
         version_collation: Mapping[str, Any],
+        fragment_reconstruction: Mapping[str, Any],
         philology_notes: Sequence[str],
     ) -> Dict[str, Any]:
         terminology_standard_table = list(term_standardization.get("terminology_standard_table") or [])
         collation_entries = list(version_collation.get("collation_entries") or [])
+        fragment_candidates = list(fragment_reconstruction.get("fragment_candidates") or [])
+        lost_text_candidates = list(fragment_reconstruction.get("lost_text_candidates") or [])
+        citation_source_candidates = list(fragment_reconstruction.get("citation_source_candidates") or [])
         annotation_report = self._build_annotation_report(
             input_metadata,
             term_standardization,
             version_collation,
+            fragment_reconstruction,
             philology_notes,
         )
 
         assets = {
             "terminology_standard_table": terminology_standard_table if self.asset_output_enabled and self.include_terminology_asset else [],
             "collation_entries": collation_entries if self.asset_output_enabled and self.include_collation_asset else [],
+            "fragment_candidates": fragment_candidates if self.asset_output_enabled else [],
+            "lost_text_candidates": lost_text_candidates if self.asset_output_enabled else [],
+            "citation_source_candidates": citation_source_candidates if self.asset_output_enabled else [],
             "annotation_report": annotation_report if self.asset_output_enabled and self.include_annotation_report else {},
         }
         assets["asset_count"] = sum(
@@ -617,6 +975,9 @@ class PhilologyService(BaseModule):
             for payload in (
                 assets.get("terminology_standard_table"),
                 assets.get("collation_entries"),
+                assets.get("fragment_candidates"),
+                assets.get("lost_text_candidates"),
+                assets.get("citation_source_candidates"),
                 assets.get("annotation_report"),
             )
             if payload not in (None, "", [], {})
@@ -628,6 +989,7 @@ class PhilologyService(BaseModule):
         input_metadata: Mapping[str, Any],
         term_standardization: Mapping[str, Any],
         version_collation: Mapping[str, Any],
+        fragment_reconstruction: Mapping[str, Any],
         philology_notes: Sequence[str],
     ) -> Dict[str, Any]:
         version_metadata = input_metadata.get("version_metadata") if isinstance(input_metadata.get("version_metadata"), dict) else {}
@@ -643,6 +1005,9 @@ class PhilologyService(BaseModule):
             "collation_difference_count": int(version_collation.get("difference_count") or 0),
             "collation_entry_count": int(version_collation.get("collation_entry_count") or 0),
             "collation_witness_count": int(version_collation.get("witness_count") or 0),
+            "fragment_candidate_count": int(fragment_reconstruction.get("fragment_candidate_count") or 0),
+            "lost_text_candidate_count": int(fragment_reconstruction.get("lost_text_candidate_count") or 0),
+            "citation_source_candidate_count": int(fragment_reconstruction.get("citation_source_candidate_count") or 0),
             "notes": [str(note) for note in philology_notes if str(note).strip()],
         }
 
@@ -650,6 +1015,7 @@ class PhilologyService(BaseModule):
         self,
         term_standardization: Dict[str, Any],
         version_collation: Dict[str, Any],
+        fragment_reconstruction: Dict[str, Any],
     ) -> List[str]:
         notes: List[str] = []
         mapping_count = int(term_standardization.get("mapping_count") or 0)
@@ -658,6 +1024,9 @@ class PhilologyService(BaseModule):
         terminology_standard_table_count = int(term_standardization.get("terminology_standard_table_count") or 0)
         difference_count = int(version_collation.get("difference_count") or 0)
         collation_entry_count = int(version_collation.get("collation_entry_count") or 0)
+        fragment_candidate_count = int(fragment_reconstruction.get("fragment_candidate_count") or 0)
+        lost_text_candidate_count = int(fragment_reconstruction.get("lost_text_candidate_count") or 0)
+        citation_source_candidate_count = int(fragment_reconstruction.get("citation_source_candidate_count") or 0)
 
         if mapping_count:
             notes.append(f"术语标准化完成 {mapping_count} 处映射")
@@ -671,6 +1040,12 @@ class PhilologyService(BaseModule):
             notes.append(f"版本对勘发现 {difference_count} 处异文，建议人工复核")
         if collation_entry_count:
             notes.append(f"输出 {collation_entry_count} 条可复用校勘条目")
+        if fragment_candidate_count:
+            notes.append(f"输出 {fragment_candidate_count} 条辑佚候选")
+        if lost_text_candidate_count:
+            notes.append(f"识别 {lost_text_candidate_count} 条疑似佚文补线索")
+        if citation_source_candidate_count:
+            notes.append(f"输出 {citation_source_candidate_count} 条引文来源候选")
         return notes
 
     def _resolve_collation_judgement(

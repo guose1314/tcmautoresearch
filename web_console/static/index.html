@@ -1390,6 +1390,281 @@
             white-space: pre-wrap;
         }
 
+        .dashboard-review-board {
+            padding: 12px 14px;
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            background: linear-gradient(165deg, rgba(255, 252, 247, 0.82), rgba(244, 238, 228, 0.78));
+            display: grid;
+            gap: 10px;
+        }
+
+        .dashboard-review-board-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .dashboard-review-board-head h4 {
+            margin: 0;
+            font-size: 0.96rem;
+        }
+
+        .dashboard-review-board-head p {
+            margin: 4px 0 0;
+            color: var(--muted);
+            font-size: 0.8rem;
+            line-height: 1.5;
+        }
+
+        .dashboard-review-toolbar {
+            display: grid;
+            gap: 10px;
+        }
+
+        .dashboard-review-filters {
+            display: grid;
+            gap: 8px;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        .dashboard-review-filter {
+            display: grid;
+            gap: 4px;
+        }
+
+        .dashboard-review-filter label {
+            color: var(--muted);
+            font-size: 0.74rem;
+        }
+
+        .dashboard-review-filter select {
+            width: 100%;
+            border-radius: 10px;
+            border: 1px solid rgba(37, 49, 45, 0.14);
+            background: rgba(255, 255, 255, 0.92);
+            color: var(--ink);
+            font-size: 0.8rem;
+            padding: 8px 10px;
+        }
+
+        .dashboard-review-filter select:focus {
+            outline: none;
+            border-color: rgba(47, 106, 73, 0.34);
+            box-shadow: 0 0 0 3px rgba(47, 106, 73, 0.08);
+        }
+
+        .dashboard-review-clear {
+            align-self: end;
+            padding: 8px 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(37, 49, 45, 0.14);
+            background: rgba(255, 255, 255, 0.88);
+            color: var(--ink);
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+
+        .dashboard-review-section {
+            display: grid;
+            gap: 10px;
+            padding-top: 4px;
+            border-top: 1px dashed rgba(37, 49, 45, 0.12);
+        }
+
+        .dashboard-review-section-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            align-items: flex-start;
+        }
+
+        .dashboard-review-section-head h5 {
+            margin: 0;
+            font-size: 0.88rem;
+            color: var(--ink);
+        }
+
+        .dashboard-review-section-head p {
+            margin: 4px 0 0;
+            color: var(--muted);
+            font-size: 0.76rem;
+            line-height: 1.5;
+        }
+
+        .dashboard-review-count {
+            color: var(--muted);
+            font-size: 0.76rem;
+            white-space: nowrap;
+        }
+
+        .dashboard-review-grid {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .dashboard-review-card {
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(37, 49, 45, 0.12);
+            background: rgba(255, 255, 255, 0.8);
+            display: grid;
+            gap: 8px;
+        }
+
+        .dashboard-review-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            align-items: flex-start;
+        }
+
+        .dashboard-review-head strong {
+            display: block;
+            font-size: 0.9rem;
+            color: var(--ink);
+        }
+
+        .dashboard-review-head span {
+            display: block;
+            margin-top: 4px;
+            font-size: 0.76rem;
+            color: var(--muted);
+            line-height: 1.45;
+        }
+
+        .dashboard-review-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .dashboard-review-badge.pending {
+            background: rgba(179, 92, 46, 0.14);
+            color: #8a5b23;
+        }
+
+        .dashboard-review-badge.accepted {
+            background: rgba(47, 106, 73, 0.14);
+            color: #2f6a49;
+        }
+
+        .dashboard-review-badge.rejected {
+            background: rgba(137, 44, 44, 0.14);
+            color: #8a2c2c;
+        }
+
+        .dashboard-review-badge.needs_source {
+            background: rgba(79, 92, 97, 0.14);
+            color: #42545a;
+        }
+
+        .dashboard-review-meta {
+            color: var(--muted);
+            font-size: 0.77rem;
+            line-height: 1.55;
+            white-space: pre-wrap;
+        }
+
+        .dashboard-review-field {
+            display: grid;
+            gap: 4px;
+        }
+
+        .dashboard-review-field label {
+            color: var(--muted);
+            font-size: 0.76rem;
+        }
+
+        .dashboard-review-field textarea {
+            width: 100%;
+            min-height: 68px;
+            resize: vertical;
+            padding: 9px 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(37, 49, 45, 0.14);
+            background: rgba(255, 255, 255, 0.92);
+            color: var(--ink);
+            font-size: 0.82rem;
+            line-height: 1.5;
+            font-family: inherit;
+        }
+
+        .dashboard-review-field textarea:focus {
+            outline: none;
+            border-color: rgba(47, 106, 73, 0.34);
+            box-shadow: 0 0 0 3px rgba(47, 106, 73, 0.08);
+        }
+
+        .dashboard-review-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .dashboard-review-button {
+            padding: 7px 10px;
+            border-radius: 10px;
+            border: 1px solid transparent;
+            font-size: 0.78rem;
+            font-weight: 600;
+            transition: opacity 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .dashboard-review-button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 18px rgba(30, 37, 34, 0.08);
+        }
+
+        .dashboard-review-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .dashboard-review-button.accepted {
+            background: #2f6a49;
+            color: #fff;
+        }
+
+        .dashboard-review-button.rejected {
+            background: #8a2c2c;
+            color: #fff;
+        }
+
+        .dashboard-review-button.needs_source {
+            background: #42545a;
+            color: #fff;
+        }
+
+        .dashboard-review-button.pending {
+            background: rgba(179, 92, 46, 0.12);
+            border-color: rgba(179, 92, 46, 0.22);
+            color: #8a5b23;
+        }
+
+        .dashboard-review-feedback {
+            min-height: 1.2rem;
+            color: var(--muted);
+            font-size: 0.76rem;
+        }
+
+        .dashboard-review-feedback.error {
+            color: #8a2c2c;
+        }
+
+        .dashboard-review-empty {
+            color: var(--muted);
+            font-size: 0.82rem;
+            line-height: 1.5;
+        }
+
         .empty {
             color: var(--muted);
             font-size: 0.92rem;
@@ -1425,6 +1700,14 @@
             }
 
             .dashboard-aux-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .dashboard-review-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .dashboard-review-filters {
                 grid-template-columns: 1fr;
             }
 
@@ -1769,6 +2052,13 @@
             sse: "SSE",
         };
 
+        const catalogReviewStatusLabels = {
+            pending: "待核",
+            accepted: "已核",
+            rejected: "驳回",
+            needs_source: "待补据",
+        };
+
         const WEBSOCKET_RECONNECT_BASE_DELAY_MS = 500;
         const WEBSOCKET_RECONNECT_MAX_DELAY_MS = 4000;
         const WEBSOCKET_RECONNECT_MAX_ATTEMPTS = 4;
@@ -1787,6 +2077,7 @@
         let dashboardRequestToken = 0;
         let dashboardPhaseFilter = DASHBOARD_PHASE_FILTER_ALL;
         let latestDashboardPayload = null;
+        let currentDashboardCatalogFilters = {};
         let dashboardModalBound = false;
         let dashboardGraphModalBound = false;
 
@@ -1970,6 +2261,11 @@
                 return "-";
             }
             return numeric.toFixed(digits);
+        }
+
+        function formatCatalogReviewStatus(status) {
+            const normalized = String(status || "pending").trim().toLowerCase();
+            return catalogReviewStatusLabels[normalized] || normalized || catalogReviewStatusLabels.pending;
         }
 
         function buildSummarySection(titleText, blocks) {
@@ -2568,8 +2864,35 @@
             return withApiKeyQuery(`/api/research/jobs/${encodeURIComponent(jobId)}/report?format=${encodeURIComponent(format)}`);
         }
 
+        function normalizeDashboardCatalogFilters(filters) {
+            if (!filters || typeof filters !== "object") {
+                return {};
+            }
+            const normalized = {};
+            ["work_title", "version_lineage_key", "witness_key"].forEach((fieldName) => {
+                const value = String(filters[fieldName] || "").trim();
+                if (value) {
+                    normalized[fieldName] = value;
+                }
+            });
+            return normalized;
+        }
+
+        function setDashboardCatalogFilters(filters) {
+            currentDashboardCatalogFilters = normalizeDashboardCatalogFilters(filters);
+        }
+
         function buildDashboardUrl(jobId) {
-            return `/api/research/jobs/${encodeURIComponent(jobId)}/dashboard`;
+            const query = new URLSearchParams();
+            Object.entries(currentDashboardCatalogFilters).forEach(([fieldName, value]) => {
+                const normalizedValue = String(value || "").trim();
+                if (normalizedValue) {
+                    query.set(fieldName, normalizedValue);
+                }
+            });
+            const queryText = query.toString();
+            const basePath = `/api/research/jobs/${encodeURIComponent(jobId)}/dashboard`;
+            return queryText ? `${basePath}?${queryText}` : basePath;
         }
 
         function renderReportActions(jobId) {
@@ -3456,6 +3779,433 @@
             return box;
         }
 
+        function formatCatalogReviewMeta(record) {
+            if (!record || typeof record !== "object") {
+                return "尚无人工校核记录。";
+            }
+            const parts = [];
+            if (record.reviewer) {
+                parts.push(`审核人：${record.reviewer}`);
+            }
+            if (record.reviewed_at) {
+                parts.push(`审核时间：${record.reviewed_at}`);
+            }
+            if (record.decision_basis) {
+                parts.push(`依据：${record.decision_basis}`);
+            }
+            return parts.length > 0 ? parts.join("\n") : "尚无人工校核记录。";
+        }
+
+        function applyObservePhilologyToDashboardPayload(payload, observePhilology) {
+            if (!payload || typeof payload !== "object" || !observePhilology || typeof observePhilology !== "object") {
+                return;
+            }
+            if (!payload.evidence_board || typeof payload.evidence_board !== "object") {
+                payload.evidence_board = {};
+            }
+            payload.evidence_board.philology = observePhilology;
+            if (observePhilology.catalog_summary && typeof observePhilology.catalog_summary === "object") {
+                payload.evidence_board.catalog_summary = observePhilology.catalog_summary;
+            }
+            payload.evidence_board.terminology_standard_table_count = safeNumber(
+                observePhilology.terminology_standard_table_count,
+                payload.evidence_board.terminology_standard_table_count
+            );
+            payload.evidence_board.collation_entry_count = safeNumber(
+                observePhilology.collation_entry_count,
+                payload.evidence_board.collation_entry_count
+            );
+            payload.evidence_board.catalog_document_count = safeNumber(
+                observePhilology.catalog_document_count,
+                payload.evidence_board.catalog_document_count
+            );
+            payload.evidence_board.fragment_candidate_count = safeNumber(
+                observePhilology.fragment_candidate_count,
+                payload.evidence_board.fragment_candidate_count
+            );
+            if (Array.isArray(observePhilology.review_workbench_decisions)) {
+                payload.evidence_board.philology.review_workbench_decisions = observePhilology.review_workbench_decisions;
+            }
+        }
+
+        async function submitCatalogReview(jobId, payload, context = {}) {
+            const normalizedJobId = String(jobId || "").trim();
+            if (!normalizedJobId || normalizedJobId === "-") {
+                throw new Error("当前任务尚未生成可审核的 job_id");
+            }
+
+            const response = await authenticatedFetch(`/api/research/jobs/${encodeURIComponent(normalizedJobId)}/catalog-review`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) {
+                const errorPayload = await response.json().catch(() => ({}));
+                throw new Error(errorPayload.detail || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            await refreshResearchDashboard(normalizedJobId);
+            const statusLabel = formatCatalogReviewStatus(payload.review_status);
+            const targetLabel = context.targetLabel ? ` ${context.targetLabel}` : "";
+            setBanner(`目录学 review 已写回：${statusLabel}${targetLabel}`, "success");
+            return result;
+        }
+
+        async function submitPhilologyReview(jobId, payload, context = {}) {
+            const normalizedJobId = String(jobId || "").trim();
+            if (!normalizedJobId || normalizedJobId === "-") {
+                throw new Error("当前任务尚未生成可审核的 job_id");
+            }
+
+            const response = await authenticatedFetch(`/api/research/jobs/${encodeURIComponent(normalizedJobId)}/philology-review`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) {
+                const errorPayload = await response.json().catch(() => ({}));
+                throw new Error(errorPayload.detail || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            await refreshResearchDashboard(normalizedJobId);
+            const statusLabel = formatCatalogReviewStatus(payload.review_status);
+            const targetLabel = context.targetLabel ? ` ${context.targetLabel}` : "";
+            setBanner(`文献学 review 已写回：${statusLabel}${targetLabel}`, "success");
+            return result;
+        }
+
+        function buildReviewWorkbenchFilterSummary(activeFilters) {
+            const labels = [];
+            if (activeFilters.work_title) {
+                labels.push(`作品=${activeFilters.work_title}`);
+            }
+            if (activeFilters.version_lineage_key) {
+                labels.push(`谱系=${activeFilters.version_lineage_key}`);
+            }
+            if (activeFilters.witness_key) {
+                labels.push(`见证本=${activeFilters.witness_key}`);
+            }
+            return labels.length > 0 ? labels.join("\n") : "未启用 catalog filter";
+        }
+
+        function buildReviewWorkbenchFilterControl(jobId, fieldName, labelText, options, activeValue) {
+            const wrapper = document.createElement("div");
+            wrapper.className = "dashboard-review-filter";
+
+            const label = document.createElement("label");
+            label.textContent = labelText;
+            wrapper.appendChild(label);
+
+            const select = document.createElement("select");
+            const emptyOption = document.createElement("option");
+            emptyOption.value = "";
+            emptyOption.textContent = `全部${labelText}`;
+            select.appendChild(emptyOption);
+
+            const normalizedActiveValue = String(activeValue || "").trim();
+            const normalizedOptions = Array.isArray(options) ? options : [];
+            const optionValues = new Set();
+            normalizedOptions.forEach((item) => {
+                const value = String(item?.value || "").trim();
+                if (!value || optionValues.has(value)) {
+                    return;
+                }
+                optionValues.add(value);
+                const option = document.createElement("option");
+                option.value = value;
+                option.textContent = `${item.label || value}${item.count ? ` (${item.count})` : ""}`;
+                select.appendChild(option);
+            });
+            if (normalizedActiveValue && !optionValues.has(normalizedActiveValue)) {
+                const option = document.createElement("option");
+                option.value = normalizedActiveValue;
+                option.textContent = normalizedActiveValue;
+                select.appendChild(option);
+            }
+            select.value = normalizedActiveValue;
+            select.addEventListener("change", function() {
+                const nextFilters = { ...currentDashboardCatalogFilters };
+                const nextValue = String(select.value || "").trim();
+                if (nextValue) {
+                    nextFilters[fieldName] = nextValue;
+                } else {
+                    delete nextFilters[fieldName];
+                }
+                setDashboardCatalogFilters(nextFilters);
+                queueResearchDashboardRefresh(jobId, 0);
+            });
+            wrapper.appendChild(select);
+            return wrapper;
+        }
+
+        function buildReviewWorkbenchToolbar(payload, evidenceBoard, reviewWorkbench) {
+            const toolbar = document.createElement("div");
+            toolbar.className = "dashboard-review-toolbar";
+
+            const filters = document.createElement("div");
+            filters.className = "dashboard-review-filters";
+
+            const options = evidenceBoard?.catalog_filter_options && typeof evidenceBoard.catalog_filter_options === "object"
+                ? evidenceBoard.catalog_filter_options
+                : {};
+            const activeFilters = normalizeDashboardCatalogFilters(evidenceBoard?.active_catalog_filters);
+
+            filters.appendChild(buildReviewWorkbenchFilterControl(payload.job_id, "work_title", "作品", options.work_title, activeFilters.work_title));
+            filters.appendChild(buildReviewWorkbenchFilterControl(payload.job_id, "version_lineage_key", "谱系", options.version_lineage_key, activeFilters.version_lineage_key));
+            filters.appendChild(buildReviewWorkbenchFilterControl(payload.job_id, "witness_key", "见证本", options.witness_key, activeFilters.witness_key));
+
+            const clearButton = document.createElement("button");
+            clearButton.type = "button";
+            clearButton.className = "dashboard-review-clear";
+            clearButton.textContent = "清空筛选";
+            clearButton.addEventListener("click", function() {
+                setDashboardCatalogFilters({});
+                queueResearchDashboardRefresh(payload.job_id, 0);
+            });
+            filters.appendChild(clearButton);
+
+            const summary = document.createElement("div");
+            summary.className = "dashboard-review-meta";
+            summary.textContent = `当前筛选：${buildReviewWorkbenchFilterSummary(activeFilters)}\n可见卡片：${safeNumber(reviewWorkbench?.total_item_count, 0)}`;
+
+            toolbar.appendChild(filters);
+            toolbar.appendChild(summary);
+            return toolbar;
+        }
+
+        function buildPhilologyReviewPayload(item, reviewStatus, decisionBasis) {
+            return {
+                asset_type: item.asset_type,
+                asset_key: item.asset_key,
+                review_status: reviewStatus,
+                decision_basis: decisionBasis,
+                candidate_kind: item.candidate_kind || "",
+                document_title: item.document_title || "",
+                document_urn: item.document_urn || "",
+                work_title: item.work_title || "",
+                fragment_title: item.fragment_title || "",
+                version_lineage_key: item.version_lineage_key || "",
+                witness_key: item.witness_key || "",
+                canonical: item.canonical || "",
+                label: item.label || "",
+                difference_type: item.difference_type || "",
+                base_text: item.base_text || "",
+                witness_text: item.witness_text || "",
+                claim_id: item.claim_id || "",
+                source_entity: item.source_entity || "",
+                target_entity: item.target_entity || "",
+                relation_type: item.relation_type || "",
+                fragment_candidate_id: item.fragment_candidate_id || "",
+            };
+        }
+
+        function buildReviewWorkbenchCard(payload, section, item) {
+            const card = document.createElement("article");
+            card.className = "dashboard-review-card";
+
+            const headRow = document.createElement("div");
+            headRow.className = "dashboard-review-head";
+
+            const titleWrap = document.createElement("div");
+            const title = document.createElement("strong");
+            title.textContent = item.title || "未命名条目";
+            const meta = document.createElement("span");
+            meta.textContent = item.subtitle || section.title;
+            titleWrap.appendChild(title);
+            titleWrap.appendChild(meta);
+
+            const badge = document.createElement("span");
+            const statusKey = String(item.review_status || "pending").trim().toLowerCase() || "pending";
+            badge.className = `dashboard-review-badge ${statusKey}`.trim();
+            badge.textContent = formatCatalogReviewStatus(statusKey);
+
+            headRow.appendChild(titleWrap);
+            headRow.appendChild(badge);
+            card.appendChild(headRow);
+
+            const summaryNode = document.createElement("div");
+            summaryNode.className = "dashboard-review-meta";
+            summaryNode.textContent = Array.isArray(item.summary_lines) && item.summary_lines.length > 0
+                ? item.summary_lines.join("\n")
+                : "暂无补充摘要。";
+            card.appendChild(summaryNode);
+
+            const metaNode = document.createElement("div");
+            metaNode.className = "dashboard-review-meta";
+            metaNode.textContent = formatCatalogReviewMeta(item);
+            card.appendChild(metaNode);
+
+            const field = document.createElement("div");
+            field.className = "dashboard-review-field";
+            const label = document.createElement("label");
+            label.textContent = "审核依据 / 备注";
+            const textarea = document.createElement("textarea");
+            textarea.placeholder = "填写人工判断依据、缺失来源说明或复核备注";
+            textarea.value = item.decision_basis || "";
+            field.appendChild(label);
+            field.appendChild(textarea);
+            card.appendChild(field);
+
+            const feedback = document.createElement("div");
+            feedback.className = "dashboard-review-feedback";
+            card.appendChild(feedback);
+
+            const actions = document.createElement("div");
+            actions.className = "dashboard-review-actions";
+            [
+                ["accepted", "标记已核"],
+                ["rejected", "标记驳回"],
+                ["needs_source", "待补据"],
+                ["pending", "退回待核"],
+            ].forEach(([statusValue, labelText]) => {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = `dashboard-review-button ${statusValue}`.trim();
+                button.textContent = labelText;
+                button.addEventListener("click", async function() {
+                    const buttons = Array.from(actions.querySelectorAll("button"));
+                    buttons.forEach((node) => {
+                        node.disabled = true;
+                    });
+                    textarea.disabled = true;
+                    feedback.classList.remove("error");
+                    feedback.textContent = "写回中...";
+                    try {
+                        if (item.submission_mode === "catalog") {
+                            await submitCatalogReview(
+                                payload.job_id,
+                                {
+                                    scope: "version_lineage",
+                                    version_lineage_key: item.version_lineage_key || item.asset_key,
+                                    review_status: statusValue,
+                                    decision_basis: textarea.value.trim(),
+                                },
+                                {
+                                    targetLabel: item.title || item.version_lineage_key || item.asset_key,
+                                }
+                            );
+                        } else {
+                            await submitPhilologyReview(
+                                payload.job_id,
+                                buildPhilologyReviewPayload(item, statusValue, textarea.value.trim()),
+                                {
+                                    targetLabel: item.title || item.asset_key,
+                                }
+                            );
+                        }
+                        feedback.textContent = `${labelText} 已写回。`;
+                    } catch (error) {
+                        feedback.textContent = `写回失败：${error.message}`;
+                        feedback.classList.add("error");
+                    } finally {
+                        buttons.forEach((node) => {
+                            node.disabled = false;
+                        });
+                        textarea.disabled = false;
+                    }
+                });
+                actions.appendChild(button);
+            });
+
+            card.appendChild(actions);
+            return card;
+        }
+
+        function buildReviewWorkbenchSection(payload, section) {
+            const block = document.createElement("div");
+            block.className = "dashboard-review-section";
+
+            const head = document.createElement("div");
+            head.className = "dashboard-review-section-head";
+
+            const headingWrap = document.createElement("div");
+            const heading = document.createElement("h5");
+            heading.textContent = section.title || section.asset_type || "未命名 section";
+            const subtitle = document.createElement("p");
+            subtitle.textContent = section.description || "";
+            headingWrap.appendChild(heading);
+            headingWrap.appendChild(subtitle);
+
+            const count = document.createElement("span");
+            count.className = "dashboard-review-count";
+            count.textContent = `卡片 ${safeNumber(section.count, 0)}`;
+
+            head.appendChild(headingWrap);
+            head.appendChild(count);
+            block.appendChild(head);
+
+            if (!Array.isArray(section.items) || section.items.length === 0) {
+                const empty = document.createElement("div");
+                empty.className = "dashboard-review-empty";
+                empty.textContent = section.empty_message || "当前没有可审核条目。";
+                block.appendChild(empty);
+                return block;
+            }
+
+            const grid = document.createElement("div");
+            grid.className = "dashboard-review-grid";
+            section.items.forEach((item) => {
+                grid.appendChild(buildReviewWorkbenchCard(payload, section, item));
+            });
+            block.appendChild(grid);
+            return block;
+        }
+
+        function buildPhilologyReviewWorkbench(payload, evidenceBoard) {
+            const reviewWorkbench = evidenceBoard?.review_workbench && typeof evidenceBoard.review_workbench === "object"
+                ? evidenceBoard.review_workbench
+                : { sections: [], total_item_count: 0 };
+            const sections = Array.isArray(reviewWorkbench.sections)
+                ? reviewWorkbench.sections.filter((item) => item && typeof item === "object")
+                : [];
+
+            setDashboardCatalogFilters(evidenceBoard?.active_catalog_filters);
+
+            const section = document.createElement("section");
+            section.className = "dashboard-review-board";
+
+            const head = document.createElement("div");
+            head.className = "dashboard-review-board-head";
+
+            const headingWrap = document.createElement("div");
+            const heading = document.createElement("h4");
+            heading.textContent = "文献学校核工作台";
+            const subtitle = document.createElement("p");
+            subtitle.textContent = "统一审核目录谱系、术语标准表、校勘条目、辑佚候选和考据 claim；筛选条件直接复用 catalog filter contract。";
+            headingWrap.appendChild(heading);
+            headingWrap.appendChild(subtitle);
+
+            const summary = document.createElement("span");
+            summary.className = "dashboard-review-meta";
+            summary.textContent = `周期：${payload.cycle_id || "-"}\n可见卡片：${safeNumber(reviewWorkbench.total_item_count, 0)}`;
+
+            head.appendChild(headingWrap);
+            head.appendChild(summary);
+            section.appendChild(head);
+            section.appendChild(buildReviewWorkbenchToolbar(payload, evidenceBoard, reviewWorkbench));
+
+            if (sections.length === 0) {
+                const empty = document.createElement("div");
+                empty.className = "dashboard-review-empty";
+                empty.textContent = "当前任务尚未生成可审核的文献学工作台 section。";
+                section.appendChild(empty);
+                return section;
+            }
+
+            sections.forEach((item) => {
+                section.appendChild(buildReviewWorkbenchSection(payload, item));
+            });
+            return section;
+        }
+
         function buildDashboardPrimaryAssociationBox(evidenceBoard) {
             const primaryAssociation = evidenceBoard?.primary_association;
             const miningSummary = evidenceBoard?.data_mining_summary && typeof evidenceBoard.data_mining_summary === "object"
@@ -3719,6 +4469,8 @@
             shell.appendChild(phaseTrack);
 
             shell.appendChild(buildKnowledgeGraphBoardSection(knowledgeGraphBoard, title.textContent));
+
+            shell.appendChild(buildPhilologyReviewWorkbench(payload, evidenceBoard));
 
             const auxGrid = document.createElement("div");
             auxGrid.className = "dashboard-aux-grid";

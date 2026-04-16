@@ -92,9 +92,19 @@ class TestPhilologyService(unittest.TestCase):
         self.assertEqual(version_collation["collation_entries"][0]["judgement"], "异体字通用")
         self.assertIn("不改义项", version_collation["collation_entries"][0]["note"])
 
+        fragment_reconstruction = philology["fragment_reconstruction"]
+        self.assertGreaterEqual(fragment_reconstruction["fragment_candidate_count"], 1)
+        self.assertEqual(fragment_reconstruction["lost_text_candidate_count"], 0)
+        self.assertEqual(fragment_reconstruction["citation_source_candidate_count"], 0)
+        self.assertIn("fragment_candidate_id", fragment_reconstruction["fragment_candidates"][0])
+        self.assertIn("reconstruction_basis", fragment_reconstruction["fragment_candidates"][0])
+
         assets = philology["philology_assets"]
-        self.assertEqual(assets["asset_count"], 3)
+        self.assertEqual(assets["asset_count"], 4)
         self.assertEqual(assets["annotation_report"]["terminology_standard_table_count"], term_standardization["terminology_standard_table_count"])
         self.assertEqual(len(assets["terminology_standard_table"]), term_standardization["terminology_standard_table_count"])
         self.assertEqual(len(assets["collation_entries"]), version_collation["collation_entry_count"])
+        self.assertEqual(len(assets["fragment_candidates"]), fragment_reconstruction["fragment_candidate_count"])
+        self.assertEqual(assets["annotation_report"]["fragment_candidate_count"], fragment_reconstruction["fragment_candidate_count"])
         self.assertTrue(any("版本对勘" in note for note in result["philology_notes"]))
+        self.assertTrue(any("辑佚候选" in note for note in result["philology_notes"]))

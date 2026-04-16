@@ -16,6 +16,7 @@ from src.core.module_base import ModuleStatus
 from src.extraction.relation_extractor import RelationExtractor
 from src.infrastructure.config_loader import AppSettings, load_settings
 from src.infrastructure.monitoring import MonitoringService
+from src.infrastructure.research_session_repo import ResearchSessionRepository
 from web_console.job_manager import ResearchJobManager
 
 if TYPE_CHECKING:
@@ -303,6 +304,13 @@ def get_job_manager(request: Request) -> ResearchJobManager:
     if manager is None:
         raise HTTPException(status_code=500, detail="job manager 未配置")
     return manager
+
+
+def get_research_session_repository(request: Request) -> ResearchSessionRepository:
+    db_manager = getattr(request.app.state, "db_manager", None)
+    if db_manager is None:
+        raise HTTPException(status_code=503, detail="数据库未初始化，无法写回研究会话")
+    return ResearchSessionRepository(db_manager)
 
 
 def get_settings(request: Request) -> AppSettings:

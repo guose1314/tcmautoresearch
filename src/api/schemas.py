@@ -92,6 +92,60 @@ class ResearchDashboardResponse(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="看板元数据")
 
 
+class ResearchCatalogReviewRequest(BaseModel):
+    scope: str = Field(default="version_lineage", description="review 目标范围：version_lineage / witness / document")
+    review_status: str = Field(..., description="review 状态：pending / accepted / rejected / needs_source")
+    version_lineage_key: Optional[str] = Field(default=None, description="版本谱系键")
+    witness_key: Optional[str] = Field(default=None, description="见证键")
+    document_id: Optional[str] = Field(default=None, description="文档 ID")
+    document_urn: Optional[str] = Field(default=None, description="文档 URN")
+    document_title: Optional[str] = Field(default=None, description="文档标题")
+    reviewer: Optional[str] = Field(default=None, description="审核人")
+    decision_basis: Optional[str] = Field(default=None, description="审核依据")
+    review_reasons: List[str] = Field(default_factory=list, description="审核原因")
+
+
+class ResearchCatalogReviewResponse(BaseModel):
+    job_id: str = Field(..., description="任务 ID")
+    cycle_id: str = Field(..., description="周期 ID")
+    observe_philology: Dict[str, Any] = Field(default_factory=dict, description="更新后的 Observe 文献学资产")
+    review_artifact: Dict[str, Any] = Field(default_factory=dict, description="写回后的 review artifact")
+
+
+class ResearchPhilologyWorkbenchReviewRequest(BaseModel):
+    asset_type: str = Field(..., description="review 资产类型：terminology_row / collation_entry / claim / fragment_candidate")
+    asset_key: str = Field(..., description="前端 workbench item 的稳定键")
+    review_status: str = Field(..., description="review 状态：pending / accepted / rejected / needs_source")
+    reviewer: Optional[str] = Field(default=None, description="审核人")
+    decision_basis: Optional[str] = Field(default=None, description="审核依据")
+    review_reasons: List[str] = Field(default_factory=list, description="审核原因")
+    candidate_kind: Optional[str] = Field(default=None, description="候选类型，如 fragment_candidates")
+    document_id: Optional[str] = Field(default=None, description="文档 ID")
+    document_title: Optional[str] = Field(default=None, description="文档标题")
+    document_urn: Optional[str] = Field(default=None, description="文档 URN")
+    work_title: Optional[str] = Field(default=None, description="作品")
+    fragment_title: Optional[str] = Field(default=None, description="章节或片段")
+    version_lineage_key: Optional[str] = Field(default=None, description="版本谱系键")
+    witness_key: Optional[str] = Field(default=None, description="见证键")
+    canonical: Optional[str] = Field(default=None, description="术语 canonical")
+    label: Optional[str] = Field(default=None, description="术语标签")
+    difference_type: Optional[str] = Field(default=None, description="校勘差异类型")
+    base_text: Optional[str] = Field(default=None, description="校勘底本读文")
+    witness_text: Optional[str] = Field(default=None, description="校勘见证本读文")
+    claim_id: Optional[str] = Field(default=None, description="claim 标识")
+    source_entity: Optional[str] = Field(default=None, description="claim 源实体")
+    target_entity: Optional[str] = Field(default=None, description="claim 目标实体")
+    relation_type: Optional[str] = Field(default=None, description="claim 关系类型")
+    fragment_candidate_id: Optional[str] = Field(default=None, description="fragment candidate 标识")
+
+
+class ResearchPhilologyWorkbenchReviewResponse(BaseModel):
+    job_id: str = Field(..., description="任务 ID")
+    cycle_id: str = Field(..., description="周期 ID")
+    observe_philology: Dict[str, Any] = Field(default_factory=dict, description="更新后的 Observe 文献学资产")
+    review_artifact: Dict[str, Any] = Field(default_factory=dict, description="写回后的 review artifact")
+
+
 class ResearchJobListItem(BaseModel):
     job_id: str = Field(..., description="任务 ID")
     topic: str = Field(..., description="研究主题")

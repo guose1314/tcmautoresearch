@@ -114,6 +114,38 @@ def get_research_session(app: Any, cycle_id: str) -> Optional[Dict[str, Any]]:
     return build_session_contract(snapshot)
 
 
+def apply_catalog_review(
+    app: Any,
+    cycle_id: str,
+    payload: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    repository = _get_repository(app)
+    saved = repository.upsert_observe_catalog_review(cycle_id, payload)
+    if saved is None:
+        return None
+
+    snapshot = _load_session_snapshot(repository, cycle_id)
+    if snapshot is None:
+        return None
+    return build_session_contract(snapshot)
+
+
+def apply_philology_review(
+    app: Any,
+    cycle_id: str,
+    payload: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    repository = _get_repository(app)
+    saved = repository.upsert_observe_workbench_review(cycle_id, payload)
+    if saved is None:
+        return None
+
+    snapshot = _load_session_snapshot(repository, cycle_id)
+    if snapshot is None:
+        return None
+    return build_session_contract(snapshot)
+
+
 def _build_runtime_result_contract(
     existing_session: Dict[str, Any],
     runtime_result: ResearchRuntimeResult,

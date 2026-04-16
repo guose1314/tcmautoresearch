@@ -9,6 +9,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
+from src.infrastructure.research_session_repo import ResearchSessionRepository
 from web_console.app import create_app
 from web_console.job_manager import ResearchJobManager
 
@@ -314,6 +315,81 @@ class TestWebConsoleApi(unittest.TestCase):
         self.manager.close()
         self.tempdir.cleanup()
 
+    def _persist_catalog_review_session(self, cycle_id: str) -> None:
+        repo = ResearchSessionRepository(self.client.app.state.db_manager)
+        if repo.get_session(cycle_id) is not None:
+            repo.delete_session(cycle_id)
+        repo.create_session(
+            {
+                "cycle_id": cycle_id,
+                "cycle_name": "console review session",
+                "description": "catalog review writeback",
+                "research_objective": "验证目录学 review 写回",
+                "status": "completed",
+                "current_phase": "analyze",
+            }
+        )
+        phase = repo.add_phase_execution(
+            cycle_id,
+            {"phase": "observe", "status": "completed", "output": {"phase": "observe", "status": "completed"}},
+        )
+        repo.add_artifact(
+            cycle_id,
+            {
+                "phase_execution_id": phase["id"],
+                "name": "observe_philology_catalog_summary",
+                "artifact_type": "dataset",
+                "content": {
+                    "summary": {
+                        "catalog_document_count": 1,
+                        "work_count": 1,
+                        "work_fragment_count": 1,
+                        "version_lineage_count": 1,
+                        "witness_count": 1,
+                        "missing_core_metadata_count": 0,
+                        "source_type_counts": {"local": 1},
+                    },
+                    "documents": [
+                        {
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:console:1",
+                            "source_type": "local",
+                            "catalog_id": "console:catalog:1",
+                            "work_title": "补血汤",
+                            "fragment_title": "补血汤",
+                            "work_fragment_key": "补血汤|补血汤",
+                            "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                            "witness_key": "console:witness:1",
+                            "dynasty": "明",
+                            "author": "李时珍",
+                            "edition": "宋本",
+                        }
+                    ],
+                    "version_lineages": [
+                        {
+                            "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                            "work_fragment_key": "补血汤|补血汤",
+                            "work_title": "补血汤",
+                            "fragment_title": "补血汤",
+                            "dynasty": "明",
+                            "author": "李时珍",
+                            "edition": "宋本",
+                            "witness_count": 1,
+                            "witnesses": [
+                                {
+                                    "title": "补血汤宋本",
+                                    "urn": "doc:console:1",
+                                    "source_type": "local",
+                                    "catalog_id": "console:catalog:1",
+                                    "witness_key": "console:witness:1",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            },
+        )
+
     def test_health_endpoint(self):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
@@ -356,6 +432,10 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertIn("研究看板", response.text)
         self.assertIn('id="research-dashboard"', response.text)
         self.assertIn("renderResearchDashboard", response.text)
+        self.assertIn("文献学校核工作台", response.text)
+        self.assertIn("submitCatalogReview", response.text)
+        self.assertIn("submitPhilologyReview", response.text)
+        self.assertIn("清空筛选", response.text)
         self.assertIn("queueResearchDashboardRefresh", response.text)
         self.assertIn("resolveHealthTier", response.text)
         self.assertIn("buildPhaseSegmentTitle", response.text)
@@ -795,6 +875,107 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertEqual(payload["evidence_board"]["active_catalog_filters"]["witness_key"], "console:witness:1")
         self.assertEqual(payload["evidence_board"]["catalog_document_count"], 1)
         self.assertEqual(payload["evidence_board"]["catalog_summary"]["documents"][0]["work_title"], "补血汤")
+
+    def test_catalog_review_writeback_updates_dashboard_snapshot(self):
+        create_response = self.client.post("/api/research/jobs", json={"topic": "目录写回看板"})
+        self.assertEqual(create_response.status_code, 202)
+        job_id = create_response.json()["job_id"]
+
+        for _ in range(20):
+            status_response = self.client.get(f"/api/research/jobs/{job_id}")
+            status_payload = status_response.json()
+            if status_payload["status"] in {"completed", "partial", "failed"}:
+                break
+            time.sleep(0.01)
+
+        self._persist_catalog_review_session("cycle-1")
+        review_response = self.client.post(
+            f"/api/research/jobs/{job_id}/catalog-review",
+            json={
+                "scope": "version_lineage",
+                "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                "review_status": "accepted",
+                "decision_basis": "控制台人工复核说明",
+            },
+        )
+        self.assertEqual(review_response.status_code, 200)
+        review_payload = review_response.json()
+        self.assertEqual(review_payload["cycle_id"], "cycle-1")
+        self.assertEqual(
+            review_payload["observe_philology"]["catalog_summary"]["documents"][0]["review_status"],
+            "accepted",
+        )
+        self.assertEqual(
+            review_payload["observe_philology"]["catalog_summary"]["documents"][0]["decision_basis"],
+            "控制台人工复核说明",
+        )
+
+        dashboard_response = self.client.get(f"/api/research/jobs/{job_id}/dashboard")
+        self.assertEqual(dashboard_response.status_code, 200)
+        dashboard_payload = dashboard_response.json()
+        self.assertEqual(
+            dashboard_payload["evidence_board"]["catalog_summary"]["documents"][0]["review_status"],
+            "accepted",
+        )
+        self.assertEqual(
+            dashboard_payload["evidence_board"]["catalog_summary"]["documents"][0]["decision_basis"],
+            "控制台人工复核说明",
+        )
+        self.assertFalse(
+            dashboard_payload["evidence_board"]["catalog_summary"]["documents"][0]["needs_manual_review"]
+        )
+
+    def test_philology_review_writeback_updates_claim_workbench_card(self):
+        create_response = self.client.post("/api/research/jobs", json={"topic": "claim 写回看板"})
+        self.assertEqual(create_response.status_code, 202)
+        job_id = create_response.json()["job_id"]
+
+        for _ in range(20):
+            status_response = self.client.get(f"/api/research/jobs/{job_id}")
+            status_payload = status_response.json()
+            if status_payload["status"] in {"completed", "partial", "failed"}:
+                break
+            time.sleep(0.01)
+
+        self._persist_catalog_review_session("cycle-1")
+        initial_dashboard = self.client.get(f"/api/research/jobs/{job_id}/dashboard")
+        self.assertEqual(initial_dashboard.status_code, 200)
+        initial_payload = initial_dashboard.json()
+        section_map = {
+            section["asset_type"]: section
+            for section in initial_payload["evidence_board"]["review_workbench"]["sections"]
+        }
+        claim_item = section_map["claim"]["items"][0]
+
+        review_response = self.client.post(
+            f"/api/research/jobs/{job_id}/philology-review",
+            json={
+                "asset_type": "claim",
+                "asset_key": claim_item["asset_key"],
+                "review_status": "accepted",
+                "decision_basis": "控制台考据 claim 复核",
+                "claim_id": claim_item.get("claim_id"),
+                "source_entity": claim_item.get("source_entity"),
+                "target_entity": claim_item.get("target_entity"),
+                "relation_type": claim_item.get("relation_type"),
+            },
+        )
+        self.assertEqual(review_response.status_code, 200)
+        review_payload = review_response.json()
+        self.assertEqual(review_payload["cycle_id"], "cycle-1")
+        self.assertEqual(review_payload["review_artifact"]["name"], "observe_philology_review_workbench")
+
+        dashboard_response = self.client.get(f"/api/research/jobs/{job_id}/dashboard")
+        self.assertEqual(dashboard_response.status_code, 200)
+        dashboard_payload = dashboard_response.json()
+        section_map = {
+            section["asset_type"]: section
+            for section in dashboard_payload["evidence_board"]["review_workbench"]["sections"]
+        }
+        reviewed_claim = section_map["claim"]["items"][0]
+        self.assertEqual(reviewed_claim["review_status"], "accepted")
+        self.assertEqual(reviewed_claim["decision_basis"], "控制台考据 claim 复核")
+        self.assertFalse(reviewed_claim["needs_manual_review"])
 
     def test_list_jobs_endpoint_returns_recent_persisted_jobs(self):
         first_job = self.client.post("/api/research/jobs", json={"topic": "最近任务 A"}).json()["job_id"]

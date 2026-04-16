@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -27,6 +28,8 @@ from src.infrastructure.runtime_config_assembler import (
     build_runtime_assembly,
 )
 from web_console.job_manager import ResearchJobManager
+
+logger = logging.getLogger(__name__)
 
 
 def configure_api_services(
@@ -98,6 +101,22 @@ def create_app(
         runtime_assembly=runtime_assembly,
     )
 
+    try:
+        from src.infrastructure.persistence import DatabaseManager
+
+        db_manager = DatabaseManager(
+            connection_string=resolved_settings.database_url,
+            echo=resolved_settings.database_config.get("echo", False),
+        )
+        db_manager.init_db()
+        with db_manager.session_scope() as _session:
+            DatabaseManager.create_default_relationships(_session)
+        app.state.db_manager = db_manager
+        monitoring_service: MonitoringService = app.state.monitoring_service
+        monitoring_service.bind_db_manager(db_manager)
+    except Exception as exc:
+        logger.warning("独立 API 数据库初始化失败，研究会话写回能力不可用: %s", exc)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=resolved_settings.api_cors_origins,
@@ -122,6 +141,9 @@ def create_app(
 
     @app.on_event("shutdown")
     def shutdown_job_manager() -> None:
+        db_mgr = getattr(app.state, "db_manager", None)
+        if db_mgr is not None:
+            db_mgr.close()
         manager.close()
 
     include_api_routers(app, base_prefix="/api/v1")

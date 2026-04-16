@@ -10,12 +10,17 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
+    Request,
     WebSocket,
 )
 from fastapi.responses import Response, StreamingResponse
 
 from src.api import websocket as websocket_streaming
-from src.api.dependencies import get_job_manager, require_management_api_key
+from src.api.dependencies import (
+    get_job_manager,
+    get_research_session_repository,
+    require_management_api_key,
+)
 from src.api.research_utils import (
     build_artifact_file_response,
     build_markdown_report,
@@ -25,17 +30,53 @@ from src.api.research_utils import (
     resolve_preferred_report_artifact,
 )
 from src.api.schemas import (
+    ResearchCatalogReviewRequest,
+    ResearchCatalogReviewResponse,
     ResearchDashboardResponse,
     ResearchJobAccepted,
     ResearchJobDeletionResponse,
     ResearchJobListResponse,
     ResearchJobSnapshot,
+    ResearchPhilologyWorkbenchReviewRequest,
+    ResearchPhilologyWorkbenchReviewResponse,
     ResearchResult,
     ResearchRunRequest,
 )
+from src.infrastructure.research_session_repo import ResearchSessionRepository
 from web_console.job_manager import ResearchJobManager, format_sse
 
 router = APIRouter(tags=["research"])
+
+
+def _resolve_job_snapshot(manager: ResearchJobManager, job_id: str) -> dict:
+    job = manager.get_job(job_id)
+    if job is not None:
+        return job.snapshot()
+
+    payload = manager.get_persisted_job(job_id)
+    if isinstance(payload, dict) and isinstance(payload.get("job"), dict):
+        return dict(payload["job"])
+
+    raise HTTPException(status_code=404, detail="job 不存在")
+
+
+def _resolve_cycle_id(job_snapshot: dict) -> str:
+    result = job_snapshot.get("result") if isinstance(job_snapshot.get("result"), dict) else {}
+    return str(job_snapshot.get("cycle_id") or result.get("cycle_id") or "").strip()
+
+
+def _resolve_review_reviewer(request: Request, explicit_reviewer: str) -> str:
+    reviewer = str(explicit_reviewer or "").strip()
+    if reviewer:
+        return reviewer
+
+    auth_context = getattr(request.state, "auth_context", None)
+    if isinstance(auth_context, dict):
+        for field_name in ("principal", "display_name", "username", "user_id"):
+            value = str(auth_context.get(field_name) or "").strip()
+            if value:
+                return value
+    return "管理 API"
 
 
 @router.post("/run")
@@ -92,10 +133,7 @@ def get_research_job(
     manager: ResearchJobManager=Depends(get_job_manager),
     _: None=Depends(require_management_api_key),
 ) -> ResearchJobSnapshot:
-    job = manager.get_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="job 不存在")
-    return job.snapshot()
+    return _resolve_job_snapshot(manager, job_id)
 
 
 @router.get("/jobs/{job_id}/dashboard")
@@ -108,11 +146,8 @@ def get_research_job_dashboard(
     manager: ResearchJobManager=Depends(get_job_manager),
     _: None=Depends(require_management_api_key),
 ) -> ResearchDashboardResponse:
-    job = manager.get_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="job 不存在")
     return build_research_dashboard_payload(
-        job.snapshot(),
+        _resolve_job_snapshot(manager, job_id),
         philology_filters={
             "document_title": document_title,
             "work_title": work_title,
@@ -120,6 +155,100 @@ def get_research_job_dashboard(
             "witness_key": witness_key,
         },
     )
+
+
+@router.post("/jobs/{job_id}/catalog-review")
+def update_research_job_catalog_review(
+    job_id: str,
+    payload: ResearchCatalogReviewRequest,
+    request: Request,
+    manager: ResearchJobManager=Depends(get_job_manager),
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ResearchCatalogReviewResponse:
+    job_snapshot = _resolve_job_snapshot(manager, job_id)
+    result = job_snapshot.get("result") if isinstance(job_snapshot.get("result"), dict) else None
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=409, detail="job 尚未生成可写回的研究结果")
+
+    cycle_id = _resolve_cycle_id(job_snapshot)
+    if not cycle_id:
+        raise HTTPException(status_code=409, detail="job 尚未关联持久化 cycle_id")
+
+    review_payload = payload.model_dump()
+    review_payload["reviewer"] = _resolve_review_reviewer(request, str(review_payload.get("reviewer") or ""))
+    if not str(review_payload.get("decision_basis") or "").strip():
+        review_payload["decision_basis"] = "管理 API 目录学 review 写回"
+
+    try:
+        review_artifact = repository.upsert_observe_catalog_review(cycle_id, review_payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if review_artifact is None:
+        if repository.get_session(cycle_id) is None:
+            raise HTTPException(status_code=404, detail="研究会话不存在")
+        raise HTTPException(status_code=409, detail="Observe 阶段尚未持久化，暂不可写回 review")
+
+    refreshed_snapshot = repository.get_full_snapshot(cycle_id)
+    if refreshed_snapshot is None:
+        raise HTTPException(status_code=404, detail="研究会话不存在")
+
+    observe_philology = refreshed_snapshot.get("observe_philology") if isinstance(refreshed_snapshot, dict) else {}
+    manager.sync_job_observe_philology(job_id, observe_philology if isinstance(observe_philology, dict) else {})
+    return {
+        "job_id": job_id,
+        "cycle_id": cycle_id,
+        "observe_philology": observe_philology if isinstance(observe_philology, dict) else {},
+        "review_artifact": review_artifact,
+    }
+
+
+@router.post("/jobs/{job_id}/philology-review")
+def update_research_job_philology_review(
+    job_id: str,
+    payload: ResearchPhilologyWorkbenchReviewRequest,
+    request: Request,
+    manager: ResearchJobManager=Depends(get_job_manager),
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ResearchPhilologyWorkbenchReviewResponse:
+    job_snapshot = _resolve_job_snapshot(manager, job_id)
+    result = job_snapshot.get("result") if isinstance(job_snapshot.get("result"), dict) else None
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=409, detail="job 尚未生成可写回的研究结果")
+
+    cycle_id = _resolve_cycle_id(job_snapshot)
+    if not cycle_id:
+        raise HTTPException(status_code=409, detail="job 尚未关联持久化 cycle_id")
+
+    review_payload = payload.model_dump()
+    review_payload["reviewer"] = _resolve_review_reviewer(request, str(review_payload.get("reviewer") or ""))
+    if not str(review_payload.get("decision_basis") or "").strip():
+        review_payload["decision_basis"] = "控制台文献学工作台快速审核"
+
+    try:
+        review_artifact = repository.upsert_observe_workbench_review(cycle_id, review_payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if review_artifact is None:
+        if repository.get_session(cycle_id) is None:
+            raise HTTPException(status_code=404, detail="研究会话不存在")
+        raise HTTPException(status_code=409, detail="Observe 阶段尚未持久化，暂不可写回文献学 review")
+
+    refreshed_snapshot = repository.get_full_snapshot(cycle_id)
+    if refreshed_snapshot is None:
+        raise HTTPException(status_code=404, detail="研究会话不存在")
+
+    observe_philology = refreshed_snapshot.get("observe_philology") if isinstance(refreshed_snapshot, dict) else {}
+    manager.sync_job_observe_philology(job_id, observe_philology if isinstance(observe_philology, dict) else {})
+    return {
+        "job_id": job_id,
+        "cycle_id": cycle_id,
+        "observe_philology": observe_philology if isinstance(observe_philology, dict) else {},
+        "review_artifact": review_artifact,
+    }
 
 
 @router.delete("/jobs/{job_id}")

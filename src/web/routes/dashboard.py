@@ -25,17 +25,21 @@ from html import escape
 from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
+from src.api.research_utils import build_research_dashboard_payload
 from src.research.observe_philology import (
     build_observe_philology_filter_contract,
     filter_observe_philology_assets,
 )
 from src.web.auth import get_current_user
+from src.web.ops.research_session_contract import resolve_phase_result
 from src.web.ops.research_session_service import (
+    apply_catalog_review,
+    apply_philology_review,
     get_research_session,
     list_research_sessions,
 )
@@ -185,6 +189,14 @@ def _normalize_page(value: Any, default: int = 1) -> int:
     except (TypeError, ValueError):
         return default
     return page if page > 0 else default
+
+
+def _parse_urlencoded_body(raw_body: bytes) -> Dict[str, str]:
+    parsed = parse_qs(raw_body.decode("utf-8", errors="ignore"), keep_blank_values=True)
+    return {
+        str(key): str(values[-1] if values else "")
+        for key, values in parsed.items()
+    }
 
 
 def _paginate_items(items: List[Dict[str, Any]], page: int, page_size: int) -> Dict[str, Any]:
@@ -357,6 +369,86 @@ def _render_catalog_review_badge(status: str) -> str:
     return f'<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium {cls}">{_safe_html(label)}</span>'
 
 
+def _resolve_dashboard_reviewer(current_user: Any) -> str:
+    if isinstance(current_user, dict):
+        for field_name in ("display_name", "username", "principal", "user_id"):
+            value = str(current_user.get(field_name) or "").strip()
+            if value:
+                return value
+    return "工作台用户"
+
+
+def _render_catalog_review_meta(record: Dict[str, Any]) -> str:
+    reviewer = str(record.get("reviewer") or "").strip()
+    reviewed_at = str(record.get("reviewed_at") or "").strip()
+    decision_basis = str(record.get("decision_basis") or "").strip()
+    parts = [part for part in (reviewer, reviewed_at, decision_basis) if part]
+    if not parts:
+        return '<p class="text-[11px] text-gray-400">尚未写回人工校核记录</p>'
+    return f'<p class="text-[11px] text-gray-400">{" · ".join(_safe_html(part) for part in parts)}</p>'
+
+
+def _render_catalog_review_actions(
+    cycle_id: str,
+    lineage: Dict[str, Any],
+    *,
+    terminology_page: int,
+    collation_page: int,
+    drawer: bool,
+    document_title: str,
+    work_title: str,
+    version_lineage_key: str,
+    witness_key: str,
+) -> str:
+    target_id = "#session-detail-drawer-content" if drawer else "#project-detail-panel"
+    target_version_lineage_key = str(lineage.get("version_lineage_key") or lineage.get("work_fragment_key") or "").strip()
+    if not target_version_lineage_key:
+        return ""
+
+    hidden_fields = "".join(
+        f'<input type="hidden" name="{_safe_html(name)}" value="{_safe_html(value)}">'
+        for name, value in (
+            ("scope", "version_lineage"),
+            ("target_version_lineage_key", target_version_lineage_key),
+            ("terminology_page", str(max(1, terminology_page))),
+            ("collation_page", str(max(1, collation_page))),
+            ("drawer", "1" if drawer else "0"),
+            ("document_title", document_title),
+            ("work_title", work_title),
+            ("version_lineage_key", version_lineage_key),
+            ("witness_key", witness_key),
+        )
+    )
+    buttons = (
+        ("accepted", "标记已核", "bg-emerald-600 text-white hover:bg-emerald-700"),
+        ("rejected", "标记驳回", "bg-rose-600 text-white hover:bg-rose-700"),
+        ("needs_source", "待补据", "bg-slate-800 text-white hover:bg-slate-900"),
+        ("pending", "退回待核", "bg-amber-100 text-amber-800 hover:bg-amber-200"),
+    )
+    buttons_html = "".join(
+        f'<button type="submit" name="review_status" value="{_safe_html(status)}" '
+        f'class="inline-flex items-center px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition {cls}">{_safe_html(label)}</button>'
+        for status, label, cls in buttons
+    )
+    decision_basis = str(lineage.get("decision_basis") or "").strip()
+    basis_field = (
+        '<label class="block text-[11px] text-gray-500">'
+        '审核依据 / 备注'
+        f'<textarea name="decision_basis" rows="2" '
+        'class="mt-1 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 '
+        'placeholder:text-gray-400 focus:border-emerald-300 focus:bg-white focus:outline-none" '
+        'placeholder="填写审核依据、缺失来源说明或人工备注">'
+        f'{_safe_html(decision_basis)}</textarea>'
+        '</label>'
+    )
+    return (
+        f'<form class="space-y-2 pt-1" '
+        f'hx-post="/api/projects/{quote(str(cycle_id or "").strip(), safe="")}/catalog-review" '
+        f'hx-target="{target_id}" hx-swap="outerHTML">'
+        f'{hidden_fields}{basis_field}<div class="flex flex-wrap items-center gap-2">{buttons_html}</div></form>'
+    )
+
+
 def _format_active_catalog_filter_summary(filter_contract: Dict[str, Any]) -> str:
     active_filters = filter_contract.get("active_filters") if isinstance(filter_contract.get("active_filters"), dict) else {}
     options = filter_contract.get("options") if isinstance(filter_contract.get("options"), dict) else {}
@@ -471,6 +563,282 @@ def _render_catalog_filter_chips(
         </div>
         {''.join(sections_html)}
     </div>
+    """
+
+
+def _build_session_dashboard_snapshot(session: Dict[str, Any]) -> Dict[str, Any]:
+    phase_executions = session.get("phase_executions") if isinstance(session.get("phase_executions"), dict) else {}
+    phase_items: List[Dict[str, Any]] = []
+    phase_results: Dict[str, Dict[str, Any]] = {}
+    for phase_name, execution in phase_executions.items():
+        if not isinstance(execution, dict):
+            continue
+        normalized_phase = str(execution.get("phase") or phase_name or "").strip().lower() or str(phase_name)
+        result = resolve_phase_result(execution)
+        phase_items.append(
+            {
+                "phase": normalized_phase,
+                "status": str(execution.get("status") or result.get("status") or "completed").strip() or "completed",
+                "duration_sec": float(execution.get("duration") or result.get("duration_sec") or 0.0),
+                "summary": result.get("summary") if isinstance(result.get("summary"), dict) else {},
+            }
+        )
+        if result:
+            phase_results[normalized_phase] = result
+
+    status = str(session.get("status") or "completed").strip().lower() or "completed"
+    progress = 100.0 if status == "completed" else 0.0
+    return {
+        "job_id": str(session.get("cycle_id") or "").strip(),
+        "topic": str(
+            session.get("research_objective")
+            or session.get("description")
+            or session.get("cycle_name")
+            or session.get("cycle_id")
+            or ""
+        ).strip(),
+        "status": status,
+        "progress": progress,
+        "current_phase": str(session.get("current_phase") or "observe").strip().lower() or "observe",
+        "result": {
+            "cycle_id": str(session.get("cycle_id") or "").strip(),
+            "pipeline_metadata": {
+                "cycle_name": str(session.get("cycle_name") or "").strip(),
+                "description": str(session.get("description") or "").strip(),
+            },
+            "phases": phase_items,
+            "phase_results": phase_results,
+            "observe_philology": session.get("observe_philology") if isinstance(session.get("observe_philology"), dict) else {},
+        },
+    }
+
+
+def _render_workbench_review_actions(
+    cycle_id: str,
+    item: Dict[str, Any],
+    *,
+    terminology_page: int,
+    collation_page: int,
+    drawer: bool,
+    document_title: str,
+    work_title: str,
+    version_lineage_key: str,
+    witness_key: str,
+) -> str:
+    asset_type = str(item.get("asset_type") or "").strip()
+    asset_key = str(item.get("asset_key") or "").strip()
+    if not asset_type or not asset_key:
+        return ""
+
+    target_id = "#session-detail-drawer-content" if drawer else "#project-detail-panel"
+    hidden_fields = "".join(
+        f'<input type="hidden" name="{_safe_html(name)}" value="{_safe_html(value)}">'
+        for name, value in (
+            ("asset_type", asset_type),
+            ("asset_key", asset_key),
+            ("candidate_kind", str(item.get("candidate_kind") or "")),
+            ("document_title", str(item.get("document_title") or "")),
+            ("document_urn", str(item.get("document_urn") or "")),
+            ("work_title", str(item.get("work_title") or "")),
+            ("fragment_title", str(item.get("fragment_title") or "")),
+            ("version_lineage_key", str(item.get("version_lineage_key") or "")),
+            ("witness_key", str(item.get("witness_key") or "")),
+            ("canonical", str(item.get("canonical") or "")),
+            ("label", str(item.get("label") or "")),
+            ("difference_type", str(item.get("difference_type") or "")),
+            ("base_text", str(item.get("base_text") or "")),
+            ("witness_text", str(item.get("witness_text") or "")),
+            ("claim_id", str(item.get("claim_id") or "")),
+            ("source_entity", str(item.get("source_entity") or "")),
+            ("target_entity", str(item.get("target_entity") or "")),
+            ("relation_type", str(item.get("relation_type") or "")),
+            ("fragment_candidate_id", str(item.get("fragment_candidate_id") or "")),
+            ("terminology_page", str(max(1, terminology_page))),
+            ("collation_page", str(max(1, collation_page))),
+            ("drawer", "1" if drawer else "0"),
+            ("document_title_filter", document_title),
+            ("work_title_filter", work_title),
+            ("version_lineage_key_filter", version_lineage_key),
+            ("witness_key_filter", witness_key),
+        )
+    )
+    buttons = (
+        ("accepted", "标记已核", "bg-emerald-600 text-white hover:bg-emerald-700"),
+        ("rejected", "标记驳回", "bg-rose-600 text-white hover:bg-rose-700"),
+        ("needs_source", "待补据", "bg-slate-800 text-white hover:bg-slate-900"),
+        ("pending", "退回待核", "bg-amber-100 text-amber-800 hover:bg-amber-200"),
+    )
+    buttons_html = "".join(
+        f'<button type="submit" name="review_status" value="{_safe_html(status)}" '
+        f'class="inline-flex items-center px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition {cls}">{_safe_html(label)}</button>'
+        for status, label, cls in buttons
+    )
+    decision_basis = str(item.get("decision_basis") or "").strip()
+    return (
+        f'<form class="space-y-2 pt-1" '
+        f'hx-post="/api/projects/{quote(str(cycle_id or "").strip(), safe="")}/philology-review" '
+        f'hx-target="{target_id}" hx-swap="outerHTML">'
+        f'{hidden_fields}'
+        '<label class="block text-[11px] text-gray-500">审核依据 / 备注'
+        f'<textarea name="decision_basis" rows="2" '
+        'class="mt-1 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 '
+        'placeholder:text-gray-400 focus:border-emerald-300 focus:bg-white focus:outline-none" '
+        'placeholder="填写审核依据、补据说明或人工备注">'
+        f'{_safe_html(decision_basis)}</textarea></label>'
+        f'<div class="flex flex-wrap items-center gap-2">{buttons_html}</div></form>'
+    )
+
+
+def _render_workbench_review_card(
+    cycle_id: str,
+    item: Dict[str, Any],
+    *,
+    terminology_page: int,
+    collation_page: int,
+    drawer: bool,
+    document_title: str,
+    work_title: str,
+    version_lineage_key: str,
+    witness_key: str,
+) -> str:
+    summary_lines = [str(line).strip() for line in item.get("summary_lines") or [] if str(line).strip()]
+    summary_html = "".join(
+        f'<p class="text-xs text-gray-500 leading-5">{_safe_html(line)}</p>'
+        for line in summary_lines
+    ) or '<p class="text-xs text-gray-400">暂无摘要说明</p>'
+    subtitle = str(item.get("subtitle") or "").strip()
+    return f"""
+    <article class="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-3">
+        <div class="flex flex-wrap items-start justify-between gap-2">
+            <div>
+                <h5 class="text-sm font-semibold text-gray-800">{_safe_html(item.get('title') or '未命名条目')}</h5>
+                <p class="text-xs text-gray-500 mt-1">{_safe_html(subtitle or '文献学工作台条目')}</p>
+            </div>
+            {_render_catalog_review_badge(str(item.get('review_status') or 'pending'))}
+        </div>
+        <div class="space-y-1">{summary_html}</div>
+        {_render_catalog_review_meta(item)}
+        {_render_workbench_review_actions(
+            cycle_id,
+            item,
+            terminology_page=terminology_page,
+            collation_page=collation_page,
+            drawer=drawer,
+            document_title=document_title,
+            work_title=work_title,
+            version_lineage_key=version_lineage_key,
+            witness_key=witness_key,
+        )}
+    </article>
+    """
+
+
+def _render_workbench_review_section(
+    cycle_id: str,
+    section: Dict[str, Any],
+    *,
+    terminology_page: int,
+    collation_page: int,
+    drawer: bool,
+    document_title: str,
+    work_title: str,
+    version_lineage_key: str,
+    witness_key: str,
+) -> str:
+    items = [dict(item) for item in section.get("items") or [] if isinstance(item, dict)]
+    if not items:
+        return ""
+    cards_html = "".join(
+        _render_workbench_review_card(
+            cycle_id,
+            item,
+            terminology_page=terminology_page,
+            collation_page=collation_page,
+            drawer=drawer,
+            document_title=document_title,
+            work_title=work_title,
+            version_lineage_key=version_lineage_key,
+            witness_key=witness_key,
+        )
+        for item in items
+    )
+    return f"""
+    <section class="rounded-2xl border border-gray-100 bg-gray-50/60 p-4 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+                <h4 class="text-base font-semibold text-gray-800">{_safe_html(section.get('title') or '文献学校核分组')}</h4>
+                <p class="text-sm text-gray-400 mt-1">{_safe_html(section.get('description') or '按当前目录学筛选展示可审核条目')}</p>
+            </div>
+            <span class="text-xs text-gray-500">卡片 {len(items)}</span>
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">{cards_html}</div>
+    </section>
+    """
+
+
+def _render_philology_review_workbench(
+    cycle_id: str,
+    review_workbench: Dict[str, Any],
+    filter_summary: str,
+    *,
+    terminology_page: int,
+    collation_page: int,
+    drawer: bool,
+    document_title: str,
+    work_title: str,
+    version_lineage_key: str,
+    witness_key: str,
+) -> str:
+    sections = [
+        dict(section)
+        for section in (review_workbench.get("sections") or [])
+        if isinstance(section, dict) and str(section.get("asset_type") or "") != "catalog_version_lineage"
+    ]
+    visible_sections = [section for section in sections if any(isinstance(item, dict) for item in (section.get("items") or []))]
+    if not visible_sections:
+        return f"""
+        <section class="rounded-2xl border border-gray-100 bg-gray-50/60 p-4 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h4 class="text-base font-semibold text-gray-800">文献学校核工作台</h4>
+                    <p class="text-sm text-gray-400 mt-1">目录谱系仍在上方目录学基线复核，其余术语、校勘、辑佚与 claim 条目统一在此处理</p>
+                </div>
+                <span class="text-xs text-emerald-700">{_safe_html(filter_summary)}</span>
+            </div>
+            {_empty_state('🧾', '暂无可审核条目', '当前筛选结果下还没有可在详情页直接写回的文献学工作台卡片。')}
+        </section>
+        """
+    sections_html = "".join(
+        _render_workbench_review_section(
+            cycle_id,
+            section,
+            terminology_page=terminology_page,
+            collation_page=collation_page,
+            drawer=drawer,
+            document_title=document_title,
+            work_title=work_title,
+            version_lineage_key=version_lineage_key,
+            witness_key=witness_key,
+        )
+        for section in visible_sections
+    )
+    total_cards = sum(len(section.get("items") or []) for section in visible_sections)
+    return f"""
+    <section class="space-y-4">
+        <div class="rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h4 class="text-base font-semibold text-gray-800">文献学校核工作台</h4>
+                    <p class="text-sm text-gray-400 mt-1">目录谱系仍在上方目录学基线复核，其余术语、校勘、辑佚与 claim 条目统一在此处理</p>
+                </div>
+                <div class="text-right text-xs text-gray-500">
+                    <p>可见卡片 {total_cards}</p>
+                    <p class="mt-1 text-emerald-700">{_safe_html(filter_summary)}</p>
+                </div>
+            </div>
+        </div>
+        {sections_html}
+    </section>
     """
 
 
@@ -664,7 +1032,7 @@ def _render_session_detail_panel(
     )
 
     if not isinstance(session, dict):
-        message = error_message or "选择一条研究任务后，可在这里查看 Observe 阶段的术语标准表与校勘条目。"
+        message = error_message or "选择一条研究任务后，可在这里查看 Observe 阶段的术语标准表、校勘条目与文献学校核工作台。"
         return f"""
         <div id="{panel_id}" class="{panel_class}">
             <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
@@ -678,6 +1046,13 @@ def _render_session_detail_panel(
         </div>
         """
 
+    notice_banner = ""
+    if error_message:
+        notice_banner = (
+            '<div class="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">'
+            f'{_safe_html(error_message)}</div>'
+        )
+
     title = str(
         session.get("cycle_name")
         or session.get("title")
@@ -690,22 +1065,37 @@ def _render_session_detail_panel(
     cycle_id = str(session.get("cycle_id") or "").strip()
     phases = _session_phases(session)
     observe = session.get("observe_philology") if isinstance(session.get("observe_philology"), dict) else {}
+    selected_document_title = str(document_title or "").strip()
+    selected_work_title = str(work_title or "").strip()
+    selected_version_lineage_key = str(version_lineage_key or "").strip()
+    selected_witness_key = str(witness_key or "").strip()
     observe_filter_contract = build_observe_philology_filter_contract(
         observe,
         {
-            "document_title": document_title,
-            "work_title": work_title,
-            "version_lineage_key": version_lineage_key,
-            "witness_key": witness_key,
+            "document_title": selected_document_title,
+            "work_title": selected_work_title,
+            "version_lineage_key": selected_version_lineage_key,
+            "witness_key": selected_witness_key,
         },
     )
+    dashboard_payload = build_research_dashboard_payload(
+        _build_session_dashboard_snapshot(session),
+        philology_filters={
+            "document_title": selected_document_title,
+            "work_title": selected_work_title,
+            "version_lineage_key": selected_version_lineage_key,
+            "witness_key": selected_witness_key,
+        },
+    )
+    evidence_board = dashboard_payload.get("evidence_board") if isinstance(dashboard_payload.get("evidence_board"), dict) else {}
+    review_workbench = evidence_board.get("review_workbench") if isinstance(evidence_board.get("review_workbench"), dict) else {}
     observe = filter_observe_philology_assets(
         observe,
         {
-            "document_title": document_title,
-            "work_title": work_title,
-            "version_lineage_key": version_lineage_key,
-            "witness_key": witness_key,
+            "document_title": selected_document_title,
+            "work_title": selected_work_title,
+            "version_lineage_key": selected_version_lineage_key,
+            "witness_key": selected_witness_key,
         },
     )
     annotation_report = observe.get("annotation_report") if isinstance(observe.get("annotation_report"), dict) else {}
@@ -732,10 +1122,6 @@ def _render_session_detail_panel(
         if str(key).strip()
     }
     notes = summary.get("philology_notes") if isinstance(summary.get("philology_notes"), list) else []
-    selected_document_title = str(document_title or "").strip()
-    selected_work_title = str(work_title or "").strip()
-    selected_version_lineage_key = str(version_lineage_key or "").strip()
-    selected_witness_key = str(witness_key or "").strip()
 
     terminology_rows_all = sorted(
         [dict(item) for item in observe.get("terminology_standard_table") or [] if isinstance(item, dict)],
@@ -778,6 +1164,18 @@ def _render_session_detail_panel(
         cycle_id,
         filter_contract=observe_filter_contract,
         drawer=drawer,
+    )
+    workbench_section_html = _render_philology_review_workbench(
+        cycle_id,
+        review_workbench,
+        _format_active_catalog_filter_summary(observe_filter_contract),
+        terminology_page=term_page["page"],
+        collation_page=collation_page_data["page"],
+        drawer=drawer,
+        document_title=selected_document_title,
+        work_title=selected_work_title,
+        version_lineage_key=selected_version_lineage_key,
+        witness_key=selected_witness_key,
     )
     catalog_semantic_badges_html = "".join(
         badge
@@ -846,7 +1244,19 @@ def _render_session_detail_panel(
             <p class="text-xs text-gray-500">{_safe_html(lineage_meta)}</p>
             <p class="text-xs text-gray-500">时代语义：{_safe_html(lineage_semantic_hint)}</p>
             <p class="text-xs text-gray-500">训诂义项：{_safe_html(lineage_exegesis_preview or '待补充')}</p>
+            {_render_catalog_review_meta(lineage)}
             <p class="text-[11px] text-gray-400 break-all">{_safe_html(lineage.get("version_lineage_key") or lineage.get("work_fragment_key") or '未生成谱系键')}</p>
+            {_render_catalog_review_actions(
+                cycle_id,
+                lineage,
+                terminology_page=term_page["page"],
+                collation_page=collation_page_data["page"],
+                drawer=drawer,
+                document_title=selected_document_title,
+                work_title=selected_work_title,
+                version_lineage_key=selected_version_lineage_key,
+                witness_key=selected_witness_key,
+            )}
         </article>
         """
     if not catalog_lineage_cards_html:
@@ -1021,6 +1431,8 @@ def _render_session_detail_panel(
 
         {filter_chips_html}
 
+        {workbench_section_html}
+
         <section class="rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <div>
@@ -1094,10 +1506,11 @@ def _render_session_detail_panel(
         <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
             <div>
                 <h3 class="text-base font-semibold text-gray-800">研究任务详情</h3>
-                <p class="text-sm text-gray-400 mt-1">聚合展示 Observe 阶段术语标准表与校勘条目</p>
+                <p class="text-sm text-gray-400 mt-1">聚合展示 Observe 阶段术语标准表、校勘条目与文献学校核工作台</p>
             </div>
             {close_button}
         </div>
+        {notice_banner}
         {detail_body}
     </div>
     """
@@ -1715,6 +2128,135 @@ async def project_detail_panel(
             version_lineage_key=version_lineage_key,
             witness_key=witness_key,
             error_message=f"未找到研究任务: {cycle_id}",
+        )
+    )
+
+
+@router.post("/api/projects/{cycle_id}/catalog-review", response_class=HTMLResponse)
+async def update_project_catalog_review(
+    request: Request,
+    cycle_id: str,
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> HTMLResponse:
+    form_payload = _parse_urlencoded_body(await request.body())
+    scope = str(form_payload.get("scope") or "version_lineage").strip() or "version_lineage"
+    target_version_lineage_key = str(form_payload.get("target_version_lineage_key") or "").strip()
+    review_status = str(form_payload.get("review_status") or "pending").strip() or "pending"
+    terminology_page = _normalize_page(form_payload.get("terminology_page"), 1)
+    collation_page = _normalize_page(form_payload.get("collation_page"), 1)
+    document_title = str(form_payload.get("document_title") or "").strip()
+    work_title = str(form_payload.get("work_title") or "").strip()
+    version_lineage_key = str(form_payload.get("version_lineage_key") or "").strip()
+    witness_key = str(form_payload.get("witness_key") or "").strip()
+    decision_basis = str(form_payload.get("decision_basis") or "").strip()
+    drawer = 1 if str(form_payload.get("drawer") or "0").strip() in {"1", "true", "True"} else 0
+
+    try:
+        updated_session = apply_catalog_review(
+            request.app,
+            cycle_id,
+            {
+                "scope": scope,
+                "version_lineage_key": str(target_version_lineage_key or "").strip(),
+                "review_status": review_status,
+                "reviewer": _resolve_dashboard_reviewer(user),
+                "decision_basis": decision_basis or "目录学工作台快速审核",
+            },
+        )
+        if updated_session is None:
+            raise ValueError("Observe 阶段未持久化或研究任务不存在，无法写回目录学 review")
+        session = updated_session
+        error_message = ""
+    except Exception as exc:
+        logger.exception("dashboard catalog review writeback failed: %s", cycle_id)
+        try:
+            session = get_research_session(request.app, cycle_id)
+        except Exception:
+            session = None
+        error_message = f"目录学 review 写回失败: {exc}"
+
+    return HTMLResponse(
+        _render_session_detail_panel(
+            session,
+            terminology_page=terminology_page,
+            collation_page=collation_page,
+            drawer=bool(drawer),
+            document_title=document_title,
+            work_title=work_title,
+            version_lineage_key=version_lineage_key,
+            witness_key=witness_key,
+            error_message=error_message,
+        )
+    )
+
+
+@router.post("/api/projects/{cycle_id}/philology-review", response_class=HTMLResponse)
+async def update_project_philology_review(
+    request: Request,
+    cycle_id: str,
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> HTMLResponse:
+    form_payload = _parse_urlencoded_body(await request.body())
+    review_status = str(form_payload.get("review_status") or "pending").strip() or "pending"
+    terminology_page = _normalize_page(form_payload.get("terminology_page"), 1)
+    collation_page = _normalize_page(form_payload.get("collation_page"), 1)
+    document_title = str(form_payload.get("document_title_filter") or "").strip()
+    work_title = str(form_payload.get("work_title_filter") or "").strip()
+    version_lineage_key = str(form_payload.get("version_lineage_key_filter") or "").strip()
+    witness_key = str(form_payload.get("witness_key_filter") or "").strip()
+    decision_basis = str(form_payload.get("decision_basis") or "").strip()
+    drawer = 1 if str(form_payload.get("drawer") or "0").strip() in {"1", "true", "True"} else 0
+
+    review_payload = {
+        "asset_type": str(form_payload.get("asset_type") or "").strip(),
+        "asset_key": str(form_payload.get("asset_key") or "").strip(),
+        "review_status": review_status,
+        "reviewer": _resolve_dashboard_reviewer(user),
+        "decision_basis": decision_basis or "项目详情文献学工作台快速审核",
+        "candidate_kind": str(form_payload.get("candidate_kind") or "").strip(),
+        "document_title": str(form_payload.get("document_title") or "").strip(),
+        "document_urn": str(form_payload.get("document_urn") or "").strip(),
+        "work_title": str(form_payload.get("work_title") or "").strip(),
+        "fragment_title": str(form_payload.get("fragment_title") or "").strip(),
+        "version_lineage_key": str(form_payload.get("version_lineage_key") or "").strip(),
+        "witness_key": str(form_payload.get("witness_key") or "").strip(),
+        "canonical": str(form_payload.get("canonical") or "").strip(),
+        "label": str(form_payload.get("label") or "").strip(),
+        "difference_type": str(form_payload.get("difference_type") or "").strip(),
+        "base_text": str(form_payload.get("base_text") or "").strip(),
+        "witness_text": str(form_payload.get("witness_text") or "").strip(),
+        "claim_id": str(form_payload.get("claim_id") or "").strip(),
+        "source_entity": str(form_payload.get("source_entity") or "").strip(),
+        "target_entity": str(form_payload.get("target_entity") or "").strip(),
+        "relation_type": str(form_payload.get("relation_type") or "").strip(),
+        "fragment_candidate_id": str(form_payload.get("fragment_candidate_id") or "").strip(),
+    }
+
+    try:
+        updated_session = apply_philology_review(request.app, cycle_id, review_payload)
+        if updated_session is None:
+            raise ValueError("Observe 阶段未持久化或研究任务不存在，无法写回文献学 review")
+        session = updated_session
+        error_message = ""
+    except Exception as exc:
+        logger.exception("dashboard philology review writeback failed: %s", cycle_id)
+        try:
+            session = get_research_session(request.app, cycle_id)
+        except Exception:
+            session = None
+        error_message = f"文献学 review 写回失败: {exc}"
+
+    return HTMLResponse(
+        _render_session_detail_panel(
+            session,
+            terminology_page=terminology_page,
+            collation_page=collation_page,
+            drawer=bool(drawer),
+            document_title=document_title,
+            work_title=work_title,
+            version_lineage_key=version_lineage_key,
+            witness_key=witness_key,
+            error_message=error_message,
         )
     )
 

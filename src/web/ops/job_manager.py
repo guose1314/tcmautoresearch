@@ -242,6 +242,37 @@ class ResearchJobManager:
             return None
         return payload
 
+    def sync_job_observe_philology(self, job_id: str, observe_philology: Dict[str, Any]) -> bool:
+        normalized_job_id = str(job_id or "").strip()
+        if not normalized_job_id:
+            return False
+
+        observe_payload = deepcopy(observe_philology if isinstance(observe_philology, dict) else {})
+        updated = False
+        with self._lock:
+            job = self._jobs.get(normalized_job_id)
+            if job is not None:
+                if not isinstance(job.result, dict):
+                    job.result = {}
+                job.result["observe_philology"] = observe_payload
+                self._persist_job(job)
+                updated = True
+
+        persisted_payload = self._store.get_job_payload(normalized_job_id)
+        if not isinstance(persisted_payload, dict):
+            return updated
+
+        snapshot = persisted_payload.get("job") if isinstance(persisted_payload.get("job"), dict) else None
+        if snapshot is None:
+            return updated
+
+        result = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {}
+        result["observe_philology"] = deepcopy(observe_payload)
+        snapshot["result"] = result
+        persisted_payload["job"] = snapshot
+        self._store.save_job(persisted_payload)
+        return True
+
     def _load_persisted_jobs(self) -> Dict[str, ResearchJob]:
         restored: Dict[str, ResearchJob] = {}
         needs_save = False

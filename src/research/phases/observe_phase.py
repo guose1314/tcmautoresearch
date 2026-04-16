@@ -223,6 +223,7 @@ class ObservePhaseMixin:
         terminology_standard_table_count = int(aggregate.get("terminology_standard_table_count") or 0)
         version_collation_difference_count = int(aggregate.get("version_collation_difference_count") or 0)
         collation_entry_count = int(aggregate.get("collation_entry_count") or 0)
+        fragment_candidate_count = int(aggregate.get("fragment_candidate_count") or 0)
         if philology_document_count:
             observations.append(f"已对 {philology_document_count} 篇文本执行术语标准化与文献学注记")
         if term_mapping_count or orthographic_variant_count:
@@ -237,6 +238,8 @@ class ObservePhaseMixin:
             findings.append(f"版本对勘累计发现 {version_collation_difference_count} 处异文")
         if collation_entry_count:
             findings.append(f"文献学层生成 {collation_entry_count} 条可复用校勘条目")
+        if fragment_candidate_count:
+            findings.append(f"文献学层生成 {fragment_candidate_count} 条可审核辑佚候选")
         findings.append(f"首段主流程累计识别 {aggregate.get('total_entities', 0)} 个实体")
         findings.append(
             f"累计构建 {aggregate.get('semantic_graph_nodes', 0)} 个语义节点与 {aggregate.get('semantic_graph_edges', 0)} 条关系"
@@ -302,6 +305,7 @@ class ObservePhaseMixin:
                 or ingestion_aggregate.get("recognized_term_count", 0) > 0
             ),
             "version_collation": bool(ingestion_aggregate.get("version_collation_witness_count", 0) > 0),
+            "fragment_reconstruction": bool(ingestion_aggregate.get("fragment_candidate_count", 0) > 0),
             "philology_artifacts": bool(ingestion_aggregate.get("philology_asset_count", 0) > 0),
             "output_generation": self._has_observe_output_generation(ingestion_result, ingestion_ok),
             "literature_retrieval": literature_ok,
@@ -669,6 +673,9 @@ class ObservePhaseMixin:
         version_collation_difference_count = 0
         version_collation_witness_count = 0
         collation_entry_count = 0
+        fragment_candidate_count = 0
+        lost_text_candidate_count = 0
+        citation_source_candidate_count = 0
         philology_notes: List[str] = []
 
         try:
@@ -697,6 +704,7 @@ class ObservePhaseMixin:
                 philology_payload = philology_result.get("philology", {}) if isinstance(philology_result, dict) else {}
                 term_standardization = philology_payload.get("term_standardization", {})
                 version_collation = philology_payload.get("version_collation", {})
+                fragment_reconstruction = philology_payload.get("fragment_reconstruction", {})
                 philology_assets = philology_payload.get("philology_assets", {}) if isinstance(philology_payload, dict) else {}
                 document_philology_notes = philology_payload.get("philology_notes", []) or philology_result.get("philology_notes", [])
 
@@ -710,6 +718,9 @@ class ObservePhaseMixin:
                 if int(version_collation.get("witness_count") or 0) > 0:
                     version_collation_witness_count += 1
                 collation_entry_count += int(version_collation.get("collation_entry_count") or 0)
+                fragment_candidate_count += int(fragment_reconstruction.get("fragment_candidate_count") or 0)
+                lost_text_candidate_count += int(fragment_reconstruction.get("lost_text_candidate_count") or 0)
+                citation_source_candidate_count += int(fragment_reconstruction.get("citation_source_candidate_count") or 0)
                 for note in document_philology_notes:
                     note_text = str(note or "").strip()
                     if note_text and note_text not in philology_notes:
@@ -811,6 +822,7 @@ class ObservePhaseMixin:
             )
             terminology_standard_table = self._aggregate_observe_terminology_standard_table(document_results)
             collation_entries = self._aggregate_observe_collation_entries(document_results)
+            fragment_candidate_assets = self._aggregate_observe_fragment_candidates(document_results)
             philology_annotation_report = self._build_observe_philology_annotation_report(
                 document_results,
                 {
@@ -823,12 +835,18 @@ class ObservePhaseMixin:
                     "version_collation_difference_count": version_collation_difference_count,
                     "version_collation_witness_count": version_collation_witness_count,
                     "collation_entry_count": len(collation_entries),
+                    "fragment_candidate_count": len(fragment_candidate_assets["fragment_candidates"]),
+                    "lost_text_candidate_count": len(fragment_candidate_assets["lost_text_candidates"]),
+                    "citation_source_candidate_count": len(fragment_candidate_assets["citation_source_candidates"]),
                     "philology_notes": philology_notes,
                 },
             )
             philology_assets = {
                 "terminology_standard_table": terminology_standard_table,
                 "collation_entries": collation_entries,
+                "fragment_candidates": fragment_candidate_assets["fragment_candidates"],
+                "lost_text_candidates": fragment_candidate_assets["lost_text_candidates"],
+                "citation_source_candidates": fragment_candidate_assets["citation_source_candidates"],
                 "annotation_report": philology_annotation_report,
             }
             philology_asset_count = sum(
@@ -836,6 +854,9 @@ class ObservePhaseMixin:
                 for payload in (
                     terminology_standard_table,
                     collation_entries,
+                    fragment_candidate_assets["fragment_candidates"],
+                    fragment_candidate_assets["lost_text_candidates"],
+                    fragment_candidate_assets["citation_source_candidates"],
                     philology_annotation_report,
                 )
                 if payload not in (None, "", [], {})
@@ -860,6 +881,9 @@ class ObservePhaseMixin:
                     "version_collation_difference_count": version_collation_difference_count,
                     "version_collation_witness_count": version_collation_witness_count,
                     "collation_entry_count": len(collation_entries),
+                    "fragment_candidate_count": len(fragment_candidate_assets["fragment_candidates"]),
+                    "lost_text_candidate_count": len(fragment_candidate_assets["lost_text_candidates"]),
+                    "citation_source_candidate_count": len(fragment_candidate_assets["citation_source_candidates"]),
                     "philology_asset_count": philology_asset_count,
                     "philology_assets": philology_assets,
                     "philology_notes": philology_notes,
@@ -999,6 +1023,42 @@ class ObservePhaseMixin:
                 )
         return entries
 
+    def _aggregate_observe_fragment_candidates(self, documents: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        aggregated = {
+            "fragment_candidates": [],
+            "lost_text_candidates": [],
+            "citation_source_candidates": [],
+        }
+        seen: set[tuple[str, str]] = set()
+        for document in documents:
+            if not isinstance(document, dict):
+                continue
+            philology_assets = document.get("philology_assets") if isinstance(document.get("philology_assets"), dict) else {}
+            for field_name in aggregated:
+                document_entries = philology_assets.get(field_name) if isinstance(philology_assets.get(field_name), list) else []
+                for entry in document_entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    candidate_id = str(
+                        entry.get("fragment_candidate_id")
+                        or entry.get("candidate_id")
+                        or entry.get("id")
+                        or ""
+                    ).strip()
+                    identity = (field_name, candidate_id or str(entry))
+                    if identity in seen:
+                        continue
+                    seen.add(identity)
+                    aggregated[field_name].append(
+                        {
+                            **entry,
+                            "document_title": str(entry.get("document_title") or document.get("title") or "").strip(),
+                            "document_urn": str(entry.get("document_urn") or document.get("urn") or "").strip(),
+                            "source_type": str(entry.get("source_type") or document.get("source_type") or "").strip(),
+                        }
+                    )
+        return aggregated
+
     def _build_observe_philology_annotation_report(
         self,
         documents: List[Dict[str, Any]],
@@ -1011,6 +1071,7 @@ class ObservePhaseMixin:
             philology = document.get("philology") if isinstance(document.get("philology"), dict) else {}
             term_standardization = philology.get("term_standardization") if isinstance(philology.get("term_standardization"), dict) else {}
             version_collation = philology.get("version_collation") if isinstance(philology.get("version_collation"), dict) else {}
+            fragment_reconstruction = philology.get("fragment_reconstruction") if isinstance(philology.get("fragment_reconstruction"), dict) else {}
             document_reports.append(
                 {
                     "document_title": str(document.get("title") or "").strip(),
@@ -1022,6 +1083,9 @@ class ObservePhaseMixin:
                     "difference_count": int(version_collation.get("difference_count") or 0),
                     "collation_entry_count": int(version_collation.get("collation_entry_count") or 0),
                     "witness_count": int(version_collation.get("witness_count") or 0),
+                    "fragment_candidate_count": int(fragment_reconstruction.get("fragment_candidate_count") or 0),
+                    "lost_text_candidate_count": int(fragment_reconstruction.get("lost_text_candidate_count") or 0),
+                    "citation_source_candidate_count": int(fragment_reconstruction.get("citation_source_candidate_count") or 0),
                     "philology_notes": [str(note) for note in (document.get("philology_notes") or []) if str(note).strip()],
                 }
             )

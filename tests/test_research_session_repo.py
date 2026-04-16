@@ -813,6 +813,169 @@ class TestObserveDocumentGraph:
         assert snapshot["observe_philology"]["catalog_summary"]["summary"]["catalog_document_count"] == 1
         assert snapshot["observe_philology"]["source"] == "artifacts"
 
+    def test_upsert_observe_catalog_review_persists_artifact_and_updates_snapshot(self, repo):
+        session_payload = _make_payload(cycle_id="observe-philology-review-writeback")
+        repo.create_session(session_payload)
+        phase = repo.add_phase_execution(
+            session_payload["cycle_id"],
+            {"phase": "observe", "status": "completed", "output": {"phase": "observe", "status": "completed"}},
+        )
+        repo.add_artifact(
+            session_payload["cycle_id"],
+            {
+                "phase_execution_id": phase["id"],
+                "name": "observe_philology_catalog_summary",
+                "artifact_type": "dataset",
+                "content": {
+                    "summary": {
+                        "catalog_document_count": 1,
+                        "work_count": 1,
+                        "work_fragment_count": 1,
+                        "version_lineage_count": 1,
+                        "witness_count": 1,
+                        "missing_core_metadata_count": 0,
+                        "source_type_counts": {"local": 1},
+                    },
+                    "documents": [
+                        {
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:review:1",
+                            "catalog_id": "review:catalog:1",
+                            "source_type": "local",
+                            "work_title": "补血汤",
+                            "fragment_title": "补血汤",
+                            "work_fragment_key": "补血汤|补血汤",
+                            "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                            "witness_key": "review:witness:1",
+                            "dynasty": "明",
+                            "author": "李时珍",
+                            "edition": "宋本",
+                        }
+                    ],
+                    "version_lineages": [
+                        {
+                            "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                            "work_fragment_key": "补血汤|补血汤",
+                            "work_title": "补血汤",
+                            "fragment_title": "补血汤",
+                            "dynasty": "明",
+                            "author": "李时珍",
+                            "edition": "宋本",
+                            "witness_count": 1,
+                            "witnesses": [
+                                {
+                                    "title": "补血汤宋本",
+                                    "urn": "doc:review:1",
+                                    "catalog_id": "review:catalog:1",
+                                    "source_type": "local",
+                                    "witness_key": "review:witness:1",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            },
+        )
+
+        saved_artifact = repo.upsert_observe_catalog_review(
+            session_payload["cycle_id"],
+            {
+                "scope": "version_lineage",
+                "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                "review_status": "accepted",
+                "reviewer": "repo-test",
+                "decision_basis": "unit test",
+            },
+        )
+        snapshot = repo.get_full_snapshot(session_payload["cycle_id"])
+        artifacts = {artifact["name"]: artifact for artifact in repo.list_artifacts(session_payload["cycle_id"])}
+
+        assert saved_artifact is not None
+        assert saved_artifact["name"] == "observe_philology_catalog_review"
+        assert artifacts["observe_philology_catalog_review"]["content"]["decision_count"] == 1
+        assert snapshot is not None
+        document = snapshot["observe_philology"]["catalog_summary"]["documents"][0]
+        lineage = snapshot["observe_philology"]["catalog_summary"]["version_lineages"][0]
+        assert document["review_status"] == "accepted"
+        assert document["needs_manual_review"] is False
+        assert document["reviewer"] == "repo-test"
+        assert document["review_source"] == "manual_review"
+        assert lineage["review_status"] == "accepted"
+        assert lineage["reviewer"] == "repo-test"
+
+    def test_upsert_observe_workbench_review_persists_artifact_and_updates_snapshot(self, repo):
+        session_payload = _make_payload(cycle_id="observe-philology-workbench-review-writeback")
+        repo.create_session(session_payload)
+        phase = repo.add_phase_execution(
+            session_payload["cycle_id"],
+            {"phase": "observe", "status": "completed", "output": {"phase": "observe", "status": "completed"}},
+        )
+        repo.add_artifact(
+            session_payload["cycle_id"],
+            {
+                "phase_execution_id": phase["id"],
+                "name": "observe_philology_catalog_summary",
+                "artifact_type": "dataset",
+                "content": {
+                    "summary": {
+                        "catalog_document_count": 1,
+                        "work_count": 1,
+                        "work_fragment_count": 1,
+                        "version_lineage_count": 1,
+                        "witness_count": 1,
+                        "missing_core_metadata_count": 0,
+                        "source_type_counts": {"local": 1},
+                    },
+                    "documents": [
+                        {
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:workbench:1",
+                            "catalog_id": "workbench:catalog:1",
+                            "source_type": "local",
+                            "work_title": "补血汤",
+                            "fragment_title": "补血汤",
+                            "work_fragment_key": "补血汤|补血汤",
+                            "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                            "witness_key": "workbench:witness:1",
+                            "dynasty": "明",
+                            "author": "李时珍",
+                            "edition": "宋本",
+                        }
+                    ],
+                },
+            },
+        )
+
+        saved_artifact = repo.upsert_observe_workbench_review(
+            session_payload["cycle_id"],
+            {
+                "asset_type": "claim",
+                "asset_key": "claim::claim_id=claim-1|source_entity=黄芪|target_entity=补气|relation_type=treats",
+                "review_status": "accepted",
+                "reviewer": "repo-reviewer",
+                "decision_basis": "人工 claim 复核",
+                "claim_id": "claim-1",
+                "source_entity": "黄芪",
+                "target_entity": "补气",
+                "relation_type": "treats",
+                "work_title": "补血汤",
+                "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                "witness_key": "workbench:witness:1",
+            },
+        )
+        snapshot = repo.get_full_snapshot(session_payload["cycle_id"])
+        artifacts = {artifact["name"]: artifact for artifact in repo.list_artifacts(session_payload["cycle_id"])}
+
+        assert saved_artifact is not None
+        assert saved_artifact["name"] == "observe_philology_review_workbench"
+        assert artifacts["observe_philology_review_workbench"]["content"]["decision_count"] == 1
+        assert snapshot is not None
+        decisions = snapshot["observe_philology"]["review_workbench_decisions"]
+        assert len(decisions) == 1
+        assert decisions[0]["asset_type"] == "claim"
+        assert decisions[0]["review_status"] == "accepted"
+        assert decisions[0]["reviewer"] == "repo-reviewer"
+
     def test_backfill_observe_philology_artifacts_skips_sessions_without_philology(self, repo):
         session_payload = _make_payload(cycle_id="observe-philology-backfill-skip")
         repo.create_session(session_payload)

@@ -1,4 +1,5 @@
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -36,7 +37,27 @@ class _StructuredStore:
             "research_objective": "桂枝汤研究",
             "phase_executions": {
                 "observe": {"result": {}},
-                "publish": {"result": {"deliverables": [{"name": "paper.md"}]}},
+                "publish": {
+                    "result": {
+                        "deliverables": [{"name": "paper.md"}],
+                        "results": {
+                            "analysis_results": {
+                                "evidence_protocol": {
+                                    "claims": [
+                                        {
+                                            "claim_id": "claim-structured-1",
+                                            "source_entity": "黄芪",
+                                            "target_entity": "补气",
+                                            "relation_type": "supports",
+                                            "support_count": 1,
+                                            "confidence": 0.82,
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                    }
+                },
             },
             "deliverables": [{"name": "paper.md"}],
             "observe_documents": [
@@ -61,6 +82,22 @@ class _StructuredStore:
                     }
                 },
                 "catalog_summary": {
+                    "documents": [
+                        {
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:structured:1",
+                            "source_type": "local",
+                            "catalog_id": "local:catalog:1",
+                            "work_title": "补血汤",
+                            "fragment_title": "补血汤",
+                            "work_fragment_key": "补血汤|补血汤",
+                            "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                            "witness_key": "local:doc:structured:1",
+                            "dynasty": "明",
+                            "author": "李时珍",
+                            "edition": "宋本",
+                        }
+                    ],
                     "summary": {
                         "catalog_document_count": 1,
                         "work_count": 1,
@@ -118,6 +155,28 @@ class _StructuredStore:
                         "source": "auto_version_collation",
                     }
                 ],
+                "fragment_candidates": [
+                    {
+                        "fragment_candidate_id": "frag-structured-1",
+                        "document_title": "补血汤宋本",
+                        "document_urn": "doc:structured:1",
+                        "work_title": "补血汤",
+                        "fragment_title": "补血汤",
+                        "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                        "witness_key": "local:doc:structured:1",
+                        "witness_title": "补血汤明抄本",
+                        "witness_urn": "doc:structured:2",
+                        "witness_work_title": "补血汤",
+                        "witness_fragment_title": "补血汤",
+                        "witness_version_lineage_key": "补血汤|补血汤|明|李时珍|明抄本",
+                        "witness_witness_key": "local:doc:structured:2",
+                        "match_score": 0.78,
+                        "source_refs": ["见证本:补血汤明抄本"],
+                        "reconstruction_basis": "明抄本保留换文，可作为辑佚补线索。",
+                        "review_status": "pending",
+                        "needs_manual_review": True,
+                    }
+                ],
             },
             "updated_at": "2026-04-12T20:00:05",
         }
@@ -129,6 +188,15 @@ class TestDashboardCopy(unittest.TestCase):
         app.include_router(dashboard_router)
         app.dependency_overrides[get_current_user] = lambda: {"user_id": "user-1"}
         return TestClient(app)
+
+    def _extract_section_by_copy(self, html: str, marker: str, next_marker: str = "") -> str:
+        start = html.find(marker)
+        self.assertNotEqual(start, -1, f"missing marker: {marker}")
+        if not next_marker:
+            return html[start:]
+        end = html.find(next_marker, start + len(marker))
+        self.assertNotEqual(end, -1, f"missing next marker: {next_marker}")
+        return html[start:end]
 
     def test_projects_page_empty_state_uses_run_jobs_copy(self):
         with patch("src.web.routes.dashboard._scan_research_sessions", return_value=[]), patch(
@@ -212,6 +280,137 @@ class TestDashboardCopy(unittest.TestCase):
         self.assertIn("校勘条目明细", text)
         self.assertIn("查看详情", text)
 
+    def test_project_detail_renders_catalog_review_actions(self):
+        structured_store = _StructuredStore()
+        with patch(
+            "src.web.routes.dashboard.get_research_session",
+            side_effect=lambda app, cycle_id: structured_store.get_session(cycle_id),
+        ):
+            with self._build_client() as client:
+                response = client.get("/api/projects/cycle-structured-1/detail")
+
+        self.assertEqual(response.status_code, 200)
+        text = response.text
+        self.assertIn("/api/projects/cycle-structured-1/catalog-review", text)
+        self.assertIn("标记已核", text)
+        self.assertIn("标记驳回", text)
+        self.assertIn("退回待核", text)
+        self.assertIn("审核依据 / 备注", text)
+        self.assertIn('name="decision_basis"', text)
+
+    def test_project_detail_renders_generic_philology_review_workbench(self):
+        structured_store = _StructuredStore()
+        with patch(
+            "src.web.routes.dashboard.get_research_session",
+            side_effect=lambda app, cycle_id: structured_store.get_session(cycle_id),
+        ):
+            with self._build_client() as client:
+                response = client.get("/api/projects/cycle-structured-1/detail")
+
+        self.assertEqual(response.status_code, 200)
+        text = response.text
+        self.assertIn("文献学校核工作台", text)
+        self.assertIn("/api/projects/cycle-structured-1/philology-review", text)
+        self.assertIn("辑佚候选", text)
+        self.assertIn("考据 Claim", text)
+
+    def test_project_detail_catalog_review_post_rerenders_updated_lineage(self):
+        updated_session = deepcopy(_StructuredStore().get_session("cycle-structured-1"))
+        updated_session["observe_philology"]["catalog_summary"]["documents"] = [
+            {
+                "document_title": "补血汤宋本",
+                "document_urn": "doc:structured:1",
+                "source_type": "local",
+                "catalog_id": "local:catalog:1",
+                "work_title": "补血汤",
+                "fragment_title": "补血汤",
+                "work_fragment_key": "补血汤|补血汤",
+                "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                "witness_key": "local:doc:structured:1",
+                "dynasty": "明",
+                "author": "李时珍",
+                "edition": "宋本",
+            }
+        ]
+        updated_session["observe_philology"]["catalog_review_decisions"] = [
+            {
+                "scope": "version_lineage",
+                "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                "review_status": "accepted",
+                "needs_manual_review": False,
+                "reviewer": "user-1",
+                "reviewed_at": "2026-04-16T12:00:00",
+                "decision_basis": "目录学工作台快速审核",
+                "review_source": "manual_review",
+            }
+        ]
+
+        with patch("src.web.routes.dashboard.apply_catalog_review", return_value=updated_session) as apply_review:
+            with self._build_client() as client:
+                response = client.post(
+                    "/api/projects/cycle-structured-1/catalog-review",
+                    data={
+                        "scope": "version_lineage",
+                        "target_version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                        "review_status": "accepted",
+                        "decision_basis": "人工补录的版本依据",
+                    },
+                )
+
+        self.assertEqual(apply_review.call_count, 1)
+        self.assertEqual(apply_review.call_args.args[2]["decision_basis"], "人工补录的版本依据")
+
+        self.assertEqual(response.status_code, 200)
+        text = response.text
+        self.assertIn("已核", text)
+        self.assertIn("user-1", text)
+        self.assertIn("目录学工作台快速审核", text)
+
+    def test_project_detail_philology_review_post_rerenders_updated_card(self):
+        updated_session = deepcopy(_StructuredStore().get_session("cycle-structured-1"))
+        updated_session["observe_philology"]["review_workbench_decisions"] = [
+            {
+                "asset_type": "fragment_candidate",
+                "asset_key": "fragment_candidate::candidate_kind=fragment_candidates|fragment_candidate_id=frag-structured-1|document_urn=doc:structured:1|version_lineage_key=补血汤|补血汤|明|李时珍|宋本|witness_key=local:doc:structured:1|fragment_title=补血汤",
+                "review_status": "accepted",
+                "needs_manual_review": False,
+                "reviewer": "user-1",
+                "reviewed_at": "2026-04-16T12:10:00",
+                "decision_basis": "人工辑佚复核",
+                "review_source": "manual_review",
+                "fragment_candidate_id": "frag-structured-1",
+            }
+        ]
+
+        with patch("src.web.routes.dashboard.apply_philology_review", return_value=updated_session) as apply_review:
+            with self._build_client() as client:
+                response = client.post(
+                    "/api/projects/cycle-structured-1/philology-review",
+                    data={
+                        "asset_type": "fragment_candidate",
+                        "asset_key": "fragment_candidate::candidate_kind=fragment_candidates|fragment_candidate_id=frag-structured-1|document_urn=doc:structured:1|version_lineage_key=补血汤|补血汤|明|李时珍|宋本|witness_key=local:doc:structured:1|fragment_title=补血汤",
+                        "review_status": "accepted",
+                        "decision_basis": "人工辑佚复核",
+                        "fragment_candidate_id": "frag-structured-1",
+                        "document_title": "补血汤宋本",
+                        "document_urn": "doc:structured:1",
+                        "work_title": "补血汤",
+                        "fragment_title": "补血汤",
+                        "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                        "witness_key": "local:doc:structured:1",
+                        "candidate_kind": "fragment_candidates",
+                    },
+                )
+
+        self.assertEqual(apply_review.call_count, 1)
+        self.assertEqual(apply_review.call_args.args[2]["decision_basis"], "人工辑佚复核")
+        self.assertEqual(apply_review.call_args.args[2]["asset_type"], "fragment_candidate")
+
+        self.assertEqual(response.status_code, 200)
+        text = response.text
+        self.assertIn("已核", text)
+        self.assertIn("人工辑佚复核", text)
+
     def test_project_detail_endpoint_paginates_terminology_and_collation(self):
         session = {
             "cycle_id": "cycle-detail-1",
@@ -269,17 +468,40 @@ class TestDashboardCopy(unittest.TestCase):
                 first_page = client.get("/api/projects/cycle-detail-1/detail")
                 second_page = client.get("/api/projects/cycle-detail-1/detail?terminology_page=2&collation_page=2")
 
+        first_page_terminology_section = self._extract_section_by_copy(
+            first_page.text,
+            "分页查看规范术语、观测写法、来源与注记",
+            "校勘条目明细",
+        )
+        second_page_terminology_section = self._extract_section_by_copy(
+            second_page.text,
+            "分页查看规范术语、观测写法、来源与注记",
+            "校勘条目明细",
+        )
+        first_page_collation_section = self._extract_section_by_copy(
+            first_page.text,
+            "校勘条目明细",
+        )
+        second_page_collation_section = self._extract_section_by_copy(
+            second_page.text,
+            "校勘条目明细",
+        )
+
         self.assertEqual(first_page.status_code, 200)
-        self.assertIn("术语1", first_page.text)
-        self.assertNotIn("术语9", first_page.text)
-        self.assertIn("异文1", first_page.text)
-        self.assertNotIn("异文7", first_page.text)
-        self.assertIn("第 1 / 2 页", first_page.text)
+        self.assertIn("术语1", first_page_terminology_section)
+        self.assertNotIn("术语9", first_page_terminology_section)
+        self.assertIn("异文1", first_page_collation_section)
+        self.assertNotIn("异文7", first_page_collation_section)
+        self.assertIn("第 1 / 2 页", first_page_terminology_section)
+        self.assertIn("第 1 / 2 页", first_page_collation_section)
 
         self.assertEqual(second_page.status_code, 200)
-        self.assertIn("术语9", second_page.text)
-        self.assertIn("异文7", second_page.text)
-        self.assertIn("第 2 / 2 页", second_page.text)
+        self.assertIn("术语9", second_page_terminology_section)
+        self.assertNotIn("术语1", second_page_terminology_section)
+        self.assertIn("异文7", second_page_collation_section)
+        self.assertNotIn("异文1", second_page_collation_section)
+        self.assertIn("第 2 / 2 页", second_page_terminology_section)
+        self.assertIn("第 2 / 2 页", second_page_collation_section)
 
     def test_project_detail_endpoint_filters_by_document_title(self):
         session = {

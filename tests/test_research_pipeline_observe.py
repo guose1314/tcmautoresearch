@@ -592,19 +592,29 @@ class TestResearchPipelineObserve(unittest.TestCase):
         self.assertGreaterEqual(result["aggregate"]["version_collation_difference_count"], 1)
         self.assertGreaterEqual(result["aggregate"]["version_collation_witness_count"], 1)
         self.assertGreaterEqual(result["aggregate"]["collation_entry_count"], 1)
-        self.assertGreaterEqual(result["aggregate"]["philology_asset_count"], 3)
+        self.assertGreaterEqual(result["aggregate"]["fragment_candidate_count"], 1)
+        self.assertGreaterEqual(result["aggregate"]["citation_source_candidate_count"], 1)
+        self.assertGreaterEqual(result["aggregate"]["philology_asset_count"], 5)
         self.assertTrue(any("版本对勘" in note for note in result["aggregate"]["philology_notes"]))
+        self.assertTrue(any("辑佚候选" in note for note in result["aggregate"]["philology_notes"]))
 
         aggregate_assets = result["aggregate"]["philology_assets"]
         self.assertEqual(len(aggregate_assets["terminology_standard_table"]), result["aggregate"]["terminology_standard_table_count"])
         self.assertEqual(len(aggregate_assets["collation_entries"]), result["aggregate"]["collation_entry_count"])
+        self.assertEqual(len(aggregate_assets["fragment_candidates"]), result["aggregate"]["fragment_candidate_count"])
+        self.assertEqual(
+            len(aggregate_assets["citation_source_candidates"]),
+            result["aggregate"]["citation_source_candidate_count"],
+        )
         self.assertEqual(aggregate_assets["annotation_report"]["summary"]["processed_document_count"], 2)
+        self.assertGreaterEqual(aggregate_assets["annotation_report"]["summary"]["fragment_candidate_count"], 1)
 
         first_doc = result["documents"][0]
         self.assertIn("philology", first_doc)
         self.assertIn("philology_assets", first_doc)
         self.assertGreaterEqual(first_doc["philology"]["term_standardization"]["recognized_term_count"], 1)
         self.assertGreaterEqual(first_doc["philology"]["version_collation"]["difference_count"], 1)
+        self.assertGreaterEqual(first_doc["philology"]["fragment_reconstruction"]["fragment_candidate_count"], 1)
         self.assertGreaterEqual(first_doc["philology"]["term_standardization"]["terminology_standard_table_count"], 1)
         self.assertGreaterEqual(first_doc["philology"]["version_collation"]["collation_entry_count"], 1)
         self.assertEqual(
@@ -618,6 +628,10 @@ class TestResearchPipelineObserve(unittest.TestCase):
         first_collation_entry = first_doc["philology"]["version_collation"]["collation_entries"][0]
         self.assertIn("judgement", first_collation_entry)
         self.assertIn("base_context", first_collation_entry)
+        first_fragment_candidate = first_doc["philology"]["fragment_reconstruction"]["fragment_candidates"][0]
+        self.assertIn("fragment_candidate_id", first_fragment_candidate)
+        self.assertIn("match_score", first_fragment_candidate)
+        self.assertIn("reconstruction_basis", first_fragment_candidate)
 
         self.assertIn("黄芪", mock_pre_exec.call_args_list[0].args[0]["raw_text"])
 
@@ -746,6 +760,11 @@ class TestResearchPipelineObserve(unittest.TestCase):
         self.assertEqual(catalog_artifact["artifact_type"], "dataset")
         self.assertEqual(catalog_artifact["content"]["summary"]["catalog_document_count"], 1)
         self.assertEqual(catalog_artifact["content"]["summary"]["version_lineage_count"], 1)
+        self.assertEqual(catalog_artifact["content"]["summary"]["exegesis_entry_count"], 1)
+        exegesis_entry = catalog_artifact["content"]["documents"][0]["exegesis_entries"][0]
+        self.assertEqual(exegesis_entry["definition_source"], "structured_tcm_knowledge")
+        self.assertIn("补气", exegesis_entry["definition"])
+        self.assertIn("TCMRelationshipDefinitions.HERB_EFFICACY_MAP", exegesis_entry["source_refs"])
 
     @patch("src.research.research_pipeline.OutputGenerator.cleanup")
     @patch("src.research.research_pipeline.OutputGenerator.initialize")
