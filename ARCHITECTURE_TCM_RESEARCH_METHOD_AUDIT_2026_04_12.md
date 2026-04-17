@@ -214,7 +214,7 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 | --- | --- | --- | --- |
 | 主入口兼容壳仍存在 ✅ | ResearchRuntimeService 已统一主研究路径，兼容壳已全面治理完成 | 调用方已可形成"ResearchRuntimeService 是唯一主链"的稳定认知；`run_research()` 已标记 DeprecationWarning，`__init__.py` 已区分推荐导出与兼容/内部导出，阶段 context 规范默认值（`CANONICAL_OBSERVE_DEFAULTS` / `CANONICAL_PUBLISH_DEFAULTS`）已从 API 层上收至 `research_runtime_service.py` 并嵌入所有 runtime profile，API 层仅追加 `local_data_dir` 环境路径；11 项入口合约测试保护 | 已完成 |
 | 结构化存储事务边界仍可继续收敛 ✅ | `TransactionCoordinator` 主写路径已收口，`StorageConsistencyState` 一致性状态合同已建立 | 调用方现可通过 `factory.get_consistency_state()` 一眼区分 `dual_write` / `pg_only` / `sqlite_fallback` / `uninitialized` 四种运行模式；`TransactionResult` 增加 `storage_mode` 字段；`cycle.metadata.storage_persistence` 现嵌入完整 `consistency_state` 字典；`build_consistency_state()` 为唯一状态判定路径，monitoring / dashboard / 运维可共享一致结论；18 项契约测试保护 | 已完成 |
-| Observe 反向依赖 cycle 层 | research phase 调 cycle runner | 形成跨层耦合，后续难以做干净边界 | 中，约 2-4 人日 |
+| Observe 反向依赖 cycle 层 ✅ | `observe_phase.py` → `cycle_runner` 和 `research_runtime_service.py` → `cycle_reporter` 两条反向依赖已消除 | 新增 `src/research/module_pipeline.py` 作为模块管线规范位置（`execute_real_module_pipeline`、`summarize_module_quality` 等）；`extract_research_phase_results` 迁入 `src/research/phase_result.py`；cycle 层保留兼容重导出（`cycle_runner`/`cycle_reporter` re-import）且 `assertIs` 测试确认同一对象；AST 扫描保护 research 层不再 import cycle；8 项层边界契约测试；回归 2362 pass | 已完成 |
 | LLM 多条旁路 | paper_plugin、翻译、助手等直接 new LLMEngine | 模型参数、缓存、GPU 使用和成本控制无法统一 | 中，约 3-5 人日 |
 
 “主入口兼容壳仍存在”的当前实现状态如下：

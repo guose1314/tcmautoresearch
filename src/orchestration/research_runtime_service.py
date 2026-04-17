@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
-from src.cycle.cycle_reporter import extract_research_phase_results
 from src.orchestration.research_orchestrator import (
     OrchestrationResult,
     PhaseOutcome,
@@ -18,7 +17,7 @@ from src.orchestration.research_orchestrator import (
     topic_to_phase_context,
 )
 from src.research.observe_philology import resolve_observe_philology_assets
-from src.research.phase_result import get_phase_value
+from src.research.phase_result import extract_research_phase_results, get_phase_value
 
 logger = logging.getLogger(__name__)
 

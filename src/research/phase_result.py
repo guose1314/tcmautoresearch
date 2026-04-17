@@ -411,3 +411,32 @@ def _artifact_sequence_to_list(artifacts: Iterable[Any]) -> List[Dict[str, Any]]
             continue
         normalized.append({"value": str(artifact), "type": "artifact"})
     return normalized
+
+
+# ── Cycle 快照结果提取 ────────────────────────────────────────────────────
+
+def extract_research_phase_results(cycle_snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """从 cycle 快照中提取各阶段执行结果。
+
+    Parameters
+    ----------
+    cycle_snapshot :
+        包含 ``phase_executions`` 键的 cycle 快照字典。
+
+    Returns
+    -------
+    Dict[str, Any]
+        ``{phase_name: result_dict, ...}``
+    """
+    phase_results: Dict[str, Any] = {}
+    phase_executions = cycle_snapshot.get("phase_executions")
+    if not isinstance(phase_executions, dict):
+        return phase_results
+
+    for phase_name, execution in phase_executions.items():
+        if not isinstance(execution, dict):
+            continue
+        result = execution.get("result")
+        if isinstance(result, dict):
+            phase_results[str(phase_name)] = result
+    return phase_results

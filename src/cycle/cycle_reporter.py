@@ -247,171 +247,23 @@ def export_cycle_demo_report(cycle_results: Dict[str, Any], output_path: Path, g
 
 
 # ── 质量评估 ───────────────────────────────────────────────────────
-
-# 各模块视为"核心产出"的关键字段
-_MODULE_EXPECTED_KEYS: Dict[str, List[str]] = {
-    "DocumentPreprocessor": ["processed_text", "metadata", "entities"],
-    "EntityExtractor": ["entities", "entity_count", "metadata"],
-    "SemanticModeler": ["semantic_graph", "relationships", "metadata"],
-    "ReasoningEngine": ["reasoning_results", "conclusions", "evidence"],
-    "OutputGenerator": ["output_data", "format", "metadata"],
-}
-
-# 每个模块的产出中，这些字段代表"有实质内容的列表/字典"
-_MODULE_CONTENT_KEYS: Dict[str, List[str]] = {
-    "DocumentPreprocessor": ["processed_text"],
-    "EntityExtractor": ["entities"],
-    "SemanticModeler": ["semantic_graph", "relationships"],
-    "ReasoningEngine": ["reasoning_results", "conclusions"],
-    "OutputGenerator": ["output_data"],
-}
-
-
-def _compute_completeness(module_name: str, result: Dict[str, Any]) -> float:
-    """字段覆盖率 = 结果中存在的预期字段数 / 预期字段总数。"""
-    expected = _MODULE_EXPECTED_KEYS.get(module_name, ["status", "results", "metadata"])
-    if not expected:
-        return 0.0
-    present = sum(1 for k in expected if result.get(k) is not None)
-    return round(present / len(expected), 4)
-
-
-def _compute_accuracy(module_name: str, result: Dict[str, Any]) -> float:
-    """内容丰富度 — 核心字段非空且有实质内容的比例。"""
-    content_keys = _MODULE_CONTENT_KEYS.get(module_name, ["results"])
-    if not content_keys:
-        return 0.0
-    scores: List[float] = []
-    for key in content_keys:
-        value = result.get(key)
-        if value is None:
-            scores.append(0.0)
-        elif isinstance(value, str):
-            scores.append(min(1.0, len(value.strip()) / 100))
-        elif isinstance(value, (list, tuple)):
-            scores.append(min(1.0, len(value) / 5))
-        elif isinstance(value, dict):
-            scores.append(min(1.0, len(value) / 3))
-        else:
-            scores.append(0.5)
-    return round(sum(scores) / len(scores), 4) if scores else 0.0
-
-
-def _compute_consistency(result: Dict[str, Any]) -> float:
-    """内部一致性 — 检查 status 是否成功、无 error 字段、有 metadata。"""
-    score = 0.0
-    status = result.get("status", "")
-    if status in ("completed", "success", "ok"):
-        score += 0.4
-    elif status:
-        score += 0.2
-    if not result.get("error"):
-        score += 0.3
-    if result.get("metadata") and isinstance(result["metadata"], dict):
-        score += 0.3
-    return round(min(1.0, score), 4)
-
-
-def summarize_module_quality(
-    module_name: str,
-    result: Dict[str, Any],
-    llm_engine: Any = None,
-) -> Dict[str, float]:
-    """从模块实际产出计算质量指标。
-
-    三维指标 (0.0–1.0):
-      - completeness: 预期字段覆盖率
-      - accuracy: 核心产出内容丰富度
-      - consistency: 状态/错误/元数据一致性
-
-    当 *llm_engine* 可用且有 ``generate`` 方法时，追加 LLM 结构化评分
-    ``llm_quality`` (方法学/证据强度/可重复性 的均值)。
-    """
-    completeness = _compute_completeness(module_name, result)
-    accuracy = _compute_accuracy(module_name, result)
-    consistency = _compute_consistency(result)
-
-    metrics: Dict[str, float] = {
-        "completeness": completeness,
-        "accuracy": accuracy,
-        "consistency": consistency,
-    }
-
-    # ---- LLM 增强评分（可选） ----
-    if llm_engine is not None and hasattr(llm_engine, "generate"):
-        llm_score = _llm_structured_quality(module_name, result, llm_engine)
-        if llm_score is not None:
-            metrics["llm_quality"] = llm_score
-
-    return metrics
-
-
-def _llm_structured_quality(
-    module_name: str,
-    result: Dict[str, Any],
-    llm_engine: Any,
-) -> Optional[float]:
-    """调用 LLM 做方法学/证据强度/可重复性三维评分，返回均值或 None。"""
-    import logging as _logging
-
-    _logger = _logging.getLogger(__name__)
-
-    # 构建精简摘要（限制 token 消耗）
-    summary_parts = [f"模块: {module_name}", f"状态: {result.get('status', 'unknown')}"]
-    for key in ("entities", "relationships", "reasoning_results", "conclusions", "processed_text"):
-        val = result.get(key)
-        if isinstance(val, list):
-            summary_parts.append(f"{key}: {len(val)} 项")
-        elif isinstance(val, str) and len(val) > 20:
-            summary_parts.append(f"{key}: {val[:200]}...")
-        elif val is not None:
-            summary_parts.append(f"{key}: {val}")
-    summary = "\n".join(summary_parts)
-
-    prompt = (
-        "请评估以下中医研究模块产出的质量，从三个维度打分 (0.0–1.0)：\n"
-        "1. methodological_rigor — 方法学严谨性\n"
-        "2. evidence_strength — 证据强度（数据量、可信度）\n"
-        "3. reproducibility — 可重复性（参数记录、流程完整度）\n\n"
-        f"## 模块产出摘要\n{summary}\n\n"
-        "请输出严格 JSON: "
-        '{"methodological_rigor": 0.0, "evidence_strength": 0.0, "reproducibility": 0.0}'
-    )
-    system = "你是中医研究质量评审专家。只输出 JSON，不要其他文字。"
-
-    try:
-        raw = llm_engine.generate(prompt, system)
-        import json as _json
-        parsed = _json.loads(raw)
-        dims = [
-            float(parsed.get("methodological_rigor", 0)),
-            float(parsed.get("evidence_strength", 0)),
-            float(parsed.get("reproducibility", 0)),
-        ]
-        # 限定 0-1
-        dims = [max(0.0, min(1.0, d)) for d in dims]
-        return round(sum(dims) / len(dims), 4)
-    except Exception as exc:
-        _logger.warning("LLM 质量评分失败，仅使用规则评分: %s", exc)
-        return None
+# summarize_module_quality 及辅助函数已迁移至 src.research.module_pipeline，
+# 此处保留兼容重导出。
+from src.research.module_pipeline import (  # noqa: E402
+    summarize_module_quality,
+    _MODULE_EXPECTED_KEYS,
+    _MODULE_CONTENT_KEYS,
+    _compute_completeness,
+    _compute_accuracy,
+    _compute_consistency,
+)
 
 
 # ── 科研报告导出 ───────────────────────────────────────────────────
 
-
-def extract_research_phase_results(cycle_snapshot: Dict[str, Any]) -> Dict[str, Any]:
-    phase_results: Dict[str, Any] = {}
-    phase_executions = cycle_snapshot.get("phase_executions")
-    if not isinstance(phase_executions, dict):
-        return phase_results
-
-    for phase_name, execution in phase_executions.items():
-        if not isinstance(execution, dict):
-            continue
-        result = execution.get("result")
-        if isinstance(result, dict):
-            phase_results[str(phase_name)] = result
-    return phase_results
+# extract_research_phase_results 已迁移至 src.research.phase_result，
+# 此处保留兼容重导出。
+from src.research.phase_result import extract_research_phase_results  # noqa: E402, F811
 
 
 def export_research_session_reports(

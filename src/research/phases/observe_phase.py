@@ -12,7 +12,7 @@ from src.collector.corpus_bundle import (
     extract_text_entries,
     is_corpus_bundle,
 )
-from src.cycle.cycle_runner import execute_real_module_pipeline
+from src.research.module_pipeline import execute_real_module_pipeline
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
     has_learning_strategy,

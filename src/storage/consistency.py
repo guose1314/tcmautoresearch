@@ -17,7 +17,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-
 # ── 模式常量 ──────────────────────────────────────────────────────────────
 
 MODE_DUAL_WRITE = "dual_write"

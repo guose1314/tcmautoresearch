@@ -227,8 +227,14 @@ class TestModeConstants(unittest.TestCase):
     def test_lazy_import_from_storage_package(self):
         from src.storage import (
             MODE_DUAL_WRITE as m1,
+        )
+        from src.storage import (
             MODE_PG_ONLY as m2,
+        )
+        from src.storage import (
             StorageConsistencyState as cls,
+        )
+        from src.storage import (
             build_consistency_state as fn,
         )
         self.assertEqual(m1, "dual_write")

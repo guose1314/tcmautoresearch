@@ -11,6 +11,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Collection, Dict, List, NamedTuple, Optional
 
+from src.research.module_pipeline import (
+    ModuleLifecycle,
+    build_real_modules,
+    cleanup_real_modules,
+    execute_real_module_pipeline,
+    initialize_real_modules,
+    summarize_module_quality,
+)
 from src.research.phase_result import get_phase_value
 
 from .cycle_reporter import (
@@ -23,7 +31,6 @@ from .cycle_reporter import (
     fail_phase,
     record_failed_operation,
     start_phase,
-    summarize_module_quality,
 )
 from .cycle_runtime_config import build_cycle_runtime_config
 
@@ -40,54 +47,10 @@ def create_sample_data() -> List[str]:
     ]
 
 
-def build_real_modules() -> List[tuple[str, Any]]:
-    """构建真实处理链路模块。"""
-    from src.analysis.entity_extractor import AdvancedEntityExtractor
-    from src.analysis.preprocessor import DocumentPreprocessor
-    from src.analysis.reasoning_engine import ReasoningEngine
-    from src.analysis.semantic_graph import SemanticGraphBuilder
-    from src.generation.output_formatter import OutputGenerator
-
-    return [
-        ("DocumentPreprocessor", DocumentPreprocessor()),
-        ("EntityExtractor", AdvancedEntityExtractor()),
-        ("SemanticModeler", SemanticGraphBuilder()),
-        ("ReasoningEngine", ReasoningEngine()),
-        ("OutputGenerator", OutputGenerator()),
-    ]
-
-
-def initialize_real_modules(modules: List[tuple[str, Any]]) -> None:
-    """统一初始化模块，避免在每次迭代中重复初始化。"""
-    for module_name, module in modules:
-        logger.info("初始化真实模块: %s", module_name)
-        initialized = module.initialize()
-        if not initialized:
-            raise RuntimeError(f"模块初始化失败: {module_name}")
-
-
-def cleanup_real_modules(modules: List[tuple[str, Any]]) -> None:
-    """统一清理模块资源。"""
-    for module_name, module in modules:
-        try:
-            module.cleanup()
-            logger.info("真实模块 %s 资源清理完成", module_name)
-        except Exception as exc:
-            logger.warning("真实模块 %s 清理异常: %s", module_name, exc)
-
-
-class ModuleLifecycle(NamedTuple):
-    """模块生命周期回调集合（build / initialize / cleanup）。"""
-    build: Callable[[], List[tuple[str, Any]]]
-    initialize: Callable[[List[tuple[str, Any]]], None]
-    cleanup: Callable[[List[tuple[str, Any]]], None]
-
-
-_DEFAULT_MODULE_LIFECYCLE = ModuleLifecycle(
-    build=build_real_modules,
-    initialize=initialize_real_modules,
-    cleanup=cleanup_real_modules,
-)
+# build_real_modules, initialize_real_modules, cleanup_real_modules,
+# ModuleLifecycle, execute_real_module_pipeline, summarize_module_quality
+# 已迁移至 src.research.module_pipeline，此处通过顶层 import 保留兼容。
+from src.research.module_pipeline import DEFAULT_MODULE_LIFECYCLE as _DEFAULT_MODULE_LIFECYCLE  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -260,70 +223,8 @@ def _aggregate_iteration_quality(iterations: List[Dict[str, Any]]) -> Dict[str, 
     }
 
 
-def execute_real_module_pipeline(
-    input_data: Dict[str, Any],
-    modules: Optional[List[tuple[str, Any]]] = None,
-    manage_module_lifecycle: bool = False,
-    optional_modules: Optional[Collection[str]] = None,
-) -> List[Dict[str, Any]]:
-    """顺序执行真实 src 模块。"""
-    context = dict(input_data)
-    module_results = []
-    module_chain = modules or build_real_modules()
-    optional_module_names = {str(module_name) for module_name in (optional_modules or [])}
-
-    if manage_module_lifecycle:
-        initialize_real_modules(module_chain)
-
-    try:
-        for module_name, module in module_chain:
-            logger.info("开始执行真实模块: %s", module_name)
-
-            module_start_time = time.time()
-            try:
-                result = module.execute(context)
-            except Exception as exc:
-                execution_time = time.time() - module_start_time
-                if module_name not in optional_module_names:
-                    raise
-
-                logger.warning("可选真实模块 %s 执行失败，继续后续链路: %s", module_name, exc)
-                module_results.append(
-                    {
-                        "module": module_name,
-                        "status": "failed_optional",
-                        "execution_time": execution_time,
-                        "timestamp": datetime.now().isoformat(),
-                        "input_data": dict(context),
-                        "output_data": {},
-                        "quality_metrics": {},
-                        "error": str(exc),
-                    }
-                )
-                continue
-
-            execution_time = time.time() - module_start_time
-            context.update(result)
-
-            module_results.append(
-                {
-                    "module": module_name,
-                    "status": "completed",
-                    "execution_time": execution_time,
-                    "timestamp": datetime.now().isoformat(),
-                    "input_data": dict(context),
-                    "output_data": result,
-                    "quality_metrics": summarize_module_quality(module_name, result),
-                }
-            )
-
-            logger.info("真实模块 %s 执行完成，耗时: %.2f秒", module_name, execution_time)
-
-    finally:
-        if manage_module_lifecycle:
-            cleanup_real_modules(module_chain)
-
-    return module_results
+# execute_real_module_pipeline 已迁移至 src.research.module_pipeline，
+# 此处通过顶层 import 保留兼容导出。
 
 
 def _build_initial_iteration_results(
