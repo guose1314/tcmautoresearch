@@ -256,16 +256,21 @@ def detect_claim_conflicts(
 ) -> List[Dict[str, Any]]:
     """检测互相矛盾的 claim，返回冲突对列表。
 
-    冲突定义: 同一 claim_type 内，存在不同 claim_statement 且都有较高置信度。
+    冲突定义: 同一 claim_type 且同一 work_title (若有) 内，
+    存在不同 claim_statement 且都有较高置信度。
     """
     conflicts: List[Dict[str, Any]] = []
-    by_type: Dict[str, List[Mapping[str, Any]]] = {}
+    # 分组键: (claim_type, work_title)  — work_title 允许缺省
+    by_group: Dict[tuple[str, str], List[Mapping[str, Any]]] = {}
     for claim in claims:
         ct = str(claim.get(FIELD_CLAIM_TYPE) or "").strip()
-        if ct:
-            by_type.setdefault(ct, []).append(claim)
+        if not ct:
+            continue
+        work_title = str(claim.get("work_title") or "").strip()
+        key = (ct, work_title)
+        by_group.setdefault(key, []).append(claim)
 
-    for ct, group in by_type.items():
+    for (ct, work_title), group in by_group.items():
         if len(group) < 2:
             continue
         statements: Dict[str, List[Mapping[str, Any]]] = {}

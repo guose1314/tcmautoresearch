@@ -26,6 +26,7 @@ from src.quality.quality_assessor import QualityAssessor
 from src.research.audit_history import AuditHistory
 from src.research.gap_analyzer import GapAnalyzer
 from src.research.hypothesis_engine import HypothesisEngine
+from src.research.learning_strategy import build_strategy_snapshot
 from src.research.phase_orchestrator import PhaseOrchestrator
 from src.research.pipeline_orchestrator import ResearchPipelineOrchestrator
 from src.research.pipeline_phase_handlers import ResearchPhaseHandlers
@@ -35,7 +36,6 @@ from src.research.study_session_manager import (
     ResearchPhase,
     StudySessionManager,
 )
-from src.research.learning_strategy import build_strategy_snapshot
 
 # 配置日志
 logger = logging.getLogger(__name__)

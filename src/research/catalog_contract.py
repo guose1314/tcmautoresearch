@@ -293,6 +293,166 @@ def build_catalog_hierarchy(
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 朝代归一化
+# ─────────────────────────────────────────────────────────────────────────────
+
+DYNASTY_SYNONYMS: Dict[str, str] = {
+    # 先秦
+    "春秋": "先秦", "战国": "先秦", "周": "先秦",
+    "春秋战国": "先秦", "先秦两汉": "先秦",
+    # 秦
+    "秦代": "秦",
+    # 汉
+    "前汉": "西汉", "西汉初": "西汉",
+    "后汉": "东汉", "东汉末": "东汉",
+    "两汉": "汉",
+    # 三国
+    "曹魏": "三国", "蜀汉": "三国", "孙吴": "三国",
+    "魏": "三国", "蜀": "三国", "吴": "三国",
+    # 晋
+    "西晋": "晋", "东晋": "晋",
+    # 南北朝
+    "南朝宋": "南朝", "南朝齐": "南朝", "南朝梁": "南朝", "南朝陈": "南朝",
+    "刘宋": "南朝", "萧齐": "南朝", "萧梁": "南朝",
+    "北魏": "北朝", "东魏": "北朝", "西魏": "北朝",
+    "北齐": "北朝", "北周": "北朝",
+    "南北朝": "南北朝",
+    # 隋唐五代
+    "隋代": "隋",
+    "唐代": "唐", "初唐": "唐", "盛唐": "唐", "中唐": "唐", "晚唐": "唐",
+    "五代十国": "五代", "后梁": "五代", "后唐": "五代",
+    "后晋": "五代", "后汉": "五代", "后周": "五代",
+    # 宋
+    "北宋": "宋", "南宋": "宋", "宋代": "宋",
+    # 辽金
+    "辽代": "辽", "金代": "金",
+    # 元
+    "元代": "元",
+    # 明
+    "明代": "明", "明初": "明", "明末": "明",
+    # 清
+    "清代": "清", "清初": "清", "清末": "清",
+    # 民国
+    "民国时期": "民国",
+}
+
+# 精确朝代（保留子朝代区分的归一化）
+DYNASTY_SYNONYMS_PRECISE: Dict[str, str] = {
+    "前汉": "西汉",
+    "后汉": "东汉",
+    "曹魏": "魏",
+    "蜀汉": "蜀",
+    "孙吴": "吴",
+    "刘宋": "南朝宋",
+    "萧齐": "南朝齐",
+    "萧梁": "南朝梁",
+    "秦代": "秦",
+    "隋代": "隋",
+    "唐代": "唐",
+    "宋代": "宋",
+    "辽代": "辽",
+    "金代": "金",
+    "元代": "元",
+    "明代": "明",
+    "清代": "清",
+    "民国时期": "民国",
+    "五代十国": "五代",
+}
+
+
+def normalize_dynasty(raw: str, *, precise: bool = False) -> str:
+    """将朝代变体名归一化为标准名称。
+
+    Parameters
+    ----------
+    raw : str
+        原始朝代字符串
+    precise : bool
+        True 时保留子朝代区分 (如 西汉/东汉)，False 时合并至大朝代 (如 汉)。
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    table = DYNASTY_SYNONYMS_PRECISE if precise else DYNASTY_SYNONYMS
+    return table.get(text, text)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 跨作品谱系一致性校验
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def validate_lineage_consistency(
+    documents: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """校验同一 work_title 下版本谱系元数据的一致性。
+
+    检测项:
+      - 同一 work_title 下 dynasty 不一致
+      - 同一 work_title 下 author 不一致 (仅警告，不作为强断言)
+      - 同一 version_lineage_key 对应多个 work_title (可能录入错误)
+
+    返回:
+      - inconsistencies: 不一致项列表
+      - consistency_score: 0..1 (完全一致为 1.0)
+    """
+    # work_title → {dynasty: set, author: set}
+    work_meta: Dict[str, Dict[str, set]] = {}
+    # version_lineage_key → {work_title: set}
+    lineage_works: Dict[str, set] = {}
+
+    for doc in documents:
+        work = _as_text(doc.get(FIELD_WORK_TITLE))
+        dynasty = _as_text(doc.get(FIELD_DYNASTY))
+        author = _as_text(doc.get(FIELD_AUTHOR))
+        lineage = _as_text(doc.get(FIELD_VERSION_LINEAGE_KEY))
+        if not work:
+            continue
+        node = work_meta.setdefault(work, {"dynasty": set(), "author": set()})
+        if dynasty:
+            node["dynasty"].add(normalize_dynasty(dynasty, precise=True))
+        if author:
+            node["author"].add(author)
+        if lineage:
+            lineage_works.setdefault(lineage, set()).add(work)
+
+    inconsistencies: List[Dict[str, Any]] = []
+
+    for work, meta in sorted(work_meta.items()):
+        if len(meta["dynasty"]) > 1:
+            inconsistencies.append({
+                "type": "dynasty_conflict",
+                "work_title": work,
+                "values": sorted(meta["dynasty"]),
+            })
+        if len(meta["author"]) > 1:
+            inconsistencies.append({
+                "type": "author_conflict",
+                "work_title": work,
+                "values": sorted(meta["author"]),
+            })
+
+    for lineage, works in sorted(lineage_works.items()):
+        if len(works) > 1:
+            inconsistencies.append({
+                "type": "lineage_shared_across_works",
+                "version_lineage_key": lineage,
+                "work_titles": sorted(works),
+            })
+
+    total_checks = max(len(work_meta) + len(lineage_works), 1)
+    consistency_score = round(1.0 - len(inconsistencies) / total_checks, 4)
+    consistency_score = max(0.0, consistency_score)
+
+    return {
+        "inconsistencies": inconsistencies,
+        "consistency_score": consistency_score,
+        "works_checked": len(work_meta),
+        "lineages_checked": len(lineage_works),
+    }
+
+
 def build_backfill_summary(
     documents: Sequence[Mapping[str, Any]],
 ) -> Dict[str, Any]:

@@ -136,17 +136,53 @@ def disambiguate_polysemy(
     category: str,
     *,
     dictionaries: Sequence[ExegesisDictionary] = (),
+    context_terms: Sequence[str] = (),
 ) -> Dict[str, Any]:
     """对多义术语执行义项判别，返回释义载荷。
 
-    按 dictionaries 注入顺序依次查词典，取首个匹配结果。
+    按 dictionaries 注入顺序查词典，用评分机制选取最优匹配，
+    而非简单取首个命中结果。评分依据:
+      - definition_source 优先级 (rank 4..1)
+      - context_terms 中出现在释义里的关键词命中数
+      - category 精确匹配加分
+
     若全部未命中则返回空字典。
     """
-    for dictionary in dictionaries:
+    candidates: List[tuple[float, int, Dict[str, Any]]] = []
+    for idx, dictionary in enumerate(dictionaries):
         payload = dictionary.lookup(canonical, category=category)
-        if payload and payload.get("definition"):
-            return payload
-    return {}
+        if not payload or not payload.get("definition"):
+            continue
+        score = 0.0
+        # 来源优先级
+        source = str(payload.get("definition_source") or "").strip()
+        score += definition_source_rank(source) * 10.0
+        # category 匹配
+        payload_category = str(payload.get("category") or "").strip()
+        if payload_category and payload_category == category:
+            score += 5.0
+        # context 命中
+        definition_text = str(payload.get("definition") or "")
+        context_hits = 0
+        for term in context_terms:
+            term_str = str(term or "").strip()
+            if term_str and term_str in definition_text:
+                context_hits += 1
+        score += context_hits * 2.0
+        # 字典注入顺序作为次要排序 (越靠前越优)
+        candidates.append((score, -idx, payload))
+
+    if not candidates:
+        return {}
+    candidates.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    best = candidates[0][2]
+    # 记录判别依据
+    if context_terms and "disambiguation_basis" not in best:
+        basis_terms = [t for t in context_terms if str(t or "").strip() in str(best.get("definition") or "")]
+        if basis_terms:
+            best = dict(best)
+            best.setdefault("disambiguation_basis", [f"上下文关联:{t}" for t in basis_terms[:3]])
+    return best
 
 
 # ---------------------------------------------------------------------------

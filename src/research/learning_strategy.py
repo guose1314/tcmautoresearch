@@ -4,7 +4,6 @@ import hashlib
 import json
 from typing import Any, Dict, List, Mapping, Optional
 
-
 # ---------------------------------------------------------------------------
 # Strategy snapshot & fingerprint
 # ---------------------------------------------------------------------------

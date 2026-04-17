@@ -225,5 +225,76 @@ class TestPolysemyDisambiguationCategories(unittest.TestCase):
         self.assertNotIn("formula", POLYSEMY_DISAMBIGUATION_CATEGORIES)
 
 
+class TestDisambiguatePolysemyScoring(unittest.TestCase):
+    """Phase 2: 评分机制 — context_terms 与 definition_source 影响选择。"""
+
+    def test_higher_rank_source_wins(self):
+        from src.research.exegesis_contract import disambiguate_polysemy
+
+        class LowRankDict:
+            def lookup(self, canonical, *, category=""):
+                return {"definition": "低优先级", "definition_source": "canonical_fallback"}
+
+        class HighRankDict:
+            def lookup(self, canonical, *, category=""):
+                return {"definition": "高优先级", "definition_source": "config_terminology_standard"}
+
+        result = disambiguate_polysemy(
+            "黄芪", "herb",
+            dictionaries=[LowRankDict(), HighRankDict()],
+        )
+        self.assertEqual(result["definition"], "高优先级")
+
+    def test_context_terms_boost(self):
+        from src.research.exegesis_contract import disambiguate_polysemy
+
+        class DictA:
+            def lookup(self, canonical, *, category=""):
+                return {"definition": "补气固表", "definition_source": "canonical_fallback"}
+
+        class DictB:
+            def lookup(self, canonical, *, category=""):
+                return {"definition": "清热解毒利湿", "definition_source": "canonical_fallback"}
+
+        # 上下文含"清热"时 DictB 胜出
+        result = disambiguate_polysemy(
+            "黄芪", "herb",
+            dictionaries=[DictA(), DictB()],
+            context_terms=["清热", "解毒"],
+        )
+        self.assertEqual(result["definition"], "清热解毒利湿")
+
+    def test_context_terms_populate_disambiguation_basis(self):
+        from src.research.exegesis_contract import disambiguate_polysemy
+
+        class FakeDict:
+            def lookup(self, canonical, *, category=""):
+                return {"definition": "含有补气的释义", "definition_source": "note"}
+
+        result = disambiguate_polysemy(
+            "x", "herb",
+            dictionaries=[FakeDict()],
+            context_terms=["补气"],
+        )
+        self.assertIn("disambiguation_basis", result)
+
+    def test_category_match_bonus(self):
+        from src.research.exegesis_contract import disambiguate_polysemy
+
+        class DictNoCategory:
+            def lookup(self, canonical, *, category=""):
+                return {"definition": "无类别", "definition_source": "canonical_fallback"}
+
+        class DictWithCategory:
+            def lookup(self, canonical, *, category=""):
+                return {"definition": "有类别", "definition_source": "canonical_fallback", "category": "herb"}
+
+        result = disambiguate_polysemy(
+            "x", "herb",
+            dictionaries=[DictNoCategory(), DictWithCategory()],
+        )
+        self.assertEqual(result["definition"], "有类别")
+
+
 if __name__ == "__main__":
     unittest.main()

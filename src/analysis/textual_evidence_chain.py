@@ -27,6 +27,7 @@ from src.research.evidence_chain_contract import (
     build_claim,
     detect_claim_conflicts,
 )
+from src.research.catalog_contract import normalize_dynasty
 
 
 def build_evidence_chains(
@@ -116,8 +117,9 @@ def _build_authorship_claims(
             seen_work_authors.setdefault(work_title, {})
             seen_work_authors[work_title][author] = seen_work_authors[work_title].get(author, 0) + 1
         if dynasty:
+            normalized = normalize_dynasty(dynasty, precise=True)
             seen_work_dynasties.setdefault(work_title, {})
-            seen_work_dynasties[work_title][dynasty] = seen_work_dynasties[work_title].get(dynasty, 0) + 1
+            seen_work_dynasties[work_title][normalized] = seen_work_dynasties[work_title].get(normalized, 0) + 1
 
     for work_title, author_counts in seen_work_authors.items():
         if not author_counts:
