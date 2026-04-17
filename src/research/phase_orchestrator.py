@@ -1258,6 +1258,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     "observe_relationship_count": sum(int(item.get("relationship_count") or 0) for item in observe_documents if isinstance(item, dict)),
                     "graph_node_count": graph_report.get("node_count", 0),
                     "graph_edge_count": graph_report.get("edge_count", 0),
+                    "eventual_consistency": self._classify_eventual_consistency(
+                        consistency_state, graph_report,
+                    ),
                 }
                 repository.update_session(cycle.cycle_id, {"metadata": cycle.metadata}, session=pg_session)
 
@@ -1265,6 +1268,39 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             return True
         finally:
             factory.close()
+
+    @staticmethod
+    def _classify_eventual_consistency(
+        consistency_state: Any,
+        graph_report: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """标注当前持久化是否存在 eventual consistency 边界。
+
+        返回结构::
+            {
+                "graph_backfill_pending": bool,
+                "reason": Optional[str],
+            }
+        """
+        from src.storage.consistency import MODE_DUAL_WRITE
+
+        graph_ok = (
+            graph_report.get("enabled")
+            and graph_report.get("status") == "active"
+            and graph_report.get("node_count", 0) > 0
+        )
+        if consistency_state.mode == MODE_DUAL_WRITE and graph_ok:
+            return {"graph_backfill_pending": False, "reason": None}
+
+        if not graph_report.get("enabled"):
+            reason = "Neo4j 未启用，图投影需后续 backfill"
+        elif graph_report.get("status") != "active":
+            reason = f"图投影状态 {graph_report.get('status')}，需后续 backfill"
+        elif consistency_state.mode != MODE_DUAL_WRITE:
+            reason = f"存储模式 {consistency_state.mode}，图数据需后续 backfill"
+        else:
+            reason = "图投影节点为零，需后续 backfill"
+        return {"graph_backfill_pending": True, "reason": reason}
 
     def _persist_result_legacy_sqlite(self, cycle: ResearchCycle) -> bool:
         db_path = self.pipeline.config.get(

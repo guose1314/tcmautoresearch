@@ -44,6 +44,9 @@ class TransactionResult:
     storage_mode: str = ""
     error: Optional[str] = None
     compensations_applied: int = 0
+    neo4j_error: Optional[str] = None
+    compensation_details: List[str] = field(default_factory=list)
+    needs_backfill: bool = False
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
@@ -236,9 +239,12 @@ class TransactionCoordinator:
             neo4j_error = self._execute_neo4j_ops()
             if neo4j_error is not None:
                 # Neo4j 部分失败 → 补偿已执行的 Neo4j 操作 + 回滚 PG
-                compensations = self._compensate_neo4j()
+                compensations, comp_details = self._compensate_neo4j_detailed()
                 self._pg.rollback()
                 result.compensations_applied = compensations
+                result.compensation_details = comp_details
+                result.neo4j_error = neo4j_error
+                result.needs_backfill = True
                 result.error = (
                     f"Neo4j 执行失败，已回滚 PG 并补偿 {compensations} 个 Neo4j 操作: "
                     f"{neo4j_error}"
@@ -259,8 +265,10 @@ class TransactionCoordinator:
             result.pg_committed = True
         except Exception as exc:
             # PG commit 失败 → 补偿已执行的 Neo4j 操作
-            compensations = self._compensate_neo4j()
+            compensations, comp_details = self._compensate_neo4j_detailed()
             result.compensations_applied = compensations
+            result.compensation_details = comp_details
+            result.needs_backfill = True
             result.error = (
                 f"PostgreSQL commit 失败，已补偿 {compensations} 个 Neo4j 操作: {exc}"
             )
@@ -311,11 +319,17 @@ class TransactionCoordinator:
 
     def _compensate_neo4j(self) -> int:
         """对已执行的 Neo4j 操作执行补偿，返回成功补偿数。"""
+        count, _ = self._compensate_neo4j_detailed()
+        return count
+
+    def _compensate_neo4j_detailed(self) -> tuple:
+        """对已执行的 Neo4j 操作执行补偿，返回 (成功补偿数, 详情列表)。"""
         driver = self._neo4j
         if driver is None or not hasattr(driver, 'driver') or driver.driver is None:
-            return 0
+            return 0, []
 
         compensated = 0
+        details: List[str] = []
         for op in reversed(self._neo4j_executed):
             if op.compensate_cypher is None:
                 continue
@@ -325,10 +339,12 @@ class TransactionCoordinator:
                         lambda tx, c=op.compensate_cypher, p=op.compensate_params or {}: tx.run(c, **p)
                     )
                 compensated += 1
+                details.append(f"compensated: {op.compensate_cypher[:80]}")
             except Exception as exc:
                 logger.warning("Neo4j 补偿失败（需人工介入）: %s — %s", op.compensate_cypher, exc)
+                details.append(f"failed: {op.compensate_cypher[:80]} — {exc}")
         self._neo4j_executed.clear()
-        return compensated
+        return compensated, details
 
 
 @contextmanager

@@ -185,6 +185,110 @@ class TestTransactionResultStorageMode(unittest.TestCase):
         self.assertEqual(result.storage_mode, "")
 
 
+class TestTransactionResultObservationFields(unittest.TestCase):
+    """TransactionResult 新增观测字段 — 契约测试。"""
+
+    def test_neo4j_error_field_default_none(self):
+        result = TransactionResult(success=True)
+        self.assertIsNone(result.neo4j_error)
+
+    def test_neo4j_error_field_assignable(self):
+        result = TransactionResult(success=False, neo4j_error="connection refused")
+        self.assertEqual(result.neo4j_error, "connection refused")
+
+    def test_compensation_details_field_default_empty_list(self):
+        result = TransactionResult(success=True)
+        self.assertIsInstance(result.compensation_details, list)
+        self.assertEqual(len(result.compensation_details), 0)
+
+    def test_compensation_details_field_assignable(self):
+        details = ["compensated: MATCH (n) DELETE n"]
+        result = TransactionResult(success=False, compensation_details=details)
+        self.assertEqual(result.compensation_details, details)
+
+    def test_needs_backfill_field_default_false(self):
+        result = TransactionResult(success=True)
+        self.assertFalse(result.needs_backfill)
+
+    def test_needs_backfill_field_assignable(self):
+        result = TransactionResult(success=False, needs_backfill=True)
+        self.assertTrue(result.needs_backfill)
+
+    def test_all_observation_fields_coexist(self):
+        result = TransactionResult(
+            success=False,
+            neo4j_error="timeout",
+            compensation_details=["comp1", "comp2"],
+            needs_backfill=True,
+            compensations_applied=2,
+            storage_mode="dual_write",
+        )
+        self.assertEqual(result.neo4j_error, "timeout")
+        self.assertEqual(len(result.compensation_details), 2)
+        self.assertTrue(result.needs_backfill)
+        self.assertEqual(result.compensations_applied, 2)
+
+
+class TestEventualConsistencyAnnotation(unittest.TestCase):
+    """phase_orchestrator._classify_eventual_consistency 边界标注 — 契约测试。"""
+
+    @staticmethod
+    def _classify(mode, graph_enabled, graph_status, node_count):
+        from src.research.phase_orchestrator import PhaseOrchestrator
+        state = build_consistency_state(
+            initialized=True,
+            db_type="postgresql" if mode != MODE_SQLITE_FALLBACK else "sqlite",
+            pg_status="active",
+            neo4j_enabled=mode == MODE_DUAL_WRITE,
+            neo4j_status="active" if mode == MODE_DUAL_WRITE else "skipped",
+            neo4j_driver_connected=mode == MODE_DUAL_WRITE,
+        )
+        graph_report = {
+            "enabled": graph_enabled,
+            "status": graph_status,
+            "node_count": node_count,
+        }
+        return PhaseOrchestrator._classify_eventual_consistency(state, graph_report)
+
+    def test_dual_write_graph_ok_no_backfill(self):
+        ec = self._classify(MODE_DUAL_WRITE, True, "active", 5)
+        self.assertFalse(ec["graph_backfill_pending"])
+        self.assertIsNone(ec["reason"])
+
+    def test_pg_only_marks_backfill_pending(self):
+        ec = self._classify(MODE_PG_ONLY, False, "skipped", 0)
+        self.assertTrue(ec["graph_backfill_pending"])
+        self.assertIn("backfill", ec["reason"])
+
+    def test_dual_write_graph_failed_marks_backfill(self):
+        ec = self._classify(MODE_DUAL_WRITE, True, "error", 0)
+        self.assertTrue(ec["graph_backfill_pending"])
+        self.assertIn("backfill", ec["reason"])
+
+    def test_dual_write_graph_zero_nodes_marks_backfill(self):
+        ec = self._classify(MODE_DUAL_WRITE, True, "active", 0)
+        self.assertTrue(ec["graph_backfill_pending"])
+        self.assertIn("backfill", ec["reason"])
+
+    def test_sqlite_fallback_marks_backfill(self):
+        ec = self._classify(MODE_SQLITE_FALLBACK, False, "skipped", 0)
+        self.assertTrue(ec["graph_backfill_pending"])
+        self.assertIn("backfill", ec["reason"])
+
+    def test_result_has_required_keys(self):
+        ec = self._classify(MODE_DUAL_WRITE, True, "active", 5)
+        self.assertIn("graph_backfill_pending", ec)
+        self.assertIn("reason", ec)
+
+
+class TestMonitoringPersistenceConsistencyState(unittest.TestCase):
+    """monitoring._build_persistence_summary 嵌入 consistency_state — 契约测试。"""
+
+    def test_get_consistency_state_dict_method_exists(self):
+        from src.infrastructure.monitoring import MonitoringService
+        self.assertTrue(hasattr(MonitoringService, "_get_consistency_state_dict"))
+
+
 class TestFactoryGetConsistencyState(unittest.TestCase):
     """StorageBackendFactory.get_consistency_state() 集成验证。"""
 

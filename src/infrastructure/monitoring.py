@@ -274,8 +274,26 @@ class MonitoringService:
 
     def _build_persistence_summary(self) -> Dict[str, Any]:
         summary = dict(self.job_manager.get_storage_summary())
-        summary["structured_storage"] = dict(self._structured_storage_summary)
+        structured = dict(self._structured_storage_summary)
+        # 嵌入统一的 StorageConsistencyState — 单一事实源
+        consistency_dict = self._get_consistency_state_dict()
+        if consistency_dict:
+            structured["consistency_state"] = consistency_dict
+        summary["structured_storage"] = structured
         return summary
+
+    def _get_consistency_state_dict(self) -> Optional[Dict[str, Any]]:
+        """从 StorageBackendFactory 获取一致性状态快照（懒加载，容错）。"""
+        try:
+            from src.storage import StorageBackendFactory
+            factory = StorageBackendFactory(self.settings.materialize_runtime_config())
+            try:
+                factory.initialize()
+                return factory.get_consistency_state().to_dict()
+            finally:
+                factory.close()
+        except Exception:
+            return None
 
     def _build_structured_storage_summary(self) -> Dict[str, Any]:
         db_type = self.settings.database_type
