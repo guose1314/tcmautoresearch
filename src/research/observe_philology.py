@@ -16,9 +16,12 @@ from src.research.exegesis_contract import (
     FIELD_DEFINITION,
     FIELD_DEFINITION_SOURCE,
     assess_exegesis_completeness,
-    build_exegesis_summary,
     build_exegesis_note,
+    build_exegesis_summary,
     definition_source_rank,
+)
+from src.research.evidence_chain_contract import (
+    build_evidence_chain_summary,
 )
 from src.research.fragment_contract import (
     CANDIDATE_KINDS,
@@ -37,6 +40,7 @@ OBSERVE_PHILOLOGY_ANNOTATION_REPORT_ARTIFACT = "observe_philology_annotation_rep
 OBSERVE_PHILOLOGY_CATALOG_SUMMARY_ARTIFACT = "observe_philology_catalog_summary"
 OBSERVE_PHILOLOGY_CATALOG_REVIEW_ARTIFACT = "observe_philology_catalog_review"
 OBSERVE_PHILOLOGY_FRAGMENT_RECONSTRUCTION_ARTIFACT = "observe_philology_fragment_reconstruction"
+OBSERVE_PHILOLOGY_EVIDENCE_CHAIN_ARTIFACT = "observe_philology_evidence_chain"
 OBSERVE_PHILOLOGY_ARTIFACT_NAMES = frozenset(
     {
         OBSERVE_PHILOLOGY_TERMINOLOGY_TABLE_ARTIFACT,
@@ -45,6 +49,7 @@ OBSERVE_PHILOLOGY_ARTIFACT_NAMES = frozenset(
         OBSERVE_PHILOLOGY_CATALOG_SUMMARY_ARTIFACT,
         OBSERVE_PHILOLOGY_CATALOG_REVIEW_ARTIFACT,
         OBSERVE_PHILOLOGY_FRAGMENT_RECONSTRUCTION_ARTIFACT,
+        OBSERVE_PHILOLOGY_EVIDENCE_CHAIN_ARTIFACT,
         OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT,
     }
 )
@@ -2329,6 +2334,14 @@ def normalize_observe_philology_assets(raw_assets: Any) -> Dict[str, Any]:
     for field_name, items in fragment_candidate_payloads.items():
         normalized_assets[field_name] = items
 
+    # 考据证据链
+    evidence_chains = _as_dict_list(assets.get("evidence_chains"))
+    conflict_claims = _as_dict_list(assets.get("conflict_claims"))
+    normalized_assets["evidence_chains"] = evidence_chains
+    normalized_assets["conflict_claims"] = conflict_claims
+    normalized_assets["evidence_chain_count"] = _safe_int(assets.get("evidence_chain_count"), len(evidence_chains))
+    normalized_assets["conflict_count"] = _safe_int(assets.get("conflict_count"), len(conflict_claims))
+
     # 辑佚摘要 — 注入到 catalog_summary.summary 供 dashboard 消费
     all_fragment_items = [item for items in fragment_candidate_payloads.values() for item in items]
     if all_fragment_items:
@@ -2351,6 +2364,23 @@ def normalize_observe_philology_assets(raw_assets: Any) -> Dict[str, Any]:
             catalog_summary = {"summary": catalog_metrics, "documents": [], "version_lineages": []}
             normalized_assets["catalog_summary"] = catalog_summary
         elif "summary" not in catalog_summary:
+            catalog_summary["summary"] = catalog_metrics
+
+    # 考据证据链摘要 — 注入到 catalog_summary.summary 供 dashboard 消费
+    if evidence_chains:
+        ec_summary = build_evidence_chain_summary(evidence_chains)
+        catalog_metrics["evidence_chain_count"] = ec_summary["total"]
+        catalog_metrics["evidence_conflict_count"] = ec_summary["conflict_count"]
+        catalog_metrics["evidence_needs_review_count"] = ec_summary["needs_review_count"]
+        catalog_metrics["evidence_claim_type_distribution"] = ec_summary["claim_type_distribution"]
+        catalog_metrics["evidence_judgment_distribution"] = ec_summary["judgment_type_distribution"]
+        catalog_metrics["evidence_confidence_avg"] = ec_summary.get("avg_confidence", 0.0)
+        catalog_metrics["evidence_confidence_min"] = 0.0
+        catalog_metrics["evidence_confidence_max"] = 0.0
+        if not catalog_summary:
+            catalog_summary = {"summary": catalog_metrics, "documents": [], "version_lineages": []}
+            normalized_assets["catalog_summary"] = catalog_summary
+        else:
             catalog_summary["summary"] = catalog_metrics
 
     return normalized_assets
@@ -2476,6 +2506,32 @@ def build_observe_philology_artifact_payloads(
             }
         )
 
+    # 考据证据链报告
+    evidence_chains = assets.get("evidence_chains") or []
+    conflict_claims = assets.get("conflict_claims") or []
+    if config.get("include_evidence_chain", True) and evidence_chains:
+        ec_summary = build_evidence_chain_summary(evidence_chains)
+        artifacts.append(
+            {
+                "name": OBSERVE_PHILOLOGY_EVIDENCE_CHAIN_ARTIFACT,
+                "artifact_type": "analysis",
+                "mime_type": "application/json",
+                "description": "Observe 阶段考据证据链报告",
+                "content": {
+                    "asset_kind": "evidence_chain",
+                    "summary": ec_summary,
+                    "evidence_chains": evidence_chains,
+                    "conflict_claims": conflict_claims,
+                },
+                "metadata": {
+                    "asset_kind": "evidence_chain",
+                    "evidence_chain_count": len(evidence_chains),
+                    "conflict_count": len(conflict_claims),
+                    "phase": "observe",
+                },
+            }
+        )
+
     return artifacts
 
 
@@ -2499,6 +2555,8 @@ def _resolve_artifact_kind(artifact: Mapping[str, Any]) -> str:
         return _CATALOG_REVIEW_ASSET_KIND
     if name == OBSERVE_PHILOLOGY_FRAGMENT_RECONSTRUCTION_ARTIFACT:
         return "fragment_reconstruction"
+    if name == OBSERVE_PHILOLOGY_EVIDENCE_CHAIN_ARTIFACT:
+        return "evidence_chain"
     if name == OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT:
         return REVIEW_WORKBENCH_ASSET_KIND
     return ""
@@ -2530,6 +2588,13 @@ def extract_observe_philology_assets_from_artifacts(artifacts: Sequence[Mapping[
                 items = _as_dict_list(content.get(fk))
                 if items:
                     collected[fk] = items
+        elif asset_kind == "evidence_chain" and content:
+            chains = _as_dict_list(content.get("evidence_chains"))
+            if chains:
+                collected["evidence_chains"] = chains
+            conflicts = _as_dict_list(content.get("conflict_claims"))
+            if conflicts:
+                collected["conflict_claims"] = conflicts
         elif asset_kind == REVIEW_WORKBENCH_ASSET_KIND and content:
             collected["review_workbench_decisions"] = content
     return normalize_observe_philology_assets(collected)

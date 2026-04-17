@@ -9,17 +9,18 @@ from typing import Any, Dict, List, Mapping, Sequence
 from src.collector.normalizer import Normalizer
 from src.core.module_base import BaseModule
 from src.data.tcm_lexicon import get_lexicon
+from src.analysis.textual_evidence_chain import build_evidence_chains
 from src.research.exegesis_contract import (
+    CATEGORY_TO_LABEL,
     FIELD_DEFINITION,
     FIELD_DEFINITION_SOURCE,
-    FIELD_SEMANTIC_SCOPE,
-    FIELD_DYNASTY_USAGE,
     FIELD_DISAMBIGUATION_BASIS,
+    FIELD_DYNASTY_USAGE,
+    FIELD_SEMANTIC_SCOPE,
     ExegesisDictionary,
+    build_exegesis_note,
     disambiguate_polysemy,
     resolve_polysemy_category,
-    build_exegesis_note,
-    CATEGORY_TO_LABEL,
 )
 from src.semantic_modeling.tcm_relationships import TCMRelationshipDefinitions
 
@@ -146,12 +147,16 @@ class PhilologyService(BaseModule):
         )
         version_collation = self._build_version_collation(raw_text, context, input_metadata)
         fragment_reconstruction = self._build_fragment_reconstruction(input_metadata, version_collation)
+        evidence_chain_result = self._build_textual_evidence_chains(
+            input_metadata, term_standardization, version_collation, fragment_reconstruction,
+        )
         philology_notes = self._build_philology_notes(term_standardization, version_collation, fragment_reconstruction)
         philology_assets = self._build_philology_assets(
             input_metadata,
             term_standardization,
             version_collation,
             fragment_reconstruction,
+            evidence_chain_result,
             philology_notes,
         )
 
@@ -162,6 +167,7 @@ class PhilologyService(BaseModule):
             "term_standardization": term_standardization,
             "version_collation": version_collation,
             "fragment_reconstruction": fragment_reconstruction,
+            "evidence_chain": evidence_chain_result,
             "philology_assets": philology_assets,
             "statistics": {
                 "mapping_count": int(term_standardization.get("mapping_count") or 0),
@@ -174,6 +180,8 @@ class PhilologyService(BaseModule):
                 "fragment_candidate_count": int(fragment_reconstruction.get("fragment_candidate_count") or 0),
                 "lost_text_candidate_count": int(fragment_reconstruction.get("lost_text_candidate_count") or 0),
                 "citation_source_candidate_count": int(fragment_reconstruction.get("citation_source_candidate_count") or 0),
+                "evidence_chain_count": int(evidence_chain_result.get("evidence_chain_count") or 0),
+                "conflict_count": int(evidence_chain_result.get("conflict_count") or 0),
                 "asset_count": int(philology_assets.get("asset_count") or 0),
             },
             "philology_notes": philology_notes,
@@ -193,6 +201,8 @@ class PhilologyService(BaseModule):
                 "fragment_candidate_count": int(fragment_reconstruction.get("fragment_candidate_count") or 0),
                 "lost_text_candidate_count": int(fragment_reconstruction.get("lost_text_candidate_count") or 0),
                 "citation_source_candidate_count": int(fragment_reconstruction.get("citation_source_candidate_count") or 0),
+                "evidence_chain_count": int(evidence_chain_result.get("evidence_chain_count") or 0),
+                "conflict_count": int(evidence_chain_result.get("conflict_count") or 0),
                 "asset_count": int(philology_assets.get("asset_count") or 0),
                 "notes": list(philology_notes),
             },
@@ -1082,6 +1092,7 @@ class PhilologyService(BaseModule):
         term_standardization: Mapping[str, Any],
         version_collation: Mapping[str, Any],
         fragment_reconstruction: Mapping[str, Any],
+        evidence_chain_result: Mapping[str, Any],
         philology_notes: Sequence[str],
     ) -> Dict[str, Any]:
         terminology_standard_table = list(term_standardization.get("terminology_standard_table") or [])
@@ -1097,6 +1108,9 @@ class PhilologyService(BaseModule):
             philology_notes,
         )
 
+        evidence_chains = list(evidence_chain_result.get("evidence_chains") or []) if self.asset_output_enabled else []
+        conflict_claims = list(evidence_chain_result.get("conflict_claims") or []) if self.asset_output_enabled else []
+
         assets = {
             "terminology_standard_table": terminology_standard_table if self.asset_output_enabled and self.include_terminology_asset else [],
             "collation_entries": collation_entries if self.asset_output_enabled and self.include_collation_asset else [],
@@ -1104,6 +1118,10 @@ class PhilologyService(BaseModule):
             "lost_text_candidates": lost_text_candidates if self.asset_output_enabled else [],
             "citation_source_candidates": citation_source_candidates if self.asset_output_enabled else [],
             "annotation_report": annotation_report if self.asset_output_enabled and self.include_annotation_report else {},
+            "evidence_chains": evidence_chains,
+            "conflict_claims": conflict_claims,
+            "evidence_chain_count": len(evidence_chains),
+            "conflict_count": len(conflict_claims),
         }
         assets["asset_count"] = sum(
             1
@@ -1114,6 +1132,7 @@ class PhilologyService(BaseModule):
                 assets.get("lost_text_candidates"),
                 assets.get("citation_source_candidates"),
                 assets.get("annotation_report"),
+                assets.get("evidence_chains"),
             )
             if payload not in (None, "", [], {})
         )
@@ -1182,6 +1201,30 @@ class PhilologyService(BaseModule):
         if citation_source_candidate_count:
             notes.append(f"输出 {citation_source_candidate_count} 条引文来源候选")
         return notes
+
+    def _build_textual_evidence_chains(
+        self,
+        input_metadata: Mapping[str, Any],
+        term_standardization: Mapping[str, Any],
+        version_collation: Mapping[str, Any],
+        fragment_reconstruction: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        catalog_documents = list(input_metadata.get("catalog_documents") or [])
+        version_lineages = list(input_metadata.get("version_lineages") or [])
+        collation_entries = list(version_collation.get("collation_entries") or [])
+        fragment_candidates = list(fragment_reconstruction.get("fragment_candidates") or [])
+        lost_text_candidates = list(fragment_reconstruction.get("lost_text_candidates") or [])
+        citation_source_candidates = list(fragment_reconstruction.get("citation_source_candidates") or [])
+        terminology_rows = list(term_standardization.get("terminology_standard_table") or [])
+        return build_evidence_chains(
+            catalog_documents=catalog_documents,
+            version_lineages=version_lineages,
+            collation_entries=collation_entries,
+            fragment_candidates=fragment_candidates,
+            lost_text_candidates=lost_text_candidates,
+            citation_source_candidates=citation_source_candidates,
+            terminology_rows=terminology_rows,
+        )
 
     def _resolve_collation_judgement(
         self,

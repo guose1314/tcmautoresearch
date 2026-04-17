@@ -55,6 +55,10 @@ class AnalyzePhaseMixin:
             analysis_results["statistical_analysis"]["evidence_grade"] = evidence_grade_payload
             analysis_results["statistical_analysis"]["evidence_grade_summary"] = analysis_results["evidence_grade_summary"]
 
+        textual_evidence_summary = self._extract_textual_evidence_summary(cycle)
+        if textual_evidence_summary:
+            analysis_results["textual_evidence_summary"] = textual_evidence_summary
+
         metadata = {
             "analysis_type": "statistical_analysis",
             "significance_level": significance_level,
@@ -67,6 +71,8 @@ class AnalyzePhaseMixin:
             "data_mining_methods": list(data_mining_result.get("methods_executed") or []),
             "evidence_grade_generated": bool(evidence_grade_payload),
             "evidence_study_count": int(evidence_grade_payload.get("study_count") or 0) if evidence_grade_payload else 0,
+            "textual_evidence_chain_consumed": bool(textual_evidence_summary),
+            "textual_evidence_chain_count": int(textual_evidence_summary.get("evidence_chain_count") or 0) if textual_evidence_summary else 0,
             "learning_strategy_applied": has_learning_strategy(context, self.pipeline.config),
         }
         if evidence_grade_error:
@@ -860,6 +866,28 @@ class AnalyzePhaseMixin:
             "factor_averages": factor_averages,
             "bias_risk_distribution": bias_distribution,
             "summary": summary_lines,
+        }
+
+    def _extract_textual_evidence_summary(self, cycle: "ResearchCycle") -> Dict[str, Any]:
+        observe_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.OBSERVE, {}).get("result", {})
+        if not isinstance(observe_result, dict):
+            return {}
+        philology_assets = get_phase_value(observe_result, "philology_assets", {})
+        if not isinstance(philology_assets, dict):
+            return {}
+        evidence_chains = philology_assets.get("evidence_chains") or []
+        if not evidence_chains:
+            return {}
+        conflict_claims = philology_assets.get("conflict_claims") or []
+        evidence_chain_count = int(philology_assets.get("evidence_chain_count") or len(evidence_chains))
+        conflict_count = int(philology_assets.get("conflict_count") or len(conflict_claims))
+        needs_review_count = sum(1 for c in evidence_chains if c.get("needs_manual_review"))
+        high_confidence_count = sum(1 for c in evidence_chains if (c.get("confidence") or 0) >= 0.60)
+        return {
+            "evidence_chain_count": evidence_chain_count,
+            "conflict_count": conflict_count,
+            "needs_review_count": needs_review_count,
+            "high_confidence_count": high_confidence_count,
         }
 
     # ── Hypothesis fallback: 从先前阶段合成分析数据 ──────────────

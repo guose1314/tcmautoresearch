@@ -701,6 +701,64 @@ def _render_fragment_summary_card(catalog_metrics: Dict[str, Any]) -> str:
     """
 
 
+def _render_evidence_chain_summary_card(catalog_metrics: Dict[str, Any]) -> str:
+    """考据证据链摘要卡片 — 展示 claim 类型分布、置信度、冲突与复核状态。"""
+    total = int(catalog_metrics.get("evidence_chain_count") or 0)
+    if total == 0:
+        return ""
+    conflict_count = int(catalog_metrics.get("evidence_conflict_count") or 0)
+    needs_review = int(catalog_metrics.get("evidence_needs_review_count") or 0)
+    confidence_avg = catalog_metrics.get("evidence_confidence_avg")
+    confidence_avg_text = f"{confidence_avg:.2f}" if confidence_avg is not None else "—"
+    claim_dist = catalog_metrics.get("evidence_claim_type_distribution") or {}
+    judgment_dist = catalog_metrics.get("evidence_judgment_distribution") or {}
+
+    claim_labels = {"authorship_attribution": "作者归属", "version_chronology": "版本先后", "citation_source": "引文来源"}
+    claim_badges = "".join(
+        f'<span class="inline-flex items-center px-2 py-1 rounded-full bg-teal-50 text-teal-700 text-xs">'
+        f'{_safe_html(claim_labels.get(ct, ct))} {count}</span>'
+        for ct, count in sorted(claim_dist.items())
+    ) or '<span class="text-xs text-gray-400">暂无 claim</span>'
+
+    judgment_labels = {"rule_based": "规则判定", "needs_review": "待人工复核"}
+    judgment_badges = "".join(
+        f'<span class="inline-flex items-center px-2 py-1 rounded-full bg-cyan-50 text-cyan-700 text-xs">'
+        f'{_safe_html(judgment_labels.get(jt, jt))} {count}</span>'
+        for jt, count in sorted(judgment_dist.items())
+    ) or '<span class="text-xs text-gray-400">暂无判定</span>'
+
+    return f"""
+    <div class="rounded-2xl border border-teal-100 bg-teal-50/30 p-4 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <h4 class="text-sm font-semibold text-gray-800">考据证据链</h4>
+            <span class="text-xs text-teal-600">平均置信 {_safe_html(confidence_avg_text)}</span>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+            <div class="rounded-xl bg-white border border-slate-100 p-3">
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">证据链</p>
+                <p class="text-lg font-semibold text-gray-800 mt-1">{total}</p>
+            </div>
+            <div class="rounded-xl bg-white border border-slate-100 p-3">
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">冲突</p>
+                <p class="text-lg font-semibold text-red-600 mt-1">{conflict_count}</p>
+            </div>
+            <div class="rounded-xl bg-white border border-slate-100 p-3">
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">待复核</p>
+                <p class="text-lg font-semibold text-amber-700 mt-1">{needs_review}</p>
+            </div>
+        </div>
+        <div class="space-y-1">
+            <p class="text-[11px] uppercase tracking-wide text-gray-400">claim 类型</p>
+            <div class="flex flex-wrap gap-2">{claim_badges}</div>
+        </div>
+        <div class="space-y-1">
+            <p class="text-[11px] uppercase tracking-wide text-gray-400">判定类型</p>
+            <div class="flex flex-wrap gap-2">{judgment_badges}</div>
+        </div>
+    </div>
+    """
+
+
 def _build_session_dashboard_snapshot(session: Dict[str, Any]) -> Dict[str, Any]:
     phase_executions = session.get("phase_executions") if isinstance(session.get("phase_executions"), dict) else {}
     phase_items: List[Dict[str, Any]] = []
@@ -1429,6 +1487,7 @@ def _render_session_detail_panel(
             <div class="flex flex-wrap gap-2">{catalog_semantic_badges_html}{catalog_review_badges_html}</div>
             {_render_exegesis_summary_card(catalog_metrics)}
             {_render_fragment_summary_card(catalog_metrics)}
+            {_render_evidence_chain_summary_card(catalog_metrics)}
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">{catalog_lineage_cards_html}</div>
         </section>
         """
