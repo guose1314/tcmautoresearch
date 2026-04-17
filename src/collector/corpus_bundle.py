@@ -18,6 +18,24 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.research.catalog_contract import (
+    FIELD_AUTHOR,
+    FIELD_CATALOG_ID,
+    FIELD_DYNASTY,
+    FIELD_EDITION,
+    FIELD_FRAGMENT_KEY,
+    FIELD_FRAGMENT_TITLE,
+    FIELD_LINEAGE_SOURCE,
+    FIELD_SOURCE_NAME,
+    FIELD_SOURCE_REF,
+    FIELD_SOURCE_TYPE,
+    FIELD_VERSION_LINEAGE_KEY,
+    FIELD_WITNESS_KEY,
+    FIELD_WORK_FRAGMENT_KEY,
+    FIELD_WORK_KEY,
+    FIELD_WORK_TITLE,
+)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Schema version — 判别新旧格式的唯一标识
 # ─────────────────────────────────────────────────────────────────────────────
@@ -154,21 +172,21 @@ def build_document_version_metadata(
 
     version_metadata = {
         **version_metadata,
-        "work_title": work_title,
-        "work_key": work_key,
-        "fragment_title": fragment_title,
-        "fragment_key": fragment_key,
-        "work_fragment_key": work_fragment_key,
-        "version_lineage_key": str(version_lineage_key),
-        "dynasty": str(dynasty or "").strip(),
-        "author": str(author or "").strip(),
-        "edition": str(edition or "").strip(),
-        "catalog_id": str(catalog_id or "").strip(),
-        "source_name": str(source_name or source_type).strip(),
-        "source_type": str(source_type or "").strip(),
-        "source_ref": str(source_ref or "").strip(),
-        "witness_key": witness_key,
-        "lineage_source": lineage_source,
+        FIELD_WORK_TITLE: work_title,
+        FIELD_WORK_KEY: work_key,
+        FIELD_FRAGMENT_TITLE: fragment_title,
+        FIELD_FRAGMENT_KEY: fragment_key,
+        FIELD_WORK_FRAGMENT_KEY: work_fragment_key,
+        FIELD_VERSION_LINEAGE_KEY: str(version_lineage_key),
+        FIELD_DYNASTY: str(dynasty or "").strip(),
+        FIELD_AUTHOR: str(author or "").strip(),
+        FIELD_EDITION: str(edition or "").strip(),
+        FIELD_CATALOG_ID: str(catalog_id or "").strip(),
+        FIELD_SOURCE_NAME: str(source_name or source_type).strip(),
+        FIELD_SOURCE_TYPE: str(source_type or "").strip(),
+        FIELD_SOURCE_REF: str(source_ref or "").strip(),
+        FIELD_WITNESS_KEY: witness_key,
+        FIELD_LINEAGE_SOURCE: lineage_source,
     }
 
     if enriched_metadata.get("root_title"):

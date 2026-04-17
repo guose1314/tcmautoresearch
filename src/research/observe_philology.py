@@ -3,6 +3,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Mapping, Sequence
 
+from src.research.catalog_contract import (
+    CATALOG_BASELINE_FIELDS,
+    CATALOG_CORE_FIELDS,
+    CATALOG_FILTER_FIELDS,
+    assess_catalog_completeness,
+    build_backfill_summary,
+    build_catalog_hierarchy,
+    has_baseline_fields,
+)
 from src.research.review_workbench import (
     OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT,
     REVIEW_WORKBENCH_ASSET_KIND,
@@ -36,19 +45,8 @@ _TERMINOLOGY_COLUMNS = [
     "sources",
     "notes",
 ]
-_CATALOG_CORE_FIELDS = (
-    "catalog_id",
-    "work_title",
-    "fragment_title",
-    "version_lineage_key",
-    "witness_key",
-)
-_CATALOG_FILTER_FIELDS = (
-    "document_title",
-    "work_title",
-    "version_lineage_key",
-    "witness_key",
-)
+_CATALOG_CORE_FIELDS = CATALOG_CORE_FIELDS
+_CATALOG_FILTER_FIELDS = CATALOG_FILTER_FIELDS
 _FRAGMENT_CANDIDATE_FIELDS = (
     "fragment_candidates",
     "lost_text_candidates",
@@ -465,20 +463,7 @@ def _normalize_exegesis_entries(value: Any) -> List[Dict[str, Any]]:
 
 
 def _catalog_entry_has_baseline_fields(entry: Mapping[str, Any]) -> bool:
-    for key in (
-        "catalog_id",
-        "work_title",
-        "fragment_title",
-        "work_fragment_key",
-        "version_lineage_key",
-        "witness_key",
-        "dynasty",
-        "author",
-        "edition",
-    ):
-        if _as_text(entry.get(key)):
-            return True
-    return False
+    return has_baseline_fields(entry)
 
 
 def _normalize_catalog_document(record: Mapping[str, Any]) -> Dict[str, Any]:
@@ -498,12 +483,12 @@ def _normalize_catalog_document(record: Mapping[str, Any]) -> Dict[str, Any]:
         "edition": _as_text(record.get("edition")),
         "lineage_source": _as_text(record.get("lineage_source")),
     }
-    missing_core_fields = [field_name for field_name in _CATALOG_CORE_FIELDS if not normalized[field_name]]
+    completeness_result = assess_catalog_completeness(normalized)
+    missing_core_fields = completeness_result["missing_core_fields"]
     normalized["missing_core_fields"] = missing_core_fields
-    normalized["metadata_completeness"] = round(
-        (len(_CATALOG_CORE_FIELDS) - len(missing_core_fields)) / len(_CATALOG_CORE_FIELDS),
-        3,
-    )
+    normalized["metadata_completeness"] = completeness_result["metadata_completeness"]
+    normalized["needs_backfill"] = completeness_result["needs_backfill"]
+    normalized["backfill_candidates"] = completeness_result["backfill_candidates"]
     temporal_semantics = _normalize_temporal_semantics(
         record.get("temporal_semantics"),
         dynasty=normalized["dynasty"],
@@ -848,6 +833,11 @@ def _build_catalog_summary_metrics(
             "needs_manual_review_count": needs_manual_review_count,
         }
     )
+    if documents:
+        summary["catalog_hierarchy"] = build_catalog_hierarchy(documents)
+        backfill = build_backfill_summary(documents)
+        summary["needs_backfill_count"] = backfill["needs_backfill_count"]
+        summary["backfill_field_gap_counts"] = backfill["field_gap_counts"]
     return summary
 
 
