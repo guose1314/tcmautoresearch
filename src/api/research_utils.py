@@ -113,6 +113,11 @@ REVIEW_WORKBENCH_SECTION_META = {
         "description": "对 evidence protocol 中的候选论断做人工取舍与补据。",
         "empty_message": "当前筛选结果下没有可审核的 claim。",
     },
+    "evidence_chain": {
+        "title": "考据证据链",
+        "description": "对作者归属、版本先后、引文来源等文献学考据 claim 做人工复核。",
+        "empty_message": "当前筛选结果下没有可审核的考据证据链。",
+    },
 }
 
 
@@ -817,6 +822,77 @@ def _build_claim_review_items(
     return items
 
 
+def _build_evidence_chain_review_items(
+    observe_philology: Dict[str, Any],
+    decision_lookup: Dict[tuple[str, str], Dict[str, Any]],
+    active_filters: Dict[str, Any],
+) -> list[Dict[str, Any]]:
+    evidence_chains = _as_dict_list(observe_philology.get("evidence_chains"))
+    items: list[Dict[str, Any]] = []
+    for chain in evidence_chains:
+        chain_id = _as_text(chain.get("evidence_chain_id") or chain.get("id"))
+        claim_type = _as_text(chain.get("claim_type"))
+        claim_statement = _as_text(chain.get("claim_statement"))
+        confidence = chain.get("confidence")
+        basis_summary = _as_text(chain.get("basis_summary"))
+        judgment_type = _as_text(chain.get("judgment_type"))
+        counter_evidence = _as_list(chain.get("counter_evidence"))
+        source_refs = _as_list(chain.get("source_refs"))
+        claim_type_label = {
+            "authorship_attribution": "作者归属",
+            "version_chronology": "版本先后",
+            "citation_source": "引文来源",
+        }.get(claim_type, claim_type or "未知")
+        judgment_label = {"rule_based": "规则判定", "needs_review": "人工待核"}.get(judgment_type, judgment_type or "-")
+        asset_key = _build_review_workbench_asset_key(
+            "evidence_chain",
+            ("evidence_chain_id", chain_id),
+            ("claim_type", claim_type),
+            ("claim_statement", claim_statement[:80] if claim_statement else ""),
+        )
+        summary_lines = [
+            f"类型：{claim_type_label}",
+            f"置信度：{confidence if confidence is not None else '-'}",
+            f"判断：{judgment_label}",
+        ]
+        if basis_summary:
+            summary_lines.append(f"依据：{basis_summary[:120]}")
+        if counter_evidence:
+            summary_lines.append(f"反证 {len(counter_evidence)} 条")
+        item = {
+            "asset_type": "evidence_chain",
+            "asset_key": asset_key,
+            "submission_mode": "generic",
+            "review_status": _normalize_workbench_review_status(chain.get("review_status")),
+            "needs_manual_review": bool(chain.get("needs_manual_review", True)),
+            "review_reasons": _as_list(chain.get("review_reasons")) or ["evidence_chain_machine_generated"],
+            "reviewer": _as_text(chain.get("reviewer")),
+            "reviewed_at": _as_text(chain.get("reviewed_at")),
+            "decision_basis": _as_text(chain.get("decision_basis")),
+            "title": claim_statement[:60] if claim_statement else f"考据 claim ({claim_type_label})",
+            "subtitle": claim_type_label,
+            "summary_lines": summary_lines,
+            "evidence_chain_id": chain_id,
+            "claim_type": claim_type,
+            "claim_statement": claim_statement,
+            "judgment_type": judgment_type,
+            "document_title": _as_text(chain.get("document_title")),
+            "work_title": _as_text(chain.get("work_title")),
+            "version_lineage_key": _as_text(chain.get("version_lineage_key")),
+            "witness_key": _as_text(chain.get("witness_key")),
+            "filter_candidates": _build_filter_candidate_map(
+                document_title=[chain.get("document_title")],
+                work_title=[chain.get("work_title")],
+                version_lineage_key=[chain.get("version_lineage_key")],
+                witness_key=[chain.get("witness_key")],
+            ),
+        }
+        item = _apply_review_workbench_decision(item, decision_lookup.get(("evidence_chain", asset_key)))
+        if _item_matches_catalog_filters(item, active_filters):
+            items.append(item)
+    return items
+
+
 def _build_review_workbench(
     evidence_protocol: Dict[str, Any],
     observe_philology: Dict[str, Any],
@@ -829,6 +905,7 @@ def _build_review_workbench(
         _build_review_workbench_section("collation_entry", _build_collation_review_items(observe_philology, decision_lookup)),
         _build_review_workbench_section("fragment_candidate", _build_fragment_candidate_review_items(observe_philology, decision_lookup, active_filters)),
         _build_review_workbench_section("claim", _build_claim_review_items(evidence_protocol, decision_lookup, active_filters)),
+        _build_review_workbench_section("evidence_chain", _build_evidence_chain_review_items(observe_philology, decision_lookup, active_filters)),
     ]
     return {
         "sections": sections,

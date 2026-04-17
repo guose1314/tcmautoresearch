@@ -7,7 +7,9 @@ import unittest
 
 class TestEvidenceChainArtifactConstant(unittest.TestCase):
     def test_artifact_constant_defined(self):
-        from src.research.observe_philology import OBSERVE_PHILOLOGY_EVIDENCE_CHAIN_ARTIFACT
+        from src.research.observe_philology import (
+            OBSERVE_PHILOLOGY_EVIDENCE_CHAIN_ARTIFACT,
+        )
 
         self.assertEqual(OBSERVE_PHILOLOGY_EVIDENCE_CHAIN_ARTIFACT, "observe_philology_evidence_chain")
 

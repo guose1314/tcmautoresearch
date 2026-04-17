@@ -846,6 +846,10 @@ def _render_workbench_review_actions(
             ("target_entity", str(item.get("target_entity") or "")),
             ("relation_type", str(item.get("relation_type") or "")),
             ("fragment_candidate_id", str(item.get("fragment_candidate_id") or "")),
+            ("evidence_chain_id", str(item.get("evidence_chain_id") or "")),
+            ("claim_type", str(item.get("claim_type") or "")),
+            ("claim_statement", str(item.get("claim_statement") or "")),
+            ("judgment_type", str(item.get("judgment_type") or "")),
             ("terminology_page", str(max(1, terminology_page))),
             ("collation_page", str(max(1, collation_page))),
             ("drawer", "1" if drawer else "0"),
@@ -900,8 +904,9 @@ def _render_workbench_review_card(
         for line in summary_lines
     ) or '<p class="text-xs text-gray-400">暂无摘要说明</p>'
     subtitle = str(item.get("subtitle") or "").strip()
+    card_review_status = str(item.get("review_status") or "pending").strip()
     return f"""
-    <article class="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-3">
+    <article class="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-3" data-review-status="{_safe_html(card_review_status)}">
         <div class="flex flex-wrap items-start justify-between gap-2">
             <div>
                 <h5 class="text-sm font-semibold text-gray-800">{_safe_html(item.get('title') or '未命名条目')}</h5>
@@ -994,7 +999,7 @@ def _render_philology_review_workbench(
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <div>
                     <h4 class="text-base font-semibold text-gray-800">文献学校核工作台</h4>
-                    <p class="text-sm text-gray-400 mt-1">目录谱系仍在上方目录学基线复核，其余术语、校勘、辑佚与 claim 条目统一在此处理</p>
+                    <p class="text-sm text-gray-400 mt-1">目录谱系仍在上方目录学基线复核，其余术语、校勘、辑佚、考据证据链条目统一在此处理</p>
                 </div>
                 <span class="text-xs text-emerald-700">{_safe_html(filter_summary)}</span>
             </div>
@@ -1016,22 +1021,73 @@ def _render_philology_review_workbench(
         for section in visible_sections
     )
     total_cards = sum(len(section.get("items") or []) for section in visible_sections)
+    # collect unique review_status values across all visible items for filter chips
+    all_review_statuses: set[str] = set()
+    for section in visible_sections:
+        for item in section.get("items") or []:
+            if isinstance(item, dict):
+                rs = str(item.get("review_status") or "").strip()
+                if rs:
+                    all_review_statuses.add(rs)
+    status_labels = {
+        "pending": "待审核",
+        "accepted": "已通过",
+        "rejected": "已驳回",
+        "needs_source": "待补据",
+    }
+    review_status_chips = "".join(
+        f'<button type="button" data-status="{_safe_html(status)}" '
+        f'class="wb-status-chip inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium border transition '
+        f'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300" '
+        f'onclick="toggleWorkbenchStatusFilter(this)">{_safe_html(status_labels.get(status, status))}</button>'
+        for status in ("pending", "accepted", "rejected", "needs_source")
+        if status in all_review_statuses
+    )
+    review_filter_html = ""
+    if review_status_chips:
+        review_filter_html = (
+            '<div class="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100 mt-2">'
+            '<span class="text-xs text-gray-500 mr-1">复核状态：</span>'
+            f'<button type="button" class="wb-status-chip wb-status-active inline-flex items-center px-3 py-1.5 '
+            f'rounded-full text-xs font-medium border transition '
+            f'bg-emerald-600 border-emerald-600 text-white" '
+            f'data-status="" onclick="toggleWorkbenchStatusFilter(this)">全部</button>'
+            f'{review_status_chips}</div>'
+        )
+    filter_script = """
+    <script>
+    function toggleWorkbenchStatusFilter(btn) {
+      var status = btn.getAttribute("data-status") || "";
+      document.querySelectorAll(".wb-status-chip").forEach(function(c) {
+        c.classList.remove("wb-status-active", "bg-emerald-600", "border-emerald-600", "text-white");
+        c.classList.add("bg-white", "border-gray-200", "text-gray-600");
+      });
+      btn.classList.add("wb-status-active", "bg-emerald-600", "border-emerald-600", "text-white");
+      btn.classList.remove("bg-white", "border-gray-200", "text-gray-600");
+      document.querySelectorAll("[data-review-status]").forEach(function(card) {
+        card.style.display = (!status || card.getAttribute("data-review-status") === status) ? "" : "none";
+      });
+    }
+    </script>
+    """
     return f"""
     <section class="space-y-4">
         <div class="rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <div>
                     <h4 class="text-base font-semibold text-gray-800">文献学校核工作台</h4>
-                    <p class="text-sm text-gray-400 mt-1">目录谱系仍在上方目录学基线复核，其余术语、校勘、辑佚与 claim 条目统一在此处理</p>
+                    <p class="text-sm text-gray-400 mt-1">目录谱系仍在上方目录学基线复核，其余术语、校勘、辑佚、考据证据链条目统一在此处理</p>
                 </div>
                 <div class="text-right text-xs text-gray-500">
                     <p>可见卡片 {total_cards}</p>
                     <p class="mt-1 text-emerald-700">{_safe_html(filter_summary)}</p>
                 </div>
             </div>
+            {review_filter_html}
         </div>
         {sections_html}
     </section>
+    {filter_script}
     """
 
 

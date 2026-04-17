@@ -12,6 +12,7 @@ _REVIEWABLE_ASSET_TYPES = frozenset(
         "collation_entry",
         "claim",
         "fragment_candidate",
+        "evidence_chain",
     }
 )
 _REVIEWABLE_OPTIONAL_FIELDS = (
@@ -33,6 +34,10 @@ _REVIEWABLE_OPTIONAL_FIELDS = (
     "target_entity",
     "relation_type",
     "fragment_candidate_id",
+    "evidence_chain_id",
+    "claim_type",
+    "claim_statement",
+    "judgment_type",
 )
 
 

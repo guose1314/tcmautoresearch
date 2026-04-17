@@ -260,7 +260,9 @@ class TestDetectClaimConflicts(unittest.TestCase):
 
 class TestAssessEvidenceChainCompleteness(unittest.TestCase):
     def test_empty_claims(self):
-        from src.research.evidence_chain_contract import assess_evidence_chain_completeness
+        from src.research.evidence_chain_contract import (
+            assess_evidence_chain_completeness,
+        )
 
         result = assess_evidence_chain_completeness([])
         self.assertEqual(result["total"], 0)

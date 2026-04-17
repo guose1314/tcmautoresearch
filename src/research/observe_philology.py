@@ -12,6 +12,9 @@ from src.research.catalog_contract import (
     build_catalog_hierarchy,
     has_baseline_fields,
 )
+from src.research.evidence_chain_contract import (
+    build_evidence_chain_summary,
+)
 from src.research.exegesis_contract import (
     FIELD_DEFINITION,
     FIELD_DEFINITION_SOURCE,
@@ -19,9 +22,6 @@ from src.research.exegesis_contract import (
     build_exegesis_note,
     build_exegesis_summary,
     definition_source_rank,
-)
-from src.research.evidence_chain_contract import (
-    build_evidence_chain_summary,
 )
 from src.research.fragment_contract import (
     CANDIDATE_KINDS,
@@ -1979,6 +1979,11 @@ def filter_observe_philology_assets(
     }
     for field_name, items in filtered_fragment_candidates.items():
         filtered_assets[field_name] = items
+    # 考据证据链 — pass through (not filtered by catalog dimensions)
+    if _as_dict_list(normalized.get("evidence_chains")):
+        filtered_assets["evidence_chains"] = _as_dict_list(normalized.get("evidence_chains"))
+    if _as_dict_list(normalized.get("conflict_claims")):
+        filtered_assets["conflict_claims"] = _as_dict_list(normalized.get("conflict_claims"))
     if _as_text(normalized.get("source")):
         filtered_assets["source"] = normalized["source"]
     if _as_string_list(normalized.get("sources")):
@@ -2101,6 +2106,8 @@ def _merge_philology_candidates(
             "catalog_summary",
             "catalog_review_decisions",
             "review_workbench_decisions",
+            "evidence_chains",
+            "conflict_claims",
             *_FRAGMENT_CANDIDATE_FIELDS,
         ):
             if not resolved_payload.get(field_name) and candidate.get(field_name):
@@ -2177,10 +2184,11 @@ def _apply_workbench_review_decisions(
     terminology_rows: List[Dict[str, Any]],
     collation_entries: List[Dict[str, Any]],
     fragment_candidate_payloads: Dict[str, List[Dict[str, Any]]],
+    evidence_chains: List[Dict[str, Any]],
     review_workbench_decisions: List[Dict[str, Any]],
-) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]:
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]]:
     if not review_workbench_decisions:
-        return terminology_rows, collation_entries, fragment_candidate_payloads
+        return terminology_rows, collation_entries, fragment_candidate_payloads, evidence_chains
 
     lookup: Dict[tuple[str, str], Dict[str, Any]] = {}
     for decision in review_workbench_decisions:
@@ -2190,7 +2198,7 @@ def _apply_workbench_review_decisions(
             lookup[(asset_type, asset_key)] = decision
 
     if not lookup:
-        return terminology_rows, collation_entries, fragment_candidate_payloads
+        return terminology_rows, collation_entries, fragment_candidate_payloads, evidence_chains
 
     updated_rows: List[Dict[str, Any]] = []
     for row in terminology_rows:
@@ -2238,7 +2246,21 @@ def _apply_workbench_review_decisions(
             updated_items.append(_apply_workbench_review_to_item(entry, decision) if decision else entry)
         updated_fragments[field_name] = updated_items
 
-    return updated_rows, updated_collation, updated_fragments
+    updated_chains: List[Dict[str, Any]] = []
+    for chain in evidence_chains:
+        chain_id = _as_text(chain.get("evidence_chain_id") or chain.get("id"))
+        claim_type = _as_text(chain.get("claim_type"))
+        claim_statement = _as_text(chain.get("claim_statement"))
+        key = _build_workbench_asset_key(
+            "evidence_chain",
+            ("evidence_chain_id", chain_id),
+            ("claim_type", claim_type),
+            ("claim_statement", claim_statement[:80] if claim_statement else ""),
+        )
+        decision = lookup.get(("evidence_chain", key))
+        updated_chains.append(_apply_workbench_review_to_item(chain, decision) if decision else chain)
+
+    return updated_rows, updated_collation, updated_fragments, updated_chains
 
 
 def normalize_observe_philology_assets(raw_assets: Any) -> Dict[str, Any]:
@@ -2268,8 +2290,9 @@ def normalize_observe_philology_assets(raw_assets: Any) -> Dict[str, Any]:
     document_reports = _enrich_document_reports_with_catalog_metadata(document_reports, catalog_documents)
     catalog_summary = _enrich_catalog_summary(catalog_summary, terminology_rows, collation_entries)
     catalog_summary = _apply_catalog_review_decisions(catalog_summary, catalog_review_decisions)
-    terminology_rows, collation_entries, fragment_candidate_payloads = _apply_workbench_review_decisions(
-        terminology_rows, collation_entries, fragment_candidate_payloads, review_workbench_decisions,
+    evidence_chains = _as_dict_list(assets.get("evidence_chains"))
+    terminology_rows, collation_entries, fragment_candidate_payloads, evidence_chains = _apply_workbench_review_decisions(
+        terminology_rows, collation_entries, fragment_candidate_payloads, evidence_chains, review_workbench_decisions,
     )
     catalog_metrics = _as_dict(catalog_summary.get("summary"))
 
@@ -2304,6 +2327,7 @@ def normalize_observe_philology_assets(raw_assets: Any) -> Dict[str, Any]:
             catalog_summary,
             catalog_review_decisions,
             review_workbench_decisions,
+            evidence_chains,
             *fragment_candidate_payloads.values(),
         )
         if payload not in ({}, [], None, "")
@@ -2335,7 +2359,6 @@ def normalize_observe_philology_assets(raw_assets: Any) -> Dict[str, Any]:
         normalized_assets[field_name] = items
 
     # 考据证据链
-    evidence_chains = _as_dict_list(assets.get("evidence_chains"))
     conflict_claims = _as_dict_list(assets.get("conflict_claims"))
     normalized_assets["evidence_chains"] = evidence_chains
     normalized_assets["conflict_claims"] = conflict_claims

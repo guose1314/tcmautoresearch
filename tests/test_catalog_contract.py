@@ -364,7 +364,9 @@ class TestSnapshotDashboardConsistency(unittest.TestCase):
         self.assertEqual(_CATALOG_FILTER_FIELDS, CATALOG_FILTER_FIELDS)
 
     def test_filter_contract_options_match_core_fields(self):
-        from src.research.observe_philology import build_observe_philology_filter_contract
+        from src.research.observe_philology import (
+            build_observe_philology_filter_contract,
+        )
 
         assets = {
             "catalog_summary": {
@@ -376,7 +378,9 @@ class TestSnapshotDashboardConsistency(unittest.TestCase):
         self.assertIn("work_title", options)
 
     def test_catalog_summary_artifact_has_hierarchy(self):
-        from src.research.observe_philology import build_observe_philology_artifact_payloads
+        from src.research.observe_philology import (
+            build_observe_philology_artifact_payloads,
+        )
 
         assets = {
             "catalog_summary": {

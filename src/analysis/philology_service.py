@@ -6,10 +6,10 @@ import difflib
 import re
 from typing import Any, Dict, List, Mapping, Sequence
 
+from src.analysis.textual_evidence_chain import build_evidence_chains
 from src.collector.normalizer import Normalizer
 from src.core.module_base import BaseModule
 from src.data.tcm_lexicon import get_lexicon
-from src.analysis.textual_evidence_chain import build_evidence_chains
 from src.research.exegesis_contract import (
     CATEGORY_TO_LABEL,
     FIELD_DEFINITION,
