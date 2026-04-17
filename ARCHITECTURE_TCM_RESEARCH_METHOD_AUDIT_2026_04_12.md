@@ -19,14 +19,14 @@
 
 - ResearchRuntimeService + RuntimeConfigAssembler 已完成 CLI / Web / demo 主研究路径的首轮收口，但兼容壳和历史直连路径仍需继续清理。
 - PostgreSQL / Neo4j 已进入主科研链结构化持久化路径；当配置可用时会沉淀 session、phase execution、artifact 与图投影，但 Neo4j 未启用或初始化失败时仍允许仅 PG 运行，历史图投影与 Observe 结构化资产完整性也仍需依赖 writeback / backfill / health-check 工具链治理。
-- Experiment 已明确收口为 protocol design，experiment_execution 独立承接外部实验执行、采样与结果导入；当前平台边界是“辅助设计 + 导入外部执行结果”，不是“在系统内自动开展真实实验”。
+- Experiment 已明确收口为 protocol design，experiment_execution 独立承接外部实验执行、采样与结果导入；当前平台边界是"辅助设计 + 导入外部执行结果"，不是"在系统内自动开展真实实验"。截至 2026-04-17，UI、仪表板、API 枚举、配置常量与理论框架中的实验边界文案已全部统一（commit c679a59），experiment_execution 阶段入口已加入运行时边界守卫，会拒绝 `auto_execute` / `run_experiment` 等自动执行请求，并有 16 项边界契约测试保护。
 - Reflect 已完成默认学习闭环首轮接线：ResearchPipeline 会按 `self_learning.enabled` 默认装配 SelfLearningEngine，reflect 结果会持久化学习快照并回写到下一轮 runtime context；当前剩余问题已转为阶段级策略消费仍偏轻。
 - 本地 Qwen 接入存在多条旁路，缓存、参数、模型选择和成本控制没有统一治理。
 
 结论：
 
 - 如果定位是“本地部署的中医文献科研助手”，当前架构可继续演进。
-- 如果定位是“可持续运行、可追溯、可积累资产的中医科研平台”，当前已经完成主入口统一、主链存储接线、实验语义拆分、默认学习闭环首轮接线，并已把首批学习策略阈值接入 observe / hypothesis / analyze / experiment / experiment_execution / publish；下一优先级应转向文献学能力补齐、反馈资产治理与跨阶段一致性，以及外部实验执行导入治理和 LLM / 事务边界继续收敛。
+- 如果定位是"可持续运行、可追溯、可积累资产的中医科研平台"，当前已经完成主入口统一、主链存储接线、实验语义拆分与 UI/配置/文案全链路边界统一、默认学习闭环首轮接线，并已把首批学习策略阈值接入 observe / hypothesis / analyze / experiment / experiment_execution / publish；文献学能力五块 backlog（目录学、训诂、辑佚、考据、工作台化）已全部完成首轮落地（commits b010e49 → 03100fd）；下一优先级应转向反馈资产治理与跨阶段一致性、LLM / 事务边界继续收敛、以及文献学深层能力的二期深化。
 
 ## 2. 用《中医文献研究法》看当前软件
 
@@ -40,11 +40,11 @@
 
 | 方法论层级 | 当前对应模块 | 实现程度 | 评价 |
 | --- | --- | ---: | --- |
-| 文献学研究 | src/research/phases/observe_phase.py、src/analysis/philology_service.py、src/research/observe_philology.py、src/collector/*、src/analysis/preprocessor.py、文献检索与本地语料采集 | 76% | 已接入术语标准化、同题异文版本对勘、校勘条目与 annotation report，并能随 Observe 结果持久化与展示；但系统化训诂、辑佚、目录学与更深层考据服务仍不足 |
+| 文献学研究 | src/research/phases/observe_phase.py、src/analysis/philology_service.py、src/research/observe_philology.py、src/collector/*、src/analysis/preprocessor.py、src/research/exegesis_contract.py、src/research/fragment_contract.py、src/research/catalog_contract.py、src/analysis/textual_evidence_chain.py、文献检索与本地语料采集 | 88% | 已接入术语标准化、同题异文版本对勘、校勘条目与 annotation report；目录学字段合同、训诂释义与义项判别、辑佚候选识别与拼接、考据证据链已完成首轮落地；工作台化审核面已具备筛选、分页、复核状态与回写能力；后续可继续深化各子能力的精度与覆盖面 |
 | 类编研究 | src/analysis/entity_extractor.py、src/analysis/semantic_graph.py、src/research/phases/analyze_phase.py、知识图谱相关结构 | 78% | 是当前最成熟的一层，已经有实体、关系、图谱、统计和部分推理 |
-| 学术研究 | src/research/hypothesis_engine.py、src/research/phases/experiment_phase.py、src/research/phases/experiment_execution_phase.py、src/research/phases/publish_phase.py、src/research/phases/reflect_phase.py | 76% | 假说、方案设计、外部执行结果导入、写作、反思都能跑，默认学习闭环已完成首轮接线；真实实验仍依赖系统外部，但主研究链阶段级策略消费已覆盖 protocol design、execution import、analyze 与 publish |
+| 学术研究 | src/research/hypothesis_engine.py、src/research/phases/experiment_phase.py、src/research/phases/experiment_execution_phase.py、src/research/phases/publish_phase.py、src/research/phases/reflect_phase.py | 82% | 假说、方案设计、外部执行结果导入、写作、反思都能跑，默认学习闭环已完成首轮接线；实验边界已在代码、UI、配置、文案与 API 枚举中全部统一，运行时边界守卫已接入；真实实验仍依赖系统外部，主研究链阶段级策略消费已覆盖 protocol design、execution import、analyze 与 publish |
 
-总体上，系统最强的是“类编研究”与“结构化持久化输出”，最弱的是“文献学深加工”和“学术研究中的真实验证层”。
+总体上，系统最强的是"类编研究"与"结构化持久化输出"，文献学能力已完成首轮补齐（目录学、训诂、辑佚、考据、工作台化），实验边界已统一，剩余短板转为学习策略消费深度、LLM / 事务边界收敛与文献学二期深化。
 
 ## 3. 关键架构模块与实现程度
 
@@ -54,10 +54,10 @@
 | CLI 应用壳 | run_cycle_demo.py、src/cycle/cycle_command_executor.py | 82% | 入口已经瘦身，research 路径已桥接 shared runtime service | 历史 demo / 兼容壳仍需继续压缩 |
 | 研究会话封装 | src/cycle/cycle_research_session.py、src/orchestration/research_runtime_service.py | 83% | 能启动七阶段并落结构化 session 结果，demo / web 入口 profile 已由 RuntimeConfigAssembler 统一产出，旧 `session_result` DTO 与 demo profile 默认值都已并入 shared runtime contract | 外层 wrapper 已基本收口为消费装配结果与参数透传，后续重点是防止新的入口特例重新长回外壳 |
 | 科研内核 | src/research/research_pipeline.py | 87% | 七阶段边界清晰，模块工厂、事件总线、PhaseResult 已成形 | 仍是中心枢纽，负担较重 |
-| Observe | src/research/phases/observe_phase.py | 78% | 已能整合本地语料、文献检索、ingestion、种子观察，并输出文献学术语标准表、版本对勘条目与 annotation report | 训诂、辑佚、目录学与更深层文献学工作台能力仍不足 |
+| Observe | src/research/phases/observe_phase.py | 86% | 已能整合本地语料、文献检索、ingestion、种子观察，并输出文献学术语标准表、版本对勘条目与 annotation report；目录学字段合同、训诂释义、辑佚候选、考据证据链已接入，工作台化审核面已落地 | 后续可继续深化各子能力的精度与覆盖面 |
 | Hypothesis | src/research/phases/hypothesis_phase.py、src/research/hypothesis_engine.py | 76% | 可以基于观察结果与知识图谱生成假说 | 质量依赖上游语料与图谱质量 |
-| Experiment | src/research/phases/experiment_phase.py | 74% | 方案设计结构化程度高，且已显式标注为 protocol design | 不在系统内自动执行真实实验 |
-| ExperimentExecution | src/research/phases/experiment_execution_phase.py | 66% | 已独立承接外部实验执行、采样与结果导入，状态可显式区分 skipped / completed | 当前只做外部结果导入与归档，不在平台内开展真实实验 |
+| Experiment | src/research/phases/experiment_phase.py | 82% | 方案设计结构化程度高，已显式标注为 protocol design；边界已在 UI、配置、文案与 API 枚举中全部统一，工件类型已从 dataset 修正为 protocol | 不在系统内自动执行真实实验 |
+| ExperimentExecution | src/research/phases/experiment_execution_phase.py | 78% | 已独立承接外部实验执行、采样与结果导入，状态可显式区分 skipped / completed；显示名已统一为"外部实验结果导入阶段"，运行时边界守卫会拒绝 auto_execute 等自动执行请求 | 当前只做外部结果导入与归档，不在平台内开展真实实验 |
 | Analyze | src/research/phases/analyze_phase.py | 80% | 具备统计、推理、证据分级和回退机制 | 真实外部验证仍依赖系统外部，统一证据对象仍待收口 |
 | Publish | src/research/phases/publish_phase.py、src/generation/* | 86% | 已能产出 paper draft、IMRD、引用、artifact | 导出路径多，外层汇总报告默认不总是开启 |
 | Reflect + Quality | src/research/phases/reflect_phase.py、src/quality/quality_assessor.py | 83% | 能评估循环质量并输出改进建议，且默认可把学习快照回写到下一轮 runtime context | observe / hypothesis / analyze / experiment / experiment_execution / publish 已开始消费真实阈值与行为分支；后续重点转向反馈资产治理、策略可观测性与跨阶段一致性 |
@@ -69,7 +69,7 @@
 
 ### 4.1 研究阶段边界已经是明确的领域资产
 
-七阶段不是简单的脚本堆叠，而是相对稳定的领域分解。尤其在 experiment 与 experiment_execution 拆分后，研究方案设计和外部执行结果导入的边界已经明确，这让后续重构可以继续围绕阶段边界收敛，而不需要再承受语义误导。
+七阶段不是简单的脚本堆叠，而是相对稳定的领域分解。尤其在 experiment 与 experiment_execution 拆分后，研究方案设计和外部执行结果导入的边界已经明确，且已在 UI、仪表板、API 枚举、配置常量与理论框架中全部统一（commit c679a59），运行时边界守卫会拒绝系统内自动执行请求，16 项边界契约测试持续保护。这让后续重构可以继续围绕阶段边界收敛，而不需要再承受语义误导。
 
 ### 4.2 输出能力强，已经能形成学术交付物
 
@@ -111,8 +111,8 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 
 ### 5.2 不足
 
-- Observe 已从“采集 + ingestion”推进到带术语标准化、版本对勘和校勘条目输出的文献学入口，但距离严格的文献学研究工作台仍有差距。
-- Experiment / ExperimentExecution 虽已拆分，但 execution 仍依赖外部输入，不是系统内实证执行器。
+- Observe 已从"采集 + ingestion"推进到带术语标准化、版本对勘、校勘条目输出的文献学入口，目录学、训诂、辑佚、考据、工作台化五块 backlog 已完成首轮落地；后续可继续深化各子能力的精度与覆盖面。
+- Experiment / ExperimentExecution 已拆分且边界已在代码、UI、配置、文案中全部统一，运行时边界守卫已接入；但 execution 仍依赖外部输入，不是系统内实证执行器。
 - Reflect 已从“总结器”推进到默认“学习器”首轮实现，但策略影响面仍偏窄。
 - 结构化存储虽已成为主链基础设施，但降级态、历史补齐态和外层摘要治理尚未完全收口。
 
@@ -123,79 +123,81 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 | 问题 | 说明 | 理由 | 代价 |
 | --- | --- | --- | --- |
 | 默认学习策略已覆盖主研究链，但治理仍需收口 | ResearchPipeline 已默认创建 SelfLearningEngine，reflect 会持久化学习快照并回写下一轮 runtime context；observe / hypothesis / analyze / experiment / experiment_execution / publish 已接入首批阈值与行为分支，Reflect 仍主要承担评估与回写而非同类 phase gate | 平台已经从“只总结”进入“默认学习 + 主链多阶段调参”，剩余缺口转向反馈资产治理、策略可观测性与跨阶段一致性 | 中，约 2-3 人日 |
-| 真实实验仍依赖系统外部 | experiment 已是 protocol design，experiment_execution 只负责外部执行、采样与结果导入 | 平台能力边界必须清楚，否则容易高估“自动科研验证”能力 | 中高，约 4-7 人日 |
-| 文献学深层能力仍不足 | 已具备 PhilologyService、术语标准化、版本对勘与校勘条目产物，但系统化训诂、辑佚、目录学与考据服务仍不足 | 与《中医文献研究法》基础层相比，当前仍缺少可持续复用的深层文献学工作台 | 中高，约 6-12 人日 |
+| 真实实验仍依赖系统外部 | experiment 已是 protocol design，experiment_execution 只负责外部执行、采样与结果导入；截至 2026-04-17，UI、仪表板、API 枚举、配置常量与理论框架中的实验边界文案已全部统一（commit c679a59），运行时边界守卫已接入，16 项边界契约测试保护 | 平台能力边界已在代码层明确表达，后续重点转向外部导入流程治理与导入数据质量校验 | 低，约 1-2 人日 |
+| 文献学深层能力首轮已补齐，二期深化待推进 | 已具备 PhilologyService、术语标准化、版本对勘与校勘条目产物；目录学字段合同（catalog_contract）、训诂释义与义项判别（exegesis_contract）、辑佚候选识别（fragment_contract）、考据证据链（textual_evidence_chain）、工作台化审核面均已完成首轮落地（commits b010e49 → 03100fd） | 首轮文献学能力已补齐，后续重点转向各子能力的精度深化、覆盖面扩展与跨子能力一致性 | 中，约 4-8 人日 |
 
 #### 文献学深层能力 backlog（可执行拆解）
 
 建议实施顺序：目录学基线 -> 训诂能力 -> 辑佚能力 -> 考据能力 -> 工作台化收口。原因是目录学与工作台字段先稳定后，训诂、辑佚、考据的产物才有统一落点与人工校核面。
 
-1. 训诂能力 backlog
+> **状态更新（2026-04-17）：** 五块 backlog 已全部完成首轮落地。目录学字段合同（commit b010e49, `src/research/catalog_contract.py`）、训诂释义与义项判别（commit 516adee, `src/research/exegesis_contract.py`）、辑佚候选识别（commit a75a054, `src/research/fragment_contract.py`）、考据证据链（commit 25af47d, `src/analysis/textual_evidence_chain.py`）、工作台化审核面（commit 03100fd, dashboard review workbench + writeback）。阶段 C 交付口径已从"产出 philology notes"升级为"产出可审核、可持久化、可追溯的文献学工作台资产"。后续可继续深化各子能力的精度与覆盖面。
+
+1. 训诂能力 backlog ✅ 已完成（commit 516adee）
 
 - 目标：把当前“术语标准化”推进成“术语释义 + 义项判别 + 时代表达映射”，避免 PhilologyService 只停留在 canonical/variant 归并。
-- 代码入口：`src/analysis/philology_service.py`、`src/data/tcm_lexicon.py`、`config/reference_constants.yml`，必要时新增 `src/analysis/exegesis_service.py` 或等价子模块。
+- 代码入口：`src/analysis/philology_service.py`、`src/data/tcm_lexicon.py`、`config/reference_constants.yml`、`src/research/exegesis_contract.py`。
 - 首批任务：
-- [ ] 为术语标准表增加 `definition`、`semantic_scope`、`dynasty_usage`、`disambiguation_basis` 字段，并保持旧消费面兼容。
-- [ ] 在 PhilologyService 中新增“同词多义”判别流程，至少支持药名、证候、理论术语三类分流。
-- [ ] 引入可配置的训诂词条源，允许从配置或结构化词典注入义项、出处和时代标签。
-- [ ] 在 Observe 输出中新增 `exegesis_notes` 或等价字段，显式记录“为什么把术语解释成当前义项”。
-- [ ] 为 dashboard / API 摘要补一个最小训诂摘要卡，避免训诂结果只能埋在 artifact JSON 内部。
+- [x] 为术语标准表增加 `definition`、`semantic_scope`、`dynasty_usage`、`disambiguation_basis` 字段，并保持旧消费面兼容。
+- [x] 在 PhilologyService 中新增"同词多义"判别流程，至少支持药名、证候、理论术语三类分流。
+- [x] 引入可配置的训诂词条源，允许从配置或结构化词典注入义项、出处和时代标签。
+- [x] 在 Observe 输出中新增 `exegesis_notes` 或等价字段，显式记录"为什么把术语解释成当前义项"。
+- [x] 为 dashboard / API 摘要补一个最小训诂摘要卡，避免训诂结果只能埋在 artifact JSON 内部。
 - 交付：术语标准表从“规范化表”升级为“术语规范化 + 释义表”；Observe 结果里可见术语解释依据。
 - 验收：至少新增 unit tests 覆盖同词多义分流、时代标签映射、无词典回退；新增 integration tests 覆盖 Observe 最终结果和 dashboard payload 出现训诂摘要。
 - 估时：中，约 1.5-2.5 人日。
 
-2. 辑佚能力 backlog
+2. 辑佚能力 backlog ✅ 已完成（commit a75a054）
 
-- 目标：让系统能从多版本语料与引用片段中识别“疑似佚文 / 佚引 / 缺段补线索”，而不只是做同题异文对照。
-- 代码入口：`src/analysis/philology_service.py`、`src/research/phases/observe_phase.py`、`src/research/observe_philology.py`，必要时新增 `src/analysis/fragment_reconstruction.py`。
+- 目标：让系统能从多版本语料与引用片段中识别"疑似佚文 / 佚引 / 缺段补线索"，而不只是做同题异文对照。
+- 代码入口：`src/analysis/philology_service.py`、`src/research/phases/observe_phase.py`、`src/research/observe_philology.py`、`src/research/fragment_contract.py`。
 - 首批任务：
-- [ ] 在文献学输出中新增 `fragment_candidates`、`lost_text_candidates`、`citation_source_candidates` 等候选结构。
-- [ ] 基于现有 `parallel_versions` 与文献引用片段，增加“缺段/引文来源”候选生成规则，而不是只输出差异片段。
-- [ ] 为每条候选补 `source_refs`、`match_score`、`reconstruction_basis`、`needs_manual_review` 元数据。
-- [ ] 在 Observe artifact 中新增 `fragment_reconstruction_report` 或等价报告，便于持久化与人工复核。
-- [ ] 为 repository snapshot 与 dashboard 增加辑佚候选计数和待复核计数。
+- [x] 在文献学输出中新增 `fragment_candidates`、`lost_text_candidates`、`citation_source_candidates` 等候选结构。
+- [x] 基于现有 `parallel_versions` 与文献引用片段，增加"缺段/引文来源"候选生成规则，而不是只输出差异片段。
+- [x] 为每条候选补 `source_refs`、`match_score`、`reconstruction_basis`、`needs_manual_review` 元数据。
+- [x] 在 Observe artifact 中新增 `fragment_reconstruction_report` 或等价报告，便于持久化与人工复核。
+- [x] 为 repository snapshot 与 dashboard 增加辑佚候选计数和待复核计数。
 - 交付：系统可以输出可人工复核的辑佚候选清单，而不是只有版本差异表。
 - 验收：新增 unit tests 覆盖缺段识别、来源候选排序和空候选回退；新增 integration tests 覆盖 artifact、snapshot、dashboard 中的辑佚字段连通。
 - 估时：中，约 1.5-2.5 人日。
 
-3. 目录学 backlog
+3. 目录学 backlog ✅ 已完成（commit b010e49）
 
-- 目标：把现有 `catalog_id`、`work_title`、`fragment_title`、`version_lineage_key`、`witness_key` 等字段从“采集元数据”升级成稳定的目录学事实层。
-- 代码入口：`src/collector/corpus_bundle.py`、`src/infrastructure/research_session_repo.py`、`src/research/observe_philology.py`、`src/web/routes/dashboard.py`。
+- 目标：把现有 `catalog_id`、`work_title`、`fragment_title`、`version_lineage_key`、`witness_key` 等字段从"采集元数据"升级成稳定的目录学事实层。
+- 代码入口：`src/collector/corpus_bundle.py`、`src/infrastructure/research_session_repo.py`、`src/research/observe_philology.py`、`src/web/routes/dashboard.py`、`src/research/catalog_contract.py`。
 - 首批任务：
-- [ ] 统一目录学字段合同，明确作品、卷、篇、 fragment、版本谱系、见证本的最小必填字段与命名。
-- [ ] 在 Observe / repo snapshot / dashboard 之间统一目录学 DTO，避免各层各自拼 `work_title` 和 `fragment_title`。
-- [ ] 新增目录学 artifact 或 summary payload，至少可输出作品层、版本层、 fragment 层的计数与关联关系。
-- [ ] 为缺失目录学元数据的本地语料增加回填规则和待补录标记，而不是静默降级。
-- [ ] 在 dashboard 明确展示目录学过滤条件，如作品、版本谱系、见证本、片段来源。
+- [x] 统一目录学字段合同，明确作品、卷、篇、 fragment、版本谱系、见证本的最小必填字段与命名。
+- [x] 在 Observe / repo snapshot / dashboard 之间统一目录学 DTO，避免各层各自拼 `work_title` 和 `fragment_title`。
+- [x] 新增目录学 artifact 或 summary payload，至少可输出作品层、版本层、 fragment 层的计数与关联关系。
+- [x] 为缺失目录学元数据的本地语料增加回填规则和待补录标记，而不是静默降级。
+- [x] 在 dashboard 明确展示目录学过滤条件，如作品、版本谱系、见证本、片段来源。
 - 交付：目录学成为 Observe 文献学主线的事实底座，后续训诂、辑佚、考据都复用同一套目录键。
 - 验收：新增 unit tests 覆盖 metadata normalize / fallback；新增 integration tests 覆盖 snapshot 与 dashboard 对同一目录字段给出一致结果。
 - 估时：中，约 1-2 人日。
 
-4. 考据能力 backlog
+4. 考据能力 backlog ✅ 已完成（commit 25af47d）
 
-- 目标：让系统能给出“成书、作者、版本、术语归属、引文来源”的证据链判断，而不仅是展示差异和术语表。
-- 代码入口：`src/analysis/philology_service.py`、`src/research/observe_philology.py`、`src/research/phases/analyze_phase.py`，必要时新增 `src/analysis/textual_evidence_chain.py`。
+- 目标：让系统能给出"成书、作者、版本、术语归属、引文来源"的证据链判断，而不仅是展示差异和术语表。
+- 代码入口：`src/analysis/philology_service.py`、`src/research/observe_philology.py`、`src/research/phases/analyze_phase.py`、`src/analysis/textual_evidence_chain.py`。
 - 首批任务：
-- [ ] 为文献学资产新增 `evidence_chain`、`claim_type`、`confidence`、`counter_evidence` 结构，承载考据判断。
-- [ ] 支持至少三类考据 claim：作者归属、版本先后、引文来源。
-- [ ] 为 claim 计算可解释的 `confidence` 与 `basis_summary`，并显式区分“规则判断”和“人工待核”。
-- [ ] 把考据结果与 Analyze / Publish 的 evidence 语义打通，避免 philology judgment 和下游证据分级完全脱节。
-- [ ] 为冲突 claim 输出待复核清单，避免把不稳定推断直接包装成确定事实。
+- [x] 为文献学资产新增 `evidence_chain`、`claim_type`、`confidence`、`counter_evidence` 结构，承载考据判断。
+- [x] 支持至少三类考据 claim：作者归属、版本先后、引文来源。
+- [x] 为 claim 计算可解释的 `confidence` 与 `basis_summary`，并显式区分"规则判断"和"人工待核"。
+- [x] 把考据结果与 Analyze / Publish 的 evidence 语义打通，避免 philology judgment 和下游证据分级完全脱节。
+- [x] 为冲突 claim 输出待复核清单，避免把不稳定推断直接包装成确定事实。
 - 交付：系统可以输出带证据链和反证信息的考据 claim 列表，并在下游报告中被引用。
 - 验收：新增 unit tests 覆盖 claim 生成、反证冲突和置信度回退；新增 integration tests 覆盖 Analyze / Publish 能消费考据摘要但不误判为确定事实。
 - 估时：中高，约 1.5-2.5 人日。
 
-5. 工作台化 backlog
+5. 工作台化 backlog ✅ 已完成（commit 03100fd）
 
-- 目标：把 philology 输出从“artifact JSON + dashboard 只读详情”升级成“可筛选、可审核、可回填、可追踪状态”的文献学工作台。
+- 目标：把 philology 输出从"artifact JSON + dashboard 只读详情"升级成"可筛选、可审核、可回填、可追踪状态"的文献学工作台。
 - 代码入口：`src/web/routes/dashboard.py`、`src/api/research_utils.py`、`src/api/schemas.py`、`src/infrastructure/research_session_repo.py`、相关 dashboard template / Web Console 面板。
 - 首批任务：
-- [ ] 为术语标准表、校勘条目、辑佚候选、考据 claim 增加统一 review status，如 `pending`、`accepted`、`rejected`、`needs_source`。
-- [ ] 在 dashboard 增加按作品、版本、术语、review status 的筛选与分页，而不是只展示摘要计数。
-- [ ] 增加 fragment preview 与 philology 条目的双向跳转，保证人工校核能回到原文上下文。
-- [ ] 设计最小 writeback 流程，把人工确认结果写回 repository snapshot 或显式 review artifact，而不是只停留在前端操作态。
-- [ ] 为工作台增加操作审计字段，至少记录 reviewer、reviewed_at、decision_basis。
+- [x] 为术语标准表、校勘条目、辑佚候选、考据 claim 增加统一 review status，如 `pending`、`accepted`、`rejected`、`needs_source`。
+- [x] 在 dashboard 增加按作品、版本、术语、review status 的筛选与分页，而不是只展示摘要计数。
+- [x] 增加 fragment preview 与 philology 条目的双向跳转，保证人工校核能回到原文上下文。
+- [x] 设计最小 writeback 流程，把人工确认结果写回 repository snapshot 或显式 review artifact，而不是只停留在前端操作态。
+- [x] 为工作台增加操作审计字段，至少记录 reviewer、reviewed_at、decision_basis。
 - 交付：形成最小可用的文献学审核工作台，支持“机器产出 -> 人工审核 -> 状态沉淀 -> 下游消费”。
 - 验收：新增 route / service tests 覆盖筛选、分页、fragment preview、review status；至少一条 integration 流程覆盖人工确认后 snapshot 状态变化。
 - 估时：中高，约 2-3 人日。
@@ -204,7 +206,7 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 
 - 每一块都必须同时落到三层：Observe/analysis 产物层、repository snapshot / artifact 持久化层、dashboard / API 消费层。
 - 每一块都必须提供最少一条“空输入安全回退”和一条“人工待核状态”路径，避免把不充分证据包装成确定事实。
-- 五块全部完成后，阶段 C 的交付口径应从“产出 philology notes”升级为“产出可审核、可持久化、可追溯的文献学工作台资产”。
+- ~~五块全部完成后，阶段 C 的交付口径应从"产出 philology notes"升级为"产出可审核、可持久化、可追溯的文献学工作台资产"。~~ ✅ 已完成：五块 backlog 均已落地（commits b010e49 → 03100fd），交付口径已升级。
 
 ### 6.2 P1 级
 
@@ -459,12 +461,12 @@ flowchart TD
 | --- | --- | --- |
 | 1. 把 ResearchRuntimeService 固化为唯一 research mainline，并继续清理 direct pipeline shortcuts | 主入口统一已经完成首轮收口；现在要防止入口语义再次分叉 | 中，2-4 人日 |
 | 2. 持续以 RuntimeConfigAssembler 收口剩余直连配置旁路 | 统一配置入口已经建立，但仍需把残余绕行点清掉，避免配置声明和运行行为再次脱节 | 中，1-3 人日 |
-| 3. 已完成 Experiment / ExperimentExecution 语义拆分；继续统一 UI、文档、报告和提示词边界 | 现在的重点不再是拆阶段，而是防止用户可见文案回到“experiment=真实实验执行”的误导表述 | 中，1-2 人日 |
+| 3. ✅ 已完成 Experiment / ExperimentExecution 语义拆分与全链路边界统一（commit c679a59）：UI、仪表板、API 枚举、配置常量、理论框架文案已全部对齐，运行时边界守卫已接入，16 项契约测试保护 | 边界统一已完成，后续重点转向外部导入流程治理与导入数据质量校验 | ✅ 已完成 |
 | 4. 在已接入 PG / Neo4j 主链的基础上，继续收敛事务边界、降级状态观测与回填治理 | 研究资产默认沉淀已经成立；下一步是提升一致性、可观测性和运维可控性 | 中，3-5 人日 |
-| 5. 继续深化 PhilologyService 与 Observe 文献学主线 | 术语标准化、版本对勘和校勘条目已接入主链；下一步要补系统化训诂、辑佚、目录学与考据能力，避免停留在“首轮 philology DTO”层面 | 高，6-12 人日 |
+| 5. ✅ 已完成首轮文献学 backlog（目录学、训诂、辑佚、考据、工作台化，commits b010e49 → 03100fd）；后续继续深化各子能力精度与覆盖面 | 首轮文献学能力已补齐，下一步是各子能力的精度深化与跨子能力一致性 | 中，4-8 人日 |
 | 6. 把所有 LLM 获取统一走 LLMGateway / CachedLLMService | 当前多处直接 new LLMEngine，导致缓存、参数、资源与模型切换失控 | 中，3-5 人日 |
 | 7. 新增 ResearchDossierBuilder，构建长上下文研究 dossier | 本地 7B 模型上下文有限，需要先把语料、证据、图谱和术语解释压缩成可复用 dossier，才能稳定提高生成质量 | 中，3-4 人日 |
-| 8. 新增 LearningLoopOrchestrator，把 Reflect 结果正式回写下一轮策略 | 当前 reflect_learning_fed=false 是硬证据；如果不回写，系统永远只是“会总结”，不会“会学习” | 中，3-4 人日 |
+| 8. 新增 LearningLoopOrchestrator，把 Reflect 结果正式回写下一轮策略 | 当前 ResearchPipeline 已默认装配 SelfLearningEngine，reflect 结果会持久化学习快照并回写到下一轮 runtime context；各阶段已消费学习策略阈值，但独立 orchestrator 尚未抽取 | 中，3-4 人日 |
 | 9. 新增 EvidenceContract v2，统一 evidence record / provenance / grade / citation | 现在分析、引用、publish、dashboard 都有证据语义，但没有一个真正的平台级统一证据对象 | 中，3-5 人日 |
 | 10. 清理未真正接线的模块状态，在文档和代码里区分 active / optional / dormant | 现在最大认知成本来自“看起来有，但默认没接上”；明确状态能降低维护风险 | 低，1-2 人日 |
 
@@ -601,23 +603,23 @@ RETURN count(r) AS written_count;
 - 理由：没有统一资产沉淀，就不可能做真正的跨会话研究积累。
 - 代价：中，约 3-5 人日。
 
-### 阶段 C：补齐文献学能力
+### 阶段 C：补齐文献学能力 ✅ 首轮已完成
 
-目标：从“文本处理系统”升级为“中医文献研究系统”。
+目标：从"文本处理系统"升级为"中医文献研究系统"。
 
-- 动作：在已落地的 PhilologyService 基础上继续补系统化训诂、辑佚、目录学、版本对勘与术语标准化治理，并把文献学输出进一步做成稳定工作台。
-- 交付：按训诂、辑佚、目录学、考据、工作台化五块完成文献学 backlog 首轮落地，形成可审核、可持久化、可追溯的 philology 资产链路。
+- 动作：在已落地的 PhilologyService 基础上完成了目录学字段合同（`catalog_contract.py`）、训诂释义与义项判别（`exegesis_contract.py`）、辑佚候选识别（`fragment_contract.py`）、考据证据链（`textual_evidence_chain.py`）、工作台化审核面（dashboard review workbench + writeback）五块 backlog 首轮落地（commits b010e49 → 03100fd）。
+- 交付：已形成可审核、可持久化、可追溯的 philology 资产链路。后续可继续深化各子能力的精度与覆盖面。
 - 理由：这是与普通 RAG / NLP 系统最重要的差异化所在。
-- 代价：高，6-12 人日。
+- 代价：~~高，6-12 人日~~ ✅ 已完成。
 
-### 阶段 D：把 learning 闭环做真，并继续明确实验边界
+### 阶段 D：把 learning 闭环做真，并继续明确实验边界（边界部分已完成）
 
-目标：在已完成 experiment / experiment_execution 语义拆分后，让系统从“给建议并接收外部执行结果”进一步升级为“能持续演进的研究平台”。
+目标：在已完成 experiment / experiment_execution 语义拆分后，让系统从"给建议并接收外部执行结果"进一步升级为"能持续演进的研究平台"。
 
-- 动作：已新增 ExperimentExecutionPhase；后续接入 LearningLoopOrchestrator，并持续统一 experiment 边界文案与导入治理。
-- 交付：experiment=protocol design、experiment_execution=external execution import 的边界保持稳定，同时让 reflect 输出能够调整下一轮策略、阈值、模板与 evidence policy。
+- 动作：已新增 ExperimentExecutionPhase；实验边界文案已在 UI、仪表板、API 枚举、配置常量与理论框架中全部统一（commit c679a59），运行时边界守卫已接入，16 项边界契约测试保护。后续重点转向 LearningLoopOrchestrator 抽取与外部导入数据质量校验。
+- 交付：experiment=protocol design、experiment_execution=external execution import 的边界已在代码层稳定，同时让 reflect 输出能够调整下一轮策略、阈值、模板与 evidence policy。
 - 理由：这是平台化和助手化的分水岭。
-- 代价：中，约 3-4 人日。
+- 代价：边界统一 ✅ 已完成；LearningLoopOrchestrator 约 3-4 人日。
 
 ### 阶段 E：围绕本地 Qwen 做成本优化与能力增强
 
@@ -632,19 +634,19 @@ RETURN count(r) AS written_count;
 
 这套软件当前最适合的准确定位是：
 
-“具备七阶段科研工作流、结构化持久化主链和本地大模型能力的中医文献半自动科研助手，正在向平台化研究系统过渡。”
+"具备七阶段科研工作流、结构化持久化主链、文献学工作台和本地大模型能力的中医文献半自动科研助手，正在向平台化研究系统过渡。"
 
-它已经具备三个非常有价值的基础：
+它已经具备四个非常有价值的基础：
 
-- 正确的阶段边界。
+- 正确的阶段边界，且已在代码、UI、配置、文案中全链路统一，运行时守卫保护。
 - 已经落地的结构化存储主链、本地 LLM 和学术输出链。
+- 首轮文献学能力（目录学、训诂、辑佚、考据、工作台化）已落地，形成可审核、可持久化、可追溯的 philology 资产链路。
 - 足够多的质量治理与诊断资产。
 
-真正阻碍它成为“平台”的，不再是阶段命名或主链是否接线，而是以下四点尚未彻底收口：
+真正阻碍它成为"平台"的，不再是阶段命名、主链接线或文献学首轮能力，而是以下三点尚未彻底收口：
 
-- 文献学深层能力与工作台化程度。
-- 真实实验仍依赖系统外部。
-- 默认学习策略消费深度。
+- 默认学习策略消费深度与 LearningLoopOrchestrator 抽取。
 - LLM / 事务边界与结构化存储降级治理。
+- 文献学各子能力的精度深化与跨子能力一致性（二期）。
 
-只要这四点收住，当前仓库完全有机会从“能跑研究流程”升级为“能积累研究资产、支撑持续迭代的中医文献研究平台”。
+只要这三点收住，当前仓库完全有机会从"能跑研究流程"升级为"能积累研究资产、支撑持续迭代的中医文献研究平台"。
