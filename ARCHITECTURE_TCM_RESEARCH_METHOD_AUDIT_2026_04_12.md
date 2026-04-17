@@ -253,8 +253,8 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 
 - ~~继续防止旧 cycle API 外形经由新的 helper、route patch 或 transport 层重新回流；如果确实存在外部兼容诉求，应在边界层做显式 DTO 适配，而不是恢复独立 legacy store 文件。~~ ✅ 已通过 `test_architecture_regression_guard.py` 固化：AST 扫描保护 `src/web/routes/` 与 `src/web/ops/` 不导入 `src.cycle`；`get_legacy_research_store` / `LegacyResearchRuntimeStore` 符号禁止出现；`src/web/ops/` 下无 `legacy*` 文件。
 - ~~继续防止 demo research wrapper 重新长回本地默认值、结果 DTO 组装或 output policy；新的 demo 特例若确有必要，应优先收进 RuntimeConfigAssembler 的 entrypoint/profile 映射与 shared runtime profile，而不是重新挂回入口函数。~~ ✅ 已通过 `test_architecture_regression_guard.py` 固化：`cycle_research_session.py` ≤60 行且仅导入 `ResearchRuntimeService`；禁止含文件直写/DTO 组装/来源标记模式；`research_utils.py` 只在 canonical 基线上追加路径键；所有 `_SHARED_RUNTIME_PROFILES` 嵌入 canonical 默认值。12 项防护测试；回归 2385 pass。
-- 继续约束 `src/web/ops/job_manager.py` 与 `src/web/ops/research_job_runner.py` 的边界，确保新增功能只进入 runtime / repository contract，而不是重新长回 Web transport 层。
-- 继续防止 Web 入口的 `runtime_profile` 语义再次回到隐式默认或局部 helper；如果未来确有新的入口族群，应新增明确 profile 名称，而不是在 route / job wrapper 中散落默认值。
+- ~~继续约束 `src/web/ops/job_manager.py` 与 `src/web/ops/research_job_runner.py` 的边界，确保新增功能只进入 runtime / repository contract，而不是重新长回 Web transport 层。~~ ✅ 已通过 `test_architecture_regression_guard.py` Guard #6 固化：`job_manager.py` ≤450 行且禁止导入 `src.research/cycle/storage/llm/knowledge`；`research_job_runner.py` ≤60 行且仅导入 `src.orchestration`；两者均禁止含 `CANONICAL_*`/`ResearchPipeline`/session_result DTO 组装模式。
+- ~~继续防止 Web 入口的 `runtime_profile` 语义再次回到隐式默认或局部 helper；如果未来确有新的入口族群，应新增明确 profile 名称，而不是在 route / job wrapper 中散落默认值。~~ ✅ 已通过 `test_architecture_regression_guard.py` Guard #7 固化：`src/web/routes/` 和 `src/web/ops/` 全部 `.py` 文件禁止含 `CANONICAL_*_DEFAULTS`/`_SHARED_RUNTIME_PROFILES`/`default_observe_context`/`default_publish_context` 符号；route 层禁止直接导入 `ResearchPipeline`。共 21 项防护测试；回归 2394 pass。
 
 后收什么：
 

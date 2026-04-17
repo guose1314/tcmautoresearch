@@ -7,6 +7,8 @@ Guard #2: src/ 中不得引用已删除的 legacy store 符号
 Guard #3: cycle_research_session.py 必须保持薄包装
 Guard #4: research_utils.py 只在 canonical 基线上追加环境路径
 Guard #5: 共享 runtime profile 必须嵌入 canonical 默认值
+Guard #6: job_manager / research_job_runner 边界约束
+Guard #7: Web 层不得散落 runtime profile 默认值
 """
 
 import ast
@@ -161,7 +163,9 @@ class TestResearchUtilsCanonicalBaseline(unittest.TestCase):
 
     def test_observe_defaults_are_canonical_superset(self):
         from src.api.research_utils import DEFAULT_OBSERVE_PHASE_CONTEXT
-        from src.orchestration.research_runtime_service import CANONICAL_OBSERVE_DEFAULTS
+        from src.orchestration.research_runtime_service import (
+            CANONICAL_OBSERVE_DEFAULTS,
+        )
 
         for key, val in CANONICAL_OBSERVE_DEFAULTS.items():
             self.assertIn(key, DEFAULT_OBSERVE_PHASE_CONTEXT)
@@ -174,7 +178,9 @@ class TestResearchUtilsCanonicalBaseline(unittest.TestCase):
     def test_observe_only_adds_path_keys(self):
         """API 层只允许在 canonical 基线上追加以 _dir / _path 结尾的键。"""
         from src.api.research_utils import DEFAULT_OBSERVE_PHASE_CONTEXT
-        from src.orchestration.research_runtime_service import CANONICAL_OBSERVE_DEFAULTS
+        from src.orchestration.research_runtime_service import (
+            CANONICAL_OBSERVE_DEFAULTS,
+        )
 
         extra = set(DEFAULT_OBSERVE_PHASE_CONTEXT) - set(CANONICAL_OBSERVE_DEFAULTS)
         non_path = {k for k in extra if not (k.endswith("_dir") or k.endswith("_path"))}
@@ -186,7 +192,9 @@ class TestResearchUtilsCanonicalBaseline(unittest.TestCase):
 
     def test_publish_defaults_equal_canonical(self):
         from src.api.research_utils import DEFAULT_PUBLISH_PHASE_CONTEXT
-        from src.orchestration.research_runtime_service import CANONICAL_PUBLISH_DEFAULTS
+        from src.orchestration.research_runtime_service import (
+            CANONICAL_PUBLISH_DEFAULTS,
+        )
 
         self.assertEqual(DEFAULT_PUBLISH_PHASE_CONTEXT, CANONICAL_PUBLISH_DEFAULTS)
 
@@ -200,8 +208,8 @@ class TestSharedRuntimeProfilesCanonical(unittest.TestCase):
 
     def test_profiles_use_canonical_observe(self):
         from src.orchestration.research_runtime_service import (
-            CANONICAL_OBSERVE_DEFAULTS,
             _SHARED_RUNTIME_PROFILES,
+            CANONICAL_OBSERVE_DEFAULTS,
         )
         for name, profile in _SHARED_RUNTIME_PROFILES.items():
             ctx = profile.get("default_observe_context", {})
@@ -214,8 +222,8 @@ class TestSharedRuntimeProfilesCanonical(unittest.TestCase):
 
     def test_profiles_use_canonical_publish(self):
         from src.orchestration.research_runtime_service import (
-            CANONICAL_PUBLISH_DEFAULTS,
             _SHARED_RUNTIME_PROFILES,
+            CANONICAL_PUBLISH_DEFAULTS,
         )
         for name, profile in _SHARED_RUNTIME_PROFILES.items():
             ctx = profile.get("default_publish_context", {})
@@ -225,6 +233,159 @@ class TestSharedRuntimeProfilesCanonical(unittest.TestCase):
                     val,
                     f"profile '{name}' publish context '{key}' 偏离 canonical",
                 )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Guard #6 — job_manager / research_job_runner 边界约束
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestJobManagerBoundary(unittest.TestCase):
+    """job_manager.py 仅负责任务生命周期、SSE 推送与调度协调。"""
+
+    _JOB_MANAGER = _SRC / "web" / "ops" / "job_manager.py"
+    _MAX_LINES = 450
+
+    # 业务逻辑层模块 — job_manager 不应直接导入
+    _FORBIDDEN_IMPORT_PREFIXES = (
+        "src.research.",
+        "src.cycle.",
+        "src.storage.",
+        "src.llm.",
+        "src.knowledge.",
+    )
+
+    # 这些模式意味着 job wrapper 侵入了研究执行逻辑
+    _FORBIDDEN_PATTERNS = (
+        "CANONICAL_OBSERVE_DEFAULTS",
+        "CANONICAL_PUBLISH_DEFAULTS",
+        "_SHARED_RUNTIME_PROFILES",
+        "ResearchPipeline",
+        "session_result[",
+        "phase_results[",
+    )
+
+    def test_line_count_within_budget(self):
+        lines = self._JOB_MANAGER.read_text(encoding="utf-8").splitlines()
+        self.assertLessEqual(
+            len(lines),
+            self._MAX_LINES,
+            f"job_manager.py 已超 {self._MAX_LINES} 行 ({len(lines)} 行)，"
+            "可能重新长回业务逻辑",
+        )
+
+    def test_no_forbidden_business_imports(self):
+        modules = _collect_imports(self._JOB_MANAGER)
+        violations = [
+            m
+            for m in modules
+            if any(m.startswith(prefix) for prefix in self._FORBIDDEN_IMPORT_PREFIXES)
+        ]
+        self.assertEqual(
+            violations,
+            [],
+            f"job_manager.py 导入了业务层模块: {violations}",
+        )
+
+    def test_no_forbidden_patterns(self):
+        source = _collect_all_names_in_source(self._JOB_MANAGER)
+        found = [p for p in self._FORBIDDEN_PATTERNS if p in source]
+        self.assertEqual(found, [], f"job_manager.py 包含业务回流模式: {found}")
+
+
+class TestResearchJobRunnerBoundary(unittest.TestCase):
+    """research_job_runner.py 必须保持纯 passthrough。"""
+
+    _RUNNER = _SRC / "web" / "ops" / "research_job_runner.py"
+    _MAX_LINES = 60
+
+    _FORBIDDEN_PATTERNS = (
+        "CANONICAL_OBSERVE_DEFAULTS",
+        "CANONICAL_PUBLISH_DEFAULTS",
+        "ResearchPipeline",
+        "export_research_session",
+        "output/research_session",
+        "open(",
+        "json.dump",
+    )
+
+    def test_line_count_within_budget(self):
+        lines = self._RUNNER.read_text(encoding="utf-8").splitlines()
+        self.assertLessEqual(
+            len(lines),
+            self._MAX_LINES,
+            f"research_job_runner.py 已超 {self._MAX_LINES} 行 ({len(lines)} 行)，"
+            "可能重新长回业务逻辑",
+        )
+
+    def test_only_imports_orchestration(self):
+        """唯一允许的业务导入来自 src.orchestration。"""
+        modules = _collect_imports(self._RUNNER)
+        business_imports = [
+            m
+            for m in modules
+            if m.startswith("src.") and not m.startswith("src.orchestration.")
+        ]
+        self.assertEqual(
+            business_imports,
+            [],
+            f"research_job_runner.py 导入了非 orchestration 的业务模块: {business_imports}",
+        )
+
+    def test_no_forbidden_patterns(self):
+        source = _collect_all_names_in_source(self._RUNNER)
+        found = [p for p in self._FORBIDDEN_PATTERNS if p in source]
+        self.assertEqual(found, [], f"research_job_runner.py 包含业务回流模式: {found}")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Guard #7 — Web 层不得散落 runtime profile 默认值
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestNoScatteredProfileDefaults(unittest.TestCase):
+    """routes/ 和 ops/ 下所有文件不得出现研究配置常量或硬编码 phase list。"""
+
+    # 只有 orchestration 层可定义这些符号
+    _FORBIDDEN_SYMBOLS = (
+        "CANONICAL_OBSERVE_DEFAULTS",
+        "CANONICAL_PUBLISH_DEFAULTS",
+        "_SHARED_RUNTIME_PROFILES",
+        "default_observe_context",
+        "default_publish_context",
+    )
+
+    def _scan_dir(self, dirpath: Path) -> list[str]:
+        violations = []
+        for fname in os.listdir(dirpath):
+            if not fname.endswith(".py"):
+                continue
+            fpath = dirpath / fname
+            source = _collect_all_names_in_source(fpath)
+            for sym in self._FORBIDDEN_SYMBOLS:
+                if sym in source:
+                    rel = fpath.relative_to(_WORKSPACE)
+                    violations.append(f"{rel}: {sym}")
+        return violations
+
+    def test_routes_no_profile_defaults(self):
+        violations = self._scan_dir(_SRC / "web" / "routes")
+        self.assertEqual(violations, [], f"route 层散落 profile 默认值: {violations}")
+
+    def test_ops_no_profile_defaults(self):
+        violations = self._scan_dir(_SRC / "web" / "ops")
+        self.assertEqual(violations, [], f"ops 层散落 profile 默认值: {violations}")
+
+    def test_routes_no_direct_research_pipeline(self):
+        """route 文件不得直接导入 ResearchPipeline。"""
+        routes = _SRC / "web" / "routes"
+        violations = []
+        for fname in os.listdir(routes):
+            if not fname.endswith(".py"):
+                continue
+            fpath = routes / fname
+            for mod in _collect_imports(fpath):
+                if "research_pipeline" in mod:
+                    violations.append(f"{fpath.relative_to(_WORKSPACE)}: {mod}")
+        self.assertEqual(violations, [], f"route 直接导入 ResearchPipeline: {violations}")
 
 
 if __name__ == "__main__":
