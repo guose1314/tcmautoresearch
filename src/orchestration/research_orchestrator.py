@@ -560,7 +560,26 @@ def run_research(
     intervention: Optional[str] = None,
     comparison: Optional[str] = None,
 ) -> OrchestrationResult:
-    """函数式单一入口：一行代码触发完整研究流水线。"""
+    """函数式单一入口：一行代码触发完整研究流水线。
+
+    .. deprecated::
+        此函数直接实例化 ResearchOrchestrator，绕过 RuntimeConfigAssembler 的统一
+        配置组装流程。生产代码请改用 :class:`ResearchRuntimeService`::
+
+            from src.orchestration import ResearchRuntimeService
+            svc = ResearchRuntimeService(orchestrator_config)
+            result = svc.run(topic, phase_contexts=phase_contexts)
+
+        此函数仅保留用于向后兼容和快速测试场景。
+    """
+    import warnings
+
+    warnings.warn(
+        "run_research() 已弃用，请改用 ResearchRuntimeService。"
+        "此函数绕过 RuntimeConfigAssembler，不推荐在生产代码中使用。",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     orchestrator = ResearchOrchestrator(config=config)
     return orchestrator.run(
         topic,

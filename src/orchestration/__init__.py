@@ -1,11 +1,22 @@
 """src/orchestration — 研究编排层。
 
-公共导出：
+公共导出（推荐入口）：
 
-* :class:`ResearchOrchestrator` — 全流程编排器，提供 ``run(topic)`` 入口
-* :class:`OrchestrationResult`  — ``run()`` 返回值
-* :class:`PhaseOutcome`         — 单阶段摘要
+* :class:`ResearchRuntimeService` — **唯一推荐的主研究入口**，CLI / Web / API
+  均应通过此服务发起研究会话。
+* :class:`ResearchRuntimeResult`  — ``ResearchRuntimeService.run()`` 返回值
+
+兼容 / 内部导出（仅供单元测试与内部引用）：
+
+* :class:`ResearchOrchestrator` — 旧版编排器，**已被 ResearchRuntimeService 取代，
+  生产代码不应直接实例化此类**。仅保留用于单元测试和内部数据结构引用。
+* :class:`OrchestrationResult`  — 编排结果数据结构（RuntimeResult 内部使用）
+* :class:`PhaseOutcome`         — 单阶段摘要数据结构
 * :func:`topic_to_phase_context`— 主题→阶段 context 自动推导
+* :func:`run_research`          — 已弃用函数式入口，内部重定向至 RuntimeService
+
+任务调度：
+
 * :class:`TaskScheduler`        — asyncio 任务调度器（LLM 并发调用）
 * :class:`TaskSpec`             — 单任务描述
 * :class:`TaskResult`           — 单任务结果

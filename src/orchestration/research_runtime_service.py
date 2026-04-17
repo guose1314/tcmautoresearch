@@ -34,6 +34,24 @@ _DEFAULT_PHASES = [
     "reflect",
 ]
 
+# ── 阶段 context 规范默认值（各入口共享） ───────────────────────────────────
+# 所有通过 ResearchRuntimeService 发起的研究均继承此基线，调用方可通过
+# phase_contexts 参数覆盖任意键。API / Web 等入口若有环境相关补充（如
+# local_data_dir），应在调用层追加而非重新定义整套默认值。
+
+CANONICAL_OBSERVE_DEFAULTS: Dict[str, Any] = {
+    "data_source": "local",
+    "use_local_corpus": True,
+    "collect_local_corpus": True,
+    "use_ctext_whitelist": False,
+    "run_preprocess_and_extract": True,
+    "run_literature_retrieval": False,
+}
+
+CANONICAL_PUBLISH_DEFAULTS: Dict[str, Any] = {
+    "allow_pipeline_citation_fallback": False,
+}
+
 _SHARED_RUNTIME_PROFILES: Dict[str, Dict[str, Any]] = {
     "demo_research": {
         "phases": ["observe"],
@@ -41,11 +59,15 @@ _SHARED_RUNTIME_PROFILES: Dict[str, Dict[str, Any]] = {
         "default_cycle_name_mode": "timestamp",
         "default_cycle_name_prefix": "research",
         "default_scope": "中医药",
+        "default_observe_context": dict(CANONICAL_OBSERVE_DEFAULTS),
+        "default_publish_context": dict(CANONICAL_PUBLISH_DEFAULTS),
     },
     "web_research": {
         "phases": list(_DEFAULT_PHASES),
         "stop_on_failure": True,
         "default_cycle_name_mode": "slug",
+        "default_observe_context": dict(CANONICAL_OBSERVE_DEFAULTS),
+        "default_publish_context": dict(CANONICAL_PUBLISH_DEFAULTS),
     }
 }
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Sequence
 
+from src.research.catalog_contract import normalize_dynasty
 from src.research.evidence_chain_contract import (
     CLAIM_TYPE_AUTHORSHIP,
     CLAIM_TYPE_CITATION_SOURCE,
@@ -27,7 +28,6 @@ from src.research.evidence_chain_contract import (
     build_claim,
     detect_claim_conflicts,
 )
-from src.research.catalog_contract import normalize_dynasty
 
 
 def build_evidence_chains(

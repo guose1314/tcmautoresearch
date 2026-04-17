@@ -15,7 +15,9 @@ class TestScoreConstants(unittest.TestCase):
 
     def test_bonus_values_positive(self):
         from src.research.fragment_contract import (
-            SCORE_BONUS_INSERT, SCORE_BONUS_REPLACE, SCORE_BONUS_DELETE,
+            SCORE_BONUS_DELETE,
+            SCORE_BONUS_INSERT,
+            SCORE_BONUS_REPLACE,
         )
 
         self.assertGreater(SCORE_BONUS_INSERT, 0)

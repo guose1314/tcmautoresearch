@@ -23,7 +23,10 @@ class TestBuildClaim(unittest.TestCase):
         self.assertFalse(claim["needs_manual_review"])
 
     def test_low_confidence_triggers_review(self):
-        from src.research.evidence_chain_contract import build_claim, CONFIDENCE_REVIEW_THRESHOLD
+        from src.research.evidence_chain_contract import (
+            CONFIDENCE_REVIEW_THRESHOLD,
+            build_claim,
+        )
 
         claim = build_claim(
             evidence_chain_id="test-002",
@@ -52,7 +55,9 @@ class TestBuildClaim(unittest.TestCase):
 
     def test_confidence_clamped(self):
         from src.research.evidence_chain_contract import (
-            build_claim, CONFIDENCE_MIN, CONFIDENCE_MAX,
+            CONFIDENCE_MAX,
+            CONFIDENCE_MIN,
+            build_claim,
         )
 
         claim_low = build_claim(
@@ -150,14 +155,18 @@ class TestDetectClaimConflicts(unittest.TestCase):
 
 class TestAssessEvidenceChainCompleteness(unittest.TestCase):
     def test_empty(self):
-        from src.research.evidence_chain_contract import assess_evidence_chain_completeness
+        from src.research.evidence_chain_contract import (
+            assess_evidence_chain_completeness,
+        )
 
         result = assess_evidence_chain_completeness([])
         self.assertEqual(result["total"], 0)
         self.assertEqual(result["avg_confidence"], 0.0)
 
     def test_basic_statistics(self):
-        from src.research.evidence_chain_contract import assess_evidence_chain_completeness
+        from src.research.evidence_chain_contract import (
+            assess_evidence_chain_completeness,
+        )
 
         claims = [
             {"claim_type": "authorship_attribution", "judgment_type": "rule_based",

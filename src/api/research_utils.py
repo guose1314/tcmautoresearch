@@ -10,6 +10,10 @@ from typing import Any, Dict, Iterable, Optional
 
 from fastapi.responses import FileResponse
 
+from src.orchestration.research_runtime_service import (
+    CANONICAL_OBSERVE_DEFAULTS,
+    CANONICAL_PUBLISH_DEFAULTS,
+)
 from src.research.observe_philology import (
     build_observe_philology_filter_contract,
     filter_observe_philology_assets,
@@ -19,19 +23,14 @@ from src.research.phase_result import get_phase_artifact_map, get_phase_value
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
 
+# API / Web 入口的 observe 默认值 = 规范基线 + 环境路径补充
 DEFAULT_OBSERVE_PHASE_CONTEXT = {
-    "data_source": "local",
-    "use_local_corpus": True,
-    "collect_local_corpus": True,
+    **CANONICAL_OBSERVE_DEFAULTS,
     "local_data_dir": str((WORKSPACE_ROOT / "data").resolve()),
-    "use_ctext_whitelist": False,
-    "run_preprocess_and_extract": True,
-    "run_literature_retrieval": False,
 }
 
-DEFAULT_PUBLISH_PHASE_CONTEXT = {
-    "allow_pipeline_citation_fallback": False,
-}
+# publish 默认值直接复用规范基线（无 API 特有扩展）
+DEFAULT_PUBLISH_PHASE_CONTEXT = dict(CANONICAL_PUBLISH_DEFAULTS)
 
 SUMMARY_FIELD_LABELS = {
     "observation_count": "观察记录数",

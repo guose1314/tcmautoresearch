@@ -212,7 +212,7 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 
 | 问题 | 说明 | 理由 | 代价 |
 | --- | --- | --- | --- |
-| 主入口兼容壳仍存在 | ResearchRuntimeService 已统一主研究路径，但 demo 壳、Web transport wrapper 与少量直连路径仍保留 | 调用方仍难形成“ResearchRuntimeService 是唯一主链”的稳定认知；新功能、修复或观测逻辑容易继续挂到外层包装，重新造成配置、结果口径与治理链路分叉 | 中，约 2-4 人日 |
+| 主入口兼容壳仍存在 ✅ | ResearchRuntimeService 已统一主研究路径，兼容壳已全面治理完成 | 调用方已可形成"ResearchRuntimeService 是唯一主链"的稳定认知；`run_research()` 已标记 DeprecationWarning，`__init__.py` 已区分推荐导出与兼容/内部导出，阶段 context 规范默认值（`CANONICAL_OBSERVE_DEFAULTS` / `CANONICAL_PUBLISH_DEFAULTS`）已从 API 层上收至 `research_runtime_service.py` 并嵌入所有 runtime profile，API 层仅追加 `local_data_dir` 环境路径；11 项入口合约测试保护 | 已完成 |
 | 结构化存储事务边界仍可继续收敛 | `TransactionCoordinator` 已把主写路径收口为“PG flush → Neo4j execute → PG commit”，但初始化仍允许 `sqlite_fallback` / 仅 PG 降级，历史数据与图投影补齐也仍依赖 writeback / backfill / health-check 工具链协同治理 | 同一研究会话仍可能出现“PG 事实已成立、Neo4j 投影未启用或历史增量待补齐”的运行状态；若状态上抛、告警与排障口径不统一，会直接增加一致性判断与故障排查成本 | 中，约 3-5 人日 |
 | Observe 反向依赖 cycle 层 | research phase 调 cycle runner | 形成跨层耦合，后续难以做干净边界 | 中，约 2-4 人日 |
 | LLM 多条旁路 | paper_plugin、翻译、助手等直接 new LLMEngine | 模型参数、缓存、GPU 使用和成本控制无法统一 | 中，约 3-5 人日 |
@@ -244,6 +244,12 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 - `src/web/ops/job_manager.py` 已把研究执行 runner 与 contract 拼装职责拆出，当前只保留 job 生命周期、SSE 推送、恢复与调度相关能力。
 
 剩余项：
+
+> **状态更新：** 以下剩余项已全部通过代码治理落地：
+> - `run_research()` 已加 `DeprecationWarning`，防止新代码经由此旁路绕过 RuntimeConfigAssembler。
+> - `src/orchestration/__init__.py` 模块文档已将导出分为"推荐入口"（`ResearchRuntimeService` / `ResearchRuntimeResult`）与"兼容/内部"（`ResearchOrchestrator` / `run_research`）两层，认知边界明确。
+> - 阶段 context 规范默认值（`CANONICAL_OBSERVE_DEFAULTS` / `CANONICAL_PUBLISH_DEFAULTS`）已定义在 `research_runtime_service.py` 并嵌入 `_SHARED_RUNTIME_PROFILES`（`demo_research` 与 `web_research`），所有入口路径共享同一基线；`src/api/research_utils.py` 已改为导入 canonical 基线后仅追加 `local_data_dir`。
+> - `tests/unit/test_entry_point_contract.py` 包含 11 项入口合约测试，覆盖导出结构、deprecation 警告、canonical 默认值继承、API 超集一致性与 profile 解析。
 
 - 继续防止旧 cycle API 外形经由新的 helper、route patch 或 transport 层重新回流；如果确实存在外部兼容诉求，应在边界层做显式 DTO 适配，而不是恢复独立 legacy store 文件。
 - 继续防止 demo research wrapper 重新长回本地默认值、结果 DTO 组装或 output policy；新的 demo 特例若确有必要，应优先收进 RuntimeConfigAssembler 的 entrypoint/profile 映射与 shared runtime profile，而不是重新挂回入口函数。
