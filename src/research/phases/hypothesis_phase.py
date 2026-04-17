@@ -5,7 +5,10 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
-from src.research.learning_strategy import resolve_learning_strategy
+from src.research.learning_strategy import (
+    StrategyApplicationTracker,
+    resolve_learning_strategy,
+)
 from src.research.phase_result import build_phase_result, get_phase_value
 from src.storage.graph_interface import IKnowledgeGraph
 from src.storage.neo4j_driver import create_knowledge_graph
@@ -33,7 +36,9 @@ class HypothesisPhaseMixin:
     pipeline: "ResearchPipeline"  # provided by ResearchPhaseHandlers
 
     def execute_hypothesis_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
-        hypothesis_context = self._build_hypothesis_context(cycle, context or {})
+        context = context or {}
+        self._hypothesis_tracker = StrategyApplicationTracker("hypothesis", context, self.pipeline.config)
+        hypothesis_context = self._build_hypothesis_context(cycle, context)
         result = self.pipeline.hypothesis_engine.execute(hypothesis_context)
         hypotheses = result.get("hypotheses") or []
         metadata = result.setdefault("metadata", {})
@@ -49,6 +54,11 @@ class HypothesisPhaseMixin:
         metadata.setdefault("used_llm_generation", any(item.get("generation_mode") == "llm" for item in hypotheses))
         metadata.setdefault("used_llm_closed_loop", False)
         metadata.setdefault("llm_iteration_count", 0)
+        if hasattr(self, "_hypothesis_tracker"):
+            metadata["learning"] = self._hypothesis_tracker.to_metadata()
+            self.pipeline.register_phase_learning_manifest(
+                {"phase": "hypothesis", **self._hypothesis_tracker.to_metadata()}
+            )
         phase_payload = dict(result)
         return build_phase_result(
             "hypothesis",
@@ -122,12 +132,22 @@ class HypothesisPhaseMixin:
         learning_strategy: Dict[str, Any],
     ) -> bool:
         if "use_llm_generation" in context:
-            return bool(context.get("use_llm_generation"))
-        if "hypothesis_use_llm_generation" in learning_strategy:
-            return bool(learning_strategy.get("hypothesis_use_llm_generation"))
-        if "use_llm_generation" in learning_strategy:
-            return bool(learning_strategy.get("use_llm_generation"))
-        return False
+            adjusted = bool(context.get("use_llm_generation"))
+            reason = "explicit_context"
+        elif "hypothesis_use_llm_generation" in learning_strategy:
+            adjusted = bool(learning_strategy.get("hypothesis_use_llm_generation"))
+            reason = "hypothesis_use_llm_generation_in_strategy"
+        elif "use_llm_generation" in learning_strategy:
+            adjusted = bool(learning_strategy.get("use_llm_generation"))
+            reason = "use_llm_generation_in_strategy"
+        else:
+            adjusted = False
+            reason = "default_false"
+        if hasattr(self, "_hypothesis_tracker"):
+            self._hypothesis_tracker.record(
+                "use_llm_generation", False, adjusted, reason,
+            )
+        return adjusted
 
     def _extract_hypothesis_reasoning_summary(
         self,

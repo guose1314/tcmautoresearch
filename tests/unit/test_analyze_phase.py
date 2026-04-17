@@ -50,8 +50,12 @@ class _FakePipeline:
         self.config: Dict[str, Any] = {}
         self.logger = MagicMock()
         self.analysis_port = MagicMock()
+        self._learning_phase_manifests: list = []
         # Default: reasoning engine creation fails → graceful fallback
         self.analysis_port.create_reasoning_engine.side_effect = RuntimeError("no engine")
+
+    def register_phase_learning_manifest(self, manifest: Dict[str, Any]) -> None:
+        self._learning_phase_manifests.append(manifest)
 
 
 class _AnalyzeMixin(AnalyzePhaseMixin):

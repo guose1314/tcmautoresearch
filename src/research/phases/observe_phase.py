@@ -14,6 +14,7 @@ from src.collector.corpus_bundle import (
 )
 from src.cycle.cycle_runner import execute_real_module_pipeline
 from src.research.learning_strategy import (
+    StrategyApplicationTracker,
     has_learning_strategy,
     resolve_learning_flag,
     resolve_learning_strategy,
@@ -37,6 +38,7 @@ class ObservePhaseMixin:
 
     def execute_observe_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
         context = context or {}
+        self._observe_tracker = StrategyApplicationTracker("observe", context, self.pipeline.config)
 
         corpus_result = self._collect_observe_corpus_if_enabled(context)
         literature_result = self._run_observe_literature_if_enabled(context)
@@ -318,6 +320,11 @@ class ObservePhaseMixin:
                 self._resolve_observe_entity_confidence_threshold(context),
                 4,
             )
+        if hasattr(self, "_observe_tracker"):
+            metadata["learning"] = self._observe_tracker.to_metadata()
+            self.pipeline.register_phase_learning_manifest(
+                {"phase": "observe", **self._observe_tracker.to_metadata()}
+            )
         return metadata
 
     def _resolve_observe_literature_max_results(
@@ -338,12 +345,23 @@ class ObservePhaseMixin:
             max_value=0.95,
         )
         if quality_threshold >= 0.82:
-            return min(50, max(base_value + 2, int(round(base_value * 1.3))))
-        if quality_threshold >= 0.74:
-            return min(50, base_value + 1)
-        if quality_threshold <= 0.55:
-            return max(1, base_value - 1)
-        return base_value
+            adjusted = min(50, max(base_value + 2, int(round(base_value * 1.3))))
+            reason = "quality_threshold >= 0.82"
+        elif quality_threshold >= 0.74:
+            adjusted = min(50, base_value + 1)
+            reason = "quality_threshold >= 0.74"
+        elif quality_threshold <= 0.55:
+            adjusted = max(1, base_value - 1)
+            reason = "quality_threshold <= 0.55"
+        else:
+            adjusted = base_value
+            reason = "no_adjustment"
+        if hasattr(self, "_observe_tracker"):
+            self._observe_tracker.record(
+                "literature_max_results", base_value, adjusted, reason,
+                parameter="quality_threshold", parameter_value=quality_threshold,
+            )
+        return adjusted
 
     def _resolve_observe_max_texts(self, context: Dict[str, Any]) -> int:
         base_value = 3
@@ -359,18 +377,29 @@ class ObservePhaseMixin:
             max_value=0.95,
         )
         if quality_threshold >= 0.82:
-            return 5
-        if quality_threshold >= 0.74:
-            return 4
-        if quality_threshold <= 0.55:
-            return 2
-        return base_value
+            adjusted = 5
+            reason = "quality_threshold >= 0.82"
+        elif quality_threshold >= 0.74:
+            adjusted = 4
+            reason = "quality_threshold >= 0.74"
+        elif quality_threshold <= 0.55:
+            adjusted = 2
+            reason = "quality_threshold <= 0.55"
+        else:
+            adjusted = base_value
+            reason = "no_adjustment"
+        if hasattr(self, "_observe_tracker"):
+            self._observe_tracker.record(
+                "max_texts", base_value, adjusted, reason,
+                parameter="quality_threshold", parameter_value=quality_threshold,
+            )
+        return adjusted
 
     def _resolve_observe_entity_confidence_threshold(self, context: Dict[str, Any]) -> float:
         if not has_learning_strategy(context, self.pipeline.config):
             return 0.0
 
-        return resolve_numeric_learning_parameter(
+        adjusted = resolve_numeric_learning_parameter(
             "confidence_threshold",
             0.7,
             context,
@@ -378,6 +407,12 @@ class ObservePhaseMixin:
             min_value=0.0,
             max_value=1.0,
         )
+        if hasattr(self, "_observe_tracker"):
+            self._observe_tracker.record(
+                "entity_confidence_threshold", 0.7, adjusted, "from_learning_parameter",
+                parameter="confidence_threshold", parameter_value=adjusted,
+            )
+        return adjusted
 
     def _resolve_observe_flag(
         self,

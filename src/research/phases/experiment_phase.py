@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
 from src.research.learning_strategy import (
+    StrategyApplicationTracker,
     has_learning_strategy,
     resolve_learning_flag,
     resolve_learning_strategy,
@@ -44,6 +45,7 @@ class ExperimentPhaseMixin:
 
     def execute_experiment_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
         context = context or {}
+        self._experiment_tracker = StrategyApplicationTracker("experiment", context, self.pipeline.config)
         selected_hypothesis, selection_metadata = self._resolve_selected_hypothesis(cycle, context)
         if selected_hypothesis is None:
             blocked_metadata = {
@@ -137,6 +139,11 @@ class ExperimentPhaseMixin:
             "protocol_llm_generation_enabled": bool(experiment_context.get("use_llm_protocol_generation", False)),
             **selection_metadata,
         }
+        if hasattr(self, "_experiment_tracker"):
+            metadata["learning"] = self._experiment_tracker.to_metadata()
+            self.pipeline.register_phase_learning_manifest(
+                {"phase": "experiment", **self._experiment_tracker.to_metadata()}
+            )
         return build_phase_result(
             "experiment",
             status="completed",
@@ -283,7 +290,13 @@ class ExperimentPhaseMixin:
             if confidence_threshold >= 0.82:
                 normalized_multiplier = max(normalized_multiplier, 1.15)
 
-        return max(12, min(int(round(base_sample_size * normalized_multiplier)), 400))
+        adjusted = max(12, min(int(round(base_sample_size * normalized_multiplier)), 400))
+        if hasattr(self, "_experiment_tracker"):
+            self._experiment_tracker.record(
+                "sample_size", base_sample_size, adjusted,
+                f"multiplier={normalized_multiplier}",
+            )
+        return adjusted
 
     def _resolve_experiment_duration_days(
         self,
@@ -334,7 +347,13 @@ class ExperimentPhaseMixin:
             else:
                 normalized_extra_days = 0
 
-        return max(7, min(duration_days + normalized_extra_days, 120))
+        adjusted = max(7, min(duration_days + normalized_extra_days, 120))
+        if hasattr(self, "_experiment_tracker"):
+            self._experiment_tracker.record(
+                "duration_days", duration_days, adjusted,
+                f"extra_days={normalized_extra_days}",
+            )
+        return adjusted
 
     def _resolve_experiment_methodology(
         self,
@@ -369,12 +388,20 @@ class ExperimentPhaseMixin:
             max_value=0.95,
         )
         if methodology == "data_analysis" and int(evidence_profile.get("record_count") or 0) > 0:
-            return "evidence_weighted_analysis"
-        if methodology == "evidence_weighted_analysis" and len(source_weights) >= 2 and quality_threshold >= 0.74:
-            return "multisource_weighted_comparative_analysis"
-        if methodology == "multisource_weighted_comparative_analysis" and quality_threshold <= 0.55:
-            return "evidence_weighted_analysis"
-        return methodology
+            adjusted = "evidence_weighted_analysis"
+        elif methodology == "evidence_weighted_analysis" and len(source_weights) >= 2 and quality_threshold >= 0.74:
+            adjusted = "multisource_weighted_comparative_analysis"
+        elif methodology == "multisource_weighted_comparative_analysis" and quality_threshold <= 0.55:
+            adjusted = "evidence_weighted_analysis"
+        else:
+            adjusted = methodology
+        if hasattr(self, "_experiment_tracker") and adjusted != methodology:
+            self._experiment_tracker.record(
+                "methodology", methodology, adjusted,
+                f"quality_threshold={quality_threshold}",
+                parameter="quality_threshold", parameter_value=quality_threshold,
+            )
+        return adjusted
 
     def _extract_gap_priority_summary(self, clinical_gap_analysis: Dict[str, Any]) -> Dict[str, Any]:
         summary = clinical_gap_analysis.get("priority_summary") or {}

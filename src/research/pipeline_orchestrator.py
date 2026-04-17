@@ -136,6 +136,7 @@ class ResearchPipelineOrchestrator:
             research_cycle.current_phase = self.pipeline.ResearchPhase.OBSERVE
             research_cycle.metadata["final_status"] = research_cycle.status.value
             self.pipeline.active_cycles[cycle_id] = research_cycle
+            self.pipeline.freeze_learning_strategy_snapshot()
             publish_audit_event(
                 self.pipeline.event_bus,
                 "cycle_started",

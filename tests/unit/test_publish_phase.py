@@ -69,6 +69,7 @@ class _FakePipeline:
         self.logger = MagicMock()
         self.output_port = MagicMock()
         self.analysis_port = MagicMock()
+        self._learning_phase_manifests: list = []
         self.analysis_port.create_reasoning_engine.side_effect = RuntimeError("no engine")
         # Fallback class refs (used when output_port fails)
         self.CitationManager = None
@@ -76,6 +77,9 @@ class _FakePipeline:
         self.OutputGenerator = None
         self.ReportGenerator = None
         self._setup_default_mocks()
+
+    def register_phase_learning_manifest(self, manifest: Dict[str, Any]) -> None:
+        self._learning_phase_manifests.append(manifest)
 
     def _setup_default_mocks(self):
         # CitationManager mock

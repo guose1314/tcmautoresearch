@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from src.research.learning_strategy import (
+    StrategyApplicationTracker,
     has_learning_strategy,
     resolve_learning_flag,
     resolve_learning_strategy,
@@ -37,6 +38,7 @@ class ExperimentExecutionPhaseMixin:
 
     def execute_experiment_execution_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
         context = context or {}
+        self._execution_tracker = StrategyApplicationTracker("experiment_execution", context, self.pipeline.config)
 
         # --- boundary guard: reject auto-execution requests ---
         violated = self._BOUNDARY_VIOLATION_KEYS & set(context)
@@ -158,6 +160,11 @@ class ExperimentExecutionPhaseMixin:
             "learning_strategy_applied": has_learning_strategy(context, self.pipeline.config),
             "document_fallback_import_enabled": document_fallback_enabled,
         }
+        if hasattr(self, "_execution_tracker"):
+            metadata["learning"] = self._execution_tracker.to_metadata()
+            self.pipeline.register_phase_learning_manifest(
+                {"phase": "experiment_execution", **self._execution_tracker.to_metadata()}
+            )
 
         return build_phase_result(
             "experiment_execution",
@@ -343,7 +350,7 @@ class ExperimentExecutionPhaseMixin:
         return resolve_learning_flag(flag_name, default, context, self.pipeline.config)
 
     def _resolve_execution_max_records(self, context: Dict[str, Any]) -> int:
-        return self._resolve_execution_volume_limit(
+        adjusted = self._resolve_execution_volume_limit(
             context,
             context_keys=("experiment_execution_max_records", "max_execution_records"),
             strategy_key="experiment_execution_max_records",
@@ -355,9 +362,14 @@ class ExperimentExecutionPhaseMixin:
             min_value=1,
             max_value=500,
         )
+        if hasattr(self, "_execution_tracker"):
+            self._execution_tracker.record(
+                "max_records", 200, adjusted, "volume_limit",
+            )
+        return adjusted
 
     def _resolve_execution_max_relationships(self, context: Dict[str, Any]) -> int:
-        return self._resolve_execution_volume_limit(
+        adjusted = self._resolve_execution_volume_limit(
             context,
             context_keys=("experiment_execution_max_relationships", "max_execution_relationships"),
             strategy_key="experiment_execution_max_relationships",
@@ -369,9 +381,14 @@ class ExperimentExecutionPhaseMixin:
             min_value=1,
             max_value=1000,
         )
+        if hasattr(self, "_execution_tracker"):
+            self._execution_tracker.record(
+                "max_relationships", 400, adjusted, "volume_limit",
+            )
+        return adjusted
 
     def _resolve_execution_max_sampling_events(self, context: Dict[str, Any]) -> int:
-        return self._resolve_execution_volume_limit(
+        adjusted = self._resolve_execution_volume_limit(
             context,
             context_keys=("experiment_execution_max_sampling_events", "max_execution_sampling_events"),
             strategy_key="experiment_execution_max_sampling_events",
@@ -383,6 +400,11 @@ class ExperimentExecutionPhaseMixin:
             min_value=1,
             max_value=100,
         )
+        if hasattr(self, "_execution_tracker"):
+            self._execution_tracker.record(
+                "max_sampling_events", 50, adjusted, "volume_limit",
+            )
+        return adjusted
 
     def _resolve_execution_volume_limit(
         self,

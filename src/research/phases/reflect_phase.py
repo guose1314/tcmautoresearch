@@ -7,6 +7,11 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
+from src.research.learning_strategy import (
+    StrategyApplicationTracker,
+    build_strategy_diff,
+    build_strategy_snapshot,
+)
 from src.research.phase_result import build_phase_result
 
 logger = logging.getLogger(__name__)
@@ -34,6 +39,8 @@ class ReflectPhaseMixin:
     pipeline: "ResearchPipeline"  # provided by ResearchPhaseHandlers
 
     def execute_reflect_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
+        context = context or {}
+        self._reflect_tracker = StrategyApplicationTracker("reflect", context, self.pipeline.config)
         outcomes: List[Dict[str, Any]] = getattr(cycle, "outcomes", None) or []
         quality_assessor = self.pipeline.quality_assessor
 
@@ -62,6 +69,7 @@ class ReflectPhaseMixin:
         improvement_plan = self._build_improvement_plan(cycle_assessment)
 
         # ---- 5. SelfLearningEngine 反馈（可选） ----
+        snapshot_before = getattr(self.pipeline, "get_learning_strategy_snapshot", lambda: {})()
         learning_summary = self._feed_self_learning(cycle_assessment)
         if learning_summary is not None:
             refresh_learning_runtime_feedback = getattr(
@@ -74,6 +82,8 @@ class ReflectPhaseMixin:
                     refresh_learning_runtime_feedback()
                 except Exception as exc:
                     logger.warning("刷新默认学习策略快照失败: %s", exc)
+        snapshot_after = build_strategy_snapshot(None, self.pipeline.config)
+        strategy_diff = build_strategy_diff(snapshot_before, snapshot_after) if snapshot_before else {}
 
         quality_assessment = {
             "overall_cycle_score": cycle_assessment["overall_cycle_score"],
@@ -89,6 +99,17 @@ class ReflectPhaseMixin:
             "assessed_phases": len(cycle_assessment["phase_assessments"]),
             "learning_fed": learning_summary is not None,
         }
+        if hasattr(self, "_reflect_tracker"):
+            metadata["learning"] = self._reflect_tracker.to_metadata()
+            self.pipeline.register_phase_learning_manifest(
+                {"phase": "reflect", **self._reflect_tracker.to_metadata()}
+            )
+        if strategy_diff:
+            metadata["strategy_diff"] = strategy_diff
+        # ---- Build learning application summary for the cycle ----
+        learning_application_summary = {}
+        if hasattr(self.pipeline, "build_learning_application_summary"):
+            learning_application_summary = self.pipeline.build_learning_application_summary()
         return build_phase_result(
             "reflect",
             status="completed",
@@ -104,6 +125,8 @@ class ReflectPhaseMixin:
                 "improvement_plan": improvement_plan,
                 "quality_assessment": quality_assessment,
                 "learning_summary": learning_summary,
+                "strategy_diff": strategy_diff,
+                "learning_application_summary": learning_application_summary,
             },
         )
 

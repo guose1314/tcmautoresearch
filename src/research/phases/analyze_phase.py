@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from src.research.data_miner import StatisticalDataMiner
 from src.research.learning_strategy import (
+    StrategyApplicationTracker,
     has_learning_strategy,
     resolve_learning_flag,
     resolve_learning_strategy,
@@ -36,6 +37,7 @@ class AnalyzePhaseMixin:
 
     def execute_analyze_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
         context = context or {}
+        self._analyze_tracker = StrategyApplicationTracker("analyze", context, self.pipeline.config)
         significance_level = self._resolve_analyze_significance_level(context)
         analyze_records = self._collect_analyze_records(cycle, context)
         analyze_relationships = self._collect_analyze_relationships(cycle, context)
@@ -77,6 +79,11 @@ class AnalyzePhaseMixin:
         }
         if evidence_grade_error:
             metadata["evidence_grade_error"] = evidence_grade_error
+        if hasattr(self, "_analyze_tracker"):
+            metadata["learning"] = self._analyze_tracker.to_metadata()
+            self.pipeline.register_phase_learning_manifest(
+                {"phase": "analyze", **self._analyze_tracker.to_metadata()}
+            )
 
         return build_phase_result(
             "analyze",
@@ -137,7 +144,14 @@ class AnalyzePhaseMixin:
             min_value=0.3,
             max_value=0.95,
         )
-        return round(min(0.1, max(0.01, 0.12 - quality_threshold * 0.1)), 4)
+        adjusted = round(min(0.1, max(0.01, 0.12 - quality_threshold * 0.1)), 4)
+        if hasattr(self, "_analyze_tracker"):
+            self._analyze_tracker.record(
+                "significance_level", 0.05, adjusted,
+                f"quality_threshold={quality_threshold}",
+                parameter="quality_threshold", parameter_value=quality_threshold,
+            )
+        return adjusted
 
     def _resolve_analyze_min_sample_size(self, context: Dict[str, Any]) -> int:
         explicit_value = context.get("minimum_sample_size")
@@ -160,7 +174,14 @@ class AnalyzePhaseMixin:
             min_value=0.3,
             max_value=0.95,
         )
-        return max(3, min(8, int(round(2 + quality_threshold * 4))))
+        adjusted = max(3, min(8, int(round(2 + quality_threshold * 4))))
+        if hasattr(self, "_analyze_tracker"):
+            self._analyze_tracker.record(
+                "min_sample_size", 5, adjusted,
+                f"quality_threshold={quality_threshold}",
+                parameter="quality_threshold", parameter_value=quality_threshold,
+            )
+        return adjusted
 
     def _filter_analyze_relationships_by_confidence(
         self,

@@ -35,6 +35,7 @@ from src.research.study_session_manager import (
     ResearchPhase,
     StudySessionManager,
 )
+from src.research.learning_strategy import build_strategy_snapshot
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -185,6 +186,8 @@ class ResearchPipeline:
 
         self.self_learning_engine = self._bootstrap_self_learning_engine()
         self._learning_strategy: Dict[str, Any] = {}
+        self._learning_strategy_snapshot: Dict[str, Any] = {}
+        self._learning_phase_manifests: List[Dict[str, Any]] = []
         self.refresh_learning_runtime_feedback()
 
         self._register_default_module_providers()
@@ -362,6 +365,45 @@ class ResearchPipeline:
         if isinstance(previous_feedback, dict):
             return dict(previous_feedback)
         return {}
+
+    # ------------------------------------------------------------------
+    # Learning observability: snapshot, manifest, diff
+    # ------------------------------------------------------------------
+
+    def freeze_learning_strategy_snapshot(self) -> Dict[str, Any]:
+        """Capture the current strategy as an immutable snapshot with fingerprint.
+
+        Called once at cycle start so all phases share the same baseline.
+        """
+        self._learning_strategy_snapshot = build_strategy_snapshot(
+            None, self.config,
+        )
+        self._learning_phase_manifests = []
+        return dict(self._learning_strategy_snapshot)
+
+    def get_learning_strategy_snapshot(self) -> Dict[str, Any]:
+        return dict(self._learning_strategy_snapshot)
+
+    def register_phase_learning_manifest(self, manifest: Dict[str, Any]) -> None:
+        """Register one phase's learning metadata for the cycle-level summary."""
+        self._learning_phase_manifests.append(manifest)
+
+    def build_learning_application_summary(self) -> Dict[str, Any]:
+        """Build a cycle-level summary of all strategy applications across phases."""
+        phases_applied = [
+            m for m in self._learning_phase_manifests if m.get("applied")
+        ]
+        total_decisions = sum(m.get("decision_count", 0) for m in phases_applied)
+        fingerprints = {m.get("strategy_fingerprint") for m in phases_applied if m.get("strategy_fingerprint")}
+        return {
+            "snapshot_fingerprint": self._learning_strategy_snapshot.get("fingerprint"),
+            "phases_with_strategy": [m.get("phase") for m in phases_applied],
+            "phase_count": len(phases_applied),
+            "total_decision_count": total_decisions,
+            "cross_phase_consistent": len(fingerprints) <= 1,
+            "distinct_fingerprints": sorted(fingerprints),
+            "phase_manifests": list(self._learning_phase_manifests),
+        }
 
     @staticmethod
     def _is_unavailable_default_module_class(candidate: Any) -> bool:

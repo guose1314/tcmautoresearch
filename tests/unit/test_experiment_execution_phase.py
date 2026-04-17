@@ -30,6 +30,10 @@ class _FakePipeline:
 
     def __init__(self):
         self.config: Dict[str, Any] = {}
+        self._learning_phase_manifests: list = []
+
+    def register_phase_learning_manifest(self, manifest: Dict[str, Any]) -> None:
+        self._learning_phase_manifests.append(manifest)
 
 
 def _make_handler(pipeline=None):

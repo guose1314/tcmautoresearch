@@ -44,6 +44,7 @@ except Exception:
     EvidenceGrader = None
 
 from src.research.learning_strategy import (
+    StrategyApplicationTracker,
     has_learning_strategy,
     resolve_learning_flag,
     resolve_learning_strategy,
@@ -100,6 +101,7 @@ class PublishPhaseMixin:
 
     def execute_publish_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
         context = context or {}
+        self._publish_tracker = StrategyApplicationTracker("publish", context, self.pipeline.config)
         observe_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.OBSERVE, {}).get("result", {})
         hypothesis_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.HYPOTHESIS, {}).get("result", {})
         experiment_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.EXPERIMENT, {}).get("result", {})
@@ -201,6 +203,11 @@ class PublishPhaseMixin:
             "paper_generation_enabled": generate_paper,
             "report_generation_enabled": generate_reports,
         }
+        if hasattr(self, "_publish_tracker"):
+            metadata["learning"] = self._publish_tracker.to_metadata()
+            self.pipeline.register_phase_learning_manifest(
+                {"phase": "publish", **self._publish_tracker.to_metadata()}
+            )
         report_errors = report_generation_result.get("errors", []) if isinstance(report_generation_result, dict) else []
         status = "degraded" if report_errors else "completed"
         return build_phase_result(
@@ -384,12 +391,23 @@ class PublishPhaseMixin:
             max_value=0.95,
         )
         if quality_threshold >= 0.82:
-            return 32
-        if quality_threshold >= 0.74:
-            return 24
-        if quality_threshold <= 0.55:
-            return 12
-        return 20
+            adjusted = 32
+            reason = "quality_threshold >= 0.82"
+        elif quality_threshold >= 0.74:
+            adjusted = 24
+            reason = "quality_threshold >= 0.74"
+        elif quality_threshold <= 0.55:
+            adjusted = 12
+            reason = "quality_threshold <= 0.55"
+        else:
+            adjusted = 20
+            reason = "no_adjustment"
+        if hasattr(self, "_publish_tracker"):
+            self._publish_tracker.record(
+                "max_local_citation_records", 20, adjusted, reason,
+                parameter="quality_threshold", parameter_value=quality_threshold,
+            )
+        return adjusted
 
     def _should_allow_pipeline_citation_fallback(self, context: Dict[str, Any]) -> bool:
         if "allow_pipeline_citation_fallback" in context:

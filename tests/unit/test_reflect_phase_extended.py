@@ -34,10 +34,20 @@ class _FakePipeline:
     def __init__(self, *, llm_engine=None, self_learning_engine=None):
         self.quality_assessor = QualityAssessor()
         self.config: Dict[str, Any] = {}
+        self._learning_phase_manifests: List[Dict[str, Any]] = []
         if llm_engine is not None:
             self.config["llm_engine"] = llm_engine
         if self_learning_engine is not None:
             self.config["self_learning_engine"] = self_learning_engine
+
+    def register_phase_learning_manifest(self, manifest: Dict[str, Any]) -> None:
+        self._learning_phase_manifests.append(manifest)
+
+    def get_learning_strategy_snapshot(self) -> Dict[str, Any]:
+        return {}
+
+    def build_learning_application_summary(self) -> Dict[str, Any]:
+        return {"phase_manifests": list(self._learning_phase_manifests)}
 
 
 class _ReflectMixin(ReflectPhaseMixin):
