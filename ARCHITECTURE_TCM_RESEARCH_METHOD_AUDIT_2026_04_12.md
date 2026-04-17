@@ -122,7 +122,7 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 
 | 问题 | 说明 | 理由 | 代价 |
 | --- | --- | --- | --- |
-| 默认学习策略已覆盖主研究链，但治理仍需收口 | ResearchPipeline 已默认创建 SelfLearningEngine，reflect 会持久化学习快照并回写下一轮 runtime context；observe / hypothesis / analyze / experiment / experiment_execution / publish 已接入首批阈值与行为分支，Reflect 仍主要承担评估与回写而非同类 phase gate | 平台已经从“只总结”进入“默认学习 + 主链多阶段调参”，剩余缺口转向反馈资产治理、策略可观测性与跨阶段一致性 | 中，约 2-3 人日 |
+| 默认学习策略已覆盖主研究链，治理已收口 ✅ | ResearchPipeline 已默认创建 SelfLearningEngine，reflect 会持久化学习快照并回写下一轮 runtime context；observe / hypothesis / analyze / experiment / experiment_execution / publish / reflect 全 7 阶段已接入 StrategyApplicationTracker，每阶段 _resolve 方法记录 baseline/adjusted/reason 决策日志（commit ac59ecf）。**已解决缺口**: (1) 策略决策可追踪 — metadata.learning 包含 fingerprint + decisions; (2) 跨阶段策略清单 — pipeline.build_learning_application_summary() 汇总; (3) 跨阶段一致性 — freeze_learning_strategy_snapshot() 在 cycle 启动时冻结 fingerprint，summary.cross_phase_consistent 校验; (4) 反馈资产可审计 — reflect 阶段 before/after snapshot + build_strategy_diff(); (5) 标准元数据 — tracker.to_metadata() 统一输出 applied/strategy_fingerprint/strategy_version/decision_count/decisions。20 项治理契约测试保护 | 治理已收口，后续可选深化方向：策略版本历史持久化、决策日志 JSON 导出、跨 cycle 策略漂移检测 | 已完成 |
 | 真实实验仍依赖系统外部 | experiment 已是 protocol design，experiment_execution 只负责外部执行、采样与结果导入；截至 2026-04-17，UI、仪表板、API 枚举、配置常量与理论框架中的实验边界文案已全部统一（commit c679a59），运行时边界守卫已接入，16 项边界契约测试保护 | 平台能力边界已在代码层明确表达，后续重点转向外部导入流程治理与导入数据质量校验 | 低，约 1-2 人日 |
 | 文献学深层能力首轮已补齐，二期深化待推进 | 已具备 PhilologyService、术语标准化、版本对勘与校勘条目产物；目录学字段合同（catalog_contract）、训诂释义与义项判别（exegesis_contract）、辑佚候选识别（fragment_contract）、考据证据链（textual_evidence_chain）、工作台化审核面均已完成首轮落地（commits b010e49 → 03100fd） | 首轮文献学能力已补齐，后续重点转向各子能力的精度深化、覆盖面扩展与跨子能力一致性 | 中，约 4-8 人日 |
 
