@@ -12,6 +12,14 @@ from src.research.catalog_contract import (
     build_catalog_hierarchy,
     has_baseline_fields,
 )
+from src.research.exegesis_contract import (
+    FIELD_DEFINITION,
+    FIELD_DEFINITION_SOURCE,
+    assess_exegesis_completeness,
+    build_exegesis_summary,
+    build_exegesis_note,
+    definition_source_rank,
+)
 from src.research.review_workbench import (
     OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT,
     REVIEW_WORKBENCH_ASSET_KIND,
@@ -44,6 +52,12 @@ _TERMINOLOGY_COLUMNS = [
     "configured_variants",
     "sources",
     "notes",
+    "definition",
+    "definition_source",
+    "semantic_scope",
+    "dynasty_usage",
+    "disambiguation_basis",
+    "exegesis_notes",
 ]
 _CATALOG_CORE_FIELDS = CATALOG_CORE_FIELDS
 _CATALOG_FILTER_FIELDS = CATALOG_FILTER_FIELDS
@@ -457,6 +471,7 @@ def _normalize_exegesis_entries(value: Any) -> List[Dict[str, Any]]:
             "review_status": review_status,
             "needs_manual_review": bool(item.get("needs_manual_review", True)),
             "review_reasons": review_reasons,
+            "exegesis_notes": _as_text(item.get("exegesis_notes")),
         }
         entries.append(entry)
     return entries
@@ -838,6 +853,20 @@ def _build_catalog_summary_metrics(
         backfill = build_backfill_summary(documents)
         summary["needs_backfill_count"] = backfill["needs_backfill_count"]
         summary["backfill_field_gap_counts"] = backfill["field_gap_counts"]
+
+    # 训诂摘要 — 汇聚 source distribution 与 category distribution
+    all_exegesis: List[Dict[str, Any]] = []
+    for item in documents:
+        all_exegesis.extend(_as_dict_list(item.get("exegesis_entries")))
+    if all_exegesis:
+        exegesis_summary = build_exegesis_summary(all_exegesis)
+        summary["exegesis_definition_coverage"] = exegesis_summary.get("definition_coverage", 0.0)
+        summary["exegesis_source_distribution"] = exegesis_summary.get("source_distribution", {})
+        summary["exegesis_category_distribution"] = exegesis_summary.get("category_distribution", {})
+        summary["exegesis_disambiguation_count"] = exegesis_summary.get("disambiguation_count", 0)
+        summary["exegesis_needs_disambiguation"] = exegesis_summary.get("needs_disambiguation", 0)
+        summary["exegesis_dynasty_term_counts"] = exegesis_summary.get("dynasty_term_counts", {})
+
     return summary
 
 
@@ -1193,14 +1222,25 @@ def _build_exegesis_entry_from_row(row: Mapping[str, Any], *, dynasty: str = "")
     configured_variants = _as_string_list(row.get("configured_variants"))
     sources = _as_string_list(row.get("sources"))
     notes = _as_string_list(row.get("notes"))
-    definition_payload = _resolve_exegesis_definition(
+
+    # 若 terminology_row 已携带 PhilologyService 填充的释义，优先尊重
+    row_definition = _as_text(row.get(FIELD_DEFINITION))
+    row_definition_source = _as_text(row.get(FIELD_DEFINITION_SOURCE))
+    derived_payload = _resolve_exegesis_definition(
         row,
         canonical=canonical,
         label=label,
     )
-    definition = _as_text(definition_payload.get("definition"))
-    definition_source = _as_text(definition_payload.get("definition_source")) or "canonical_fallback"
-    source_refs = _as_string_list(definition_payload.get("source_refs"))
+    derived_rank = _exegesis_definition_source_rank(derived_payload.get("definition_source"))
+    row_rank = definition_source_rank(row_definition_source)
+    if row_definition and row_rank >= derived_rank:
+        definition = row_definition
+        definition_source = row_definition_source or "canonical_fallback"
+        source_refs = _as_string_list(row.get("disambiguation_basis"))
+    else:
+        definition = _as_text(derived_payload.get("definition"))
+        definition_source = _as_text(derived_payload.get("definition_source")) or "canonical_fallback"
+        source_refs = _as_string_list(derived_payload.get("source_refs"))
     if not definition:
         if observed_forms:
             definition = f"{canonical} 暂据术语标准表归并自 {observed_forms[0]}"
@@ -1229,6 +1269,11 @@ def _build_exegesis_entry_from_row(row: Mapping[str, Any], *, dynasty: str = "")
         "notes": notes,
         "dynasty_usage": _unique_texts([dynasty, row.get("dynasty")]),
         "disambiguation_basis": _merge_text_lists(sources, source_refs, notes[:1], observed_forms[:1]),
+        "exegesis_notes": _as_text(row.get("exegesis_notes")) or build_exegesis_note(
+            canonical, definition_source,
+            category=_as_text(row.get("category")),
+            disambiguation_basis=_merge_text_lists(sources, source_refs),
+        ),
         "review_status": "pending",
         "needs_manual_review": True,
         "review_reasons": review_reasons,

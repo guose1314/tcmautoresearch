@@ -9,6 +9,19 @@ from typing import Any, Dict, List, Mapping, Sequence
 from src.collector.normalizer import Normalizer
 from src.core.module_base import BaseModule
 from src.data.tcm_lexicon import get_lexicon
+from src.research.exegesis_contract import (
+    FIELD_DEFINITION,
+    FIELD_DEFINITION_SOURCE,
+    FIELD_SEMANTIC_SCOPE,
+    FIELD_DYNASTY_USAGE,
+    FIELD_DISAMBIGUATION_BASIS,
+    ExegesisDictionary,
+    disambiguate_polysemy,
+    resolve_polysemy_category,
+    build_exegesis_note,
+    CATEGORY_TO_LABEL,
+)
+from src.semantic_modeling.tcm_relationships import TCMRelationshipDefinitions
 
 _MULTI_SPACE_RE = re.compile(r"\s+")
 _CATEGORY_LABELS = {
@@ -25,6 +38,62 @@ _DEFAULT_COLLATION_JUDGEMENTS = {
     "delete": ("疑似脱文", "当前文本相较对校见缺字或缺词，建议核对传抄链。"),
     "insert": ("疑似衍文", "当前文本相较对校见增字或增词，建议核对版本来源。"),
 }
+_FORMULA_ROLE_LABELS = {"sovereign": "君药", "minister": "臣药", "assistant": "佐药", "envoy": "使药"}
+
+
+def _build_tcm_structured_definition(canonical: str, category: str, label: str) -> Dict[str, Any]:
+    """从 TCMRelationshipDefinitions 构建结构化释义 (与 observe_philology 同源逻辑)。"""
+    display_label = label or canonical
+    if category == "herb":
+        efficacies = list(dict.fromkeys(TCMRelationshipDefinitions.get_herb_efficacy(canonical)))
+        props = {k: str(v) for k, v in TCMRelationshipDefinitions.get_herb_properties(canonical).items() if str(v).strip()}
+        if not efficacies and not props:
+            return {}
+        parts = [f"{canonical}为{display_label}"]
+        refs: list[str] = []
+        if efficacies:
+            parts.append(f"常见功效：{'、'.join(efficacies)}")
+            refs.append("TCMRelationshipDefinitions.HERB_EFFICACY_MAP")
+        prop_parts: list[str] = []
+        if props.get("气"):
+            prop_parts.append(f"气{props['气']}")
+        if props.get("味"):
+            prop_parts.append(f"味{props['味']}")
+        if prop_parts:
+            parts.append(f"四气五味：{'，'.join(prop_parts)}")
+            refs.append("TCMRelationshipDefinitions.HERB_PROPERTIES")
+        return {"definition": "；".join(parts), "definition_source": "structured_tcm_knowledge", "source_refs": refs}
+    if category == "formula":
+        composition = TCMRelationshipDefinitions.get_formula_composition(canonical)
+        if not composition:
+            return {}
+        comp_parts: list[str] = []
+        for role in ("sovereign", "minister", "assistant", "envoy"):
+            members = list(dict.fromkeys(composition.get(role) or []))
+            if members:
+                comp_parts.append(f"{_FORMULA_ROLE_LABELS.get(role, role)}：{'、'.join(members)}")
+        defn = f"{canonical}为{display_label}"
+        if comp_parts:
+            defn = f"{defn}；常见组成：{'；'.join(comp_parts)}"
+        return {"definition": defn, "definition_source": "structured_tcm_knowledge", "source_refs": ["TCMRelationshipDefinitions.FORMULA_COMPOSITIONS"]}
+    if category == "syndrome":
+        info = TCMRelationshipDefinitions.get_syndrome_definition(canonical)
+        if not info:
+            return {}
+        parts = [f"{canonical}：{info.get('definition', '')}"]
+        symptoms = info.get("symptoms") or []
+        if symptoms:
+            parts.append(f"典型表现：{'、'.join(symptoms)}")
+        pathogenesis = str(info.get("pathogenesis") or "").strip()
+        if pathogenesis:
+            parts.append(f"病机：{pathogenesis}")
+        return {"definition": "；".join(parts), "definition_source": "structured_tcm_knowledge", "source_refs": ["TCMRelationshipDefinitions.SYNDROME_DEFINITIONS"]}
+    if category == "theory":
+        theory_def = TCMRelationshipDefinitions.get_theory_term_definition(canonical)
+        if not theory_def:
+            return {}
+        return {"definition": f"{canonical}：{theory_def}", "definition_source": "structured_tcm_knowledge", "source_refs": ["TCMRelationshipDefinitions.THEORY_TERM_DEFINITIONS"]}
+    return {}
 
 
 class PhilologyService(BaseModule):
@@ -54,6 +123,7 @@ class PhilologyService(BaseModule):
         self.include_annotation_report = bool(artifact_output.get("include_annotation_report", True))
         self.terminology_standards = self._normalize_terminology_standards(cfg.get("terminology_standards"))
         self.collation_entry_rules = self._normalize_collation_entry_rules(cfg.get("collation_entry_rules"))
+        self.exegesis_dictionaries: List[ExegesisDictionary] = list(cfg.get("exegesis_dictionaries") or [])
 
     def _do_initialize(self) -> bool:
         return self.normalizer.initialize()
@@ -407,8 +477,73 @@ class PhilologyService(BaseModule):
                 [str(item) for item in row.get("sources") or [] if str(item).strip()]
             )
             row["notes"] = [str(item) for item in row.get("notes") or [] if str(item).strip()]
+            self._enrich_row_with_exegesis(row)
             rows.append(row)
         return rows
+
+    def _enrich_row_with_exegesis(self, row: Dict[str, Any]) -> None:
+        """为 terminology row 填充训诂字段 (definition / semantic_scope / dynasty_usage / disambiguation_basis)。"""
+        canonical = str(row.get("canonical") or "").strip()
+        label = str(row.get("label") or "").strip()
+        category = resolve_polysemy_category(row, label)
+        notes = [str(n) for n in row.get("notes") or [] if str(n).strip()]
+        sources = [str(s) for s in row.get("sources") or [] if str(s).strip()]
+
+        definition = ""
+        definition_source = ""
+        source_refs: list[str] = []
+
+        # 1) 可配置字典注入 — 按注入顺序尝试
+        if self.exegesis_dictionaries and category:
+            payload = disambiguate_polysemy(canonical, category, dictionaries=self.exegesis_dictionaries)
+            if payload.get("definition"):
+                definition = str(payload["definition"])
+                definition_source = str(payload.get("definition_source") or "external_dictionary")
+                source_refs = list(payload.get("source_refs") or [])
+
+        # 2) config_terminology_standard 优先
+        if not definition and "config_terminology_standard" in sources:
+            curated_notes = [n for n in notes if not any(m in n for m in ("识别为", "统一为", "检测到异写"))]
+            if curated_notes:
+                definition = curated_notes[0]
+                definition_source = "config_terminology_standard"
+                source_refs = ["config_terminology_standard"]
+
+        # 3) 结构化知识库 (TCMRelationshipDefinitions)
+        if not definition and category:
+            structured = _build_tcm_structured_definition(canonical, category, label)
+            if structured.get("definition"):
+                definition = str(structured["definition"])
+                definition_source = "structured_tcm_knowledge"
+                source_refs = list(structured.get("source_refs") or [])
+
+        # 4) 附注推导
+        if not definition and notes:
+            curated_notes = [n for n in notes if not any(m in n for m in ("识别为", "统一为", "检测到异写"))]
+            if curated_notes:
+                definition = curated_notes[0]
+                definition_source = "terminology_note"
+                source_refs = [*sources[:1], "terminology_note"]
+
+        # 5) 机器归并兜底
+        if not definition:
+            observed_forms = row.get("observed_forms") or []
+            if observed_forms:
+                definition = f"{canonical} 暂据术语标准表归并自 {observed_forms[0]}"
+            else:
+                definition = f"{canonical} 暂据术语标准表归入 {label or '术语'}"
+            definition_source = "canonical_fallback"
+
+        row[FIELD_DEFINITION] = definition
+        row[FIELD_DEFINITION_SOURCE] = definition_source
+        row[FIELD_SEMANTIC_SCOPE] = label or CATEGORY_TO_LABEL.get(category, "术语")
+        row[FIELD_DYNASTY_USAGE] = []
+        row[FIELD_DISAMBIGUATION_BASIS] = [
+            b for b in [*source_refs, *sources[:1], *(row.get("observed_forms") or [])[:1]] if b
+        ]
+        row["exegesis_notes"] = build_exegesis_note(
+            canonical, definition_source, category, row[FIELD_DISAMBIGUATION_BASIS],
+        )
 
     def _build_version_collation(
         self,

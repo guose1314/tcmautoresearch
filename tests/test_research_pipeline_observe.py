@@ -1201,5 +1201,218 @@ class TestWorkbenchReviewWriteback(unittest.TestCase):
         self.assertEqual(len(result["terminology_standard_table"]), 1)
 
 
+class TestPhilologyServiceExegesisEnrichment(unittest.TestCase):
+    """Verify PhilologyService populates exegesis fields on terminology rows."""
+
+    def _build_service(self, **kwargs):
+        from src.analysis.philology_service import PhilologyService
+
+        config = {
+            "enable_version_collation": False,
+            "enable_fragment_reconstruction": False,
+            "terminology_standards": [
+                {
+                    "canonical": "黄芪",
+                    "category": "herb",
+                    "label": "本草药名",
+                    "variants": ["黃芪", "黄耆"],
+                    "note": "补气固表",
+                    "source": "config_terminology_standard",
+                },
+            ],
+            **kwargs,
+        }
+        svc = PhilologyService(config)
+        svc.initialize()
+        return svc
+
+    def _get_terminology_rows(self, result):
+        return result.get("philology", {}).get("term_standardization", {}).get("terminology_standard_table", [])
+
+    def test_terminology_row_has_exegesis_fields(self):
+        svc = self._build_service()
+        result = svc.execute({"raw_text": "黄芪具有补气之功"})
+        rows = self._get_terminology_rows(result)
+        huang_qi_rows = [r for r in rows if r["canonical"] == "黄芪"]
+        self.assertTrue(len(huang_qi_rows) >= 1)
+        row = huang_qi_rows[0]
+        self.assertIn("definition", row)
+        self.assertIn("definition_source", row)
+        self.assertIn("semantic_scope", row)
+        self.assertIn("dynasty_usage", row)
+        self.assertIn("disambiguation_basis", row)
+        self.assertIn("exegesis_notes", row)
+        self.assertTrue(row["definition"])
+        self.assertTrue(row["definition_source"])
+
+    def test_herb_gets_structured_definition_when_no_config(self):
+        from src.analysis.philology_service import PhilologyService
+
+        svc = PhilologyService({
+            "enable_version_collation": False,
+            "enable_fragment_reconstruction": False,
+        })
+        svc.initialize()
+        result = svc.execute({"raw_text": "黄芪能补气固表"})
+        rows = self._get_terminology_rows(result)
+        huang_qi_rows = [r for r in rows if r["canonical"] == "黄芪"]
+        if huang_qi_rows:
+            row = huang_qi_rows[0]
+            self.assertIn("definition", row)
+            if row.get("definition_source") == "structured_tcm_knowledge":
+                self.assertIn("补气", row["definition"])
+
+    def test_config_standard_definition_preferred_over_structured(self):
+        svc = self._build_service()
+        result = svc.execute({"raw_text": "黄芪固表止汗"})
+        rows = self._get_terminology_rows(result)
+        huang_qi_rows = [r for r in rows if r["canonical"] == "黄芪"]
+        if huang_qi_rows:
+            row = huang_qi_rows[0]
+            self.assertEqual(row["definition_source"], "config_terminology_standard")
+
+    def test_injectable_dictionary_overrides_structured(self):
+        class TestDict:
+            def lookup(self, canonical, *, category=""):
+                if canonical == "黄芪":
+                    return {"definition": "外部字典释义", "definition_source": "external_dictionary"}
+                return {}
+
+        svc = self._build_service(
+            exegesis_dictionaries=[TestDict()],
+            terminology_standards=[],
+        )
+        result = svc.execute({"raw_text": "黄芪之效"})
+        rows = self._get_terminology_rows(result)
+        huang_qi_rows = [r for r in rows if r["canonical"] == "黄芪"]
+        if huang_qi_rows:
+            self.assertEqual(huang_qi_rows[0]["definition"], "外部字典释义")
+
+    def test_fallback_definition_for_unknown_term(self):
+        svc = self._build_service(terminology_standards=[])
+        result = svc.execute({"raw_text": "此方用茯苓"})
+        rows = self._get_terminology_rows(result)
+        fu_ling_rows = [r for r in rows if r["canonical"] == "茯苓"]
+        if fu_ling_rows:
+            row = fu_ling_rows[0]
+            self.assertIn("definition", row)
+            self.assertTrue(row["definition"])
+
+    def test_exegesis_notes_generated(self):
+        svc = self._build_service()
+        result = svc.execute({"raw_text": "黄芪补气"})
+        rows = self._get_terminology_rows(result)
+        huang_qi_rows = [r for r in rows if r["canonical"] == "黄芪"]
+        if huang_qi_rows:
+            self.assertIn("exegesis_notes", huang_qi_rows[0])
+            self.assertTrue(huang_qi_rows[0]["exegesis_notes"])
+
+
+class TestObserveExegesisNotesIntegration(unittest.TestCase):
+    """Verify exegesis_notes flows through observe_philology normalization."""
+
+    def test_exegesis_entry_carries_exegesis_notes(self):
+        from src.research.observe_philology import _build_exegesis_entry_from_row
+
+        row = {
+            "canonical": "黄芪",
+            "label": "本草药名",
+            "category": "herb",
+            "sources": ["config_terminology_standard"],
+            "notes": ["补气固表要药"],
+            "observed_forms": ["黃芪"],
+            "configured_variants": [],
+            "status": "standardized",
+        }
+        entry = _build_exegesis_entry_from_row(row, dynasty="明")
+        self.assertIn("exegesis_notes", entry)
+        self.assertTrue(entry["exegesis_notes"])
+
+    def test_normalize_exegesis_entries_preserves_exegesis_notes(self):
+        from src.research.observe_philology import _normalize_exegesis_entries
+
+        entries = _normalize_exegesis_entries([
+            {
+                "canonical": "黄芪",
+                "label": "本草药名",
+                "definition": "补气固表",
+                "definition_source": "structured_tcm_knowledge",
+                "semantic_scope": "本草药名",
+                "exegesis_notes": "「黄芪」释义来源：结构化知识库",
+            },
+        ])
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["exegesis_notes"], "「黄芪」释义来源：结构化知识库")
+
+    def test_terminology_columns_include_exegesis_fields(self):
+        from src.research.observe_philology import _TERMINOLOGY_COLUMNS
+
+        self.assertIn("definition", _TERMINOLOGY_COLUMNS)
+        self.assertIn("definition_source", _TERMINOLOGY_COLUMNS)
+        self.assertIn("semantic_scope", _TERMINOLOGY_COLUMNS)
+        self.assertIn("dynasty_usage", _TERMINOLOGY_COLUMNS)
+        self.assertIn("disambiguation_basis", _TERMINOLOGY_COLUMNS)
+        self.assertIn("exegesis_notes", _TERMINOLOGY_COLUMNS)
+
+    def test_exegesis_entry_prefers_row_definition_when_higher_rank(self):
+        from src.research.observe_philology import _build_exegesis_entry_from_row
+
+        row = {
+            "canonical": "黄芪",
+            "label": "本草药名",
+            "category": "herb",
+            "definition": "配置标准释义",
+            "definition_source": "config_terminology_standard",
+            "sources": ["config_terminology_standard"],
+            "notes": [],
+            "observed_forms": [],
+            "configured_variants": [],
+            "status": "standardized",
+            "disambiguation_basis": ["config_terminology_standard"],
+        }
+        entry = _build_exegesis_entry_from_row(row)
+        self.assertEqual(entry["definition"], "配置标准释义")
+        self.assertEqual(entry["definition_source"], "config_terminology_standard")
+
+
+class TestExegesisSummaryInCatalogMetrics(unittest.TestCase):
+    """Verify exegesis summary metrics appear in catalog summary."""
+
+    def test_build_catalog_summary_includes_exegesis_metrics(self):
+        from src.research.observe_philology import _build_catalog_summary_metrics
+
+        documents = [
+            {
+                "work_title": "本草纲目",
+                "fragment_title": "卷一",
+                "catalog_id": "001",
+                "version_lineage_key": "vl1",
+                "witness_key": "w1",
+                "source_type": "local",
+                "dynasty": "明",
+                "exegesis_entries": [
+                    {
+                        "canonical": "黄芪",
+                        "semantic_scope": "本草药名",
+                        "definition": "补气固表",
+                        "definition_source": "structured_tcm_knowledge",
+                        "category": "herb",
+                        "disambiguation_basis": ["src1"],
+                    },
+                ],
+            },
+        ]
+        summary = _build_catalog_summary_metrics(documents, [])
+        self.assertIn("exegesis_definition_coverage", summary)
+        self.assertIn("exegesis_source_distribution", summary)
+        self.assertIn("exegesis_category_distribution", summary)
+
+    def test_empty_documents_no_exegesis_metrics(self):
+        from src.research.observe_philology import _build_catalog_summary_metrics
+
+        summary = _build_catalog_summary_metrics([], [])
+        self.assertNotIn("exegesis_definition_coverage", summary)
+
+
 if __name__ == "__main__":
     unittest.main()

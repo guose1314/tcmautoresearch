@@ -568,6 +568,80 @@ def _render_catalog_filter_chips(
     """
 
 
+def _render_exegesis_summary_card(catalog_metrics: Dict[str, Any]) -> str:
+    """训诂摘要卡片 — 展示释义覆盖度、来源分布、义项判别情况。"""
+    entry_count = int(catalog_metrics.get("exegesis_entry_count") or 0)
+    if entry_count == 0:
+        return ""
+    coverage = catalog_metrics.get("exegesis_definition_coverage")
+    coverage_text = f"{coverage:.0%}" if coverage is not None else "—"
+    source_dist = catalog_metrics.get("exegesis_source_distribution") or {}
+    category_dist = catalog_metrics.get("exegesis_category_distribution") or {}
+    disambiguation_count = int(catalog_metrics.get("exegesis_disambiguation_count") or 0)
+    needs_disambiguation = int(catalog_metrics.get("exegesis_needs_disambiguation") or 0)
+    dynasty_counts = catalog_metrics.get("exegesis_dynasty_term_counts") or {}
+
+    source_labels = {
+        "config_terminology_standard": "配置标准",
+        "structured_tcm_knowledge": "结构化知识",
+        "terminology_note": "附注推导",
+        "canonical_fallback": "机器归并",
+    }
+    source_badges = "".join(
+        f'<span class="inline-flex items-center px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs">'
+        f'{_safe_html(source_labels.get(src, src))} {count}</span>'
+        for src, count in sorted(source_dist.items())
+    ) or '<span class="text-xs text-gray-400">暂无来源分布</span>'
+
+    category_labels = {
+        "herb": "药名", "formula": "方剂", "syndrome": "证候",
+        "theory": "理论", "efficacy": "功效", "common": "通用",
+    }
+    category_badges = "".join(
+        f'<span class="inline-flex items-center px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs">'
+        f'{_safe_html(category_labels.get(cat, cat))} {count}</span>'
+        for cat, count in sorted(category_dist.items())
+    ) or '<span class="text-xs text-gray-400">暂无类别分布</span>'
+
+    dynasty_badges = "".join(
+        f'<span class="inline-flex items-center px-2 py-1 rounded-full bg-amber-50 text-amber-700 text-xs">'
+        f'{_safe_html(d)} {count}</span>'
+        for d, count in sorted(dynasty_counts.items())
+    )
+
+    return f"""
+    <div class="rounded-2xl border border-indigo-100 bg-indigo-50/30 p-4 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <h4 class="text-sm font-semibold text-gray-800">训诂摘要</h4>
+            <span class="text-xs text-indigo-600">释义覆盖 {_safe_html(coverage_text)}</span>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+            <div class="rounded-xl bg-white border border-slate-100 p-3">
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">义项总数</p>
+                <p class="text-lg font-semibold text-gray-800 mt-1">{entry_count}</p>
+            </div>
+            <div class="rounded-xl bg-white border border-slate-100 p-3">
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">已判别</p>
+                <p class="text-lg font-semibold text-gray-800 mt-1">{disambiguation_count}</p>
+            </div>
+            <div class="rounded-xl bg-white border border-slate-100 p-3">
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">待判别</p>
+                <p class="text-lg font-semibold text-gray-800 mt-1">{needs_disambiguation}</p>
+            </div>
+        </div>
+        <div class="space-y-1">
+            <p class="text-[11px] uppercase tracking-wide text-gray-400">释义来源</p>
+            <div class="flex flex-wrap gap-2">{source_badges}</div>
+        </div>
+        <div class="space-y-1">
+            <p class="text-[11px] uppercase tracking-wide text-gray-400">义项类别</p>
+            <div class="flex flex-wrap gap-2">{category_badges}</div>
+        </div>
+        {'<div class="space-y-1"><p class="text-[11px] uppercase tracking-wide text-gray-400">时代表达</p><div class="flex flex-wrap gap-2">' + dynasty_badges + '</div></div>' if dynasty_badges else ''}
+    </div>
+    """
+
+
 def _build_session_dashboard_snapshot(session: Dict[str, Any]) -> Dict[str, Any]:
     phase_executions = session.get("phase_executions") if isinstance(session.get("phase_executions"), dict) else {}
     phase_items: List[Dict[str, Any]] = []
@@ -1294,6 +1368,7 @@ def _render_session_detail_panel(
             </div>
             <div class="flex flex-wrap gap-2">{catalog_source_badges_html}</div>
             <div class="flex flex-wrap gap-2">{catalog_semantic_badges_html}{catalog_review_badges_html}</div>
+            {_render_exegesis_summary_card(catalog_metrics)}
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">{catalog_lineage_cards_html}</div>
         </section>
         """
