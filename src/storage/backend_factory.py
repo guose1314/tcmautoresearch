@@ -248,6 +248,32 @@ class StorageBackendFactory:
 
         return result
 
+    def _detect_schema_drift(self) -> bool:
+        """返回当前后端是否检测到 schema drift。"""
+        if not self._initialized or self._db_type != "postgresql" or self._db_manager is None:
+            return False
+
+        inspect_schema_drift = getattr(self._db_manager, "inspect_schema_drift", None)
+        if not callable(inspect_schema_drift):
+            return False
+
+        try:
+            report = inspect_schema_drift() or {}
+        except Exception as exc:
+            logger.debug("schema drift 检测失败，consistency_state 按未检测处理: %s", exc)
+            return False
+
+        status = str(report.get("status") or "").strip().lower()
+        legacy_enum_count = int(report.get("legacy_enum_count", 0) or 0)
+        incompatible_drift_count = int(report.get("incompatible_drift_count", 0) or 0)
+        compatibility_variant_count = int(report.get("compatibility_variant_count", 0) or 0)
+        return bool(
+            legacy_enum_count
+            or incompatible_drift_count
+            or compatibility_variant_count
+            or status in {"degraded", "error"}
+        )
+
     def get_consistency_state(self) -> "StorageConsistencyState":
         """返回当前存储一致性状态合同。
 
@@ -287,6 +313,7 @@ class StorageBackendFactory:
             neo4j_enabled=self.neo4j_enabled,
             neo4j_status=neo4j_status,
             neo4j_driver_connected=neo4j_driver_connected,
+            schema_drift_detected=self._detect_schema_drift(),
         )
 
     def get_storage_statistics(self) -> Dict[str, Any]:

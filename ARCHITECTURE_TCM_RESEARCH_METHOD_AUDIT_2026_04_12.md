@@ -328,9 +328,11 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 
 最后验什么：
 
-- 验证 PostgreSQL + Neo4j 正常可用时，session、phase execution、artifact、observe version witness / lineage 与图投影在同一轮 structured persist 后即可一致读取。
-- 验证 Neo4j 未启用、初始化失败或连接异常时，系统会明确暴露为 `neo4j_status != active` 或“仅 PG 模式”，而不会被 UI / 运维误判成完整双写成功。
-- 验证补偿失败、graph backfill 待执行、schema drift 存在等异常态，在 runtime metadata、monitoring summary 与 backfill 报告里使用一致口径，而不是分散在日志里由人工拼接事实。
+> **状态更新（2026-04-17）：** 以下三项最终验证已全部以自动化测试落地：
+
+- ~~验证 PostgreSQL + Neo4j 正常可用时，session、phase execution、artifact、observe version witness / lineage 与图投影在同一轮 structured persist 后即可一致读取。~~ ✅ `tests/unit/test_storage_consistency_verification.py` 使用真实 `ResearchSessionRepository` + fake `StorageBackendFactory` / `TransactionCoordinator` 验证 `_persist_result_structured()` 后同一轮即可读到 session、phase execution、artifact、observe document、version lineage，且 Neo4j 实时投影已包含 `ResearchSession` / `ResearchPhaseExecution` / `ResearchArtifact` / `VersionWitness` / `VersionLineage` 查询；`eventual_consistency.graph_backfill_pending == False`。
+- ~~验证 Neo4j 未启用、初始化失败或连接异常时，系统会明确暴露为 `neo4j_status != active` 或“仅 PG 模式”，而不会被 UI / 运维误判成完整双写成功。~~ ✅ 新增验证覆盖三种降级面：Neo4j disabled、init failure、driver not connected；断言 `StorageBackendFactory.get_consistency_state()` 与 monitoring `structured_storage.consistency_state` 统一暴露 `mode == pg_only` 且 `neo4j_status != active`。
+- ~~验证补偿失败、graph backfill 待执行、schema drift 存在等异常态，在 runtime metadata、monitoring summary 与 backfill 报告里使用一致口径，而不是分散在日志里由人工拼接事实。~~ ✅ `TransactionResult` 补偿失败路径验证 `needs_backfill` / `compensation_details` 结构化暴露；`StorageBackendFactory.get_consistency_state()` 现传播 `schema_drift_detected`；backfill 工具 `storage.consistency_state` 与 monitoring / runtime 共享同一 `StorageConsistencyState` 字段口径；回归 2425 passed（排除预存 Selenium 失败）。
 
 ### 6.3 P2 级
 

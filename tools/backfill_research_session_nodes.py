@@ -49,6 +49,44 @@ def _annotate_writeback(summary, *, fields_written):
     return result
 
 
+def _build_backfill_report(
+    *,
+    settings,
+    init_report,
+    consistency_state,
+    writeback_summary,
+    philology_artifact_writeback_summary,
+    graph_summary,
+):
+    """构建统一的 backfill 报告载荷。"""
+    return {
+        "environment": settings.environment,
+        "loaded_files": list(settings.loaded_files),
+        "loaded_secret_files": list(settings.loaded_secret_files),
+        "storage": {
+            **dict(init_report),
+            "consistency_state": dict(consistency_state),
+        },
+        "observe_version_metadata_writeback": _annotate_writeback(
+            writeback_summary,
+            fields_written=["version_metadata", "witness_key", "version_lineage_key"],
+        ),
+        "observe_philology_artifact_writeback": _annotate_writeback(
+            philology_artifact_writeback_summary,
+            fields_written=["observe_philology_artifacts"],
+        ),
+        "backfill": _annotate_writeback(
+            graph_summary,
+            fields_written=[
+                "VersionLineage_nodes", "VersionWitness_nodes",
+                "OBSERVED_WITNESS_edges", "BELONGS_TO_LINEAGE_edges",
+                "ResearchSession_nodes", "ResearchPhaseExecution_nodes",
+                "ResearchArtifact_nodes", "Entity_nodes",
+            ],
+        ),
+    }
+
+
 def main() -> int:
     args = parse_args()
     settings = load_settings(
@@ -61,6 +99,7 @@ def main() -> int:
     factory = StorageBackendFactory(runtime_config)
     try:
         init_report = factory.initialize()
+        consistency_state = factory.get_consistency_state().to_dict()
         if factory.db_manager is None:
             raise RuntimeError("PostgreSQL backend is not initialized")
         if factory.neo4j_driver is None:
@@ -83,29 +122,14 @@ def main() -> int:
         )
         print(
             json.dumps(
-                {
-                    "environment": settings.environment,
-                    "loaded_files": list(settings.loaded_files),
-                    "loaded_secret_files": list(settings.loaded_secret_files),
-                    "storage": init_report,
-                    "observe_version_metadata_writeback": _annotate_writeback(
-                        writeback_summary,
-                        fields_written=["version_metadata", "witness_key", "version_lineage_key"],
-                    ),
-                    "observe_philology_artifact_writeback": _annotate_writeback(
-                        philology_artifact_writeback_summary,
-                        fields_written=["observe_philology_artifacts"],
-                    ),
-                    "backfill": _annotate_writeback(
-                        summary,
-                        fields_written=[
-                            "VersionLineage_nodes", "VersionWitness_nodes",
-                            "OBSERVED_WITNESS_edges", "BELONGS_TO_LINEAGE_edges",
-                            "ResearchSession_nodes", "ResearchPhaseExecution_nodes",
-                            "ResearchArtifact_nodes", "Entity_nodes",
-                        ],
-                    ),
-                },
+                _build_backfill_report(
+                    settings=settings,
+                    init_report=init_report,
+                    consistency_state=consistency_state,
+                    writeback_summary=writeback_summary,
+                    philology_artifact_writeback_summary=philology_artifact_writeback_summary,
+                    graph_summary=summary,
+                ),
                 ensure_ascii=False,
                 indent=2,
             )
