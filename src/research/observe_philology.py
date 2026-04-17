@@ -2086,6 +2086,115 @@ def _unique_document_identifiers(*groups: Sequence[Mapping[str, Any]]) -> List[s
     return identifiers
 
 
+def _build_workbench_asset_key(asset_type: str, *parts: tuple[str, Any]) -> str:
+    normalized_parts = [
+        f"{name}={_as_text(value)}"
+        for name, value in parts
+        if _as_text(value)
+    ]
+    return f"{asset_type}::{'|'.join(normalized_parts) if normalized_parts else 'unkeyed'}"
+
+
+_WORKBENCH_REVIEW_MERGE_FIELDS = (
+    "review_status",
+    "needs_manual_review",
+    "review_reasons",
+    "review_source",
+    "reviewer",
+    "reviewed_at",
+    "decision_basis",
+)
+
+
+def _apply_workbench_review_to_item(
+    item: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> Dict[str, Any]:
+    updated = dict(item)
+    status = _as_text(decision.get("review_status"))
+    if status:
+        updated["review_status"] = status
+    needs = decision.get("needs_manual_review")
+    if needs is not None:
+        updated["needs_manual_review"] = bool(needs)
+    reasons = decision.get("review_reasons")
+    if isinstance(reasons, list) and reasons:
+        updated["review_reasons"] = reasons
+    for field_name in ("review_source", "reviewer", "reviewed_at", "decision_basis"):
+        value = _as_text(decision.get(field_name))
+        if value:
+            updated[field_name] = value
+    return updated
+
+
+def _apply_workbench_review_decisions(
+    terminology_rows: List[Dict[str, Any]],
+    collation_entries: List[Dict[str, Any]],
+    fragment_candidate_payloads: Dict[str, List[Dict[str, Any]]],
+    review_workbench_decisions: List[Dict[str, Any]],
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]:
+    if not review_workbench_decisions:
+        return terminology_rows, collation_entries, fragment_candidate_payloads
+
+    lookup: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for decision in review_workbench_decisions:
+        asset_type = _as_text(decision.get("asset_type")).lower()
+        asset_key = _as_text(decision.get("asset_key"))
+        if asset_type and asset_key:
+            lookup[(asset_type, asset_key)] = decision
+
+    if not lookup:
+        return terminology_rows, collation_entries, fragment_candidate_payloads
+
+    updated_rows: List[Dict[str, Any]] = []
+    for row in terminology_rows:
+        key = _build_workbench_asset_key(
+            "terminology_row",
+            ("document_urn", row.get("document_urn")),
+            ("document_title", row.get("document_title")),
+            ("version_lineage_key", row.get("version_lineage_key")),
+            ("witness_key", row.get("witness_key")),
+            ("canonical", row.get("canonical")),
+            ("label", row.get("label")),
+        )
+        decision = lookup.get(("terminology_row", key))
+        updated_rows.append(_apply_workbench_review_to_item(row, decision) if decision else row)
+
+    updated_collation: List[Dict[str, Any]] = []
+    for entry in collation_entries:
+        key = _build_workbench_asset_key(
+            "collation_entry",
+            ("document_urn", entry.get("document_urn")),
+            ("witness_urn", entry.get("witness_urn")),
+            ("version_lineage_key", entry.get("version_lineage_key")),
+            ("witness_key", entry.get("witness_key")),
+            ("difference_type", entry.get("difference_type")),
+            ("base_text", entry.get("base_text")),
+            ("witness_text", entry.get("witness_text")),
+        )
+        decision = lookup.get(("collation_entry", key))
+        updated_collation.append(_apply_workbench_review_to_item(entry, decision) if decision else entry)
+
+    updated_fragments: Dict[str, List[Dict[str, Any]]] = {}
+    for field_name, items in fragment_candidate_payloads.items():
+        updated_items: List[Dict[str, Any]] = []
+        for entry in items:
+            key = _build_workbench_asset_key(
+                "fragment_candidate",
+                ("candidate_kind", field_name),
+                ("fragment_candidate_id", entry.get("fragment_candidate_id") or entry.get("candidate_id") or entry.get("id")),
+                ("document_urn", entry.get("document_urn")),
+                ("version_lineage_key", entry.get("version_lineage_key")),
+                ("witness_key", entry.get("witness_key")),
+                ("fragment_title", entry.get("fragment_title") or entry.get("title")),
+            )
+            decision = lookup.get(("fragment_candidate", key))
+            updated_items.append(_apply_workbench_review_to_item(entry, decision) if decision else entry)
+        updated_fragments[field_name] = updated_items
+
+    return updated_rows, updated_collation, updated_fragments
+
+
 def normalize_observe_philology_assets(raw_assets: Any) -> Dict[str, Any]:
     assets = _as_dict(raw_assets)
     source = _as_text(assets.get("source"))
@@ -2113,6 +2222,9 @@ def normalize_observe_philology_assets(raw_assets: Any) -> Dict[str, Any]:
     document_reports = _enrich_document_reports_with_catalog_metadata(document_reports, catalog_documents)
     catalog_summary = _enrich_catalog_summary(catalog_summary, terminology_rows, collation_entries)
     catalog_summary = _apply_catalog_review_decisions(catalog_summary, catalog_review_decisions)
+    terminology_rows, collation_entries, fragment_candidate_payloads = _apply_workbench_review_decisions(
+        terminology_rows, collation_entries, fragment_candidate_payloads, review_workbench_decisions,
+    )
     catalog_metrics = _as_dict(catalog_summary.get("summary"))
 
     document_identifiers = _unique_document_identifiers(terminology_rows, collation_entries, document_reports)

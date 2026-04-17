@@ -5,7 +5,7 @@ TCM 语义关系定义模块 - 君臣佐使及其他中医关系类型
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
 
 class RelationshipType(Enum):

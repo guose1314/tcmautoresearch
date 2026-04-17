@@ -868,7 +868,9 @@ class TestReviewAuditTrail(unittest.TestCase):
     """Verify decision_history is preserved when a review decision is overwritten."""
 
     def test_catalog_review_upsert_preserves_previous_decision_in_history(self):
-        from src.research.observe_philology import upsert_observe_catalog_review_artifact_content
+        from src.research.observe_philology import (
+            upsert_observe_catalog_review_artifact_content,
+        )
 
         first = upsert_observe_catalog_review_artifact_content({}, {
             "scope": "version_lineage",
@@ -900,7 +902,9 @@ class TestReviewAuditTrail(unittest.TestCase):
         self.assertEqual(decision_v2["decision_history"][0]["review_status"], "pending")
 
     def test_workbench_review_upsert_preserves_audit_trail_across_three_revisions(self):
-        from src.research.review_workbench import upsert_observe_review_workbench_artifact_content
+        from src.research.review_workbench import (
+            upsert_observe_review_workbench_artifact_content,
+        )
 
         v1 = upsert_observe_review_workbench_artifact_content({}, {
             "asset_type": "terminology_row",
@@ -966,7 +970,9 @@ class TestReviewAuditTrail(unittest.TestCase):
         self.assertNotIn("decision_history", k2)
 
     def test_workbench_batch_upsert_applies_multiple_decisions(self):
-        from src.research.review_workbench import upsert_observe_review_workbench_artifact_content_batch
+        from src.research.review_workbench import (
+            upsert_observe_review_workbench_artifact_content_batch,
+        )
 
         result = upsert_observe_review_workbench_artifact_content_batch({}, [
             {
@@ -991,7 +997,9 @@ class TestExpandedExegesisAuthoritySources(unittest.TestCase):
     """Verify the new syndrome and theory exegesis sources are integrated."""
 
     def test_syndrome_category_produces_structured_knowledge_definition(self):
-        from src.research.observe_philology import _build_structured_knowledge_exegesis_definition
+        from src.research.observe_philology import (
+            _build_structured_knowledge_exegesis_definition,
+        )
 
         result = _build_structured_knowledge_exegesis_definition(
             "气虚证", category="syndrome", label="证候术语",
@@ -1002,7 +1010,9 @@ class TestExpandedExegesisAuthoritySources(unittest.TestCase):
         self.assertIn("SYNDROME_DEFINITIONS", result["source_refs"][0])
 
     def test_theory_category_produces_structured_knowledge_definition(self):
-        from src.research.observe_philology import _build_structured_knowledge_exegesis_definition
+        from src.research.observe_philology import (
+            _build_structured_knowledge_exegesis_definition,
+        )
 
         result = _build_structured_knowledge_exegesis_definition(
             "君臣佐使", category="theory", label="理论术语",
@@ -1012,7 +1022,9 @@ class TestExpandedExegesisAuthoritySources(unittest.TestCase):
         self.assertIn("THEORY_TERM_DEFINITIONS", result["source_refs"][0])
 
     def test_unknown_syndrome_returns_empty(self):
-        from src.research.observe_philology import _build_structured_knowledge_exegesis_definition
+        from src.research.observe_philology import (
+            _build_structured_knowledge_exegesis_definition,
+        )
 
         result = _build_structured_knowledge_exegesis_definition(
             "不存在证", category="syndrome", label="证候术语",
@@ -1020,7 +1032,9 @@ class TestExpandedExegesisAuthoritySources(unittest.TestCase):
         self.assertEqual(result, {})
 
     def test_unknown_theory_returns_empty(self):
-        from src.research.observe_philology import _build_structured_knowledge_exegesis_definition
+        from src.research.observe_philology import (
+            _build_structured_knowledge_exegesis_definition,
+        )
 
         result = _build_structured_knowledge_exegesis_definition(
             "不存在术语", category="theory", label="理论术语",
@@ -1049,7 +1063,9 @@ class TestExpandedExegesisAuthoritySources(unittest.TestCase):
         self.assertEqual(_exegesis_definition_source_rank(""), 0)
 
     def test_herb_exegesis_still_works_after_changes(self):
-        from src.research.observe_philology import _build_structured_knowledge_exegesis_definition
+        from src.research.observe_philology import (
+            _build_structured_knowledge_exegesis_definition,
+        )
 
         result = _build_structured_knowledge_exegesis_definition(
             "黄芪", category="herb", label="本草药名",
@@ -1058,13 +1074,131 @@ class TestExpandedExegesisAuthoritySources(unittest.TestCase):
         self.assertIn("补气", result["definition"])
 
     def test_formula_exegesis_still_works_after_changes(self):
-        from src.research.observe_philology import _build_structured_knowledge_exegesis_definition
+        from src.research.observe_philology import (
+            _build_structured_knowledge_exegesis_definition,
+        )
 
         result = _build_structured_knowledge_exegesis_definition(
             "四君子汤", category="formula", label="方剂名",
         )
         self.assertEqual(result["definition_source"], "structured_tcm_knowledge")
         self.assertIn("君药", result["definition"])
+
+
+class TestWorkbenchReviewWriteback(unittest.TestCase):
+    """Verify workbench review decisions are merged into snapshot items."""
+
+    def test_terminology_row_gets_review_status_from_workbench_decision(self):
+        from src.research.observe_philology import normalize_observe_philology_assets
+
+        raw = {
+            "terminology_standard_table": [
+                {"document_urn": "urn:doc:001", "document_title": "本草纲目", "canonical": "黄芪", "label": "本草术语"},
+            ],
+            "review_workbench_decisions": [
+                {
+                    "asset_type": "terminology_row",
+                    "asset_key": "terminology_row::document_urn=urn:doc:001|document_title=本草纲目|canonical=黄芪|label=本草术语",
+                    "review_status": "accepted",
+                    "reviewer": "审核员A",
+                    "reviewed_at": "2026-04-15T10:00:00",
+                    "decision_basis": "权威训诂确认",
+                },
+            ],
+        }
+        result = normalize_observe_philology_assets(raw)
+        rows = result["terminology_standard_table"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["review_status"], "accepted")
+        self.assertEqual(rows[0]["reviewer"], "审核员A")
+        self.assertEqual(rows[0]["decision_basis"], "权威训诂确认")
+
+    def test_collation_entry_gets_review_status_from_workbench_decision(self):
+        from src.research.observe_philology import normalize_observe_philology_assets
+
+        raw = {
+            "collation_entries": [
+                {
+                    "document_urn": "urn:doc:002",
+                    "witness_urn": "urn:w:002",
+                    "difference_type": "variant",
+                    "base_text": "甘",
+                    "witness_text": "苦",
+                },
+            ],
+            "review_workbench_decisions": [
+                {
+                    "asset_type": "collation_entry",
+                    "asset_key": "collation_entry::document_urn=urn:doc:002|witness_urn=urn:w:002|difference_type=variant|base_text=甘|witness_text=苦",
+                    "review_status": "rejected",
+                    "reviewer": "校勘师B",
+                    "decision_basis": "底本讹误",
+                },
+            ],
+        }
+        result = normalize_observe_philology_assets(raw)
+        entries = result["collation_entries"]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["review_status"], "rejected")
+        self.assertEqual(entries[0]["reviewer"], "校勘师B")
+
+    def test_fragment_candidate_gets_review_status_from_workbench_decision(self):
+        from src.research.observe_philology import normalize_observe_philology_assets
+
+        raw = {
+            "fragment_candidates": [
+                {
+                    "fragment_candidate_id": "fc-001",
+                    "document_urn": "urn:doc:003",
+                    "fragment_title": "佚文甲",
+                },
+            ],
+            "review_workbench_decisions": [
+                {
+                    "asset_type": "fragment_candidate",
+                    "asset_key": "fragment_candidate::candidate_kind=fragment_candidates|fragment_candidate_id=fc-001|document_urn=urn:doc:003|fragment_title=佚文甲",
+                    "review_status": "accepted",
+                    "reviewer": "辑佚师C",
+                },
+            ],
+        }
+        result = normalize_observe_philology_assets(raw)
+        candidates = result["fragment_candidates"]
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["review_status"], "accepted")
+        self.assertEqual(candidates[0]["reviewer"], "辑佚师C")
+
+    def test_unmatched_decision_leaves_item_unchanged(self):
+        from src.research.observe_philology import normalize_observe_philology_assets
+
+        raw = {
+            "terminology_standard_table": [
+                {"document_urn": "urn:doc:001", "canonical": "黄芪", "label": "本草术语"},
+            ],
+            "review_workbench_decisions": [
+                {
+                    "asset_type": "terminology_row",
+                    "asset_key": "terminology_row::document_urn=urn:doc:999|canonical=不存在|label=不存在",
+                    "review_status": "accepted",
+                },
+            ],
+        }
+        result = normalize_observe_philology_assets(raw)
+        rows = result["terminology_standard_table"]
+        self.assertEqual(len(rows), 1)
+        self.assertNotEqual(rows[0].get("review_status"), "accepted")
+
+    def test_empty_decisions_returns_items_unchanged(self):
+        from src.research.observe_philology import normalize_observe_philology_assets
+
+        raw = {
+            "terminology_standard_table": [
+                {"canonical": "黄芪", "label": "本草术语"},
+            ],
+            "review_workbench_decisions": [],
+        }
+        result = normalize_observe_philology_assets(raw)
+        self.assertEqual(len(result["terminology_standard_table"]), 1)
 
 
 if __name__ == "__main__":
