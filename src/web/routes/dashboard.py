@@ -642,6 +642,65 @@ def _render_exegesis_summary_card(catalog_metrics: Dict[str, Any]) -> str:
     """
 
 
+def _render_fragment_summary_card(catalog_metrics: Dict[str, Any]) -> str:
+    """辑佚摘要卡片 — 展示候选项分类计数、评分、复核状态。"""
+    total = int(catalog_metrics.get("fragment_total_count") or 0)
+    if total == 0:
+        return ""
+    fragment_count = int(catalog_metrics.get("fragment_candidate_count") or 0)
+    lost_text_count = int(catalog_metrics.get("lost_text_candidate_count") or 0)
+    citation_source_count = int(catalog_metrics.get("citation_source_candidate_count") or 0)
+    needs_review = int(catalog_metrics.get("fragment_needs_review_count") or 0)
+    high_confidence = int(catalog_metrics.get("fragment_high_confidence_count") or 0)
+    avg_score = catalog_metrics.get("fragment_avg_score")
+    avg_score_text = f"{avg_score:.2f}" if avg_score is not None else "—"
+    review_dist = catalog_metrics.get("fragment_review_status_distribution") or {}
+
+    review_labels = {"pending": "待复核", "accepted": "已采纳", "rejected": "已驳回"}
+    review_badges = "".join(
+        f'<span class="inline-flex items-center px-2 py-1 rounded-full bg-orange-50 text-orange-700 text-xs">'
+        f'{_safe_html(review_labels.get(status, status))} {count}</span>'
+        for status, count in sorted(review_dist.items())
+    ) or '<span class="text-xs text-gray-400">暂无复核记录</span>'
+
+    return f"""
+    <div class="rounded-2xl border border-amber-100 bg-amber-50/30 p-4 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <h4 class="text-sm font-semibold text-gray-800">辑佚摘要</h4>
+            <span class="text-xs text-amber-600">平均置信 {_safe_html(avg_score_text)}</span>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+            <div class="rounded-xl bg-white border border-slate-100 p-3">
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">疑似佚文</p>
+                <p class="text-lg font-semibold text-gray-800 mt-1">{fragment_count}</p>
+            </div>
+            <div class="rounded-xl bg-white border border-slate-100 p-3">
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">疑似佚失</p>
+                <p class="text-lg font-semibold text-gray-800 mt-1">{lost_text_count}</p>
+            </div>
+            <div class="rounded-xl bg-white border border-slate-100 p-3">
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">引文来源</p>
+                <p class="text-lg font-semibold text-gray-800 mt-1">{citation_source_count}</p>
+            </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+            <div class="rounded-xl bg-white border border-slate-100 p-3">
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">高置信</p>
+                <p class="text-lg font-semibold text-emerald-700 mt-1">{high_confidence}</p>
+            </div>
+            <div class="rounded-xl bg-white border border-slate-100 p-3">
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">待复核</p>
+                <p class="text-lg font-semibold text-amber-700 mt-1">{needs_review}</p>
+            </div>
+        </div>
+        <div class="space-y-1">
+            <p class="text-[11px] uppercase tracking-wide text-gray-400">复核状态</p>
+            <div class="flex flex-wrap gap-2">{review_badges}</div>
+        </div>
+    </div>
+    """
+
+
 def _build_session_dashboard_snapshot(session: Dict[str, Any]) -> Dict[str, Any]:
     phase_executions = session.get("phase_executions") if isinstance(session.get("phase_executions"), dict) else {}
     phase_items: List[Dict[str, Any]] = []
@@ -1369,6 +1428,7 @@ def _render_session_detail_panel(
             <div class="flex flex-wrap gap-2">{catalog_source_badges_html}</div>
             <div class="flex flex-wrap gap-2">{catalog_semantic_badges_html}{catalog_review_badges_html}</div>
             {_render_exegesis_summary_card(catalog_metrics)}
+            {_render_fragment_summary_card(catalog_metrics)}
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">{catalog_lineage_cards_html}</div>
         </section>
         """

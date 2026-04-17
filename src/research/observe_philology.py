@@ -20,6 +20,10 @@ from src.research.exegesis_contract import (
     build_exegesis_note,
     definition_source_rank,
 )
+from src.research.fragment_contract import (
+    CANDIDATE_KINDS,
+    build_fragment_summary,
+)
 from src.research.review_workbench import (
     OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT,
     REVIEW_WORKBENCH_ASSET_KIND,
@@ -32,6 +36,7 @@ OBSERVE_PHILOLOGY_COLLATION_ENTRIES_ARTIFACT = "observe_philology_collation_entr
 OBSERVE_PHILOLOGY_ANNOTATION_REPORT_ARTIFACT = "observe_philology_annotation_report"
 OBSERVE_PHILOLOGY_CATALOG_SUMMARY_ARTIFACT = "observe_philology_catalog_summary"
 OBSERVE_PHILOLOGY_CATALOG_REVIEW_ARTIFACT = "observe_philology_catalog_review"
+OBSERVE_PHILOLOGY_FRAGMENT_RECONSTRUCTION_ARTIFACT = "observe_philology_fragment_reconstruction"
 OBSERVE_PHILOLOGY_ARTIFACT_NAMES = frozenset(
     {
         OBSERVE_PHILOLOGY_TERMINOLOGY_TABLE_ARTIFACT,
@@ -39,6 +44,7 @@ OBSERVE_PHILOLOGY_ARTIFACT_NAMES = frozenset(
         OBSERVE_PHILOLOGY_ANNOTATION_REPORT_ARTIFACT,
         OBSERVE_PHILOLOGY_CATALOG_SUMMARY_ARTIFACT,
         OBSERVE_PHILOLOGY_CATALOG_REVIEW_ARTIFACT,
+        OBSERVE_PHILOLOGY_FRAGMENT_RECONSTRUCTION_ARTIFACT,
         OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT,
     }
 )
@@ -2322,6 +2328,31 @@ def normalize_observe_philology_assets(raw_assets: Any) -> Dict[str, Any]:
     normalized_assets["fragment_candidate_count"] = sum(len(items) for items in fragment_candidate_payloads.values())
     for field_name, items in fragment_candidate_payloads.items():
         normalized_assets[field_name] = items
+
+    # 辑佚摘要 — 注入到 catalog_summary.summary 供 dashboard 消费
+    all_fragment_items = [item for items in fragment_candidate_payloads.values() for item in items]
+    if all_fragment_items:
+        frag_summary = build_fragment_summary(
+            fragment_candidate_payloads.get("fragment_candidates", []),
+            fragment_candidate_payloads.get("lost_text_candidates", []),
+            fragment_candidate_payloads.get("citation_source_candidates", []),
+        )
+        catalog_metrics["fragment_candidate_count"] = frag_summary["fragment_candidate_count"]
+        catalog_metrics["lost_text_candidate_count"] = frag_summary["lost_text_candidate_count"]
+        catalog_metrics["citation_source_candidate_count"] = frag_summary["citation_source_candidate_count"]
+        catalog_metrics["fragment_total_count"] = frag_summary["total"]
+        catalog_metrics["fragment_needs_review_count"] = frag_summary["needs_review_count"]
+        catalog_metrics["fragment_high_confidence_count"] = frag_summary["high_confidence_count"]
+        catalog_metrics["fragment_avg_score"] = frag_summary["avg_score"]
+        catalog_metrics["fragment_kind_distribution"] = frag_summary["kind_distribution"]
+        catalog_metrics["fragment_review_status_distribution"] = frag_summary["review_status_distribution"]
+        # 确保 catalog_summary 包含更新后的 metrics
+        if not catalog_summary:
+            catalog_summary = {"summary": catalog_metrics, "documents": [], "version_lineages": []}
+            normalized_assets["catalog_summary"] = catalog_summary
+        elif "summary" not in catalog_summary:
+            catalog_summary["summary"] = catalog_metrics
+
     return normalized_assets
 
 
@@ -2412,6 +2443,39 @@ def build_observe_philology_artifact_payloads(
                 },
             }
         )
+
+    # 辑佚候选项报告
+    fragment_candidates = assets.get("fragment_candidates") or []
+    lost_text_candidates = assets.get("lost_text_candidates") or []
+    citation_source_candidates = assets.get("citation_source_candidates") or []
+    all_fragment_items = [*fragment_candidates, *lost_text_candidates, *citation_source_candidates]
+    if config.get("include_fragment_reconstruction", True) and all_fragment_items:
+        fragment_summary = build_fragment_summary(
+            fragment_candidates, lost_text_candidates, citation_source_candidates,
+        )
+        artifacts.append(
+            {
+                "name": OBSERVE_PHILOLOGY_FRAGMENT_RECONSTRUCTION_ARTIFACT,
+                "artifact_type": "analysis",
+                "mime_type": "application/json",
+                "description": "Observe 阶段辑佚候选项报告",
+                "content": {
+                    "asset_kind": "fragment_reconstruction",
+                    "summary": fragment_summary,
+                    "fragment_candidates": fragment_candidates,
+                    "lost_text_candidates": lost_text_candidates,
+                    "citation_source_candidates": citation_source_candidates,
+                },
+                "metadata": {
+                    "asset_kind": "fragment_reconstruction",
+                    "fragment_candidate_count": len(fragment_candidates),
+                    "lost_text_candidate_count": len(lost_text_candidates),
+                    "citation_source_candidate_count": len(citation_source_candidates),
+                    "phase": "observe",
+                },
+            }
+        )
+
     return artifacts
 
 
@@ -2433,6 +2497,8 @@ def _resolve_artifact_kind(artifact: Mapping[str, Any]) -> str:
         return "catalog_summary"
     if name == OBSERVE_PHILOLOGY_CATALOG_REVIEW_ARTIFACT:
         return _CATALOG_REVIEW_ASSET_KIND
+    if name == OBSERVE_PHILOLOGY_FRAGMENT_RECONSTRUCTION_ARTIFACT:
+        return "fragment_reconstruction"
     if name == OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT:
         return REVIEW_WORKBENCH_ASSET_KIND
     return ""
@@ -2459,6 +2525,11 @@ def extract_observe_philology_assets_from_artifacts(artifacts: Sequence[Mapping[
             collected["catalog_summary"] = content
         elif asset_kind == _CATALOG_REVIEW_ASSET_KIND and content:
             collected["catalog_review_decisions"] = content
+        elif asset_kind == "fragment_reconstruction" and content:
+            for fk in CANDIDATE_KINDS:
+                items = _as_dict_list(content.get(fk))
+                if items:
+                    collected[fk] = items
         elif asset_kind == REVIEW_WORKBENCH_ASSET_KIND and content:
             collected["review_workbench_decisions"] = content
     return normalize_observe_philology_assets(collected)
