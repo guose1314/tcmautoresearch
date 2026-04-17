@@ -1,7 +1,11 @@
 import unittest
 from importlib import import_module
 
-from src.orchestration.research_runtime_service import ResearchRuntimeService
+from src.orchestration.research_orchestrator import OrchestrationResult
+from src.orchestration.research_runtime_service import (
+    ResearchRuntimeResult,
+    ResearchRuntimeService,
+)
 
 
 class _FakeCycle:
@@ -33,13 +37,17 @@ class _FakePipeline:
         phase_context = dict(phase_context or {})
         result = {
             "phase": phase.value,
+            "status": "completed",
+            "results": {},
+            "artifacts": [],
             "metadata": {
                 "received_question": phase_context.get("question"),
                 "received_phase_context": phase_context,
             },
+            "error": None,
         }
         if phase.value == "observe":
-            result.update(
+            result["results"].update(
                 {
                     "observations": ["obs-1"],
                     "findings": ["finding-1"],
@@ -47,15 +55,17 @@ class _FakePipeline:
                 }
             )
         if phase.value == "publish":
-            result.update(
+            result["results"].update(
                 {
-                    "deliverables": [{"name": "markdown"}],
+                    "deliverables": ["Markdown 论文初稿"],
                     "abstract": "test abstract",
                     "analysis_results": {"statistical_analysis": {"p_value": 0.01}},
                     "research_artifact": {"evidence": [{"id": "ev-1"}]},
                     "output_files": {"markdown": "output/research.md"},
                 }
             )
+            result["artifacts"] = [{"name": "markdown", "path": "output/research.md", "type": "file"}]
+            result["metadata"].update({"report_count": 1, "report_error_count": 0})
         self.cycle.phase_executions[phase] = {"result": result}
         return result
 
@@ -207,7 +217,61 @@ class TestResearchRuntimeService(unittest.TestCase):
             result.orchestration_result.pipeline_metadata["cycle_name"],
         )
         self.assertEqual(session_result["report_outputs"]["markdown"], "output/research.md")
+        self.assertEqual(session_result["reports"]["output_files"]["markdown"], "output/research.md")
+        self.assertEqual(session_result["reports"]["report_count"], 1)
+        self.assertEqual(session_result["deliverables"], ["Markdown 论文初稿"])
+        self.assertIn("statistical_analysis", session_result["analysis_results"])
+        self.assertIn("evidence", session_result["research_artifact"])
         self.assertIn("observe", session_result["phase_results"])
+
+    def test_session_result_uses_cycle_snapshot_metadata_analysis_summary(self):
+        orchestration_result = OrchestrationResult(
+            topic="桂枝汤研究",
+            cycle_id="cycle-runtime-2",
+            status="completed",
+            started_at="2026-04-17T10:00:00",
+            completed_at="2026-04-17T10:05:00",
+            total_duration_sec=300.0,
+            phases=[],
+            pipeline_metadata={"cycle_name": "runtime-demo"},
+        )
+        runtime_result = ResearchRuntimeResult(
+            orchestration_result=orchestration_result,
+            phase_results={
+                "publish": {
+                    "phase": "publish",
+                    "status": "completed",
+                    "results": {
+                        "deliverables": ["Markdown IMRD 报告"],
+                        "analysis_results": {"statistical_analysis": {"p_value": 0.02}},
+                        "research_artifact": {"evidence": [{"id": "ev-2"}]},
+                        "output_files": {"imrd_markdown": "output/imrd.md"},
+                    },
+                    "artifacts": [{"name": "imrd_markdown", "path": "output/imrd.md", "type": "file"}],
+                    "metadata": {"report_count": 1, "report_error_count": 0},
+                    "error": None,
+                }
+            },
+            cycle_snapshot={
+                "cycle_id": "cycle-runtime-2",
+                "deliverables": ["Markdown IMRD 报告"],
+                "metadata": {
+                    "analysis_summary": {
+                        "status": "stable",
+                        "completed_phase_count": 2,
+                        "deliverable_count": 1,
+                    }
+                },
+            },
+        )
+
+        session_result = runtime_result.session_result
+
+        self.assertEqual(session_result["analysis_summary"]["status"], "stable")
+        self.assertEqual(session_result["metadata"]["analysis_summary"]["deliverable_count"], 1)
+        self.assertEqual(session_result["report_outputs"]["imrd_markdown"], "output/imrd.md")
+        self.assertEqual(session_result["reports"]["report_count"], 1)
+        self.assertEqual(session_result["deliverables"], ["Markdown IMRD 报告"])
 
     def test_runtime_profile_applies_demo_research_defaults(self):
         service = ResearchRuntimeService(

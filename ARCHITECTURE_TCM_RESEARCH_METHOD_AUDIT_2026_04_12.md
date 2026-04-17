@@ -338,7 +338,7 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 
 | 问题 | 说明 | 理由 | 代价 |
 | --- | --- | --- | --- |
-| 顶层 session 汇总口径不稳 | phase 内产物和 session 顶层 reports 不总是对齐 | 影响外层 UI / API / 运维追踪 | 中低，约 1-2 人日 |
+| 顶层 session 汇总口径不稳 ✅ | `ResearchRuntimeResult.session_result` 现已从标准 `PhaseResult` 读取 `report_outputs` / `reports` / `deliverables` / `analysis_results` / `research_artifact`，并合并 `cycle_snapshot.metadata.analysis_summary` | CLI / demo research / 外层 DTO 不再依赖 publish 根级旧字段；session 顶层汇总与 phase 内标准契约对齐，50 项运行时 / demo / report 回归保护 | 已完成 |
 | 统一证据对象仍未完成 | 分析、引用、publish、dashboard 的证据语义尚未完全统一 | 影响跨模块复用、审计与长期演进 | 中，约 3-5 人日 |
 | 自学习存储仍偏轻 | 以学习记录和日志为主，缺少可查询研究反馈库 | 无法做长期经验沉淀和策略回放 | 中，约 4-6 人日 |
 

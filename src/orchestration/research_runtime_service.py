@@ -17,7 +17,11 @@ from src.orchestration.research_orchestrator import (
     topic_to_phase_context,
 )
 from src.research.observe_philology import resolve_observe_philology_assets
-from src.research.phase_result import extract_research_phase_results, get_phase_value
+from src.research.phase_result import (
+    extract_research_phase_results,
+    get_phase_artifact_map,
+    get_phase_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,13 +93,103 @@ class ResearchRuntimeResult:
     def to_dict(self) -> Dict[str, Any]:
         return self.orchestration_result.to_dict()
 
+    @staticmethod
+    def _resolve_publish_result(
+        phase_results: Dict[str, Any],
+        cycle_snapshot: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        publish_result = phase_results.get("publish") if isinstance(phase_results.get("publish"), dict) else {}
+        if publish_result:
+            return publish_result
+        snapshot_phase_results = extract_research_phase_results(cycle_snapshot)
+        candidate = snapshot_phase_results.get("publish") if isinstance(snapshot_phase_results.get("publish"), dict) else {}
+        return candidate if isinstance(candidate, dict) else {}
+
+    @staticmethod
+    def _extract_publish_output_files(publish_result: Dict[str, Any]) -> Dict[str, str]:
+        if not isinstance(publish_result, dict):
+            return {}
+
+        output_files = get_phase_value(publish_result, "output_files", {})
+        if isinstance(output_files, dict) and output_files:
+            return {
+                str(name): str(path)
+                for name, path in output_files.items()
+                if path not in (None, "", [], {})
+            }
+
+        artifact_map = get_phase_artifact_map(publish_result)
+        return {
+            str(name): str(path)
+            for name, path in artifact_map.items()
+            if path not in (None, "", [], {})
+        }
+
+    @staticmethod
+    def _extract_publish_deliverables(
+        publish_result: Dict[str, Any],
+        cycle_snapshot: Dict[str, Any],
+    ) -> List[Any]:
+        snapshot_deliverables = cycle_snapshot.get("deliverables")
+        if isinstance(snapshot_deliverables, list) and snapshot_deliverables:
+            return deepcopy(snapshot_deliverables)
+
+        deliverables = get_phase_value(publish_result, "deliverables", [])
+        if isinstance(deliverables, list) and deliverables:
+            return deepcopy(deliverables)
+        return []
+
+    @staticmethod
+    def _build_report_summary(
+        publish_result: Dict[str, Any],
+        publish_output_files: Dict[str, str],
+        publish_deliverables: List[Any],
+    ) -> Dict[str, Any]:
+        if not isinstance(publish_result, dict):
+            return {}
+
+        metadata = publish_result.get("metadata") if isinstance(publish_result.get("metadata"), dict) else {}
+        report_error_count = int(metadata.get("report_error_count", 0) or 0)
+        report_count = int(metadata.get("report_count", 0) or 0)
+        if report_count <= 0 and publish_output_files:
+            report_count = len(publish_output_files)
+
+        if report_error_count > 0:
+            status = "degraded"
+        elif publish_output_files:
+            status = "completed"
+        else:
+            status = "pending"
+
+        if not publish_output_files and report_count <= 0 and not publish_deliverables:
+            return {}
+
+        summary: Dict[str, Any] = {
+            "status": status,
+            "report_count": report_count,
+            "report_error_count": report_error_count,
+            "output_files": deepcopy(publish_output_files),
+        }
+        if publish_deliverables:
+            summary["deliverables"] = deepcopy(publish_deliverables)
+        return summary
+
     @property
     def session_result(self) -> Dict[str, Any]:
         normalized_question = str(self.orchestration_result.topic or "").strip()
-        phase_results = dict(self.phase_results or {})
-        cycle_snapshot = dict(self.cycle_snapshot or {})
-        publish_result = phase_results.get("publish") if isinstance(phase_results.get("publish"), dict) else {}
-        publish_output_files = dict(publish_result.get("output_files") or {}) if isinstance(publish_result, dict) else {}
+        phase_results = deepcopy(self.phase_results or {})
+        cycle_snapshot = deepcopy(self.cycle_snapshot or {})
+        publish_result = self._resolve_publish_result(phase_results, cycle_snapshot)
+        publish_output_files = self._extract_publish_output_files(publish_result)
+        publish_deliverables = self._extract_publish_deliverables(publish_result, cycle_snapshot)
+        publish_reports = self._build_report_summary(publish_result, publish_output_files, publish_deliverables)
+        snapshot_metadata = cycle_snapshot.get("metadata") if isinstance(cycle_snapshot.get("metadata"), dict) else {}
+        metadata = deepcopy(snapshot_metadata)
+        metadata["research_question"] = normalized_question
+        metadata["cycle_name"] = (
+            self.orchestration_result.pipeline_metadata.get("cycle_name")
+            or metadata.get("cycle_name")
+        )
 
         session_result = {
             "status": self.orchestration_result.status,
@@ -106,12 +200,27 @@ class ResearchRuntimeResult:
             "research_question": normalized_question,
             "executed_phases": list(phase_results.keys()),
             "phase_results": phase_results,
-            "metadata": {
-                "research_question": normalized_question,
-                "cycle_name": self.orchestration_result.pipeline_metadata.get("cycle_name"),
-            },
+            "metadata": metadata,
             "cycle_snapshot": cycle_snapshot,
         }
+
+        if isinstance(metadata.get("analysis_summary"), dict) and metadata.get("analysis_summary"):
+            session_result["analysis_summary"] = deepcopy(metadata.get("analysis_summary") or {})
+
+        if publish_deliverables:
+            session_result["deliverables"] = deepcopy(publish_deliverables)
+
+        analysis_results = self.orchestration_result.analysis_results
+        if not isinstance(analysis_results, dict) or not analysis_results:
+            analysis_results = get_phase_value(publish_result, "analysis_results", {})
+        if isinstance(analysis_results, dict) and analysis_results:
+            session_result["analysis_results"] = deepcopy(analysis_results)
+
+        research_artifact = self.orchestration_result.research_artifact
+        if not isinstance(research_artifact, dict) or not research_artifact:
+            research_artifact = get_phase_value(publish_result, "research_artifact", {})
+        if isinstance(research_artifact, dict) and research_artifact:
+            session_result["research_artifact"] = deepcopy(research_artifact)
 
         observe_philology = (
             dict(self.orchestration_result.observe_philology)
@@ -121,7 +230,9 @@ class ResearchRuntimeResult:
         if observe_philology:
             session_result["observe_philology"] = observe_philology
         if publish_output_files:
-            session_result["report_outputs"] = publish_output_files
+            session_result["report_outputs"] = deepcopy(publish_output_files)
+        if publish_reports:
+            session_result["reports"] = publish_reports
         return session_result
 
     def to_session_result(self) -> Dict[str, Any]:
