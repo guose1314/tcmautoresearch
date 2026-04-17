@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from src.core.module_base import BaseModule
+from src.research.evidence_contract import build_evidence_protocol
 from src.research.phase_result import (
     get_phase_results,
     get_phase_value,
@@ -56,7 +57,8 @@ class OutputGenerator(BaseModule):
         source_file = str(context.get("source_file", "unknown"))
         safe_source = os.path.basename(source_file) or "unknown"
         entities = context.get("entities", [])
-        research_artifact = self._build_research_artifact(context)
+        evidence_protocol = self._build_evidence_protocol(context)
+        research_artifact = self._build_research_artifact(context, evidence_protocol)
 
         # 构造标准输出格式
         output = {
@@ -78,7 +80,7 @@ class OutputGenerator(BaseModule):
                 "reasoning_results": self._resolve_reasoning_payload(context),
                 "temporal_analysis": context.get("temporal_analysis", {}),
                 "pattern_recognition": context.get("pattern_recognition", {}),
-                "evidence_protocol": self._build_evidence_protocol(context),
+                "evidence_protocol": evidence_protocol,
                 "evidence_grade": self._resolve_evidence_grade_payload(context),
             },
             "research_artifact": research_artifact,
@@ -98,14 +100,18 @@ class OutputGenerator(BaseModule):
         }
         return output
 
-    def _build_research_artifact(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_research_artifact(
+        self,
+        context: Dict[str, Any],
+        evidence_protocol: Dict[str, Any],
+    ) -> Dict[str, Any]:
         """构建研究域到生成域的标准产物契约。"""
         hypothesis_payload = self._resolve_hypothesis_payload(context)
         return {
             "hypothesis": hypothesis_payload,
             "hypothesis_audit_summary": self._resolve_hypothesis_audit_summary(context, hypothesis_payload),
             "evidence_grade_summary": self._resolve_evidence_grade_summary(context),
-            "evidence": self._resolve_evidence_payload(context),
+            "evidence": list(evidence_protocol.get("evidence_records") or self._resolve_evidence_payload(context)),
             "data_mining_result": self._resolve_data_mining_payload(context),
             "similar_formula_graph_evidence_summary": self._build_similar_formula_graph_evidence_summary(context),
         }
@@ -333,85 +339,13 @@ class OutputGenerator(BaseModule):
         return {}
 
     def _build_evidence_protocol(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """构建 Evidence/Claim 输出协议，统一证据可追溯字段。"""
         reasoning_results = self._resolve_reasoning_payload(context)
-        evidence_records = [
-            self._normalize_evidence_record(record)
-            for record in list(reasoning_results.get("evidence_records", []) or [])
-        ]
-        claims = [
-            self._normalize_claim_record(claim)
-            for claim in list(reasoning_results.get("entity_relationships", []) or [])
-        ]
-        evidence_summary = dict(reasoning_results.get("evidence_summary", {}) or {})
-
-        return {
-            "contract_version": "evidence-claim-v1",
-            "evidence_records": evidence_records[: self.max_entities],
-            "claims": claims[: self.max_entities],
-            "evidence_summary": evidence_summary,
-            "research_grade": self._build_research_grade_protocol(reasoning_results),
-            "contract": {
-                "required_fields": [
-                    "source_entity",
-                    "target_entity",
-                    "relation_type",
-                    "confidence",
-                    "provenance",
-                ],
-                "claim_fields": [
-                    "source_entity",
-                    "target_entity",
-                    "relation_type",
-                    "confidence",
-                    "support_count",
-                    "evidence_ids",
-                ],
-            },
-        }
-
-    def _normalize_evidence_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        """将 evidence record 规整为输出契约要求的字段集。"""
-        provenance = record.get("provenance", {})
-        if not isinstance(provenance, dict):
-            provenance = {"source": str(provenance)}
-
-        return {
-            "evidence_id": record.get("evidence_id", ""),
-            "source_entity": record.get("source_entity", ""),
-            "target_entity": record.get("target_entity", ""),
-            "relation_type": record.get("relation_type", "related"),
-            "confidence": record.get("confidence", 0.0),
-            "provenance": provenance,
-        }
-
-    def _normalize_claim_record(self, claim: Dict[str, Any]) -> Dict[str, Any]:
-        """将 claim 规整为输出契约要求的字段集。"""
-        evidence_ids = claim.get("evidence_ids", [])
-        if not isinstance(evidence_ids, list):
-            evidence_ids = [str(evidence_ids)]
-
-        return {
-            "source_entity": claim.get("source_entity", claim.get("source", "")),
-            "target_entity": claim.get("target_entity", claim.get("target", "")),
-            "relation_type": claim.get("relation_type", claim.get("type", "related")),
-            "confidence": claim.get("confidence", 0.0),
-            "support_count": claim.get("support_count", len(evidence_ids)),
-            "evidence_ids": evidence_ids,
-        }
-
-    def _build_research_grade_protocol(self, reasoning_results: Dict[str, Any]) -> Dict[str, Any]:
-        """输出博士级科研诊断协议，支撑可验证结论复核。"""
-        diagnostics = dict(reasoning_results.get("research_grade_diagnostics", {}) or {})
-        fusion = dict(reasoning_results.get("multimodal_fusion", {}) or {})
-        return {
-            "diagnostics": diagnostics,
-            "fusion": {
-                "confidence": fusion.get("confidence", 0.0),
-                "evidence_score": fusion.get("evidence_score", 0.0),
-                "strategy": fusion.get("strategy", "attention"),
-            },
-        }
+        return build_evidence_protocol(
+            reasoning_results,
+            evidence_grade=self._resolve_evidence_grade_payload(context),
+            max_evidence_records=self.max_entities,
+            max_claims=self.max_entities,
+        )
     
     def _calculate_quality_metrics(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """计算质量指标"""

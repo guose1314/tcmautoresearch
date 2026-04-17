@@ -41,6 +41,8 @@ from src.api.schemas import (
     ResearchJobDeletionResponse,
     ResearchJobListResponse,
     ResearchJobSnapshot,
+    ResearchLearningFeedbackLibraryResponse,
+    ResearchLearningFeedbackListResponse,
     ResearchPhilologyWorkbenchReviewRequest,
     ResearchPhilologyWorkbenchReviewResponse,
     ResearchResult,
@@ -81,6 +83,46 @@ def _resolve_review_reviewer(request: Request, explicit_reviewer: str) -> str:
             if value:
                 return value
     return "管理 API"
+
+
+def _resolve_learning_feedback_library(
+    repository: ResearchSessionRepository,
+    cycle_id: str,
+) -> ResearchLearningFeedbackLibraryResponse:
+    library = repository.get_learning_feedback_library(cycle_id)
+    if library is None:
+        raise HTTPException(status_code=404, detail="研究会话不存在")
+    return {
+        "cycle_id": cycle_id,
+        "contract_version": str(library.get("contract_version") or ""),
+        "summary": dict(library.get("summary") or {}),
+        "replay_feedback": dict(library.get("replay_feedback") or {}),
+        "records": list(library.get("records") or []),
+    }
+
+
+def _hydrate_dashboard_snapshot_learning_feedback(
+    snapshot: dict,
+    repository: ResearchSessionRepository,
+) -> dict:
+    result = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {}
+    learning_feedback_library = result.get("learning_feedback_library") if isinstance(result.get("learning_feedback_library"), dict) else {}
+    if learning_feedback_library:
+        return snapshot
+
+    cycle_id = _resolve_cycle_id(snapshot)
+    if not cycle_id:
+        return snapshot
+
+    repository_library = repository.get_learning_feedback_library(cycle_id)
+    if repository_library is None:
+        return snapshot
+
+    hydrated_snapshot = dict(snapshot)
+    hydrated_result = dict(result)
+    hydrated_result["learning_feedback_library"] = repository_library
+    hydrated_snapshot["result"] = hydrated_result
+    return hydrated_snapshot
 
 
 @router.post("/run")
@@ -148,10 +190,11 @@ def get_research_job_dashboard(
     version_lineage_key: str=Query(""),
     witness_key: str=Query(""),
     manager: ResearchJobManager=Depends(get_job_manager),
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
     _: None=Depends(require_management_api_key),
 ) -> ResearchDashboardResponse:
     return build_research_dashboard_payload(
-        _resolve_job_snapshot(manager, job_id),
+        _hydrate_dashboard_snapshot_learning_feedback(_resolve_job_snapshot(manager, job_id), repository),
         philology_filters={
             "document_title": document_title,
             "work_title": work_title,
@@ -159,6 +202,63 @@ def get_research_job_dashboard(
             "witness_key": witness_key,
         },
     )
+
+
+@router.get("/jobs/{job_id}/learning-feedback")
+def get_research_job_learning_feedback(
+    job_id: str,
+    manager: ResearchJobManager=Depends(get_job_manager),
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ResearchLearningFeedbackLibraryResponse:
+    job_snapshot = _resolve_job_snapshot(manager, job_id)
+    cycle_id = _resolve_cycle_id(job_snapshot)
+    if not cycle_id:
+        raise HTTPException(status_code=409, detail="job 尚未关联持久化 cycle_id")
+    return _resolve_learning_feedback_library(repository, cycle_id)
+
+
+@router.get("/sessions/{cycle_id}/learning-feedback")
+def get_research_session_learning_feedback(
+    cycle_id: str,
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ResearchLearningFeedbackLibraryResponse:
+    return _resolve_learning_feedback_library(repository, cycle_id)
+
+
+@router.get("/learning-feedback")
+def list_research_learning_feedback(
+    cycle_id: str=Query(""),
+    feedback_scope: str=Query(""),
+    target_phase: str=Query(""),
+    cycle_trend: str=Query(""),
+    limit: int=Query(50, ge=1, le=200),
+    offset: int=Query(0, ge=0),
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ResearchLearningFeedbackListResponse:
+    filters = {
+        "cycle_id": str(cycle_id or "").strip() or None,
+        "feedback_scope": str(feedback_scope or "").strip().lower() or None,
+        "target_phase": str(target_phase or "").strip().lower() or None,
+        "cycle_trend": str(cycle_trend or "").strip().lower() or None,
+    }
+    page = repository.list_learning_feedback(
+        cycle_id=filters["cycle_id"],
+        feedback_scope=filters["feedback_scope"],
+        target_phase=filters["target_phase"],
+        cycle_trend=filters["cycle_trend"],
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "items": list(page.get("items") or []),
+        "total": int(page.get("total") or 0),
+        "limit": int(page.get("limit") or limit),
+        "offset": int(page.get("offset") or offset),
+        "filters": filters,
+    }
 
 
 @router.post("/jobs/{job_id}/catalog-review")

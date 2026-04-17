@@ -1247,6 +1247,10 @@ class PaperWriter(BaseModule):
         if isinstance(reasoning, dict):
             yield reasoning.get("evidence_records")
         analysis_results = self._resolve_analysis_results(context)
+        if isinstance(analysis_results, dict):
+            evidence_protocol = analysis_results.get("evidence_protocol")
+            if isinstance(evidence_protocol, dict):
+                yield evidence_protocol.get("evidence_records")
         nested_reasoning = analysis_results.get("reasoning_results", {}) if isinstance(analysis_results, dict) else {}
         if isinstance(nested_reasoning, dict):
             yield nested_reasoning.get("evidence_records")

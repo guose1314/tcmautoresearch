@@ -4,6 +4,7 @@ from math import erfc, sqrt
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from src.research.data_miner import StatisticalDataMiner
+from src.research.evidence_contract import build_evidence_protocol
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
     has_learning_strategy,
@@ -49,13 +50,26 @@ class AnalyzePhaseMixin:
             data_mining_result,
             context,
         )
+        literature_records = self._collect_analyze_literature_records(cycle, context)
 
-        evidence_grade_payload, evidence_grade_error = self._grade_analyze_evidence(cycle, context)
+        evidence_grade_payload, evidence_grade_error = self._grade_analyze_evidence(
+            cycle,
+            context,
+            literature_records=literature_records,
+        )
         if evidence_grade_payload:
             analysis_results["evidence_grade"] = evidence_grade_payload
             analysis_results["evidence_grade_summary"] = self._build_evidence_grade_summary(evidence_grade_payload)
             analysis_results["statistical_analysis"]["evidence_grade"] = evidence_grade_payload
             analysis_results["statistical_analysis"]["evidence_grade_summary"] = analysis_results["evidence_grade_summary"]
+
+        evidence_protocol = build_evidence_protocol(
+            reasoning_results,
+            evidence_records=literature_records,
+            evidence_grade=evidence_grade_payload,
+        )
+        if evidence_protocol:
+            analysis_results["evidence_protocol"] = evidence_protocol
 
         textual_evidence_summary = self._extract_textual_evidence_summary(cycle)
         if textual_evidence_summary:
@@ -73,6 +87,9 @@ class AnalyzePhaseMixin:
             "data_mining_methods": list(data_mining_result.get("methods_executed") or []),
             "evidence_grade_generated": bool(evidence_grade_payload),
             "evidence_study_count": int(evidence_grade_payload.get("study_count") or 0) if evidence_grade_payload else 0,
+            "evidence_protocol_generated": bool(evidence_protocol),
+            "evidence_record_count": int(((evidence_protocol.get("summary") or {}).get("evidence_record_count") or 0)) if evidence_protocol else 0,
+            "evidence_claim_count": int(((evidence_protocol.get("summary") or {}).get("claim_count") or 0)) if evidence_protocol else 0,
             "textual_evidence_chain_consumed": bool(textual_evidence_summary),
             "textual_evidence_chain_count": int(textual_evidence_summary.get("evidence_chain_count") or 0) if textual_evidence_summary else 0,
             "learning_strategy_applied": has_learning_strategy(context, self.pipeline.config),
@@ -808,17 +825,18 @@ class AnalyzePhaseMixin:
         self,
         cycle: "ResearchCycle",
         context: Dict[str, Any],
+        literature_records: List[Any] | None = None,
     ) -> tuple[Dict[str, Any], str]:
         if not self._resolve_analyze_flag(context, "grade_evidence", True):
             return {}, ""
 
-        literature_records = self._collect_analyze_literature_records(cycle, context)
-        if not literature_records:
+        records = list(literature_records or self._collect_analyze_literature_records(cycle, context))
+        if not records:
             return {}, ""
 
         try:
             grader = self._create_evidence_grader()
-            return grader.grade_evidence(literature_records).to_dict(), ""
+            return grader.grade_evidence(records).to_dict(), ""
         except Exception as exc:
             self.pipeline.logger.warning("Analyze 阶段 GRADE 证据分级失败: %s", exc)
             return {}, str(exc)

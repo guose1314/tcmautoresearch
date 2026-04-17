@@ -905,6 +905,33 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     artifact_records.append(saved)
         return artifact_records
 
+    def _persist_cycle_learning_feedback(
+        self,
+        repository: Any,
+        cycle: ResearchCycle,
+        phase_records: Dict[str, Dict[str, Any]],
+        session: Any = None,
+    ) -> Dict[str, Any]:
+        reflect_execution = cycle.phase_executions.get(ResearchPhase.REFLECT)
+        if not isinstance(reflect_execution, dict):
+            return {}
+        phase_result = reflect_execution.get("result") if isinstance(reflect_execution.get("result"), dict) else {}
+        if not isinstance(phase_result, dict):
+            return {}
+
+        feedback_library = get_phase_value(phase_result, "learning_feedback_library", {}) or {}
+        if not isinstance(feedback_library, dict):
+            return {}
+
+        reflect_phase_record = phase_records.get("reflect") or {}
+        saved = repository.replace_learning_feedback_library(
+            cycle.cycle_id,
+            self._serialize_value(feedback_library),
+            phase_execution_id=str(reflect_phase_record.get("id") or "").strip() or None,
+            session=session,
+        )
+        return saved if isinstance(saved, dict) else {}
+
     def _persist_cycle_observe_documents(
         self,
         repository: Any,
@@ -1199,6 +1226,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             phase_records: Dict[str, Dict[str, Any]] = {}
             observe_documents: List[Dict[str, Any]] = []
             artifact_records: List[Dict[str, Any]] = []
+            learning_feedback_library: Dict[str, Any] = {}
             graph_report: Dict[str, Any] = {
                 "status": persistence_report.get("neo4j_status") if persistence_report.get("neo4j_status") != "active" else "skipped",
                 "enabled": bool(factory.neo4j_driver),
@@ -1212,6 +1240,12 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     repository.delete_session(cycle.cycle_id, session=pg_session)
                 session_record = repository.save_from_cycle(cycle, session=pg_session)
                 phase_records = self._persist_cycle_phase_executions(repository, cycle, session=pg_session)
+                learning_feedback_library = self._persist_cycle_learning_feedback(
+                    repository,
+                    cycle,
+                    phase_records,
+                    session=pg_session,
+                )
                 observe_documents = self._persist_cycle_observe_documents(repository, cycle, phase_records, session=pg_session)
                 artifact_records = self._persist_cycle_artifacts(repository, cycle, phase_records, session=pg_session)
                 graph_report = self._project_cycle_to_neo4j(
@@ -1232,6 +1266,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     "neo4j_status": graph_report.get("status") if graph_report.get("enabled") else persistence_report.get("neo4j_status"),
                     "phase_execution_count": len(phase_records),
                     "artifact_count": len(artifact_records),
+                    "learning_feedback_record_count": len(learning_feedback_library.get("records") or []),
                     "observe_document_count": len(observe_documents),
                     "observe_version_witness_count": sum(
                         1

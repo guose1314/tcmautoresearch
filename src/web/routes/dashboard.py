@@ -801,6 +801,11 @@ def _build_session_dashboard_snapshot(session: Dict[str, Any]) -> Dict[str, Any]
             },
             "phases": phase_items,
             "phase_results": phase_results,
+            "learning_feedback_library": (
+                session.get("learning_feedback_library")
+                if isinstance(session.get("learning_feedback_library"), dict)
+                else {}
+            ),
             "observe_philology": session.get("observe_philology") if isinstance(session.get("observe_philology"), dict) else {},
         },
     }

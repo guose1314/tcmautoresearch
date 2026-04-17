@@ -312,6 +312,52 @@ class TestOutputGeneratorQuality(unittest.TestCase):
         self.assertEqual(summary["matches"][0]["shared_herbs"], ["人参", "白术"])
         self.assertEqual(summary["matches"][0]["shared_syndromes"], ["脾气虚证"])
 
+    def test_output_generator_builds_evidence_protocol_v2_from_nested_reasoning(self):
+        module = OutputGenerator({"max_entities": 5})
+        self.assertTrue(module.initialize())
+
+        result = module.execute(
+            {
+                "reasoning_results": {
+                    "evidence_records": [
+                        {
+                            "evidence_id": "ev-1",
+                            "title": "伤寒论",
+                            "authors": ["张仲景"],
+                            "year": 210,
+                            "source_type": "classical_text",
+                            "source_ref": "urn:shanghanlun",
+                        }
+                    ],
+                    "reasoning_results": {
+                        "entity_relationships": [
+                            {
+                                "source": "桂枝",
+                                "target": "营卫",
+                                "type": "调和",
+                                "confidence": 0.9,
+                            }
+                        ]
+                    },
+                },
+                "analysis_results": {
+                    "evidence_grade": {
+                        "overall_grade": "moderate",
+                        "overall_score": 0.71,
+                        "study_count": 1,
+                        "summary": ["纳入 1 项研究进行 GRADE 评估"],
+                    }
+                },
+            }
+        )
+
+        protocol = result["output_data"]["analysis_results"]["evidence_protocol"]
+        self.assertEqual(protocol["contract_version"], "evidence-claim-v2")
+        self.assertEqual(protocol["evidence_records"][0]["title"], "伤寒论")
+        self.assertEqual(protocol["claims"][0]["relation_type"], "调和")
+        self.assertEqual(protocol["citation_records"][0]["source_ref"], "urn:shanghanlun")
+        self.assertEqual(result["output_data"]["research_artifact"]["evidence"][0]["evidence_id"], "ev-1")
+
     def test_make_json_safe_depth_limit(self):
         module = OutputGenerator({"max_string_length": 8})
         self.assertTrue(module.initialize())

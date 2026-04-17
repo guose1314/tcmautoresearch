@@ -61,6 +61,31 @@ def _load_session_snapshot(repository: ResearchSessionRepository, cycle_id: str)
     return None
 
 
+def _apply_learning_feedback_replay(
+    service_config: Dict[str, Any],
+    session: Dict[str, Any],
+) -> None:
+    library = session.get("learning_feedback_library")
+    if not isinstance(library, dict):
+        return
+
+    replay_feedback = library.get("replay_feedback")
+    if not isinstance(replay_feedback, dict) or not replay_feedback:
+        return
+
+    pipeline_config = service_config.get("pipeline_config")
+    if not isinstance(pipeline_config, dict):
+        pipeline_config = {}
+        service_config["pipeline_config"] = pipeline_config
+
+    pipeline_config.setdefault("previous_iteration_feedback", deepcopy(replay_feedback))
+    learning_summary = replay_feedback.get("learning_summary")
+    if isinstance(learning_summary, dict):
+        tuned_parameters = learning_summary.get("tuned_parameters")
+        if isinstance(tuned_parameters, dict) and tuned_parameters:
+            pipeline_config.setdefault("learned_runtime_parameters", deepcopy(tuned_parameters))
+
+
 def create_research_session(
     app: Any,
     *,
@@ -292,6 +317,7 @@ def execute_research_phase(
     researchers = list(session.get("researchers") or [])
     if researchers:
         service_config["researchers"] = researchers
+    _apply_learning_feedback_replay(service_config, session)
 
     runtime_service = ResearchRuntimeService(service_config)
     runtime_result = runtime_service.run(

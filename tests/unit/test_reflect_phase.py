@@ -31,10 +31,11 @@ class _FakeCycle:
 
 
 class _FakePipeline:
-    def __init__(self, *, llm_engine: Any = None, self_learning_engine: Any = None):
+    def __init__(self, *, llm_engine: Any = None, self_learning_engine: Any = None, previous_feedback: Any = None):
         self.quality_assessor = QualityAssessor()
         self.config: Dict[str, Any] = {}
         self._learning_phase_manifests: List[Dict[str, Any]] = []
+        self._previous_feedback = dict(previous_feedback or {})
         if llm_engine is not None:
             self.config["llm_engine"] = llm_engine
         if self_learning_engine is not None:
@@ -48,6 +49,9 @@ class _FakePipeline:
 
     def build_learning_application_summary(self) -> Dict[str, Any]:
         return {"phase_manifests": list(self._learning_phase_manifests)}
+
+    def get_previous_iteration_feedback(self) -> Dict[str, Any]:
+        return dict(self._previous_feedback)
 
 
 class _ReflectMixin(ReflectPhaseMixin):
@@ -86,7 +90,7 @@ class TestReflectPhaseContract(unittest.TestCase):
     def test_return_has_required_keys(self):
         mixin = _ReflectMixin(_FakePipeline())
         result = mixin.execute_reflect_phase(_FakeCycle(), {})
-        for key in ("phase", "reflections", "improvement_plan", "metadata", "quality_assessment"):
+        for key in ("phase", "reflections", "improvement_plan", "metadata", "quality_assessment", "learning_feedback_library"):
             self.assertIn(key, result, f"missing key: {key}")
         self.assertEqual(result["phase"], "reflect")
 
@@ -94,8 +98,23 @@ class TestReflectPhaseContract(unittest.TestCase):
         mixin = _ReflectMixin(_FakePipeline())
         result = mixin.execute_reflect_phase(_FakeCycle(), {})
         md = result["metadata"]
-        for key in ("reflection_count", "plan_items", "cycle_quality_score", "llm_enhanced", "assessed_phases"):
+        for key in ("reflection_count", "plan_items", "cycle_quality_score", "llm_enhanced", "assessed_phases", "feedback_record_count"):
             self.assertIn(key, md, f"missing metadata key: {key}")
+
+    def test_learning_feedback_library_contains_replay_payload(self):
+        previous_feedback = {
+            "status": "completed",
+            "iteration_number": 4,
+            "learning_summary": {"tuned_parameters": {"max_concurrent_tasks": 5}},
+            "quality_assessment": {"overall_cycle_score": 0.88},
+        }
+        mixin = _ReflectMixin(_FakePipeline(previous_feedback=previous_feedback))
+        result = mixin.execute_reflect_phase(_FakeCycle(outcomes=[_full_outcome()]), {})
+
+        library = result["learning_feedback_library"]
+        self.assertEqual(library["contract_version"], "research-feedback-library.v1")
+        self.assertEqual(library["replay_feedback"]["iteration_number"], 4)
+        self.assertGreaterEqual(library["summary"]["record_count"], 1)
 
 
 class TestReflectNoOutcomes(unittest.TestCase):

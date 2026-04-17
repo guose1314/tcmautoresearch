@@ -87,9 +87,26 @@ class ResearchDashboardResponse(BaseModel):
     phase_board: Dict[str, Any] = Field(default_factory=dict, description="阶段看板数据")
     quality_board: Dict[str, Any] = Field(default_factory=dict, description="质量看板数据")
     evidence_board: Dict[str, Any] = Field(default_factory=dict, description="证据看板数据")
+    learning_feedback_board: Dict[str, Any] = Field(default_factory=dict, description="学习反馈看板数据")
     knowledge_graph_board: Dict[str, Any] = Field(default_factory=dict, description="知识关系图谱看板数据")
     protocol_inputs: Dict[str, Any] = Field(default_factory=dict, description="研究协议输入")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="看板元数据")
+
+
+class ResearchLearningFeedbackLibraryResponse(BaseModel):
+    cycle_id: str = Field(..., description="研究周期 ID")
+    contract_version: str = Field(default="", description="学习反馈库契约版本")
+    summary: Dict[str, Any] = Field(default_factory=dict, description="学习反馈库摘要")
+    replay_feedback: Dict[str, Any] = Field(default_factory=dict, description="可回放到下一轮运行的反馈快照")
+    records: List[Dict[str, Any]] = Field(default_factory=list, description="学习反馈记录列表")
+
+
+class ResearchLearningFeedbackListResponse(BaseModel):
+    items: List[Dict[str, Any]] = Field(default_factory=list, description="学习反馈记录列表")
+    total: int = Field(default=0, description="记录总数")
+    limit: int = Field(default=0, description="分页大小")
+    offset: int = Field(default=0, description="分页偏移")
+    filters: Dict[str, Any] = Field(default_factory=dict, description="已应用过滤条件")
 
 
 class ResearchCatalogReviewRequest(BaseModel):

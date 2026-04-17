@@ -1385,6 +1385,166 @@ def _build_dashboard_evidence_board(
     }
 
 
+def _dashboard_string_list(value: Any) -> list[str]:
+    return [
+        text
+        for text in (str(item or "").strip() for item in _as_list(value))
+        if text
+    ]
+
+
+def _format_learning_feedback_trend(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return ""
+    return {
+        "improving": "持续改善",
+        "stable": "基本稳定",
+        "declining": "表现下滑",
+        "regressing": "表现回退",
+        "mixed": "波动中",
+    }.get(normalized, normalized)
+
+
+def _format_learning_feedback_status(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return ""
+    return {
+        "summary": "周期总结",
+        "strength": "优势",
+        "weakness": "薄弱项",
+        "tracked": "持续跟踪",
+        "warning": "预警",
+    }.get(normalized, normalized)
+
+
+def _resolve_dashboard_learning_feedback_library(
+    snapshot: Dict[str, Any],
+    result: Dict[str, Any],
+) -> Dict[str, Any]:
+    result_library = _as_dict(result.get("learning_feedback_library"))
+    if result_library:
+        return result_library
+    return _as_dict(snapshot.get("learning_feedback_library"))
+
+
+def _build_dashboard_learning_feedback_board(
+    learning_feedback_library: Dict[str, Any],
+) -> Dict[str, Any]:
+    records = [record for record in _as_list(learning_feedback_library.get("records")) if isinstance(record, dict)]
+    summary = _as_dict(learning_feedback_library.get("summary"))
+    replay_feedback = _as_dict(learning_feedback_library.get("replay_feedback"))
+    cycle_summary = next(
+        (
+            record
+            for record in records
+            if str(record.get("feedback_scope") or "").strip().lower() == "cycle_summary"
+        ),
+        {},
+    )
+    cycle_details = _as_dict(cycle_summary.get("details"))
+    learning_summary = _as_dict(replay_feedback.get("learning_summary"))
+    if not learning_summary:
+        learning_summary = _as_dict(cycle_summary.get("learning_summary"))
+    if not learning_summary:
+        learning_summary = _as_dict(cycle_details.get("learning_summary"))
+
+    quality_assessment = _as_dict(replay_feedback.get("quality_assessment"))
+    if not quality_assessment:
+        quality_assessment = _as_dict(cycle_summary.get("quality_assessment"))
+    if not quality_assessment:
+        quality_assessment = _as_dict(cycle_details.get("quality_assessment"))
+
+    tuned_parameters = _as_dict(learning_summary.get("tuned_parameters"))
+    if not tuned_parameters:
+        tuned_parameters = _as_dict(cycle_summary.get("tuned_parameters"))
+    if not tuned_parameters:
+        tuned_parameters = _as_dict(cycle_details.get("tuned_parameters"))
+
+    recorded_phase_names = _dashboard_string_list(
+        summary.get("recorded_phase_names")
+        or cycle_summary.get("recorded_phase_names")
+        or learning_summary.get("recorded_phases")
+    )
+    weak_phase_names = _dashboard_string_list(
+        summary.get("weak_phase_names")
+        or cycle_summary.get("weak_phase_names")
+        or learning_summary.get("weak_phases")
+    )
+    improvement_priorities = _dashboard_string_list(
+        cycle_summary.get("improvement_priorities")
+        or learning_summary.get("improvement_priorities")
+        or cycle_details.get("improvement_plan")
+    )
+
+    recent_records = []
+    for record in records:
+        if str(record.get("feedback_scope") or "").strip().lower() == "cycle_summary":
+            continue
+        target_phase = str(record.get("target_phase") or "").strip().lower()
+        recent_records.append(
+            {
+                "feedback_scope": str(record.get("feedback_scope") or "").strip().lower(),
+                "feedback_status": str(record.get("feedback_status") or "").strip().lower(),
+                "feedback_status_label": _format_learning_feedback_status(record.get("feedback_status")),
+                "target_phase": target_phase,
+                "target_phase_label": format_phase_name(target_phase) if target_phase else "",
+                "overall_score": record.get("overall_score"),
+                "grade_level": str(record.get("grade_level") or "").strip(),
+                "issue_count": int(_safe_float(record.get("issue_count"), 0.0)),
+                "issue_preview": _dashboard_string_list(record.get("issues"))[:2],
+            }
+        )
+        if len(recent_records) >= 3:
+            break
+
+    latest_cycle_score = summary.get("latest_cycle_score")
+    if latest_cycle_score in (None, ""):
+        latest_cycle_score = cycle_summary.get("overall_score")
+    if latest_cycle_score in (None, ""):
+        latest_cycle_score = quality_assessment.get("overall_cycle_score")
+
+    cycle_trend = str(summary.get("cycle_trend") or cycle_summary.get("cycle_trend") or "").strip().lower()
+    iteration_number = replay_feedback.get("iteration_number")
+    if iteration_number in (None, ""):
+        iteration_number = learning_summary.get("iteration_number")
+
+    return {
+        "available": bool(records),
+        "contract_version": str(learning_feedback_library.get("contract_version") or "").strip(),
+        "summary": summary,
+        "replay_feedback": replay_feedback,
+        "record_count": len(records),
+        "phase_record_count": int(
+            _safe_float(
+                summary.get("phase_record_count"),
+                float(
+                    sum(
+                        1
+                        for record in records
+                        if str(record.get("feedback_scope") or "").strip().lower() == "phase_assessment"
+                    )
+                ),
+            )
+        ),
+        "latest_cycle_score": latest_cycle_score,
+        "cycle_trend": cycle_trend,
+        "cycle_trend_label": _format_learning_feedback_trend(cycle_trend),
+        "weak_phase_names": weak_phase_names,
+        "weak_phase_labels": [format_phase_name(phase_name) for phase_name in weak_phase_names],
+        "recorded_phase_names": recorded_phase_names,
+        "recorded_phase_labels": [format_phase_name(phase_name) for phase_name in recorded_phase_names],
+        "strategy_changed": bool(summary.get("strategy_changed") or cycle_summary.get("strategy_changed")),
+        "latest_feedback_at": summary.get("latest_feedback_at") or cycle_summary.get("created_at"),
+        "replay_status": str(replay_feedback.get("status") or "").strip().lower(),
+        "iteration_number": iteration_number,
+        "tuned_parameters": tuned_parameters,
+        "improvement_priorities": improvement_priorities,
+        "recent_records": recent_records,
+    }
+
+
 def _build_dashboard_protocol_inputs(protocol_inputs: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "study_type": protocol_inputs.get("study_type"),
@@ -1430,6 +1590,8 @@ def build_research_dashboard_payload(
     observe_philology_raw = _resolve_observe_philology(result)
     philology_filter_contract = build_observe_philology_filter_contract(observe_philology_raw, philology_filters)
     observe_philology = filter_observe_philology_assets(observe_philology_raw, philology_filters)
+    learning_feedback_library = _resolve_dashboard_learning_feedback_library(snapshot, result)
+    learning_feedback_board = _build_dashboard_learning_feedback_board(learning_feedback_library)
     knowledge_graph_board = _build_knowledge_graph_board(result)
     phase_items = _build_dashboard_phase_items(phases)
 
@@ -1472,6 +1634,7 @@ def build_research_dashboard_payload(
             observe_philology,
             philology_filter_contract,
         ),
+        "learning_feedback_board": learning_feedback_board,
         "knowledge_graph_board": knowledge_graph_board,
         "protocol_inputs": _build_dashboard_protocol_inputs(protocol_inputs),
         "metadata": {

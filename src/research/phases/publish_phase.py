@@ -43,6 +43,10 @@ try:
 except Exception:
     EvidenceGrader = None
 
+from src.research.evidence_contract import (
+    build_citation_records_from_evidence_protocol,
+    build_evidence_protocol,
+)
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
     has_learning_strategy,
@@ -250,6 +254,10 @@ class PublishPhaseMixin:
         if isinstance(literature_records, list) and literature_records:
             return [dict(item) for item in literature_records if isinstance(item, dict)]
 
+        protocol_citations = self._collect_citation_records_from_evidence_protocol(cycle, context)
+        if protocol_citations:
+            return protocol_citations
+
         corpus_records = self._collect_citation_records_from_observe_corpus(cycle, context)
         if corpus_records:
             return corpus_records
@@ -258,6 +266,32 @@ class PublishPhaseMixin:
             return []
 
         return self._build_pipeline_outcome_citation_records(cycle)
+
+    def _collect_citation_records_from_evidence_protocol(
+        self,
+        cycle: "ResearchCycle",
+        context: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        analyze_execution = cycle.phase_executions.get(self.pipeline.ResearchPhase.ANALYZE, {})
+        analyze_result = analyze_execution.get("result") if isinstance(analyze_execution, dict) else {}
+        analyze_results = get_phase_results(analyze_result) if isinstance(analyze_result, dict) else {}
+        reasoning_results = self._resolve_publish_context_reasoning_results(context)
+        if not reasoning_results and isinstance(analyze_results, dict):
+            nested_reasoning = analyze_results.get("reasoning_results")
+            if isinstance(nested_reasoning, dict):
+                reasoning_results = nested_reasoning
+
+        evidence_protocol = self._resolve_publish_evidence_protocol(
+            context,
+            analyze_result if isinstance(analyze_result, dict) else {},
+            analyze_results if isinstance(analyze_results, dict) else {},
+            reasoning_results if isinstance(reasoning_results, dict) else {},
+        )
+        return [
+            dict(item)
+            for item in build_citation_records_from_evidence_protocol(evidence_protocol)
+            if isinstance(item, dict)
+        ]
 
     def _collect_citation_records_from_observe_corpus(
         self,
@@ -608,12 +642,18 @@ class PublishPhaseMixin:
             analyze_results,
             research_artifact,
         )
+        evidence_protocol = self._resolve_publish_evidence_protocol(
+            context,
+            analyze_result,
+            analyze_results,
+            reasoning_results,
+        )
         if not research_artifact:
             research_artifact = {
                 "hypothesis": publish_hypotheses or ([selected_hypothesis] if selected_hypothesis else []),
                 "hypothesis_audit_summary": hypothesis_audit_summary,
                 "evidence_grade_summary": evidence_grade_summary,
-                "evidence": reasoning_results.get("evidence_records") or [],
+                "evidence": list(evidence_protocol.get("evidence_records") or reasoning_results.get("evidence_records") or []),
                 "data_mining_result": data_mining_result,
                 "similar_formula_graph_evidence_summary": similar_formula_graph_evidence_summary,
             }
@@ -621,6 +661,10 @@ class PublishPhaseMixin:
             existing_evidence_grade_summary = research_artifact.get("evidence_grade_summary")
             if not isinstance(existing_evidence_grade_summary, dict) or not existing_evidence_grade_summary:
                 research_artifact["evidence_grade_summary"] = evidence_grade_summary
+        if evidence_protocol:
+            existing_evidence = research_artifact.get("evidence")
+            if not isinstance(existing_evidence, list) or not existing_evidence:
+                research_artifact["evidence"] = list(evidence_protocol.get("evidence_records") or [])
         research_artifact = self._enrich_publish_research_artifact(
             research_artifact,
             statistical_analysis,
@@ -645,6 +689,7 @@ class PublishPhaseMixin:
             data_mining_result,
             data_mining_aliases,
             research_perspectives,
+            evidence_protocol,
             similar_formula_graph_evidence_summary,
             llm_analysis_context,
         )
@@ -1073,6 +1118,7 @@ class PublishPhaseMixin:
         data_mining_result: Dict[str, Any],
         data_mining_aliases: Dict[str, Any],
         research_perspectives: Dict[str, Any],
+        evidence_protocol: Dict[str, Any],
         similar_formula_graph_evidence_summary: Dict[str, Any],
         llm_analysis_context: Dict[str, Any],
     ) -> Dict[str, Any]:
@@ -1080,6 +1126,9 @@ class PublishPhaseMixin:
         structured_analysis = structured_payload.get("analysis_results") if isinstance(structured_payload, dict) else {}
         if isinstance(structured_analysis, dict):
             composed.update(structured_analysis)
+
+        if evidence_protocol and "evidence_protocol" not in composed:
+            composed["evidence_protocol"] = copy.deepcopy(evidence_protocol)
 
         if reasoning_results:
             composed["reasoning_results"] = reasoning_results
@@ -1389,6 +1438,50 @@ class PublishPhaseMixin:
             if isinstance(nested, dict):
                 return dict(nested)
         return {}
+
+    def _resolve_publish_evidence_grade_payload(
+        self,
+        context: Dict[str, Any],
+        analyze_result: Dict[str, Any],
+        analyze_results: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        containers = [context, analyze_results]
+        direct = self._resolve_publish_dict_field(containers, ("evidence_grade",))
+        if direct:
+            return direct
+
+        for container in (context, analyze_results, analyze_result):
+            if not isinstance(container, dict):
+                continue
+            statistical_analysis = container.get("statistical_analysis")
+            if isinstance(statistical_analysis, dict):
+                nested_evidence_grade = statistical_analysis.get("evidence_grade")
+                if isinstance(nested_evidence_grade, dict):
+                    return dict(nested_evidence_grade)
+        return {}
+
+    def _resolve_publish_evidence_protocol(
+        self,
+        context: Dict[str, Any],
+        analyze_result: Dict[str, Any],
+        analyze_results: Dict[str, Any],
+        reasoning_results: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        direct = self._resolve_publish_dict_field([context, analyze_results], ("evidence_protocol",))
+        if direct:
+            return direct
+
+        evidence_grade = self._resolve_publish_evidence_grade_payload(
+            context,
+            analyze_result,
+            analyze_results,
+        )
+        evidence_records = reasoning_results.get("evidence_records") if isinstance(reasoning_results.get("evidence_records"), list) else None
+        return build_evidence_protocol(
+            reasoning_results,
+            evidence_records=evidence_records,
+            evidence_grade=evidence_grade,
+        )
 
     def _resolve_publish_limitations(
         self,

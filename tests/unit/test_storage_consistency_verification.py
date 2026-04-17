@@ -10,9 +10,18 @@ from src.infrastructure.monitoring import MonitoringService
 from src.infrastructure.persistence import DatabaseManager
 from src.infrastructure.research_session_repo import ResearchSessionRepository
 from src.research.phase_orchestrator import PhaseOrchestrator
-from src.research.study_session_manager import ResearchCycle, ResearchCycleStatus, ResearchPhase
+from src.research.study_session_manager import (
+    ResearchCycle,
+    ResearchCycleStatus,
+    ResearchPhase,
+)
 from src.storage.backend_factory import StorageBackendFactory
-from src.storage.consistency import MODE_PG_ONLY, STATUS_DEGRADED, STATUS_DISABLED, build_consistency_state
+from src.storage.consistency import (
+    MODE_PG_ONLY,
+    STATUS_DEGRADED,
+    STATUS_DISABLED,
+    build_consistency_state,
+)
 from src.storage.transaction import TransactionCoordinator
 from tools.backfill_research_session_nodes import _build_backfill_report
 

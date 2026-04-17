@@ -673,6 +673,102 @@ class TestResearchUtils(unittest.TestCase):
         self.assertEqual(reviewed_item["reviewer"], "tester")
         self.assertEqual(reviewed_item["decision_basis"], "人工术语复核")
 
+    def test_build_research_dashboard_payload_includes_learning_feedback_board(self):
+        snapshot = {
+            "job_id": "job-learning-feedback",
+            "topic": "学习反馈看板",
+            "status": "completed",
+            "progress": 100,
+            "current_phase": "reflect",
+            "result": {
+                "cycle_id": "cycle-learning-feedback",
+                "phases": [
+                    {
+                        "phase": "reflect",
+                        "status": "completed",
+                        "duration_sec": 2.0,
+                        "summary": {"feedback_record_count": 3},
+                    }
+                ],
+                "pipeline_metadata": {"cycle_name": "feedback-demo"},
+                "learning_feedback_library": {
+                    "contract_version": "research-feedback-library.v1",
+                    "summary": {
+                        "record_count": 3,
+                        "phase_record_count": 2,
+                        "latest_cycle_score": 0.82,
+                        "cycle_trend": "improving",
+                        "weak_phase_names": ["analyze"],
+                        "recorded_phase_names": ["observe", "analyze"],
+                        "strategy_changed": True,
+                    },
+                    "replay_feedback": {
+                        "status": "completed",
+                        "iteration_number": 3,
+                        "learning_summary": {
+                            "recorded_phases": ["observe", "analyze"],
+                            "weak_phases": ["analyze"],
+                            "tuned_parameters": {
+                                "max_concurrent_tasks": 6,
+                                "quality_threshold": 0.74,
+                            },
+                        },
+                    },
+                    "records": [
+                        {
+                            "feedback_scope": "cycle_summary",
+                            "feedback_status": "summary",
+                            "overall_score": 0.82,
+                            "cycle_trend": "improving",
+                            "strategy_changed": True,
+                            "improvement_priorities": ["优先: 提升analyze阶段数据完整性 (评分 0.35)"],
+                            "details": {
+                                "learning_summary": {
+                                    "recorded_phases": ["observe", "analyze"],
+                                    "weak_phases": ["analyze"],
+                                    "tuned_parameters": {
+                                        "max_concurrent_tasks": 6,
+                                        "quality_threshold": 0.74,
+                                    },
+                                }
+                            },
+                        },
+                        {
+                            "feedback_scope": "phase_assessment",
+                            "target_phase": "observe",
+                            "feedback_status": "strength",
+                            "overall_score": 0.88,
+                        },
+                        {
+                            "feedback_scope": "phase_assessment",
+                            "target_phase": "analyze",
+                            "feedback_status": "weakness",
+                            "overall_score": 0.35,
+                            "issues": ["证据链衔接松散"],
+                        },
+                    ],
+                },
+            },
+        }
+
+        payload = build_research_dashboard_payload(snapshot)
+        board = payload["learning_feedback_board"]
+
+        self.assertTrue(board["available"])
+        self.assertEqual(board["contract_version"], "research-feedback-library.v1")
+        self.assertEqual(board["record_count"], 3)
+        self.assertEqual(board["phase_record_count"], 2)
+        self.assertEqual(board["cycle_trend_label"], "持续改善")
+        self.assertEqual(board["weak_phase_labels"], ["分析阶段"])
+        self.assertEqual(board["recorded_phase_labels"], ["观察阶段", "分析阶段"])
+        self.assertTrue(board["strategy_changed"])
+        self.assertEqual(board["iteration_number"], 3)
+        self.assertEqual(board["tuned_parameters"]["quality_threshold"], 0.74)
+        self.assertEqual(board["improvement_priorities"][0], "优先: 提升analyze阶段数据完整性 (评分 0.35)")
+        self.assertEqual(board["recent_records"][0]["feedback_status_label"], "优势")
+        self.assertEqual(board["recent_records"][1]["feedback_status_label"], "薄弱项")
+        self.assertEqual(board["recent_records"][1]["issue_preview"], ["证据链衔接松散"])
+
     def test_build_research_dashboard_payload_applies_catalog_filters_and_exposes_filter_options(self):
         snapshot = {
             "job_id": "job-filtered-philology",

@@ -19,6 +19,7 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence
 from sqlalchemy import (
     CHAR,
     JSON,
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -572,6 +573,12 @@ class ResearchSession(Base):
     artifacts = relationship(
         "ResearchArtifact", back_populates="session", cascade="all, delete-orphan", order_by="ResearchArtifact.created_at",
     )
+    learning_feedback_records = relationship(
+        "ResearchLearningFeedback",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="ResearchLearningFeedback.created_at",
+    )
 
     __table_args__ = (
         Index("idx_rs_status", "status"),
@@ -604,6 +611,10 @@ class PhaseExecution(Base):
     session = relationship("ResearchSession", back_populates="phase_executions")
     artifacts = relationship(
         "ResearchArtifact", back_populates="phase_execution", cascade="all, delete-orphan",
+    )
+    learning_feedback_records = relationship(
+        "ResearchLearningFeedback",
+        back_populates="phase_execution",
     )
 
     __table_args__ = (
@@ -640,6 +651,49 @@ class ResearchArtifact(Base):
     __table_args__ = (
         Index("idx_ra_session", "session_id"),
         Index("idx_ra_type", "artifact_type"),
+    )
+
+
+class ResearchLearningFeedback(Base):
+    """Research feedback library entries for replay and long-term querying."""
+
+    __tablename__ = "research_learning_feedback"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(GUID(), ForeignKey("research_sessions.id", ondelete="CASCADE"), nullable=False)
+    cycle_id = Column(String(128), nullable=False)
+    phase_execution_id = Column(GUID(), ForeignKey("phase_executions.id", ondelete="SET NULL"), nullable=True)
+    feedback_scope = Column(String(64), nullable=False)
+    source_phase = Column(String(64), nullable=False, default="reflect")
+    target_phase = Column(String(64), nullable=True)
+    feedback_status = Column(String(64), nullable=False, default="tracked")
+    overall_score = Column(Float, nullable=True)
+    grade_level = Column(String(64), nullable=True)
+    cycle_trend = Column(String(64), nullable=True)
+    issue_count = Column(Integer, default=0, nullable=False)
+    weakness_count = Column(Integer, default=0, nullable=False)
+    strength_count = Column(Integer, default=0, nullable=False)
+    strategy_changed = Column(Boolean, default=False, nullable=False)
+    strategy_before_fingerprint = Column(String(64), nullable=True)
+    strategy_after_fingerprint = Column(String(64), nullable=True)
+    recorded_phase_names = Column(StringListType(), default=list, nullable=False)
+    weak_phase_names = Column(StringListType(), default=list, nullable=False)
+    quality_dimensions_json = Column(Text, nullable=False, default="{}")
+    issues_json = Column(Text, nullable=False, default="[]")
+    improvement_priorities_json = Column(Text, nullable=False, default="[]")
+    replay_feedback_json = Column(Text, nullable=False, default="{}")
+    details_json = Column(Text, nullable=False, default="{}")
+    metadata_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    session = relationship("ResearchSession", back_populates="learning_feedback_records")
+    phase_execution = relationship("PhaseExecution", back_populates="learning_feedback_records")
+
+    __table_args__ = (
+        Index("idx_rlf_cycle", "cycle_id"),
+        Index("idx_rlf_cycle_scope", "cycle_id", "feedback_scope"),
+        Index("idx_rlf_target_phase", "target_phase"),
+        Index("idx_rlf_created", "created_at"),
     )
 
 

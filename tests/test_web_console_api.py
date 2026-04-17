@@ -14,6 +14,94 @@ from web_console.app import create_app
 from web_console.job_manager import ResearchJobManager
 
 
+def _make_learning_feedback_payload():
+    replay_feedback = {
+        "status": "completed",
+        "iteration_number": 3,
+        "learning_summary": {
+            "recorded_phases": ["observe", "analyze"],
+            "weak_phase_count": 1,
+            "cycle_trend": "improving",
+            "tuned_parameters": {
+                "max_concurrent_tasks": 6,
+                "quality_threshold": 0.74,
+            },
+        },
+        "quality_assessment": {"overall_cycle_score": 0.82},
+    }
+    return {
+        "contract_version": "research-feedback-library.v1",
+        "replay_feedback": replay_feedback,
+        "records": [
+            {
+                "feedback_scope": "cycle_summary",
+                "source_phase": "reflect",
+                "feedback_status": "summary",
+                "overall_score": 0.82,
+                "cycle_trend": "improving",
+                "issue_count": 1,
+                "weakness_count": 1,
+                "strength_count": 1,
+                "strategy_changed": True,
+                "strategy_before_fingerprint": "before-001",
+                "strategy_after_fingerprint": "after-001",
+                "recorded_phase_names": ["observe", "analyze"],
+                "weak_phase_names": ["analyze"],
+                "improvement_priorities": ["优先: 提升analyze阶段数据完整性 (评分 0.35)"],
+                "replay_feedback": replay_feedback,
+                "details": {
+                    "learning_summary": replay_feedback["learning_summary"],
+                    "quality_assessment": replay_feedback["quality_assessment"],
+                    "strategy_diff": {
+                        "changed": True,
+                        "before_fingerprint": "before-001",
+                        "after_fingerprint": "after-001",
+                    },
+                },
+            },
+            {
+                "feedback_scope": "phase_assessment",
+                "source_phase": "reflect",
+                "target_phase": "observe",
+                "feedback_status": "strength",
+                "overall_score": 0.88,
+                "grade_level": "high",
+                "strength_count": 1,
+                "recorded_phase_names": ["observe"],
+                "quality_dimensions": {
+                    "completeness": 0.9,
+                    "consistency": 0.84,
+                    "evidence_quality": 0.86,
+                },
+                "details": {
+                    "strength": {"phase": "observe", "score": 0.88},
+                },
+            },
+            {
+                "feedback_scope": "phase_assessment",
+                "source_phase": "reflect",
+                "target_phase": "analyze",
+                "feedback_status": "weakness",
+                "overall_score": 0.35,
+                "grade_level": "very_low",
+                "issue_count": 1,
+                "weakness_count": 1,
+                "recorded_phase_names": ["analyze"],
+                "weak_phase_names": ["analyze"],
+                "quality_dimensions": {
+                    "completeness": 0.31,
+                    "consistency": 0.42,
+                    "evidence_quality": 0.28,
+                },
+                "issues": ["证据链衔接松散"],
+                "details": {
+                    "weakness": {"phase": "analyze", "score": 0.35, "issues": ["证据链衔接松散"]},
+                },
+            },
+        ],
+    }
+
+
 class FakeRunner:
 
     def __init__(self, _config=None):
@@ -390,6 +478,42 @@ class TestWebConsoleApi(unittest.TestCase):
             },
         )
 
+    def _persist_learning_feedback_session(self, cycle_id: str, analyze_target_phase: str = "analyze") -> None:
+        repo = ResearchSessionRepository(self.client.app.state.db_manager)
+        if repo.get_session(cycle_id) is not None:
+            repo.delete_session(cycle_id)
+        payload = json.loads(json.dumps(_make_learning_feedback_payload(), ensure_ascii=False))
+        if analyze_target_phase != "analyze":
+            payload["records"][0]["weak_phase_names"] = [analyze_target_phase]
+            payload["records"][0]["improvement_priorities"] = [
+                f"优先: 提升{analyze_target_phase}阶段数据完整性 (评分 0.35)"
+            ]
+            payload["records"][0]["details"]["learning_summary"]["recorded_phases"] = ["observe", analyze_target_phase]
+            payload["records"][0]["details"]["learning_summary"]["weak_phase_count"] = 1
+            payload["records"][2]["target_phase"] = analyze_target_phase
+            payload["records"][2]["recorded_phase_names"] = [analyze_target_phase]
+            payload["records"][2]["weak_phase_names"] = [analyze_target_phase]
+            payload["records"][2]["details"]["weakness"]["phase"] = analyze_target_phase
+        repo.create_session(
+            {
+                "cycle_id": cycle_id,
+                "cycle_name": "learning feedback session",
+                "description": "learning feedback query api",
+                "research_objective": "验证 learning feedback 管理 API 查询入口",
+                "status": "completed",
+                "current_phase": "reflect",
+            }
+        )
+        phase = repo.add_phase_execution(
+            cycle_id,
+            {"phase": "reflect", "status": "completed", "output": {"phase": "reflect", "status": "completed"}},
+        )
+        repo.replace_learning_feedback_library(
+            cycle_id,
+            payload,
+            phase_execution_id=phase["id"],
+        )
+
     def test_health_endpoint(self):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
@@ -711,6 +835,60 @@ class TestWebConsoleApi(unittest.TestCase):
         )
         self.assertEqual(payload["result"]["research_artifact"]["similar_formula_graph_evidence_summary"]["match_count"], 1)
 
+    def test_learning_feedback_session_endpoint_returns_library(self):
+        self._persist_learning_feedback_session("feedback-api")
+
+        response = self.client.get("/api/research/sessions/feedback-api/learning-feedback")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        self.assertEqual(payload["cycle_id"], "feedback-api")
+        self.assertEqual(payload["contract_version"], "research-feedback-library.v1")
+        self.assertEqual(payload["summary"]["record_count"], 3)
+        self.assertEqual(payload["summary"]["cycle_trend"], "improving")
+        self.assertEqual(payload["records"][0]["feedback_scope"], "cycle_summary")
+        self.assertEqual(
+            payload["replay_feedback"]["learning_summary"]["tuned_parameters"]["max_concurrent_tasks"],
+            6,
+        )
+
+    def test_learning_feedback_job_endpoint_resolves_cycle_id(self):
+        create_response = self.client.post("/api/research/jobs", json={"topic": "learning feedback job"})
+        self.assertEqual(create_response.status_code, 202)
+        job_id = create_response.json()["job_id"]
+
+        for _ in range(20):
+            status_response = self.client.get(f"/api/research/jobs/{job_id}")
+            payload = status_response.json()
+            if payload["status"] in {"completed", "partial", "failed"}:
+                break
+            time.sleep(0.01)
+
+        self._persist_learning_feedback_session("cycle-1")
+        response = self.client.get(f"/api/research/jobs/{job_id}/learning-feedback")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        self.assertEqual(payload["cycle_id"], "cycle-1")
+        self.assertEqual(payload["summary"]["weak_phase_names"], ["analyze"])
+        self.assertEqual(len(payload["records"]), 3)
+
+    def test_learning_feedback_list_endpoint_filters_items(self):
+        self._persist_learning_feedback_session("feedback-list-a", analyze_target_phase="synthesize")
+        self._persist_learning_feedback_session("feedback-list-b", analyze_target_phase="synthesize")
+
+        response = self.client.get(
+            "/api/research/learning-feedback?feedback_scope=phase_assessment&target_phase=synthesize&limit=10"
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        self.assertEqual(payload["total"], 2)
+        self.assertEqual(payload["limit"], 10)
+        self.assertEqual(payload["filters"]["feedback_scope"], "phase_assessment")
+        self.assertEqual(payload["filters"]["target_phase"], "synthesize")
+        self.assertTrue(all(item["target_phase"] == "synthesize" for item in payload["items"]))
+
     def test_job_status_omits_publish_mining_alias_fields(self):
         create_response = self.client.post("/api/research/jobs", json={"topic": "桂枝汤 publish 契约"})
         self.assertEqual(create_response.status_code, 202)
@@ -852,6 +1030,37 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertEqual(payload["protocol_inputs"]["primary_outcome"], "症状评分")
         self.assertEqual(payload["protocol_inputs"]["intervention"], "桂枝汤")
         self.assertEqual(payload["protocol_inputs"]["comparison"], "常规治疗")
+
+    def test_dashboard_endpoint_includes_learning_feedback_board_from_repository(self):
+        create_response = self.client.post("/api/research/jobs", json={"topic": "学习反馈 dashboard"})
+        self.assertEqual(create_response.status_code, 202)
+        job_id = create_response.json()["job_id"]
+
+        for _ in range(20):
+            status_response = self.client.get(f"/api/research/jobs/{job_id}")
+            status_payload = status_response.json()
+            if status_payload["status"] in {"completed", "partial", "failed"}:
+                break
+            time.sleep(0.01)
+
+        self._persist_learning_feedback_session("cycle-1")
+
+        dashboard_response = self.client.get(f"/api/research/jobs/{job_id}/dashboard")
+        self.assertEqual(dashboard_response.status_code, 200)
+        payload = dashboard_response.json()
+        board = payload["learning_feedback_board"]
+
+        self.assertTrue(board["available"])
+        self.assertEqual(board["contract_version"], "research-feedback-library.v1")
+        self.assertEqual(board["record_count"], 3)
+        self.assertEqual(board["phase_record_count"], 2)
+        self.assertEqual(board["cycle_trend_label"], "持续改善")
+        self.assertEqual(board["weak_phase_labels"], ["分析阶段"])
+        self.assertTrue(board["strategy_changed"])
+        self.assertEqual(board["iteration_number"], 3)
+        self.assertEqual(board["tuned_parameters"]["quality_threshold"], 0.74)
+        self.assertEqual(board["recent_records"][0]["feedback_status"], "strength")
+        self.assertEqual(board["recent_records"][1]["feedback_status"], "weakness")
 
     def test_dashboard_endpoint_accepts_catalog_filter_query_params(self):
         create_response = self.client.post("/api/research/jobs", json={"topic": "目录筛选看板"})

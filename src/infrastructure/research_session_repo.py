@@ -34,10 +34,17 @@ from src.infrastructure.persistence import (
     RelationshipType,
     ResearchAnalysis,
     ResearchArtifact,
+    ResearchLearningFeedback,
     ResearchSession,
     SessionStatusEnum,
     _json_dumps,
     _json_loads,
+)
+from src.research.learning_feedback_contract import (
+    CONTRACT_VERSION as LEARNING_FEEDBACK_CONTRACT_VERSION,
+)
+from src.research.learning_feedback_contract import (
+    normalize_learning_feedback_record,
 )
 from src.research.observe_philology import (
     OBSERVE_PHILOLOGY_CATALOG_REVIEW_ARTIFACT,
@@ -420,6 +427,125 @@ class ResearchSessionRepository:
             session.delete(artifact)
             session.flush()
             return True
+
+    # ---- 学习反馈库 -----------------------------------------------------
+
+    def replace_learning_feedback_library(
+        self,
+        cycle_id: str,
+        payload: Mapping[str, Any],
+        *,
+        phase_execution_id: Optional[str] = None,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        with self._session_scope(session) as db_session:
+            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            if rs is None:
+                return None
+
+            raw_records = payload.get("records") if isinstance(payload.get("records"), list) else []
+            normalized_records = [
+                normalize_learning_feedback_record(item)
+                for item in raw_records
+                if isinstance(item, Mapping)
+            ]
+            db_session.query(ResearchLearningFeedback).filter_by(session_id=rs.id).delete(
+                synchronize_session=False,
+            )
+
+            default_phase_execution_id: Optional[uuid.UUID] = None
+            if phase_execution_id:
+                default_phase_execution_id = uuid.UUID(str(phase_execution_id))
+
+            for record in normalized_records:
+                record_phase_execution_id = default_phase_execution_id
+                raw_phase_execution_id = record.get("phase_execution_id")
+                if raw_phase_execution_id:
+                    record_phase_execution_id = uuid.UUID(str(raw_phase_execution_id))
+                metadata = dict(record.get("metadata") or {})
+                metadata.setdefault(
+                    "contract_version",
+                    str(payload.get("contract_version") or LEARNING_FEEDBACK_CONTRACT_VERSION),
+                )
+
+                db_session.add(
+                    ResearchLearningFeedback(
+                        session_id=rs.id,
+                        cycle_id=cycle_id,
+                        phase_execution_id=record_phase_execution_id,
+                        feedback_scope=str(record.get("feedback_scope") or "phase_assessment"),
+                        source_phase=str(record.get("source_phase") or "reflect"),
+                        target_phase=str(record.get("target_phase") or "").strip() or None,
+                        feedback_status=str(record.get("feedback_status") or "tracked"),
+                        overall_score=record.get("overall_score"),
+                        grade_level=str(record.get("grade_level") or "").strip() or None,
+                        cycle_trend=str(record.get("cycle_trend") or "").strip() or None,
+                        issue_count=max(int(record.get("issue_count") or 0), 0),
+                        weakness_count=max(int(record.get("weakness_count") or 0), 0),
+                        strength_count=max(int(record.get("strength_count") or 0), 0),
+                        strategy_changed=bool(record.get("strategy_changed")),
+                        strategy_before_fingerprint=str(record.get("strategy_before_fingerprint") or "").strip() or None,
+                        strategy_after_fingerprint=str(record.get("strategy_after_fingerprint") or "").strip() or None,
+                        recorded_phase_names=list(record.get("recorded_phase_names") or []),
+                        weak_phase_names=list(record.get("weak_phase_names") or []),
+                        quality_dimensions_json=_json_dumps(record.get("quality_dimensions"), "{}"),
+                        issues_json=_json_dumps(record.get("issues"), "[]"),
+                        improvement_priorities_json=_json_dumps(record.get("improvement_priorities"), "[]"),
+                        replay_feedback_json=_json_dumps(record.get("replay_feedback"), "{}"),
+                        details_json=_json_dumps(record.get("details"), "{}"),
+                        metadata_json=_json_dumps(metadata, "{}"),
+                    )
+                )
+
+            db_session.flush()
+            stored_records = self._list_learning_feedback_records(db_session, cycle_id)
+            return self._build_learning_feedback_library_snapshot(stored_records)
+
+    def get_learning_feedback_library(
+        self,
+        cycle_id: str,
+        *,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        with self._session_scope(session) as db_session:
+            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            if rs is None:
+                return None
+            return self._build_learning_feedback_library_snapshot(
+                self._list_learning_feedback_records(db_session, cycle_id),
+            )
+
+    def list_learning_feedback(
+        self,
+        cycle_id: Optional[str] = None,
+        *,
+        feedback_scope: Optional[str] = None,
+        target_phase: Optional[str] = None,
+        cycle_trend: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        with self._db.session_scope() as session:
+            query = session.query(ResearchLearningFeedback).order_by(ResearchLearningFeedback.created_at.desc())
+            if cycle_id:
+                query = query.filter(ResearchLearningFeedback.cycle_id == cycle_id)
+            if feedback_scope:
+                query = query.filter(
+                    ResearchLearningFeedback.feedback_scope == str(feedback_scope).strip().lower(),
+                )
+            if target_phase:
+                query = query.filter(ResearchLearningFeedback.target_phase == str(target_phase).strip().lower())
+            if cycle_trend:
+                query = query.filter(ResearchLearningFeedback.cycle_trend == str(cycle_trend).strip().lower())
+
+            total = query.count()
+            items = query.offset(offset).limit(limit).all()
+            return {
+                "items": [self._learning_feedback_to_dict(item) for item in items],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
 
     def upsert_observe_catalog_review(
         self,
@@ -812,6 +938,9 @@ class ResearchSessionRepository:
             ]
             result["observe_documents"] = self._list_observe_document_graphs(session, cycle_id)
             result["version_lineages"] = self._group_observe_version_lineages(result["observe_documents"])
+            result["learning_feedback_library"] = self._build_learning_feedback_library_snapshot(
+                self._list_learning_feedback_records(session, cycle_id),
+            )
             result["observe_philology"] = resolve_observe_philology_assets(
                 artifacts=result["artifacts"],
                 observe_phase_result=self._phase_output_by_name(result["phase_executions"], "observe"),
@@ -1077,6 +1206,119 @@ class ResearchSessionRepository:
             "created_at": a.created_at.isoformat() if a.created_at else None,
             "updated_at": a.updated_at.isoformat() if a.updated_at else None,
         }
+
+    @staticmethod
+    def _learning_feedback_to_dict(feedback: ResearchLearningFeedback) -> Dict[str, Any]:
+        details = _json_loads(feedback.details_json, {})
+        record = {
+            "id": str(feedback.id),
+            "session_id": str(feedback.session_id),
+            "cycle_id": feedback.cycle_id,
+            "phase_execution_id": str(feedback.phase_execution_id) if feedback.phase_execution_id else None,
+            "feedback_scope": feedback.feedback_scope,
+            "source_phase": feedback.source_phase,
+            "target_phase": feedback.target_phase,
+            "feedback_status": feedback.feedback_status,
+            "overall_score": feedback.overall_score,
+            "grade_level": feedback.grade_level,
+            "cycle_trend": feedback.cycle_trend,
+            "issue_count": feedback.issue_count,
+            "weakness_count": feedback.weakness_count,
+            "strength_count": feedback.strength_count,
+            "strategy_changed": bool(feedback.strategy_changed),
+            "strategy_before_fingerprint": feedback.strategy_before_fingerprint,
+            "strategy_after_fingerprint": feedback.strategy_after_fingerprint,
+            "recorded_phase_names": list(feedback.recorded_phase_names or []),
+            "weak_phase_names": list(feedback.weak_phase_names or []),
+            "quality_dimensions": _json_loads(feedback.quality_dimensions_json, {}),
+            "issues": _json_loads(feedback.issues_json, []),
+            "improvement_priorities": _json_loads(feedback.improvement_priorities_json, []),
+            "replay_feedback": _json_loads(feedback.replay_feedback_json, {}),
+            "details": details if isinstance(details, dict) else {},
+            "metadata": _json_loads(feedback.metadata_json, {}),
+            "created_at": feedback.created_at.isoformat() if feedback.created_at else None,
+        }
+        if isinstance(details, dict):
+            for key in (
+                "reflections",
+                "improvement_plan",
+                "learning_summary",
+                "quality_assessment",
+                "strategy_diff",
+                "tuned_parameters",
+                "learning_application_summary",
+            ):
+                value = details.get(key)
+                if value not in (None, "", [], {}):
+                    record[key] = value
+        return record
+
+    @staticmethod
+    def _build_learning_feedback_library_summary(records: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+        cycle_summary = next(
+            (
+                record
+                for record in records
+                if str(record.get("feedback_scope") or "") == "cycle_summary"
+            ),
+            {},
+        )
+        return {
+            "record_count": len(records),
+            "phase_record_count": sum(
+                1 for record in records if str(record.get("feedback_scope") or "") == "phase_assessment"
+            ),
+            "latest_cycle_score": cycle_summary.get("overall_score"),
+            "cycle_trend": cycle_summary.get("cycle_trend"),
+            "weak_phase_names": list(cycle_summary.get("weak_phase_names") or []),
+            "recorded_phase_names": list(cycle_summary.get("recorded_phase_names") or []),
+            "strategy_changed": bool(cycle_summary.get("strategy_changed")),
+            "latest_feedback_at": cycle_summary.get("created_at"),
+        }
+
+    @classmethod
+    def _build_learning_feedback_library_snapshot(
+        cls,
+        records: Sequence[Mapping[str, Any]],
+    ) -> Dict[str, Any]:
+        normalized_records = [dict(record) for record in records if isinstance(record, Mapping)]
+        contract_version = LEARNING_FEEDBACK_CONTRACT_VERSION
+        for record in normalized_records:
+            metadata = record.get("metadata") if isinstance(record.get("metadata"), Mapping) else {}
+            version = str(metadata.get("contract_version") or "").strip()
+            if version:
+                contract_version = version
+                break
+        cycle_summary = next(
+            (
+                record
+                for record in normalized_records
+                if str(record.get("feedback_scope") or "") == "cycle_summary"
+            ),
+            {},
+        )
+        replay_feedback = cycle_summary.get("replay_feedback") if isinstance(cycle_summary, Mapping) else {}
+        if not isinstance(replay_feedback, Mapping):
+            replay_feedback = {}
+        return {
+            "contract_version": contract_version,
+            "summary": cls._build_learning_feedback_library_summary(normalized_records),
+            "replay_feedback": dict(replay_feedback),
+            "records": normalized_records,
+        }
+
+    def _list_learning_feedback_records(
+        self,
+        session: Session,
+        cycle_id: str,
+    ) -> List[Dict[str, Any]]:
+        items = (
+            session.query(ResearchLearningFeedback)
+            .filter(ResearchLearningFeedback.cycle_id == cycle_id)
+            .order_by(ResearchLearningFeedback.created_at.asc())
+            .all()
+        )
+        return [self._learning_feedback_to_dict(item) for item in items]
 
     @staticmethod
     def _entity_to_dict(entity: Entity) -> Dict[str, Any]:

@@ -3779,6 +3779,102 @@
             return box;
         }
 
+        function formatLearningFeedbackTrend(value) {
+            const normalized = String(value || "").trim().toLowerCase();
+            if (!normalized) {
+                return "";
+            }
+            const trendMap = {
+                improving: "持续改善",
+                stable: "基本稳定",
+                declining: "表现下滑",
+                regressing: "表现回退",
+                mixed: "波动中",
+            };
+            return trendMap[normalized] || normalized;
+        }
+
+        function formatLearningFeedbackParameterValue(value) {
+            if (typeof value === "number" && Number.isFinite(value)) {
+                if (value >= 0 && value <= 1) {
+                    return formatPercentLike(value, 1);
+                }
+                return Number.isInteger(value) ? String(value) : value.toFixed(2);
+            }
+            return String(value || "").trim();
+        }
+
+        function formatLearningFeedbackParameters(parameters) {
+            if (!parameters || typeof parameters !== "object") {
+                return "";
+            }
+            const items = Object.entries(parameters)
+                .filter(([key, value]) => String(key || "").trim() && value !== undefined && value !== null && value !== "")
+                .slice(0, 3)
+                .map(([key, value]) => `${key}=${formatLearningFeedbackParameterValue(value)}`);
+            return items.join("；");
+        }
+
+        function buildDashboardLearningFeedbackLines(learningFeedbackBoard) {
+            if (!learningFeedbackBoard || typeof learningFeedbackBoard !== "object" || !learningFeedbackBoard.available) {
+                return ["当前周期尚未沉淀学习反馈。"]; 
+            }
+
+            const lines = [];
+            lines.push(`记录数：${safeNumber(learningFeedbackBoard.record_count, 0)}（阶段 ${safeNumber(learningFeedbackBoard.phase_record_count, 0)}）`);
+
+            if (learningFeedbackBoard.latest_cycle_score !== undefined && learningFeedbackBoard.latest_cycle_score !== null && learningFeedbackBoard.latest_cycle_score !== "") {
+                lines.push(`周期评分：${formatPercentLike(learningFeedbackBoard.latest_cycle_score, 1)}`);
+            }
+
+            const trendText = learningFeedbackBoard.cycle_trend_label || formatLearningFeedbackTrend(learningFeedbackBoard.cycle_trend);
+            if (trendText) {
+                lines.push(`学习趋势：${trendText}`);
+            }
+
+            const weakPhaseLabels = Array.isArray(learningFeedbackBoard.weak_phase_labels)
+                ? learningFeedbackBoard.weak_phase_labels.filter(Boolean)
+                : [];
+            if (weakPhaseLabels.length > 0) {
+                lines.push(`薄弱阶段：${weakPhaseLabels.join("、")}`);
+            }
+
+            lines.push(`策略调整：${learningFeedbackBoard.strategy_changed ? "已发生" : "无变更"}`);
+
+            if (learningFeedbackBoard.iteration_number !== undefined && learningFeedbackBoard.iteration_number !== null && learningFeedbackBoard.iteration_number !== "") {
+                lines.push(`反馈迭代：第 ${learningFeedbackBoard.iteration_number} 轮`);
+            }
+
+            const parameterText = formatLearningFeedbackParameters(learningFeedbackBoard.tuned_parameters);
+            if (parameterText) {
+                lines.push(`调优参数：${parameterText}`);
+            }
+
+            const priorities = Array.isArray(learningFeedbackBoard.improvement_priorities)
+                ? learningFeedbackBoard.improvement_priorities.filter(Boolean)
+                : [];
+            if (priorities.length > 0) {
+                lines.push(`优先改进：${priorities[0]}`);
+            }
+
+            const recentRecords = Array.isArray(learningFeedbackBoard.recent_records)
+                ? learningFeedbackBoard.recent_records.slice(0, 2)
+                : [];
+            recentRecords.forEach((record) => {
+                const phaseLabel = record.target_phase_label || record.target_phase || record.feedback_scope || "反馈项";
+                const statusLabel = record.feedback_status_label || record.feedback_status || "反馈";
+                const scoreText = record.overall_score !== undefined && record.overall_score !== null && record.overall_score !== ""
+                    ? ` ${formatPercentLike(record.overall_score, 1)}`
+                    : "";
+                const issuePreview = Array.isArray(record.issue_preview) && record.issue_preview.length > 0
+                    ? `；问题 ${record.issue_preview.join("、")}`
+                    : "";
+                lines.push(`反馈项：${phaseLabel} ${statusLabel}${scoreText}${issuePreview}`);
+            });
+
+            return lines;
+        }
+
         function formatCatalogReviewMeta(record) {
             if (!record || typeof record !== "object") {
                 return "尚无人工校核记录。";
@@ -4299,6 +4395,9 @@
             const phaseBoard = payload.phase_board && typeof payload.phase_board === "object" ? payload.phase_board : {};
             const qualityBoard = payload.quality_board && typeof payload.quality_board === "object" ? payload.quality_board : {};
             const evidenceBoard = payload.evidence_board && typeof payload.evidence_board === "object" ? payload.evidence_board : {};
+            const learningFeedbackBoard = payload.learning_feedback_board && typeof payload.learning_feedback_board === "object"
+                ? payload.learning_feedback_board
+                : {};
             const knowledgeGraphBoard = payload.knowledge_graph_board && typeof payload.knowledge_graph_board === "object"
                 ? payload.knowledge_graph_board
                 : {};
@@ -4523,6 +4622,10 @@
                     `完整度：${formatPercentLike(qualityBoard.completeness, 1)}`,
                     `综合质量：${formatPercentLike(qualityBoard.quality_score, 1)}`,
                 ])
+            );
+
+            auxGrid.appendChild(
+                buildDashboardBox("学习反馈", buildDashboardLearningFeedbackLines(learningFeedbackBoard))
             );
 
             auxGrid.appendChild(

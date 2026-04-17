@@ -122,6 +122,66 @@ class TestAnalyzePhaseContract(unittest.TestCase):
         self.assertEqual(get_phase_value(result, "reasoning_results", {}), result["results"]["reasoning_results"])
         self.assertEqual(get_phase_deprecated_fallbacks(result), [])
 
+    def test_analysis_results_include_canonical_evidence_protocol(self):
+        pipeline = _FakePipeline()
+        mock_engine = MagicMock()
+        mock_engine.initialize.return_value = True
+        mock_engine.execute.return_value = {
+            "reasoning_results": {
+                "entity_relationships": [
+                    {
+                        "source": "桂枝",
+                        "target": "营卫",
+                        "type": "调和",
+                        "confidence": 0.91,
+                    }
+                ]
+            }
+        }
+        pipeline.analysis_port.create_reasoning_engine.side_effect = None
+        pipeline.analysis_port.create_reasoning_engine.return_value = mock_engine
+
+        mixin = _AnalyzeMixin(pipeline)
+        mixin._grade_analyze_evidence = MagicMock(  # type: ignore[method-assign]
+            return_value=(
+                {
+                    "overall_grade": "moderate",
+                    "overall_score": 0.72,
+                    "study_count": 1,
+                    "summary": ["纳入 1 项研究进行 GRADE 评估"],
+                },
+                "",
+            )
+        )
+
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(),
+            {
+                "analysis_records": _sample_records(),
+                "relationships": _sample_relationships(),
+                "literature_records": [
+                    {
+                        "title": "伤寒论",
+                        "authors": ["张仲景"],
+                        "year": 210,
+                        "source_type": "classical_text",
+                        "source_ref": "urn:shanghanlun",
+                        "abstract": "论桂枝汤证。",
+                    }
+                ],
+            },
+        )
+
+        protocol = result["results"].get("evidence_protocol", {})
+        self.assertEqual(protocol.get("contract_version"), "evidence-claim-v2")
+        self.assertEqual(protocol["evidence_records"][0]["title"], "伤寒论")
+        self.assertEqual(protocol["claims"][0]["source_entity"], "桂枝")
+        self.assertEqual(protocol["citation_records"][0]["source_ref"], "urn:shanghanlun")
+        self.assertEqual(protocol["evidence_grade_summary"]["overall_grade"], "moderate")
+        self.assertTrue(result["metadata"]["evidence_protocol_generated"])
+        self.assertEqual(result["metadata"]["evidence_record_count"], 1)
+        self.assertEqual(result["metadata"]["evidence_claim_count"], 1)
+
 
 # ---------------------------------------------------------------------------
 # 2) 正常路径：有记录时产出统计分析

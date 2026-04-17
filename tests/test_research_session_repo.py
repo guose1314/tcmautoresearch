@@ -19,6 +19,7 @@ from src.infrastructure.persistence import (
     PhaseExecution,
     PhaseStatusEnum,
     ResearchArtifact,
+    ResearchLearningFeedback,
     ResearchSession,
     SessionStatusEnum,
 )
@@ -95,6 +96,90 @@ def _make_payload(**overrides):
     return base
 
 
+def _make_learning_feedback_payload() -> dict:
+    replay_feedback = {
+        "status": "completed",
+        "iteration_number": 3,
+        "learning_summary": {
+            "recorded_phases": ["observe", "analyze"],
+            "weak_phase_count": 1,
+            "cycle_trend": "improving",
+            "tuned_parameters": {
+                "max_concurrent_tasks": 6,
+                "quality_threshold": 0.74,
+            },
+        },
+        "quality_assessment": {"overall_cycle_score": 0.82},
+    }
+    return {
+        "contract_version": "research-feedback-library.v1",
+        "replay_feedback": replay_feedback,
+        "records": [
+            {
+                "feedback_scope": "cycle_summary",
+                "source_phase": "reflect",
+                "feedback_status": "summary",
+                "overall_score": 0.82,
+                "cycle_trend": "improving",
+                "issue_count": 1,
+                "weakness_count": 1,
+                "strength_count": 1,
+                "strategy_changed": True,
+                "strategy_before_fingerprint": "before-001",
+                "strategy_after_fingerprint": "after-001",
+                "recorded_phase_names": ["observe", "analyze"],
+                "weak_phase_names": ["analyze"],
+                "improvement_priorities": ["优先: 提升analyze阶段数据完整性 (评分 0.35)"],
+                "replay_feedback": replay_feedback,
+                "details": {
+                    "learning_summary": replay_feedback["learning_summary"],
+                    "quality_assessment": replay_feedback["quality_assessment"],
+                    "strategy_diff": {
+                        "changed": True,
+                        "before_fingerprint": "before-001",
+                        "after_fingerprint": "after-001",
+                    },
+                    "tuned_parameters": replay_feedback["learning_summary"]["tuned_parameters"],
+                },
+            },
+            {
+                "feedback_scope": "phase_assessment",
+                "source_phase": "reflect",
+                "target_phase": "observe",
+                "feedback_status": "strength",
+                "overall_score": 0.91,
+                "grade_level": "high",
+                "strength_count": 1,
+                "recorded_phase_names": ["observe"],
+                "quality_dimensions": {
+                    "completeness": 0.9,
+                    "consistency": 0.88,
+                    "evidence_quality": 0.93,
+                },
+                "issues": [],
+            },
+            {
+                "feedback_scope": "phase_assessment",
+                "source_phase": "reflect",
+                "target_phase": "analyze",
+                "feedback_status": "weakness",
+                "overall_score": 0.35,
+                "grade_level": "very_low",
+                "issue_count": 1,
+                "weakness_count": 1,
+                "recorded_phase_names": ["analyze"],
+                "weak_phase_names": ["analyze"],
+                "quality_dimensions": {
+                    "completeness": 0.3,
+                    "consistency": 0.4,
+                    "evidence_quality": 0.2,
+                },
+                "issues": ["missing required: status"],
+            },
+        ],
+    }
+
+
 # ---------------------------------------------------------------------------
 # 枚举转换
 # ---------------------------------------------------------------------------
@@ -147,6 +232,9 @@ class TestORMModels:
 
     def test_research_artifact_table_created(self, db_manager):
         assert "research_artifacts" in Base.metadata.tables
+
+    def test_learning_feedback_table_created(self, db_manager):
+        assert "research_learning_feedback" in Base.metadata.tables
 
     def test_session_status_enum_values(self):
         values = {e.value for e in SessionStatusEnum}
@@ -380,6 +468,65 @@ class TestArtifact:
 
     def test_delete_artifact_not_found(self, repo):
         assert repo.delete_artifact(uuid.uuid4()) is False
+
+
+# ---------------------------------------------------------------------------
+# 学习反馈库
+# ---------------------------------------------------------------------------
+
+class TestLearningFeedbackLibrary:
+    def test_replace_learning_feedback_library_persists_records(self, repo):
+        session_payload = _make_payload(cycle_id="feedback-library")
+        repo.create_session(session_payload)
+        phase = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "reflect", "status": "completed"})
+
+        saved = repo.replace_learning_feedback_library(
+            session_payload["cycle_id"],
+            _make_learning_feedback_payload(),
+            phase_execution_id=phase["id"],
+        )
+
+        assert saved is not None
+        assert saved["summary"]["record_count"] == 3
+        assert saved["summary"]["weak_phase_names"] == ["analyze"]
+        assert saved["replay_feedback"]["learning_summary"]["tuned_parameters"]["max_concurrent_tasks"] == 6
+
+    def test_list_learning_feedback_supports_cross_cycle_queries(self, repo, db_manager):
+        for cycle_id, phase_score in (("feedback-a", 0.35), ("feedback-b", 0.42)):
+            repo.create_session(_make_payload(cycle_id=cycle_id))
+            phase = repo.add_phase_execution(cycle_id, {"phase": "reflect", "status": "completed"})
+            payload = _make_learning_feedback_payload()
+            payload["records"][2]["overall_score"] = phase_score
+            repo.replace_learning_feedback_library(cycle_id, payload, phase_execution_id=phase["id"])
+
+        page = repo.list_learning_feedback(
+            feedback_scope="phase_assessment",
+            target_phase="analyze",
+            limit=10,
+        )
+
+        assert page["total"] == 2
+        assert len(page["items"]) == 2
+        assert all(item["target_phase"] == "analyze" for item in page["items"])
+
+    def test_get_full_snapshot_includes_learning_feedback_library(self, repo):
+        session_payload = _make_payload(cycle_id="feedback-snapshot")
+        repo.create_session(session_payload)
+        phase = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "reflect", "status": "completed"})
+        repo.replace_learning_feedback_library(
+            session_payload["cycle_id"],
+            _make_learning_feedback_payload(),
+            phase_execution_id=phase["id"],
+        )
+
+        snapshot = repo.get_full_snapshot(session_payload["cycle_id"])
+
+        assert snapshot is not None
+        library = snapshot["learning_feedback_library"]
+        assert library["summary"]["record_count"] == 3
+        assert library["summary"]["cycle_trend"] == "improving"
+        assert library["records"][0]["feedback_scope"] == "cycle_summary"
+        assert library["replay_feedback"]["iteration_number"] == 3
 
 
 # ---------------------------------------------------------------------------

@@ -339,8 +339,18 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 | 问题 | 说明 | 理由 | 代价 |
 | --- | --- | --- | --- |
 | 顶层 session 汇总口径不稳 ✅ | `ResearchRuntimeResult.session_result` 现已从标准 `PhaseResult` 读取 `report_outputs` / `reports` / `deliverables` / `analysis_results` / `research_artifact`，并合并 `cycle_snapshot.metadata.analysis_summary` | CLI / demo research / 外层 DTO 不再依赖 publish 根级旧字段；session 顶层汇总与 phase 内标准契约对齐，50 项运行时 / demo / report 回归保护 | 已完成 |
-| 统一证据对象仍未完成 | 分析、引用、publish、dashboard 的证据语义尚未完全统一 | 影响跨模块复用、审计与长期演进 | 中，约 3-5 人日 |
-| 自学习存储仍偏轻 | 以学习记录和日志为主，缺少可查询研究反馈库 | 无法做长期经验沉淀和策略回放 | 中，约 4-6 人日 |
+| 统一证据对象仍未完成 ✅ | `src/research/evidence_contract.py` 已落地 `evidence-claim-v2`；Analyze 直接产出 canonical `evidence_protocol`，Publish / Citation fallback / OutputGenerator / PaperWriter / dashboard 统一消费同一协议 | 不再依赖 publish 侧临时拼装才能得到 evidence protocol；引用记录可由同一 evidence object 退化生成，结构化审计与跨模块复用收口 | 已完成 |
+| 自学习存储仍偏轻 ✅ | Reflect 现直接产出 canonical `learning_feedback_library`；structured persistence 新增 `research_learning_feedback` 表与 repository 查询 / snapshot / replay 接线；management API 已补显式查询入口，legacy `learning_data.pkl` 已有离线 backfill 工具，dashboard / console 已直接展示学习反馈摘要 | 学习反馈不再只停留在 `learning_data.pkl` 与日志；既可按 cycle / scope / phase / trend 查询，也可把历史自学习资产并入同一查询面，并在 web session replay 时回注 `previous_iteration_feedback` 与 `learned_runtime_parameters`，同时可直接在控制台看板观察周期评分、弱项阶段与调优参数 | 已完成 |
+
+> **状态更新（2026-04-17）：** `自学习存储仍偏轻` 已完成首轮架构治理闭环：
+> - `src/research/learning_feedback_contract.py` 已落地 `research-feedback-library.v1`，Reflect 直接产出 canonical `learning_feedback_library`，统一包含 `cycle_summary` / `phase_assessment` 两类 feedback record 与 `replay_feedback`。
+> - `src/infrastructure/persistence.py` 新增 `research_learning_feedback` 表；`src/infrastructure/research_session_repo.py` 新增 `replace_learning_feedback_library()`、`get_learning_feedback_library()`、`list_learning_feedback()`，可按 `cycle_id`、`feedback_scope`、`target_phase`、`cycle_trend` 查询。
+> - `_persist_result_structured()` 已把 Reflect feedback library 结构化写入 PostgreSQL；`get_full_snapshot()` 现直接暴露 `learning_feedback_library`，repository snapshot 不再只能从 phase output 或 pickle 侧推断学习状态。
+> - `src/web/ops/research_session_service.py` 现会把 snapshot 中的 `learning_feedback_library.replay_feedback` 回注到 runtime `pipeline_config.previous_iteration_feedback` 与 `learned_runtime_parameters`，使持久化反馈可直接驱动下一轮 web phase replay。
+> - `src/api/routes/research.py` 已补 `/api/research/jobs/{job_id}/learning-feedback`、`/api/research/sessions/{cycle_id}/learning-feedback` 与 `/api/research/learning-feedback`，管理面不再只能绕经 snapshot 或 repository 内部方法取数。
+> - `src/api/research_utils.py` 与 `web_console/static/index.html` 已把 `learning_feedback_library` 汇总为 `learning_feedback_board` 并直出到控制台研究看板，前端无需再额外请求一条 learning feedback API 才能看到学习闭环摘要。
+> - `src/research/legacy_learning_feedback_backfill.py` 与 `tools/backfill_learning_feedback.py` 已补 legacy `learning_data.pkl` 到 `research_learning_feedback` 的离线 backfill；出于 pickle 反序列化安全边界考虑，导入入口保留为运维脚本而非 HTTP API。
+> - Focused regression 已通过：`tests/test_research_session_repo.py`、`tests/unit/test_reflect_phase.py`、`tests/unit/test_research_session_service.py`、`tests/unit/test_default_self_learning_loop.py`、`tests/test_research_pipeline_persist.py`、`tests/unit/test_research_runtime_service.py`、`tests/unit/test_self_learning_feedback_loop.py`、`tests/test_phase_orchestrator_contract.py`、`tests/test_phase_result_contract.py`，共 308 passed。
 
 ## 7. 模块接线状态
 
@@ -349,7 +359,7 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 | src/storage/backend_factory.py | 已成为 ResearchPipeline / ResearchRuntimeService 的结构化持久化主链入口；关系库存储可落 PostgreSQL，Neo4j 不可用时显式转为仅 PG 模式，非 PostgreSQL 环境仍可能出现 `sqlite_fallback` | active |
 | src/storage/transaction.py | 已用于 PostgreSQL + Neo4j 协调写入与图关系投影，仍可继续强化事务观测与收敛 | active |
 | src/storage/storage_driver.py | 主要在论文插件持久化路径使用 | 插件路径，不是科研会话默认路径 |
-| src/learning/self_learning_engine.py | ResearchPipeline 会按 `self_learning.enabled` 默认装配并初始化，reflect 后会刷新学习快照与上一轮反馈 | active |
+| src/learning/self_learning_engine.py | ResearchPipeline 会按 `self_learning.enabled` 默认装配并初始化，reflect 后会刷新学习快照与上一轮反馈；structured persistence 现同步落库为 queryable `learning_feedback_library` | active |
 | src/infra/llm_service.py 统一工厂 | clinical gap / 部分支线与 shared runtime 可用 | 不是所有 LLM 路径的唯一入口 |
 | cycle demo shared_modules | demo 中仍初始化，但 research 主链已桥接到 shared runtime service | 兼容壳，非默认主链 |
 

@@ -350,6 +350,50 @@ class TestResearchSessionService(unittest.TestCase):
         self.assertNotIn("runtime_profile", _FakeRuntimeService.instances[0].config)
         self.assertEqual(execution["phase_result"]["phase"], "observe")
 
+    def test_execute_research_phase_injects_learning_feedback_replay(self):
+        repository = _FakeSessionRepository()
+        repository.sessions["cycle-1"] = {
+            "cycle_id": "cycle-1",
+            "cycle_name": "测试研究",
+            "description": "测试描述",
+            "status": "pending",
+            "current_phase": "observe",
+            "research_objective": "测试目标",
+            "research_scope": "方剂",
+            "researchers": ["alice"],
+            "metadata": {"phase_contexts": {}, "completed_phases": []},
+            "outcomes": [],
+            "deliverables": [],
+            "learning_feedback_library": {
+                "contract_version": "research-feedback-library.v1",
+                "summary": {"record_count": 3},
+                "replay_feedback": {
+                    "status": "completed",
+                    "iteration_number": 4,
+                    "learning_summary": {
+                        "cycle_trend": "improving",
+                        "tuned_parameters": {
+                            "max_concurrent_tasks": 5,
+                            "quality_threshold": 0.76,
+                        },
+                    },
+                    "quality_assessment": {"overall_cycle_score": 0.88},
+                },
+                "records": [],
+            },
+        }
+        app = self._build_app()
+
+        with patch("src.web.ops.research_session_service._get_repository", return_value=repository), patch(
+            "src.web.ops.research_session_service.ResearchRuntimeService",
+            _FakeRuntimeService,
+        ):
+            research_session_service.execute_research_phase(app, "cycle-1", "observe")
+
+        pipeline_config = _FakeRuntimeService.instances[0].config["pipeline_config"]
+        self.assertEqual(pipeline_config["previous_iteration_feedback"]["iteration_number"], 4)
+        self.assertEqual(pipeline_config["learned_runtime_parameters"]["max_concurrent_tasks"], 5)
+
 
 if __name__ == "__main__":
     unittest.main()

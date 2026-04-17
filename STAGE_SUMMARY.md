@@ -2,6 +2,83 @@
 
 <!-- markdownlint-configure-file {"MD022": false, "MD024": false, "MD032": false, "MD060": false} -->
 
+## 阶段性收口（2026-04-17）
+
+同步说明（2026-04-17）：
+
+- 本节取代下方 2026-04-16 条目，成为当前总续接入口；如果后续只能读一节，优先读本节。
+- 本轮不是单点修补，而是两条主线同时收口：一条是统一证据对象 `evidence-claim-v2`，另一条是自学习反馈从 reflect 结果提升为可持久化、可查询、可回放、可在 dashboard 直接消费的研究资产。
+- 当前 `src/research/legacy_learning_feedback_backfill.py` 在工作区内存在额外编辑，本节结论已按现态源码重新核对；后续续接时以当前文件内容和本节为准，不再沿用更早的中间推断。
+
+### 本轮收口目标
+
+- 把 Analyze / Publish / OutputGenerator / PaperWriter / dashboard 之间分散的证据语义收口为同一份 canonical `evidence_protocol`。
+- 让 Reflect 的学习反馈不再只停留在日志、pickle 或 phase output，而是形成稳定的 `learning_feedback_library` 合同，进入 PostgreSQL 结构化持久化主链。
+- 提供 learning feedback 的管理查询入口、历史 `learning_data.pkl` 并入路径，以及 dashboard / console 的直接展示面。
+- 把学习反馈 replay 接回下一轮 web runtime，使持久化反馈真正能驱动后续 phase 执行，而不是只做离线总结。
+
+### 当前已落地成果
+
+#### 1. 统一证据对象已完成首轮收口
+
+- 新增 `src/research/evidence_contract.py`，落地 canonical `evidence-claim-v2`，统一承载 `evidence_records`、`claims`、`citation_records`、`evidence_grade_summary`、`research_grade` 与 summary contract。
+- `src/research/phases/analyze_phase.py` 现在直接生成 canonical `evidence_protocol`，不再让下游依赖 publish 侧临时拼装；Analyze metadata 也会同步记录 `evidence_protocol_generated`、`evidence_record_count`、`evidence_claim_count`。
+- `src/research/phases/publish_phase.py` 已统一从 canonical `evidence_protocol` 解析证据与引用：当显式 citation source 缺失时，会从 `evidence_protocol` 退化构造 citation records，而不是回落到多条不一致旁路。
+- `src/generation/output_formatter.py` 与 `src/generation/paper_writer.py` 已改为复用同一 contract，研究产物中的 `research_artifact.evidence`、输出层 `analysis_results.evidence_protocol` 和论文消费面不再各自维护一套证据字段。
+
+#### 2. learning feedback 已升级为结构化研究资产
+
+- 新增 `src/research/learning_feedback_contract.py`，定义 canonical `research-feedback-library.v1`，统一包含 `cycle_summary`、`phase_assessment`、`replay_feedback` 与标准 record normalization。
+- `src/research/phases/reflect_phase.py` 现在会直接产出 `learning_feedback_library`，并在 metadata 中记录 `feedback_library_generated` 与 `feedback_record_count`。
+- `src/infrastructure/persistence.py` 新增 `research_learning_feedback` 表；`src/infrastructure/research_session_repo.py` 新增 `replace_learning_feedback_library()`、`get_learning_feedback_library()`、`list_learning_feedback()`、snapshot 汇总与 record serialization，学习反馈现在可按 cycle / scope / phase / trend 查询。
+- `src/research/phase_orchestrator.py` 已把 reflect 阶段产生的 feedback library 纳入 `_persist_result_structured()`，structured persistence metadata 会同步记录 `learning_feedback_record_count`。
+
+#### 3. 管理查询入口与历史回填已补齐
+
+- `src/api/routes/research.py` 与 `src/api/schemas.py` 已新增 learning feedback 管理 API：`/api/research/jobs/{job_id}/learning-feedback`、`/api/research/sessions/{cycle_id}/learning-feedback`、`/api/research/learning-feedback`。
+- 新增 `src/research/legacy_learning_feedback_backfill.py`，可把历史 `learning_data.pkl` 归并为 canonical `learning_feedback_library`，并补充 legacy stats、cycle trend、improvement priorities、tuned parameters 等摘要。
+- 新增 `tools/backfill_learning_feedback.py` 作为离线运维入口，支持环境配置、目标 cycle 覆盖与 JSON 报告输出。
+- 这条回填链路刻意保持离线脚本形态，不暴露 HTTP 导入接口；原因是 pickle 反序列化边界不应进入管理 API。
+
+#### 4. replay 与 dashboard 查询面已经接通
+
+- `src/web/ops/research_session_service.py` 已把 `learning_feedback_library.replay_feedback` 回注到 runtime `pipeline_config.previous_iteration_feedback` 与 `learned_runtime_parameters`，web session replay 现在会真实消费持久化反馈。
+- `src/api/research_utils.py` 已新增 `learning_feedback_board`，把 library 汇总为 dashboard 友好的摘要字段：周期评分、趋势、薄弱阶段、记录数、调优参数、近期 phase feedback。
+- `src/api/routes/research.py` 的 dashboard 路由会在 job snapshot 未内嵌 learning feedback 时按 `cycle_id` 从 repository 自动回填，避免 dashboard 和 repository 读到两套不同事实源。
+- `src/web/routes/dashboard.py` 与 `web_console/static/index.html` 已直接接入 `learning_feedback_board`，控制台研究看板现在无需额外打一条 learning feedback 请求就能看到学习闭环摘要。
+
+#### 5. 审计口径与续接文档已同步到当前现态
+
+- `ARCHITECTURE_TCM_RESEARCH_METHOD_AUDIT_2026_04_12.md` 已把“统一证据对象仍未完成”和“自学习存储仍偏轻”两项更新为已完成，并同步补入当前 contract、持久化、API、backfill 与 dashboard 现态。
+- 本文件 `STAGE_SUMMARY.md` 现将“统一证据对象 + 学习反馈资产化”作为最新续接锚点；后续若继续推进，不应再把这两条线描述成“仅设计中”或“只存在于 phase output”。
+
+### 关键验证记录
+
+- 2026-04-17 已完成一轮整包 focused regression：`tests/test_research_session_repo.py`、`tests/test_research_utils.py`、`tests/test_web_console_api.py`、`tests/test_learning_feedback_backfill.py`、`tests/test_research_pipeline_persist.py`、`tests/unit/test_analyze_phase.py`、`tests/unit/test_preprocessor_output_quality.py`、`tests/unit/test_publish_phase.py`、`tests/unit/test_reflect_phase.py`、`tests/unit/test_research_session_service.py`、`tests/unit/test_default_self_learning_loop.py`、`tests/unit/test_research_runtime_service.py`，共 494 passed。
+- 统一证据对象相关覆盖已补到 `tests/unit/test_analyze_phase.py`、`tests/unit/test_publish_phase.py`、`tests/unit/test_preprocessor_output_quality.py`，覆盖 Analyze 直接生成 canonical `evidence_protocol`、Publish 从 `evidence_protocol` 保留证据并退化生成 citation records、OutputGenerator 统一构造 `evidence-claim-v2`。
+- learning feedback 结构化持久化与 replay 覆盖已补到 `tests/test_research_session_repo.py`、`tests/unit/test_reflect_phase.py`、`tests/unit/test_research_session_service.py`、`tests/test_learning_feedback_backfill.py`。
+- dashboard / management API 相关覆盖已补到 `tests/test_research_utils.py`、`tests/test_web_console_api.py`，验证 `learning_feedback_board` 聚合、job dashboard 自动回填和 learning feedback 管理接口过滤行为。
+- 本轮摘要落地后，建议把上述文件作为最小续接回归集；如果后续改动再次触及 evidence contract 或 learning feedback contract，不要只跑 UI 层回归。
+
+### 当前续接锚点
+
+- 证据对象这条线，当前共享 contract 已在 Analyze / Publish / OutputGenerator / PaperWriter / dashboard 之间打通；后续再做证据链深化时，应继续扩展 `src/research/evidence_contract.py`，不要重新在 publish 或 generation 层长新 DTO。
+- learning feedback 这条线，当前共享事实源应视为 `learning_feedback_library`：Reflect 产出、PostgreSQL 持久化、repository snapshot、management API、dashboard 和 web replay 都已经围绕它收口。
+- `src/research/legacy_learning_feedback_backfill.py` 现在承担 legacy pickle 归并逻辑；后续若继续深化，应优先补输入样本治理、报表字段或 dry-run，而不是把 pickle 导入改成在线 API。
+- dashboard 当前只展示 learning feedback 摘要，尚未展开 phase 级 drill-down；如果下一步继续做控制台增强，最自然的方向是基于现有 management API 增加筛选、明细列表和 review/标注，而不是再发明另一套 dashboard 专用查询结构。
+
+### 任意日期继续接手建议
+
+1. 先读本节，再读 `ARCHITECTURE_TCM_RESEARCH_METHOD_AUDIT_2026_04_12.md` 的 P2 段落，先锁定 evidence contract 与 learning feedback 的当前现态。
+2. 如果接统一证据对象，优先从 `src/research/evidence_contract.py`、`src/research/phases/analyze_phase.py`、`src/research/phases/publish_phase.py`、`src/generation/output_formatter.py` 建立上下文。
+3. 如果接 learning feedback 主链，优先从 `src/research/learning_feedback_contract.py`、`src/research/phases/reflect_phase.py`、`src/infrastructure/research_session_repo.py`、`src/research/legacy_learning_feedback_backfill.py` 建立上下文。
+4. 如果接控制台 / dashboard，优先从 `src/api/research_utils.py`、`src/api/routes/research.py`、`src/web/routes/dashboard.py`、`web_console/static/index.html` 建立上下文，并守住“dashboard 优先消费共享 contract，而不是单独拼装查询结果”这条约束。
+
+### 提交边界说明
+
+- 本次提交应视为一组完整阶段推进结果，覆盖 canonical evidence contract、learning feedback library contract、结构化持久化、management API、legacy backfill、web replay、dashboard 展示、测试和审计文档同步。
+- 这批改动已经跨越 research core、API、Web、dashboard、repo persistence 与 tests，不应拆成零散 fix 提交；后续若继续推进，应在此提交基础上做 drill-down 或治理深化。
+
 ## 阶段性收口（2026-04-16，续）
 
 同步说明（2026-04-16）：

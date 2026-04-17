@@ -607,6 +607,97 @@ class TestPublishLearningStrategy(unittest.TestCase):
         paper_context = pipeline.output_port.create_paper_writer.return_value.execute.call_args.args[0]
         self.assertEqual(paper_context["evidence_grade_summary"], {})
 
+    def test_publish_preserves_analyze_evidence_protocol_without_structured_output(self):
+        pipeline = _FakePipeline()
+        handler = _make_handler(pipeline)
+        cycle = _FakeCycle(
+            phase_executions={
+                **_minimal_phase_executions(),
+                _Phase.ANALYZE: {
+                    "result": {
+                        "phase": "analyze",
+                        "status": "completed",
+                        "results": {
+                            "reasoning_results": {
+                                "reasoning_results": {
+                                    "entity_relationships": [
+                                        {"source": "桂枝", "target": "营卫", "type": "调和", "confidence": 0.88}
+                                    ]
+                                }
+                            },
+                            "evidence_protocol": {
+                                "contract_version": "evidence-claim-v2",
+                                "evidence_records": [
+                                    {
+                                        "evidence_id": "ev-1",
+                                        "title": "伤寒论",
+                                        "source_type": "classical_text",
+                                        "source_ref": "urn:shanghanlun",
+                                    }
+                                ],
+                                "claims": [{"claim_id": "claim-1"}],
+                            },
+                            "statistical_analysis": {},
+                        },
+                        "metadata": {},
+                        "error": None,
+                    }
+                },
+            }
+        )
+
+        result = handler.execute(cycle, {"generate_structured_output": False, "citation_records": []})
+
+        analysis_results = result["results"]["analysis_results"]
+        research_artifact = result["results"]["research_artifact"]
+        self.assertEqual(analysis_results["evidence_protocol"]["contract_version"], "evidence-claim-v2")
+        self.assertEqual(analysis_results["evidence_protocol"]["evidence_records"][0]["evidence_id"], "ev-1")
+        self.assertEqual(research_artifact["evidence"][0]["evidence_id"], "ev-1")
+
+    def test_publish_derives_citation_records_from_evidence_protocol_when_sources_absent(self):
+        pipeline = _FakePipeline()
+        handler = _make_handler(pipeline)
+        cycle = _FakeCycle(
+            phase_executions={
+                **_minimal_phase_executions(),
+                _Phase.ANALYZE: {
+                    "result": {
+                        "phase": "analyze",
+                        "status": "completed",
+                        "results": {
+                            "reasoning_results": {},
+                            "evidence_protocol": {
+                                "contract_version": "evidence-claim-v2",
+                                "evidence_records": [
+                                    {
+                                        "evidence_id": "ev-1",
+                                        "title": "伤寒论",
+                                        "authors": ["张仲景"],
+                                        "year": 210,
+                                        "source_type": "classical_text",
+                                        "source_ref": "urn:shanghanlun",
+                                        "relation_type": "文献证据",
+                                    }
+                                ],
+                                "claims": [],
+                            },
+                            "statistical_analysis": {},
+                        },
+                        "metadata": {},
+                        "error": None,
+                    }
+                },
+            }
+        )
+
+        handler.execute(cycle, {"allow_pipeline_citation_fallback": False})
+
+        citation_records = pipeline.output_port.create_citation_manager.return_value.execute.call_args.args[0]["records"]
+        self.assertEqual(len(citation_records), 1)
+        self.assertEqual(citation_records[0]["title"], "伤寒论")
+        self.assertEqual(citation_records[0]["source_ref"], "urn:shanghanlun")
+        self.assertEqual(citation_records[0]["source_type"], "classical_text")
+
 
 if __name__ == "__main__":
     unittest.main()
