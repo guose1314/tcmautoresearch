@@ -60,7 +60,7 @@ PHASE_LABELS = {
     "observe": "观察阶段",
     "hypothesis": "假设阶段",
     "experiment": "实验方案阶段",
-    "experiment_execution": "实验执行阶段",
+    "experiment_execution": "外部实验结果导入阶段",
     "analyze": "分析阶段",
     "publish": "发布阶段",
     "reflect": "复盘阶段",

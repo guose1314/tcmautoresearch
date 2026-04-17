@@ -14,17 +14,51 @@ if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
 
-_EXECUTION_DISPLAY_NAME = "实验执行阶段"
+_EXECUTION_DISPLAY_NAME = "外部实验结果导入阶段"
 _EXECUTION_BOUNDARY_NOTICE = "当前阶段仅接收外部实验执行、采样与结果导入，不在系统内自动开展真实实验。"
 
 
 class ExperimentExecutionPhaseMixin:
-    """Mixin: experiment_execution 阶段处理方法。"""
+    """Mixin: experiment_execution 阶段 —— 仅负责外部实验执行结果的接收、采样与导入，系统不执行真实实验。"""
 
     pipeline: "ResearchPipeline"
 
+    # ------------------------------------------------------------------
+    # Boundary guard: keys whose presence in *context* indicates the
+    # caller is attempting to auto-execute a real experiment inside the
+    # platform — which is outside the system's capability boundary.
+    # ------------------------------------------------------------------
+    _BOUNDARY_VIOLATION_KEYS = frozenset({
+        "auto_execute",
+        "run_experiment",
+        "execute_internally",
+        "auto_run",
+    })
+
     def execute_experiment_execution_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
         context = context or {}
+
+        # --- boundary guard: reject auto-execution requests ---
+        violated = self._BOUNDARY_VIOLATION_KEYS & set(context)
+        if violated:
+            return build_phase_result(
+                "experiment_execution",
+                status="error",
+                results={},
+                metadata={
+                    "phase_semantics": "experiment_execution",
+                    "phase_display_name": _EXECUTION_DISPLAY_NAME,
+                    "execution_boundary": _EXECUTION_BOUNDARY_NOTICE,
+                    "external_execution_required": True,
+                    "boundary_violation": True,
+                    "rejected_keys": sorted(violated),
+                    "reason": (
+                        "experiment_execution 阶段仅接收外部实验结果导入，"
+                        "不支持系统内自动执行实验。"
+                    ),
+                },
+            )
+
         protocol_design, selected_hypothesis, experiment_result = self._resolve_execution_protocol_context(cycle)
         if not protocol_design:
             return build_phase_result(

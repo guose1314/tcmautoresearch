@@ -51,7 +51,7 @@ class ExecutePhaseRequest(BaseModel):
 
     phase: str = Field(
         ...,
-        description="阶段名称: observe / hypothesis / experiment / analyze / publish / reflect",
+        description="阶段名称: observe / hypothesis / experiment / experiment_execution / analyze / publish / reflect",
     )
     phase_context: Optional[Dict[str, Any]] = None
 

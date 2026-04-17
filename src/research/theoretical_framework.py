@@ -171,8 +171,8 @@ class ResearchHypothesis:
 @dataclass
 class ResearchExperiment:
     """
-    研究实验数据结构
-    符合中医研究规范的实验设计
+    研究实验方案（协议）数据结构 —— 仅描述实验设计方案，不代表系统内真实执行。
+    符合中医研究规范的实验设计模板。
     """
     # 基础信息
     experiment_id: str
@@ -186,8 +186,8 @@ class ResearchExperiment:
     sample_size: int = 0
     duration: int = 0  # 实验持续时间（天）
     
-    # 实验阶段
-    phase: str = "planning"  # planning, executing, completed, failed
+    # 方案状态（仅描述协议设计进度，不代表真实实验执行）
+    phase: str = "planning"  # planning, designed, archived
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     
@@ -668,14 +668,14 @@ class TheoreticalFramework(PhaseTrackerMixin):
     def design_experiment(self, hypothesis: ResearchHypothesis, 
                          context: Dict[str, Any]) -> ResearchExperiment:
         """
-        设计研究实验
+        设计研究协议（实验方案） —— 仅生成实验设计方案，不执行真实实验。
         
         Args:
             hypothesis (ResearchHypothesis): 研究假设
             context (Dict[str, Any]): 实验上下文
             
         Returns:
-            ResearchExperiment: 实验设计
+            ResearchExperiment: 实验方案（协议）
         """
         start_time = time.perf_counter()
         phase_entry = self._start_operation("design_experiment", {"hypothesis_id": hypothesis.hypothesis_id, "context_keys": sorted((context or {}).keys())})

@@ -144,7 +144,7 @@ class TestResearchPipelineExperimentPhase(unittest.TestCase):
         self.assertEqual(execution_result["phase"], "experiment_execution")
         self.assertEqual(execution_result["status"], "skipped")
         self.assertEqual(execution_result["metadata"]["phase_semantics"], "experiment_execution")
-        self.assertEqual(execution_result["metadata"]["phase_display_name"], "实验执行阶段")
+        self.assertEqual(execution_result["metadata"]["phase_display_name"], "外部实验结果导入阶段")
         self.assertEqual(execution_result["metadata"]["execution_status"], "not_executed")
         self.assertEqual(execution_result["results"]["analysis_records"], [])
         self.assertEqual(execution_result["results"]["analysis_relationships"], [])

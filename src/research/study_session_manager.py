@@ -22,7 +22,7 @@ class ResearchPhase(Enum):
     OBSERVE = "observe"          # 观察阶段
     HYPOTHESIS = "hypothesis"    # 假设阶段
     EXPERIMENT = "experiment"    # 实验方案阶段
-    EXPERIMENT_EXECUTION = "experiment_execution"  # 实验执行阶段
+    EXPERIMENT_EXECUTION = "experiment_execution"  # 外部实验结果导入阶段
     ANALYZE = "analyze"          # 分析阶段
     PUBLISH = "publish"          # 发布阶段
     REFLECT = "reflect"          # 反思阶段

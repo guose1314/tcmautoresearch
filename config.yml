@@ -761,7 +761,7 @@ lab:
   data_management:
     version_control: true
     data_provenance: true
-    experiment_tracking: true
+    protocol_tracking: true  # 实验方案跟踪（非真实实验执行跟踪）
     result_archiving: true
   collaboration:
     enabled: true

@@ -2102,7 +2102,8 @@ async def dashboard_research_workflow(
     PHASES = [
         ("observe", "📖 文献观察", "采集古籍语料，预处理规范化", "emerald"),
         ("hypothesis", "💡 假设生成", "基于知识图谱生成研究假设", "blue"),
-        ("experiment", "🧪 实验验证", "方剂分析、实体抽取、关系验证", "purple"),
+        ("experiment", "🧪 实验方案", "研究协议设计、验证计划生成", "purple"),
+        ("experiment_execution", "📥 结果导入", "外部实验执行结果接收与导入", "indigo"),
         ("analyze", "📊 数据分析", "语义建模、统计分析、可视化", "orange"),
         ("publish", "📝 论文生成", "IMRD 格式论文、引文格式化", "red"),
         ("reflect", "🔍 反思总结", "质量评审、研究空白分析", "gray"),

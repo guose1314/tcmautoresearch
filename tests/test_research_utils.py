@@ -96,7 +96,7 @@ class TestResearchUtils(unittest.TestCase):
         self.assertEqual(format_phase_name("experiment"), "实验方案阶段")
 
     def test_format_phase_name_marks_experiment_execution_explicitly(self):
-        self.assertEqual(format_phase_name("experiment_execution"), "实验执行阶段")
+        self.assertEqual(format_phase_name("experiment_execution"), "外部实验结果导入阶段")
 
     def test_iter_output_candidates_and_resolve_preferred_report_artifact(self):
         with tempfile.TemporaryDirectory(dir=WORKSPACE_ROOT) as temp_dir:

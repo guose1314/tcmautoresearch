@@ -734,7 +734,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         if phase_name == "analyze":
             return "analysis"
         if phase_name == "experiment":
-            return "dataset"
+            return "protocol"
         return "other"
 
     def _infer_mime_type(self, file_path: str) -> Optional[str]:

@@ -147,7 +147,8 @@ research_system_config:
   research_phases:
     - 观察
     - 假设
-    - 实验
+    - 实验方案设计
+    - 外部实验结果导入
     - 分析
     - 发布
     - 反思
