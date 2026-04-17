@@ -1189,6 +1189,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         factory = StorageBackendFactory(self.pipeline.config)
         try:
             persistence_report = factory.initialize()
+            consistency_state = factory.get_consistency_state()
             repository = ResearchSessionRepository(factory.db_manager)
             session_record: Dict[str, Any] = {}
             phase_records: Dict[str, Dict[str, Any]] = {}
@@ -1220,7 +1221,8 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 )
 
                 cycle.metadata["storage_persistence"] = {
-                    "mode": "structured",
+                    "mode": consistency_state.mode,
+                    "consistency_state": consistency_state.to_dict(),
                     "db_type": persistence_report.get("db_type"),
                     "pg_status": persistence_report.get("pg_status"),
                     "neo4j_status": graph_report.get("status") if graph_report.get("enabled") else persistence_report.get("neo4j_status"),

@@ -41,6 +41,7 @@ class TransactionResult:
     success: bool
     pg_committed: bool = False
     neo4j_committed: bool = False
+    storage_mode: str = ""
     error: Optional[str] = None
     compensations_applied: int = 0
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
@@ -214,7 +215,11 @@ class TransactionCoordinator:
         if self._committed or self._rolledback:
             return TransactionResult(success=self._committed, pg_committed=self._committed)
 
-        result = TransactionResult(success=False)
+        has_neo4j = self._neo4j is not None and self._neo4j_pending
+        result = TransactionResult(
+            success=False,
+            storage_mode="dual_write" if has_neo4j else "pg_only",
+        )
 
         # Phase 1: PG flush（验证约束，生成 ID，但不 commit）
         try:

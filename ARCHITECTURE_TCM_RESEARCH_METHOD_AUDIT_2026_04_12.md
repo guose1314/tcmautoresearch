@@ -213,7 +213,7 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 | 问题 | 说明 | 理由 | 代价 |
 | --- | --- | --- | --- |
 | 主入口兼容壳仍存在 ✅ | ResearchRuntimeService 已统一主研究路径，兼容壳已全面治理完成 | 调用方已可形成"ResearchRuntimeService 是唯一主链"的稳定认知；`run_research()` 已标记 DeprecationWarning，`__init__.py` 已区分推荐导出与兼容/内部导出，阶段 context 规范默认值（`CANONICAL_OBSERVE_DEFAULTS` / `CANONICAL_PUBLISH_DEFAULTS`）已从 API 层上收至 `research_runtime_service.py` 并嵌入所有 runtime profile，API 层仅追加 `local_data_dir` 环境路径；11 项入口合约测试保护 | 已完成 |
-| 结构化存储事务边界仍可继续收敛 | `TransactionCoordinator` 已把主写路径收口为“PG flush → Neo4j execute → PG commit”，但初始化仍允许 `sqlite_fallback` / 仅 PG 降级，历史数据与图投影补齐也仍依赖 writeback / backfill / health-check 工具链协同治理 | 同一研究会话仍可能出现“PG 事实已成立、Neo4j 投影未启用或历史增量待补齐”的运行状态；若状态上抛、告警与排障口径不统一，会直接增加一致性判断与故障排查成本 | 中，约 3-5 人日 |
+| 结构化存储事务边界仍可继续收敛 ✅ | `TransactionCoordinator` 主写路径已收口，`StorageConsistencyState` 一致性状态合同已建立 | 调用方现可通过 `factory.get_consistency_state()` 一眼区分 `dual_write` / `pg_only` / `sqlite_fallback` / `uninitialized` 四种运行模式；`TransactionResult` 增加 `storage_mode` 字段；`cycle.metadata.storage_persistence` 现嵌入完整 `consistency_state` 字典；`build_consistency_state()` 为唯一状态判定路径，monitoring / dashboard / 运维可共享一致结论；18 项契约测试保护 | 已完成 |
 | Observe 反向依赖 cycle 层 | research phase 调 cycle runner | 形成跨层耦合，后续难以做干净边界 | 中，约 2-4 人日 |
 | LLM 多条旁路 | paper_plugin、翻译、助手等直接 new LLMEngine | 模型参数、缓存、GPU 使用和成本控制无法统一 | 中，约 3-5 人日 |
 
@@ -295,8 +295,15 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 
 剩余项：
 
-- 继续把 `sqlite_fallback` / “仅 PG 模式”从“技术上允许发生”收口成更显式的运行策略、告警语义和调用方可见状态，避免外层把降级态误读为完整双写成功。
-- 继续统一 runtime metadata、monitoring summary、backfill/writeback 报告里的状态口径，使系统能直接区分“实时双写完成”“仅 PG 成功”“历史图投影待补齐”“schema drift 待治理”等状态。
+> **状态更新：** 以下核心剩余项已通过 `StorageConsistencyState` 合同治理落地：
+> - `StorageConsistencyState` 数据结构定义在 `src/storage/consistency.py`，包含 `mode`（`dual_write` / `pg_only` / `sqlite_fallback` / `uninitialized`）、`pg_status`、`neo4j_status`、`neo4j_degradation_reason`、`schema_drift_detected`、`summary` 等字段。
+> - `build_consistency_state()` 是唯一推荐的状态判定路径，所有消费方（factory、monitoring、runtime metadata）应通过此函数获取一致结论。
+> - `StorageBackendFactory.get_consistency_state()` 已接入工厂，根据当前初始化状态实时生成一致性合同。
+> - `TransactionResult` 增加 `storage_mode` 字段，事务完成后即可确认写入模式。
+> - `_persist_result_structured()` 现将 `consistency_state.to_dict()` 嵌入 `cycle.metadata.storage_persistence`，runtime 调用方可通过 `storage_persistence.mode` 与 `storage_persistence.consistency_state` 一眼读取运行模式。
+> - `tests/unit/test_storage_consistency_contract.py` 包含 18 项契约测试，覆盖 6 种后端组合、数据结构合同、模式常量稳定性与工厂集成。
+
+- 后续可将 monitoring `_build_persistence_summary()` 中的 `structured_storage` 也改为直接嵌入 `get_consistency_state().to_dict()`，完成状态口径最后一公里统一。
 - 继续把 `TransactionResult.compensations_applied`、图投影失败原因与补齐结果提升为稳定观测字段，而不是主要依赖日志和人工排障阅读。
 - 继续减少“运行主链成功但历史增量仍需回填”的灰区路径；确需 eventual consistency 的场景，应显式标注边界，而不是让调用方面对隐式不一致窗口。
 

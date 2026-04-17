@@ -248,6 +248,47 @@ class StorageBackendFactory:
 
         return result
 
+    def get_consistency_state(self) -> "StorageConsistencyState":
+        """返回当前存储一致性状态合同。
+
+        这是判断存储运行模式（dual_write / pg_only / sqlite_fallback）
+        的唯一推荐入口。运行时 metadata、dashboard、运维检查都应
+        通过此方法获取一致结论。
+        """
+        from src.storage.consistency import build_consistency_state
+
+        neo4j_driver_connected = bool(
+            self._neo4j_driver
+            and hasattr(self._neo4j_driver, "driver")
+            and self._neo4j_driver.driver
+        )
+        neo4j_status: str
+        if not self._initialized:
+            neo4j_status = "uninitialized"
+        elif not self.neo4j_enabled:
+            neo4j_status = "skipped"
+        elif neo4j_driver_connected:
+            neo4j_status = "active"
+        else:
+            neo4j_status = "error: driver not connected"
+
+        pg_status: str
+        if not self._initialized:
+            pg_status = "uninitialized"
+        elif self._db_manager is not None:
+            pg_status = "active"
+        else:
+            pg_status = "error: db_manager not available"
+
+        return build_consistency_state(
+            initialized=self._initialized,
+            db_type=self._db_type,
+            pg_status=pg_status,
+            neo4j_enabled=self.neo4j_enabled,
+            neo4j_status=neo4j_status,
+            neo4j_driver_connected=neo4j_driver_connected,
+        )
+
     def get_storage_statistics(self) -> Dict[str, Any]:
         """获取存储统计信息。"""
         stats: Dict[str, Any] = {"db_type": self._db_type}

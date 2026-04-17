@@ -9,6 +9,14 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .backend_factory import StorageBackendFactory
+    from .consistency import (
+        MODE_DUAL_WRITE,
+        MODE_PG_ONLY,
+        MODE_SQLITE_FALLBACK,
+        MODE_UNINITIALIZED,
+        StorageConsistencyState,
+        build_consistency_state,
+    )
     from .database_schema import get_backup_script, get_cleanup_script, get_init_script
     from .db_models import (
         Base,
@@ -84,6 +92,13 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "TransactionCoordinator": (".transaction", "TransactionCoordinator"),
     "TransactionResult": (".transaction", "TransactionResult"),
     "transaction_scope": (".transaction", "transaction_scope"),
+    # Consistency State
+    "StorageConsistencyState": (".consistency", "StorageConsistencyState"),
+    "build_consistency_state": (".consistency", "build_consistency_state"),
+    "MODE_DUAL_WRITE": (".consistency", "MODE_DUAL_WRITE"),
+    "MODE_PG_ONLY": (".consistency", "MODE_PG_ONLY"),
+    "MODE_SQLITE_FALLBACK": (".consistency", "MODE_SQLITE_FALLBACK"),
+    "MODE_UNINITIALIZED": (".consistency", "MODE_UNINITIALIZED"),
     # Output Catalog
     "OutputCatalog": (".output_catalog", "OutputCatalog"),
     "ArtifactRecord": (".output_catalog", "ArtifactRecord"),

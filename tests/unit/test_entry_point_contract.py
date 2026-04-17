@@ -16,7 +16,7 @@ class TestEntryPointExports(unittest.TestCase):
     """__init__.py 导出结构合约。"""
 
     def test_recommended_exports_are_importable(self):
-        from src.orchestration import ResearchRuntimeService, ResearchRuntimeResult
+        from src.orchestration import ResearchRuntimeResult, ResearchRuntimeService
 
         self.assertTrue(callable(ResearchRuntimeService))
         self.assertTrue(callable(ResearchRuntimeResult))
@@ -55,20 +55,24 @@ class TestCanonicalPhaseDefaults(unittest.TestCase):
     """规范阶段 context 默认值合约。"""
 
     def test_canonical_observe_defaults_have_required_keys(self):
-        from src.orchestration.research_runtime_service import CANONICAL_OBSERVE_DEFAULTS
+        from src.orchestration.research_runtime_service import (
+            CANONICAL_OBSERVE_DEFAULTS,
+        )
 
         required_keys = {"data_source", "use_local_corpus", "run_preprocess_and_extract"}
         self.assertTrue(required_keys.issubset(CANONICAL_OBSERVE_DEFAULTS.keys()))
 
     def test_canonical_publish_defaults_have_required_keys(self):
-        from src.orchestration.research_runtime_service import CANONICAL_PUBLISH_DEFAULTS
+        from src.orchestration.research_runtime_service import (
+            CANONICAL_PUBLISH_DEFAULTS,
+        )
 
         self.assertIn("allow_pipeline_citation_fallback", CANONICAL_PUBLISH_DEFAULTS)
 
     def test_all_profiles_inherit_canonical_observe_defaults(self):
         from src.orchestration.research_runtime_service import (
-            CANONICAL_OBSERVE_DEFAULTS,
             _SHARED_RUNTIME_PROFILES,
+            CANONICAL_OBSERVE_DEFAULTS,
         )
 
         for profile_name, profile in _SHARED_RUNTIME_PROFILES.items():
@@ -83,8 +87,8 @@ class TestCanonicalPhaseDefaults(unittest.TestCase):
 
     def test_all_profiles_inherit_canonical_publish_defaults(self):
         from src.orchestration.research_runtime_service import (
-            CANONICAL_PUBLISH_DEFAULTS,
             _SHARED_RUNTIME_PROFILES,
+            CANONICAL_PUBLISH_DEFAULTS,
         )
 
         for profile_name, profile in _SHARED_RUNTIME_PROFILES.items():
@@ -99,7 +103,9 @@ class TestCanonicalPhaseDefaults(unittest.TestCase):
 
     def test_api_observe_defaults_are_superset_of_canonical(self):
         from src.api.research_utils import DEFAULT_OBSERVE_PHASE_CONTEXT
-        from src.orchestration.research_runtime_service import CANONICAL_OBSERVE_DEFAULTS
+        from src.orchestration.research_runtime_service import (
+            CANONICAL_OBSERVE_DEFAULTS,
+        )
 
         for key, value in CANONICAL_OBSERVE_DEFAULTS.items():
             self.assertEqual(
@@ -112,7 +118,9 @@ class TestCanonicalPhaseDefaults(unittest.TestCase):
 
     def test_api_publish_defaults_match_canonical(self):
         from src.api.research_utils import DEFAULT_PUBLISH_PHASE_CONTEXT
-        from src.orchestration.research_runtime_service import CANONICAL_PUBLISH_DEFAULTS
+        from src.orchestration.research_runtime_service import (
+            CANONICAL_PUBLISH_DEFAULTS,
+        )
 
         for key, value in CANONICAL_PUBLISH_DEFAULTS.items():
             self.assertEqual(
