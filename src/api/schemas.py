@@ -146,6 +146,30 @@ class ResearchPhilologyWorkbenchReviewResponse(BaseModel):
     review_artifact: Dict[str, Any] = Field(default_factory=dict, description="写回后的 review artifact")
 
 
+class ResearchBatchCatalogReviewRequest(BaseModel):
+    decisions: List[ResearchCatalogReviewRequest] = Field(..., min_length=1, description="批量目录学 review 决策列表")
+
+
+class ResearchBatchCatalogReviewResponse(BaseModel):
+    job_id: str = Field(..., description="任务 ID")
+    cycle_id: str = Field(..., description="周期 ID")
+    applied_count: int = Field(default=0, description="成功写入决策数")
+    observe_philology: Dict[str, Any] = Field(default_factory=dict, description="更新后的 Observe 文献学资产")
+    review_artifact: Dict[str, Any] = Field(default_factory=dict, description="写回后的 review artifact")
+
+
+class ResearchBatchPhilologyReviewRequest(BaseModel):
+    decisions: List[ResearchPhilologyWorkbenchReviewRequest] = Field(..., min_length=1, description="批量文献学 review 决策列表")
+
+
+class ResearchBatchPhilologyReviewResponse(BaseModel):
+    job_id: str = Field(..., description="任务 ID")
+    cycle_id: str = Field(..., description="周期 ID")
+    applied_count: int = Field(default=0, description="成功写入决策数")
+    observe_philology: Dict[str, Any] = Field(default_factory=dict, description="更新后的 Observe 文献学资产")
+    review_artifact: Dict[str, Any] = Field(default_factory=dict, description="写回后的 review artifact")
+
+
 class ResearchJobListItem(BaseModel):
     job_id: str = Field(..., description="任务 ID")
     topic: str = Field(..., description="研究主题")

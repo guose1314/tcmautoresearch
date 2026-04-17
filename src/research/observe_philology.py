@@ -246,6 +246,9 @@ def normalize_observe_catalog_review_decision(raw_decision: Any) -> Dict[str, An
         normalized["reviewer"] = reviewer
     if decision_basis:
         normalized["decision_basis"] = decision_basis
+    decision_history = decision.get("decision_history")
+    if isinstance(decision_history, list) and decision_history:
+        normalized["decision_history"] = decision_history
     return normalized
 
 
@@ -289,6 +292,28 @@ def _normalize_catalog_review_decisions(raw_decisions: Any) -> List[Dict[str, An
     return decisions
 
 
+def _build_catalog_audit_entry(previous: Mapping[str, Any]) -> Dict[str, Any]:
+    entry: Dict[str, Any] = {}
+    for key in ("scope", "review_status", "reviewer", "reviewed_at", "decision_basis", "review_source"):
+        value = _as_text(previous.get(key))
+        if value:
+            entry[key] = value
+    return entry
+
+
+def _append_catalog_audit_trail(
+    new_decision: Dict[str, Any],
+    previous_decision: Mapping[str, Any] | None,
+) -> None:
+    existing_history: List[Dict[str, Any]] = list(previous_decision.get("decision_history") or []) if previous_decision else []
+    if previous_decision:
+        audit_entry = _build_catalog_audit_entry(previous_decision)
+        if audit_entry:
+            existing_history.append(audit_entry)
+    if existing_history:
+        new_decision["decision_history"] = existing_history
+
+
 def upsert_observe_catalog_review_artifact_content(
     raw_content: Any,
     raw_decision: Any,
@@ -304,6 +329,22 @@ def upsert_observe_catalog_review_artifact_content(
         for field_name in _CATALOG_REVIEW_SCOPE_FIELDS[scope]
         if _as_text(decision.get(field_name))
     )
+    previous = next(
+        (
+            item
+            for item in existing_decisions
+            if item.get("scope") == scope
+            and tuple(
+                (field_name, _as_text(item.get(field_name)))
+                for field_name in _CATALOG_REVIEW_SCOPE_FIELDS[scope]
+                if _as_text(item.get(field_name))
+            )
+            == identity
+        ),
+        None,
+    )
+    _append_catalog_audit_trail(decision, previous)
+
     filtered_decisions = [
         item
         for item in existing_decisions
@@ -326,6 +367,26 @@ def upsert_observe_catalog_review_artifact_content(
         "last_reviewer": decision.get("reviewer"),
         "decisions": filtered_decisions,
     }
+
+
+def upsert_observe_catalog_review_artifact_content_batch(
+    raw_content: Any,
+    raw_decisions: Any,
+) -> Dict[str, Any]:
+    """Apply multiple catalog review decisions in one pass, preserving audit trails."""
+    items: List[Any] = list(raw_decisions) if isinstance(raw_decisions, list) else []
+    if not items:
+        return {}
+
+    content = raw_content
+    for raw_decision in items:
+        result = upsert_observe_catalog_review_artifact_content(content, raw_decision)
+        if result:
+            content = result
+
+    if not isinstance(content, dict) or not content:
+        return {}
+    return content
 
 
 def _normalize_temporal_semantics(
@@ -1022,6 +1083,31 @@ def _build_structured_knowledge_exegesis_definition(
             "definition": definition,
             "definition_source": "structured_tcm_knowledge",
             "source_refs": ["TCMRelationshipDefinitions.FORMULA_COMPOSITIONS"],
+        }
+    if category == "syndrome":
+        syndrome_info = TCMRelationshipDefinitions.get_syndrome_definition(canonical)
+        if not syndrome_info:
+            return {}
+        parts = [f"{canonical}：{syndrome_info.get('definition', '')}"]
+        symptoms = syndrome_info.get("symptoms") or []
+        if symptoms:
+            parts.append(f"典型表现：{'、'.join(symptoms)}")
+        pathogenesis = _as_text(syndrome_info.get("pathogenesis"))
+        if pathogenesis:
+            parts.append(f"病机：{pathogenesis}")
+        return {
+            "definition": "；".join(parts),
+            "definition_source": "structured_tcm_knowledge",
+            "source_refs": ["TCMRelationshipDefinitions.SYNDROME_DEFINITIONS"],
+        }
+    if category == "theory":
+        theory_def = TCMRelationshipDefinitions.get_theory_term_definition(canonical)
+        if not theory_def:
+            return {}
+        return {
+            "definition": f"{canonical}：{theory_def}",
+            "definition_source": "structured_tcm_knowledge",
+            "source_refs": ["TCMRelationshipDefinitions.THEORY_TERM_DEFINITIONS"],
         }
     return {}
 

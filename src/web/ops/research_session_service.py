@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from src.infrastructure.research_session_repo import ResearchSessionRepository
 from src.orchestration.research_runtime_service import (
@@ -140,6 +140,36 @@ def apply_philology_review(
     if saved is None:
         return None
 
+    snapshot = _load_session_snapshot(repository, cycle_id)
+    if snapshot is None:
+        return None
+    return build_session_contract(snapshot)
+
+
+def apply_catalog_review_batch(
+    app: Any,
+    cycle_id: str,
+    decisions: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    repository = _get_repository(app)
+    saved = repository.upsert_observe_catalog_review_batch(cycle_id, decisions)
+    if saved is None:
+        return None
+    snapshot = _load_session_snapshot(repository, cycle_id)
+    if snapshot is None:
+        return None
+    return build_session_contract(snapshot)
+
+
+def apply_philology_review_batch(
+    app: Any,
+    cycle_id: str,
+    decisions: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    repository = _get_repository(app)
+    saved = repository.upsert_observe_workbench_review_batch(cycle_id, decisions)
+    if saved is None:
+        return None
     snapshot = _load_session_snapshot(repository, cycle_id)
     if snapshot is None:
         return None

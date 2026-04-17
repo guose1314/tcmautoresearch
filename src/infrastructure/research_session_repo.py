@@ -45,11 +45,13 @@ from src.research.observe_philology import (
     normalize_observe_catalog_review_decision,
     resolve_observe_philology_assets,
     upsert_observe_catalog_review_artifact_content,
+    upsert_observe_catalog_review_artifact_content_batch,
 )
 from src.research.review_workbench import (
     OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT,
     normalize_observe_review_workbench_decision,
     upsert_observe_review_workbench_artifact_content,
+    upsert_observe_review_workbench_artifact_content_batch,
 )
 
 logger = logging.getLogger(__name__)
@@ -555,6 +557,138 @@ class ResearchSessionRepository:
                 artifact.description = "Observe 阶段文献学工作台审核写回记录"
                 artifact.content_json = _json_dumps(content, "{}")
                 artifact.mime_type = "application/json"
+                artifact.size_bytes = size_bytes
+                artifact.metadata_json = _json_dumps(metadata, "{}")
+
+            db_session.flush()
+            return self._artifact_to_dict(artifact)
+
+    def upsert_observe_catalog_review_batch(
+        self,
+        cycle_id: str,
+        decisions: Sequence[Mapping[str, Any]],
+        *,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        with self._session_scope(session) as db_session:
+            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            if rs is None:
+                return None
+
+            phase_execution = (
+                db_session.query(PhaseExecution)
+                .filter(
+                    PhaseExecution.session_id == rs.id,
+                    PhaseExecution.phase == "observe",
+                )
+                .order_by(PhaseExecution.created_at.desc())
+                .first()
+            )
+            if phase_execution is None:
+                return None
+
+            artifact = (
+                db_session.query(ResearchArtifact)
+                .filter(
+                    ResearchArtifact.phase_execution_id == phase_execution.id,
+                    ResearchArtifact.name == OBSERVE_PHILOLOGY_CATALOG_REVIEW_ARTIFACT,
+                )
+                .one_or_none()
+            )
+            existing_content = _json_loads(artifact.content_json, {}) if artifact is not None else {}
+            content = upsert_observe_catalog_review_artifact_content_batch(existing_content, list(decisions))
+            if not content:
+                return None
+            metadata = {
+                "asset_kind": "catalog_review_decisions",
+                "decision_count": int(content.get("decision_count") or 0),
+                "last_reviewer": content.get("last_reviewer"),
+                "updated_at": content.get("updated_at"),
+            }
+            size_bytes = self._estimate_artifact_size(content, None)
+
+            if artifact is None:
+                artifact = ResearchArtifact(
+                    session_id=rs.id,
+                    phase_execution_id=phase_execution.id,
+                    artifact_type=ArtifactTypeEnum.ANALYSIS,
+                    name=OBSERVE_PHILOLOGY_CATALOG_REVIEW_ARTIFACT,
+                    description="Observe 阶段目录学校核写回记录（批量）",
+                    content_json=_json_dumps(content, "{}"),
+                    file_path=None,
+                    mime_type="application/json",
+                    size_bytes=size_bytes,
+                    metadata_json=_json_dumps(metadata, "{}"),
+                )
+                db_session.add(artifact)
+            else:
+                artifact.content_json = _json_dumps(content, "{}")
+                artifact.size_bytes = size_bytes
+                artifact.metadata_json = _json_dumps(metadata, "{}")
+
+            db_session.flush()
+            return self._artifact_to_dict(artifact)
+
+    def upsert_observe_workbench_review_batch(
+        self,
+        cycle_id: str,
+        decisions: Sequence[Mapping[str, Any]],
+        *,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        with self._session_scope(session) as db_session:
+            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            if rs is None:
+                return None
+
+            phase_execution = (
+                db_session.query(PhaseExecution)
+                .filter(
+                    PhaseExecution.session_id == rs.id,
+                    PhaseExecution.phase == "observe",
+                )
+                .order_by(PhaseExecution.created_at.desc())
+                .first()
+            )
+            if phase_execution is None:
+                return None
+
+            artifact = (
+                db_session.query(ResearchArtifact)
+                .filter(
+                    ResearchArtifact.phase_execution_id == phase_execution.id,
+                    ResearchArtifact.name == OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT,
+                )
+                .one_or_none()
+            )
+            existing_content = _json_loads(artifact.content_json, {}) if artifact is not None else {}
+            content = upsert_observe_review_workbench_artifact_content_batch(existing_content, list(decisions))
+            if not content:
+                return None
+            metadata = {
+                "asset_kind": "review_workbench_decisions",
+                "decision_count": int(content.get("decision_count") or 0),
+                "last_reviewer": content.get("last_reviewer"),
+                "updated_at": content.get("updated_at"),
+            }
+            size_bytes = self._estimate_artifact_size(content, None)
+
+            if artifact is None:
+                artifact = ResearchArtifact(
+                    session_id=rs.id,
+                    phase_execution_id=phase_execution.id,
+                    artifact_type=ArtifactTypeEnum.ANALYSIS,
+                    name=OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT,
+                    description="Observe 阶段文献学工作台审核写回记录（批量）",
+                    content_json=_json_dumps(content, "{}"),
+                    file_path=None,
+                    mime_type="application/json",
+                    size_bytes=size_bytes,
+                    metadata_json=_json_dumps(metadata, "{}"),
+                )
+                db_session.add(artifact)
+            else:
+                artifact.content_json = _json_dumps(content, "{}")
                 artifact.size_bytes = size_bytes
                 artifact.metadata_json = _json_dumps(metadata, "{}")
 

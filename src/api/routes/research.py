@@ -30,6 +30,10 @@ from src.api.research_utils import (
     resolve_preferred_report_artifact,
 )
 from src.api.schemas import (
+    ResearchBatchCatalogReviewRequest,
+    ResearchBatchCatalogReviewResponse,
+    ResearchBatchPhilologyReviewRequest,
+    ResearchBatchPhilologyReviewResponse,
     ResearchCatalogReviewRequest,
     ResearchCatalogReviewResponse,
     ResearchDashboardResponse,
@@ -246,6 +250,104 @@ def update_research_job_philology_review(
     return {
         "job_id": job_id,
         "cycle_id": cycle_id,
+        "observe_philology": observe_philology if isinstance(observe_philology, dict) else {},
+        "review_artifact": review_artifact,
+    }
+
+
+@router.post("/jobs/{job_id}/batch-catalog-review")
+def batch_catalog_review(
+    job_id: str,
+    payload: ResearchBatchCatalogReviewRequest,
+    request: Request,
+    manager: ResearchJobManager=Depends(get_job_manager),
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ResearchBatchCatalogReviewResponse:
+    job_snapshot = _resolve_job_snapshot(manager, job_id)
+    result = job_snapshot.get("result") if isinstance(job_snapshot.get("result"), dict) else None
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=409, detail="job 尚未生成可写回的研究结果")
+
+    cycle_id = _resolve_cycle_id(job_snapshot)
+    if not cycle_id:
+        raise HTTPException(status_code=409, detail="job 尚未关联持久化 cycle_id")
+
+    reviewer = _resolve_review_reviewer(request, "")
+    raw_decisions = []
+    for d in payload.decisions:
+        item = d.model_dump()
+        item["reviewer"] = _resolve_review_reviewer(request, str(item.get("reviewer") or "")) or reviewer
+        if not str(item.get("decision_basis") or "").strip():
+            item["decision_basis"] = "管理 API 批量目录学 review 写回"
+        raw_decisions.append(item)
+
+    try:
+        review_artifact = repository.upsert_observe_catalog_review_batch(cycle_id, raw_decisions)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if review_artifact is None:
+        if repository.get_session(cycle_id) is None:
+            raise HTTPException(status_code=404, detail="研究会话不存在")
+        raise HTTPException(status_code=409, detail="Observe 阶段尚未持久化，暂不可写回 review")
+
+    refreshed_snapshot = repository.get_full_snapshot(cycle_id)
+    observe_philology = refreshed_snapshot.get("observe_philology") if isinstance(refreshed_snapshot, dict) else {}
+    manager.sync_job_observe_philology(job_id, observe_philology if isinstance(observe_philology, dict) else {})
+    return {
+        "job_id": job_id,
+        "cycle_id": cycle_id,
+        "applied_count": len(raw_decisions),
+        "observe_philology": observe_philology if isinstance(observe_philology, dict) else {},
+        "review_artifact": review_artifact,
+    }
+
+
+@router.post("/jobs/{job_id}/batch-philology-review")
+def batch_philology_review(
+    job_id: str,
+    payload: ResearchBatchPhilologyReviewRequest,
+    request: Request,
+    manager: ResearchJobManager=Depends(get_job_manager),
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ResearchBatchPhilologyReviewResponse:
+    job_snapshot = _resolve_job_snapshot(manager, job_id)
+    result = job_snapshot.get("result") if isinstance(job_snapshot.get("result"), dict) else None
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=409, detail="job 尚未生成可写回的研究结果")
+
+    cycle_id = _resolve_cycle_id(job_snapshot)
+    if not cycle_id:
+        raise HTTPException(status_code=409, detail="job 尚未关联持久化 cycle_id")
+
+    reviewer = _resolve_review_reviewer(request, "")
+    raw_decisions = []
+    for d in payload.decisions:
+        item = d.model_dump()
+        item["reviewer"] = _resolve_review_reviewer(request, str(item.get("reviewer") or "")) or reviewer
+        if not str(item.get("decision_basis") or "").strip():
+            item["decision_basis"] = "控制台批量文献学工作台审核"
+        raw_decisions.append(item)
+
+    try:
+        review_artifact = repository.upsert_observe_workbench_review_batch(cycle_id, raw_decisions)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if review_artifact is None:
+        if repository.get_session(cycle_id) is None:
+            raise HTTPException(status_code=404, detail="研究会话不存在")
+        raise HTTPException(status_code=409, detail="Observe 阶段尚未持久化，暂不可写回文献学 review")
+
+    refreshed_snapshot = repository.get_full_snapshot(cycle_id)
+    observe_philology = refreshed_snapshot.get("observe_philology") if isinstance(refreshed_snapshot, dict) else {}
+    manager.sync_job_observe_philology(job_id, observe_philology if isinstance(observe_philology, dict) else {})
+    return {
+        "job_id": job_id,
+        "cycle_id": cycle_id,
+        "applied_count": len(raw_decisions),
         "observe_philology": observe_philology if isinstance(observe_philology, dict) else {},
         "review_artifact": review_artifact,
     }

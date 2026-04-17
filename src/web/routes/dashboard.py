@@ -39,7 +39,9 @@ from src.web.auth import get_current_user
 from src.web.ops.research_session_contract import resolve_phase_result
 from src.web.ops.research_session_service import (
     apply_catalog_review,
+    apply_catalog_review_batch,
     apply_philology_review,
+    apply_philology_review_batch,
     get_research_session,
     list_research_sessions,
 )
@@ -2256,6 +2258,110 @@ async def update_project_philology_review(
             work_title=work_title,
             version_lineage_key=version_lineage_key,
             witness_key=witness_key,
+            error_message=error_message,
+        )
+    )
+
+
+@router.post("/api/projects/{cycle_id}/batch-catalog-review", response_class=HTMLResponse)
+async def batch_project_catalog_review(
+    request: Request,
+    cycle_id: str,
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> HTMLResponse:
+    import json as _json
+
+    try:
+        raw_body = await request.body()
+        body = _json.loads(raw_body) if raw_body else {}
+    except Exception:
+        body = {}
+
+    decisions_raw: List[Dict[str, Any]] = body.get("decisions") or []
+    reviewer = _resolve_dashboard_reviewer(user)
+    terminology_page = int(body.get("terminology_page") or 1)
+    collation_page = int(body.get("collation_page") or 1)
+    drawer = 1 if body.get("drawer") else 0
+
+    decisions = []
+    for d in decisions_raw:
+        d["reviewer"] = reviewer
+        if not str(d.get("decision_basis") or "").strip():
+            d["decision_basis"] = "仪表盘批量目录学审核"
+        decisions.append(d)
+
+    try:
+        updated_session = apply_catalog_review_batch(request.app, cycle_id, decisions)
+        if updated_session is None:
+            raise ValueError("Observe 阶段未持久化或研究任务不存在")
+        session = updated_session
+        error_message = ""
+    except Exception as exc:
+        logger.exception("dashboard batch catalog review failed: %s", cycle_id)
+        try:
+            session = get_research_session(request.app, cycle_id)
+        except Exception:
+            session = None
+        error_message = f"批量目录学 review 写回失败: {exc}"
+
+    return HTMLResponse(
+        _render_session_detail_panel(
+            session,
+            terminology_page=terminology_page,
+            collation_page=collation_page,
+            drawer=bool(drawer),
+            error_message=error_message,
+        )
+    )
+
+
+@router.post("/api/projects/{cycle_id}/batch-philology-review", response_class=HTMLResponse)
+async def batch_project_philology_review(
+    request: Request,
+    cycle_id: str,
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> HTMLResponse:
+    import json as _json
+
+    try:
+        raw_body = await request.body()
+        body = _json.loads(raw_body) if raw_body else {}
+    except Exception:
+        body = {}
+
+    decisions_raw: List[Dict[str, Any]] = body.get("decisions") or []
+    reviewer = _resolve_dashboard_reviewer(user)
+    terminology_page = int(body.get("terminology_page") or 1)
+    collation_page = int(body.get("collation_page") or 1)
+    drawer = 1 if body.get("drawer") else 0
+
+    decisions = []
+    for d in decisions_raw:
+        d["reviewer"] = reviewer
+        if not str(d.get("decision_basis") or "").strip():
+            d["decision_basis"] = "仪表盘批量文献学工作台审核"
+        decisions.append(d)
+
+    try:
+        updated_session = apply_philology_review_batch(request.app, cycle_id, decisions)
+        if updated_session is None:
+            raise ValueError("Observe 阶段未持久化或研究任务不存在")
+        session = updated_session
+        error_message = ""
+    except Exception as exc:
+        logger.exception("dashboard batch philology review failed: %s", cycle_id)
+        try:
+            session = get_research_session(request.app, cycle_id)
+        except Exception:
+            session = None
+        error_message = f"批量文献学 review 写回失败: {exc}"
+
+    return HTMLResponse(
+        _render_session_detail_panel(
+            session,
+            terminology_page=terminology_page,
+            collation_page=collation_page,
+            drawer=bool(drawer),
             error_message=error_message,
         )
     )

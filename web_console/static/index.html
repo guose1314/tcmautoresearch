@@ -3882,6 +3882,46 @@
             return result;
         }
 
+        async function submitBatchCatalogReview(jobId, decisions, context = {}) {
+            const normalizedJobId = String(jobId || "").trim();
+            if (!normalizedJobId || normalizedJobId === "-") {
+                throw new Error("当前任务尚未生成可审核的 job_id");
+            }
+            const response = await authenticatedFetch(`/api/research/jobs/${encodeURIComponent(normalizedJobId)}/batch-catalog-review`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({decisions}),
+            });
+            if (!response.ok) {
+                const errorPayload = await response.json().catch(() => ({}));
+                throw new Error(errorPayload.detail || `HTTP ${response.status}`);
+            }
+            const result = await response.json();
+            await refreshResearchDashboard(normalizedJobId);
+            setBanner(`批量目录学 review 已写回 ${result.applied_count} 条`, "success");
+            return result;
+        }
+
+        async function submitBatchPhilologyReview(jobId, decisions, context = {}) {
+            const normalizedJobId = String(jobId || "").trim();
+            if (!normalizedJobId || normalizedJobId === "-") {
+                throw new Error("当前任务尚未生成可审核的 job_id");
+            }
+            const response = await authenticatedFetch(`/api/research/jobs/${encodeURIComponent(normalizedJobId)}/batch-philology-review`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({decisions}),
+            });
+            if (!response.ok) {
+                const errorPayload = await response.json().catch(() => ({}));
+                throw new Error(errorPayload.detail || `HTTP ${response.status}`);
+            }
+            const result = await response.json();
+            await refreshResearchDashboard(normalizedJobId);
+            setBanner(`批量文献学 review 已写回 ${result.applied_count} 条`, "success");
+            return result;
+        }
+
         function buildReviewWorkbenchFilterSummary(activeFilters) {
             const labels = [];
             if (activeFilters.work_title) {

@@ -864,5 +864,208 @@ class TestResearchPipelineObserve(unittest.TestCase):
         mock_out_init.assert_not_called()
 
 
+class TestReviewAuditTrail(unittest.TestCase):
+    """Verify decision_history is preserved when a review decision is overwritten."""
+
+    def test_catalog_review_upsert_preserves_previous_decision_in_history(self):
+        from src.research.observe_philology import upsert_observe_catalog_review_artifact_content
+
+        first = upsert_observe_catalog_review_artifact_content({}, {
+            "scope": "version_lineage",
+            "version_lineage_key": "伤寒论|宋版",
+            "review_status": "pending",
+            "reviewer": "张三",
+            "reviewed_at": "2026-04-15T10:00:00",
+            "decision_basis": "初审",
+        })
+        self.assertEqual(first["decision_count"], 1)
+        decision_v1 = first["decisions"][0]
+        self.assertNotIn("decision_history", decision_v1)
+
+        second = upsert_observe_catalog_review_artifact_content(first, {
+            "scope": "version_lineage",
+            "version_lineage_key": "伤寒论|宋版",
+            "review_status": "accepted",
+            "reviewer": "李四",
+            "reviewed_at": "2026-04-16T12:00:00",
+            "decision_basis": "复核通过",
+        })
+        self.assertEqual(second["decision_count"], 1)
+        decision_v2 = second["decisions"][0]
+        self.assertEqual(decision_v2["review_status"], "accepted")
+        self.assertEqual(decision_v2["reviewer"], "李四")
+        self.assertIn("decision_history", decision_v2)
+        self.assertEqual(len(decision_v2["decision_history"]), 1)
+        self.assertEqual(decision_v2["decision_history"][0]["reviewer"], "张三")
+        self.assertEqual(decision_v2["decision_history"][0]["review_status"], "pending")
+
+    def test_workbench_review_upsert_preserves_audit_trail_across_three_revisions(self):
+        from src.research.review_workbench import upsert_observe_review_workbench_artifact_content
+
+        v1 = upsert_observe_review_workbench_artifact_content({}, {
+            "asset_type": "terminology_row",
+            "asset_key": "黄芪|本草药名",
+            "review_status": "pending",
+            "reviewer": "A",
+            "reviewed_at": "2026-04-10T00:00:00",
+        })
+        v2 = upsert_observe_review_workbench_artifact_content(v1, {
+            "asset_type": "terminology_row",
+            "asset_key": "黄芪|本草药名",
+            "review_status": "needs_source",
+            "reviewer": "B",
+            "reviewed_at": "2026-04-11T00:00:00",
+        })
+        v3 = upsert_observe_review_workbench_artifact_content(v2, {
+            "asset_type": "terminology_row",
+            "asset_key": "黄芪|本草药名",
+            "review_status": "accepted",
+            "reviewer": "C",
+            "reviewed_at": "2026-04-12T00:00:00",
+        })
+        decision = v3["decisions"][0]
+        self.assertEqual(decision["review_status"], "accepted")
+        self.assertEqual(decision["reviewer"], "C")
+        self.assertEqual(len(decision["decision_history"]), 2)
+        self.assertEqual(decision["decision_history"][0]["reviewer"], "A")
+        self.assertEqual(decision["decision_history"][1]["reviewer"], "B")
+
+    def test_catalog_review_batch_preserves_audit_trail(self):
+        from src.research.observe_philology import (
+            upsert_observe_catalog_review_artifact_content,
+            upsert_observe_catalog_review_artifact_content_batch,
+        )
+
+        existing = upsert_observe_catalog_review_artifact_content({}, {
+            "scope": "version_lineage",
+            "version_lineage_key": "K1",
+            "review_status": "pending",
+            "reviewer": "用户1",
+        })
+        result = upsert_observe_catalog_review_artifact_content_batch(existing, [
+            {
+                "scope": "version_lineage",
+                "version_lineage_key": "K1",
+                "review_status": "accepted",
+                "reviewer": "用户2",
+            },
+            {
+                "scope": "version_lineage",
+                "version_lineage_key": "K2",
+                "review_status": "rejected",
+                "reviewer": "用户2",
+            },
+        ])
+        self.assertEqual(result["decision_count"], 2)
+        k1 = next(d for d in result["decisions"] if d.get("version_lineage_key") == "K1")
+        k2 = next(d for d in result["decisions"] if d.get("version_lineage_key") == "K2")
+        self.assertEqual(k1["review_status"], "accepted")
+        self.assertIn("decision_history", k1)
+        self.assertEqual(k1["decision_history"][0]["reviewer"], "用户1")
+        self.assertEqual(k2["review_status"], "rejected")
+        self.assertNotIn("decision_history", k2)
+
+    def test_workbench_batch_upsert_applies_multiple_decisions(self):
+        from src.research.review_workbench import upsert_observe_review_workbench_artifact_content_batch
+
+        result = upsert_observe_review_workbench_artifact_content_batch({}, [
+            {
+                "asset_type": "claim",
+                "asset_key": "c1",
+                "review_status": "accepted",
+                "reviewer": "审核员",
+            },
+            {
+                "asset_type": "collation_entry",
+                "asset_key": "col1",
+                "review_status": "rejected",
+                "reviewer": "审核员",
+            },
+        ])
+        self.assertEqual(result["decision_count"], 2)
+        types = {d["asset_type"] for d in result["decisions"]}
+        self.assertEqual(types, {"claim", "collation_entry"})
+
+
+class TestExpandedExegesisAuthoritySources(unittest.TestCase):
+    """Verify the new syndrome and theory exegesis sources are integrated."""
+
+    def test_syndrome_category_produces_structured_knowledge_definition(self):
+        from src.research.observe_philology import _build_structured_knowledge_exegesis_definition
+
+        result = _build_structured_knowledge_exegesis_definition(
+            "气虚证", category="syndrome", label="证候术语",
+        )
+        self.assertEqual(result["definition_source"], "structured_tcm_knowledge")
+        self.assertIn("元气不足", result["definition"])
+        self.assertIn("少气懒言", result["definition"])
+        self.assertIn("SYNDROME_DEFINITIONS", result["source_refs"][0])
+
+    def test_theory_category_produces_structured_knowledge_definition(self):
+        from src.research.observe_philology import _build_structured_knowledge_exegesis_definition
+
+        result = _build_structured_knowledge_exegesis_definition(
+            "君臣佐使", category="theory", label="理论术语",
+        )
+        self.assertEqual(result["definition_source"], "structured_tcm_knowledge")
+        self.assertIn("君药治主症", result["definition"])
+        self.assertIn("THEORY_TERM_DEFINITIONS", result["source_refs"][0])
+
+    def test_unknown_syndrome_returns_empty(self):
+        from src.research.observe_philology import _build_structured_knowledge_exegesis_definition
+
+        result = _build_structured_knowledge_exegesis_definition(
+            "不存在证", category="syndrome", label="证候术语",
+        )
+        self.assertEqual(result, {})
+
+    def test_unknown_theory_returns_empty(self):
+        from src.research.observe_philology import _build_structured_knowledge_exegesis_definition
+
+        result = _build_structured_knowledge_exegesis_definition(
+            "不存在术语", category="theory", label="理论术语",
+        )
+        self.assertEqual(result, {})
+
+    def test_resolve_exegesis_definition_prefers_structured_syndrome(self):
+        from src.research.observe_philology import _resolve_exegesis_definition
+
+        row = {
+            "label": "证候术语",
+            "notes": ["一般性备注"],
+            "sources": [],
+        }
+        result = _resolve_exegesis_definition(row, canonical="血虚证", label="证候术语")
+        self.assertEqual(result["definition_source"], "structured_tcm_knowledge")
+        self.assertIn("血液亏虚", result["definition"])
+
+    def test_exegesis_source_rank_covers_all_levels(self):
+        from src.research.observe_philology import _exegesis_definition_source_rank
+
+        self.assertEqual(_exegesis_definition_source_rank("config_terminology_standard"), 4)
+        self.assertEqual(_exegesis_definition_source_rank("structured_tcm_knowledge"), 3)
+        self.assertEqual(_exegesis_definition_source_rank("terminology_note"), 2)
+        self.assertEqual(_exegesis_definition_source_rank("canonical_fallback"), 1)
+        self.assertEqual(_exegesis_definition_source_rank(""), 0)
+
+    def test_herb_exegesis_still_works_after_changes(self):
+        from src.research.observe_philology import _build_structured_knowledge_exegesis_definition
+
+        result = _build_structured_knowledge_exegesis_definition(
+            "黄芪", category="herb", label="本草药名",
+        )
+        self.assertEqual(result["definition_source"], "structured_tcm_knowledge")
+        self.assertIn("补气", result["definition"])
+
+    def test_formula_exegesis_still_works_after_changes(self):
+        from src.research.observe_philology import _build_structured_knowledge_exegesis_definition
+
+        result = _build_structured_knowledge_exegesis_definition(
+            "四君子汤", category="formula", label="方剂名",
+        )
+        self.assertEqual(result["definition_source"], "structured_tcm_knowledge")
+        self.assertIn("君药", result["definition"])
+
+
 if __name__ == "__main__":
     unittest.main()

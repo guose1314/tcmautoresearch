@@ -116,6 +116,58 @@ class TCMRelationshipDefinitions:
         "柴胡": {"气": "凉", "味": "苦、辛"},
         "丹参": {"气": "微温", "味": "苦"},
     }
+
+    # 证候定义与典型症状
+    SYNDROME_DEFINITIONS: Dict[str, Dict[str, Any]] = {
+        "气虚证": {
+            "definition": "元气不足，脏腑功能减退",
+            "symptoms": ["少气懒言", "神疲乏力", "自汗", "舌淡", "脉虚弱"],
+            "pathogenesis": "劳倦内伤、久病耗损、年老体弱致气之化源不足",
+        },
+        "血虚证": {
+            "definition": "血液亏虚，脏腑百脉失养",
+            "symptoms": ["面色淡白或萎黄", "唇舌色淡", "头晕眼花", "心悸", "脉细"],
+            "pathogenesis": "失血过多或生血不足，血液亏少",
+        },
+        "阴虚证": {
+            "definition": "阴液不足，虚热内生",
+            "symptoms": ["潮热盗汗", "五心烦热", "口燥咽干", "舌红少苔", "脉细数"],
+            "pathogenesis": "热病伤阴或久病耗损阴液",
+        },
+        "阳虚证": {
+            "definition": "阳气不足，温煦失职",
+            "symptoms": ["畏寒肢冷", "面色苍白", "神疲蜷卧", "舌淡胖", "脉沉迟无力"],
+            "pathogenesis": "久病伤阳或年老阳衰",
+        },
+        "痰湿证": {
+            "definition": "水湿痰饮停聚体内",
+            "symptoms": ["肢体困重", "脘腹胀满", "恶心", "苔腻", "脉滑"],
+            "pathogenesis": "脾失健运或外湿侵袭致水液运化失常",
+        },
+        "血瘀证": {
+            "definition": "血液瘀滞不畅",
+            "symptoms": ["刺痛拒按", "痛处固定", "面色晦暗", "舌紫暗或有瘀斑", "脉涩"],
+            "pathogenesis": "气滞、外伤、寒凝或热灼致血行不畅",
+        },
+        "湿热证": {
+            "definition": "湿与热互结蕴蒸",
+            "symptoms": ["身热不扬", "脘痞呕恶", "口苦口黏", "苔黄腻", "脉濡数"],
+            "pathogenesis": "外感湿热或脾胃运化失常，湿热内蕴",
+        },
+    }
+
+    # 经典理论术语简释
+    THEORY_TERM_DEFINITIONS: Dict[str, str] = {
+        "君臣佐使": "方剂配伍的基本结构原则，君药治主症，臣药助君，佐药制约或兼治，使药调和引经",
+        "四气五味": "药物的寒热温凉四气与辛甘酸苦咸五味，是中药药性理论的核心",
+        "归经": "药物作用的靶向经络脏腑，指导临床用药定位",
+        "七情配伍": "药物相互作用的七种关系：单行、相须、相使、相畏、相杀、相恶、相反",
+        "辨证论治": "中医诊疗体系核心，通过四诊合参辨别证型，据证立法选方用药",
+        "正邪": "正气为人体抗病能力，邪气为致病因素，发病取决于正邪斗争",
+        "升降浮沉": "药物作用的趋向性，升浮药向上向外，沉降药向下向内",
+        "表里": "八纲辨证之一，病位在表为表证（外感初期），在里为里证（脏腑病变）",
+    }
+
     
     @classmethod
     def get_formula_composition(cls, formula_name: str) -> Dict[str, List[str]]:
@@ -155,6 +207,16 @@ class TCMRelationshipDefinitions:
             属性字典 {气: str, 味: str}
         """
         return cls.HERB_PROPERTIES.get(herb_name, {})
+
+    @classmethod
+    def get_syndrome_definition(cls, syndrome_name: str) -> Dict[str, Any]:
+        """获取证候定义、典型症状与病机。"""
+        return dict(cls.SYNDROME_DEFINITIONS.get(syndrome_name, {}))
+
+    @classmethod
+    def get_theory_term_definition(cls, term: str) -> str:
+        """获取经典理论术语的简释文本。返回空字符串表示未收录。"""
+        return cls.THEORY_TERM_DEFINITIONS.get(term, "")
     
     @classmethod
     def infer_relationship_type(

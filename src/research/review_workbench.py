@@ -140,6 +140,9 @@ def normalize_observe_review_workbench_decision(raw_decision: Any) -> Dict[str, 
         normalized["reviewer"] = reviewer
     if decision_basis:
         normalized["decision_basis"] = decision_basis
+    decision_history = decision.get("decision_history")
+    if isinstance(decision_history, list) and decision_history:
+        normalized["decision_history"] = decision_history
     return normalized
 
 
@@ -172,6 +175,30 @@ def normalize_observe_review_workbench_decisions(raw_decisions: Any) -> List[Dic
     return decisions
 
 
+def _build_audit_history_entry(previous: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract a compact audit entry from the previous decision being overwritten."""
+    entry: Dict[str, Any] = {}
+    for key in ("review_status", "reviewer", "reviewed_at", "decision_basis", "review_source"):
+        value = _as_text(previous.get(key))
+        if value:
+            entry[key] = value
+    return entry
+
+
+def _append_audit_trail(
+    new_decision: Dict[str, Any],
+    previous_decision: Dict[str, Any] | None,
+) -> None:
+    """Carry forward decision_history from *previous_decision* into *new_decision*."""
+    existing_history: List[Dict[str, Any]] = list(previous_decision.get("decision_history") or []) if previous_decision else []
+    if previous_decision:
+        audit_entry = _build_audit_history_entry(previous_decision)
+        if audit_entry:
+            existing_history.append(audit_entry)
+    if existing_history:
+        new_decision["decision_history"] = existing_history
+
+
 def upsert_observe_review_workbench_artifact_content(
     raw_content: Any,
     raw_decision: Any,
@@ -180,9 +207,21 @@ def upsert_observe_review_workbench_artifact_content(
     if not decision:
         return {}
 
+    existing_decisions = normalize_observe_review_workbench_decisions(raw_content)
+    previous = next(
+        (
+            item
+            for item in existing_decisions
+            if item.get("asset_type") == decision["asset_type"]
+            and item.get("asset_key") == decision["asset_key"]
+        ),
+        None,
+    )
+    _append_audit_trail(decision, previous)
+
     decisions = [
         item
-        for item in normalize_observe_review_workbench_decisions(raw_content)
+        for item in existing_decisions
         if not (
             item.get("asset_type") == decision["asset_type"]
             and item.get("asset_key") == decision["asset_key"]
@@ -197,3 +236,23 @@ def upsert_observe_review_workbench_artifact_content(
         "last_reviewer": decision.get("reviewer"),
         "decisions": decisions,
     }
+
+
+def upsert_observe_review_workbench_artifact_content_batch(
+    raw_content: Any,
+    raw_decisions: Any,
+) -> Dict[str, Any]:
+    """Apply multiple review decisions in one pass, preserving audit trails."""
+    items: List[Any] = list(raw_decisions) if isinstance(raw_decisions, list) else []
+    if not items:
+        return {}
+
+    content = raw_content
+    for raw_decision in items:
+        result = upsert_observe_review_workbench_artifact_content(content, raw_decision)
+        if result:
+            content = result
+
+    if not isinstance(content, dict) or not content:
+        return {}
+    return content
