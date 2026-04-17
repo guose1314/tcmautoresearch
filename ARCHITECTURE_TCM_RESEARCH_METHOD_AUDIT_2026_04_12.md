@@ -303,15 +303,28 @@ src/research/phase_result.py 已经把 phase、status、results、artifacts、me
 > - `_persist_result_structured()` 现将 `consistency_state.to_dict()` 嵌入 `cycle.metadata.storage_persistence`，runtime 调用方可通过 `storage_persistence.mode` 与 `storage_persistence.consistency_state` 一眼读取运行模式。
 > - `tests/unit/test_storage_consistency_contract.py` 包含 18 项契约测试，覆盖 6 种后端组合、数据结构合同、模式常量稳定性与工厂集成。
 
-- 后续可将 monitoring `_build_persistence_summary()` 中的 `structured_storage` 也改为直接嵌入 `get_consistency_state().to_dict()`，完成状态口径最后一公里统一。
-- 继续把 `TransactionResult.compensations_applied`、图投影失败原因与补齐结果提升为稳定观测字段，而不是主要依赖日志和人工排障阅读。
-- 继续减少“运行主链成功但历史增量仍需回填”的灰区路径；确需 eventual consistency 的场景，应显式标注边界，而不是让调用方面对隐式不一致窗口。
+> **状态更新（2026-04-17）：** "后收什么"三项已全部落地：
+> - monitoring `_build_persistence_summary()` 已通过 `_get_consistency_state_dict()` 嵌入 `get_consistency_state().to_dict()`，状态口径最后一公里统一完成。
+> - `TransactionResult` 新增 `neo4j_error`（图投影失败原因）、`compensation_details: List[str]`（补偿操作详情）、`needs_backfill: bool`（是否需回填）三个稳定观测字段；`_compensate_neo4j_detailed()` 在失败路径自动填充详情。
+> - `_classify_eventual_consistency()` 在 `storage_persistence` 中显式标注 `eventual_consistency.graph_backfill_pending` 与 `reason`，消除灰区路径。
+> - `get_full_snapshot()` 返回 `backfill_dependency` 字段，标注 `observe_philology`、`version_lineages`、`graph_projection` 三组的完整性与 `depends_on`，消费方一眼识别 backfill 依赖。
+> - `_project_cycle_to_neo4j()` 返回 `graph_projection_scope`（`current_cycle`），区分本次投影与 backfill 历史补齐。
+> - backfill 工具输出追加 `fields_written` 标注写入的字段/节点类型。
+> - `test_architecture_regression_guard.py` Guard #8（6 项）保护主写路径收口与一致性合同不可绕过；Guard #9（5 项）保护快照 backfill_dependency 标注完整性。共 33 项防护测试。
+> - `test_storage_consistency_contract.py` 扩展至 36 项，覆盖 TransactionResult 观测字段与 eventual_consistency 分类。
+> - 回归 2419 passed。
+
+- ~~后续可将 monitoring `_build_persistence_summary()` 中的 `structured_storage` 也改为直接嵌入 `get_consistency_state().to_dict()`，完成状态口径最后一公里统一。~~ ✅ 已完成。
+- ~~继续把 `TransactionResult.compensations_applied`、图投影失败原因与补齐结果提升为稳定观测字段，而不是主要依赖日志和人工排障阅读。~~ ✅ 已完成。
+- ~~继续减少"运行主链成功但历史增量仍需回填"的灰区路径；确需 eventual consistency 的场景，应显式标注边界，而不是让调用方面对隐式不一致窗口。~~ ✅ 已完成。
 
 后收什么：
 
-- 保持结构化主写路径继续收口到 `StorageBackendFactory` + `TransactionCoordinator`，由统一事务边界控制 PG / Neo4j 的写入顺序、失败处理与补偿语义。
-- 把结构化持久化的事实状态继续收口为一套稳定合同，让 runtime result、repository snapshot、dashboard 与运维检查对同一会话给出一致结论，而不是各自拼接一套“是否写成功”的判断。
-- 把历史补齐工具链继续定位为显式治理资产，而不是默认依赖的隐式主路径；凡是依赖 writeback / backfill 才完整的状态，都应能被一眼识别出来。
+> **状态更新（2026-04-17）：** 以下三项"后收什么"已全部通过代码治理落地并由 Guard #8 / #9 持续保护：
+
+- ~~保持结构化主写路径继续收口到 `StorageBackendFactory` + `TransactionCoordinator`，由统一事务边界控制 PG / Neo4j 的写入顺序、失败处理与补偿语义。~~ ✅ Guard #8 固化：`_persist_result_structured` 必须经由 `factory.transaction()` 并传 `transaction=txn` 给 `_project_cycle_to_neo4j`；`TransactionResult` 具备完整观测字段（`neo4j_error`、`compensation_details`、`needs_backfill`）；monitoring 必须嵌入 `consistency_state`。
+- ~~把结构化持久化的事实状态继续收口为一套稳定合同，让 runtime result、repository snapshot、dashboard 与运维检查对同一会话给出一致结论，而不是各自拼接一套"是否写成功"的判断。~~ ✅ 已完成：`StorageConsistencyState.to_dict()` 嵌入 `cycle.metadata.storage_persistence.consistency_state`（runtime）、monitoring `structured_storage.consistency_state`（dashboard）、`get_full_snapshot().backfill_dependency`（snapshot）三处共享同一合同。
+- ~~把历史补齐工具链继续定位为显式治理资产，而不是默认依赖的隐式主路径；凡是依赖 writeback / backfill 才完整的状态，都应能被一眼识别出来。~~ ✅ Guard #9 固化：`get_full_snapshot()` 必须返回 `backfill_dependency`，标注 `observe_philology`、`version_lineages`、`graph_projection` 三组的 `depends_on` 与完整性；`_project_cycle_to_neo4j` 返回 `graph_projection_scope` 区分当前投影与 backfill；backfill 工具输出 `fields_written`。
 
 最后验什么：
 

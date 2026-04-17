@@ -817,7 +817,49 @@ class ResearchSessionRepository:
                 observe_phase_result=self._phase_output_by_name(result["phase_executions"], "observe"),
                 observe_documents=result["observe_documents"],
             )
+            result["backfill_dependency"] = self._classify_backfill_dependency(result)
             return result
+
+    @staticmethod
+    def _classify_backfill_dependency(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        """标注快照中依赖 backfill/writeback 才完整的字段。
+
+        返回各字段组的完整性判定，让消费方（dashboard / API / 运维）
+        一眼识别当前快照中哪些数据可能不完整。
+        """
+        storage_meta = (snapshot.get("metadata") or {}).get("storage_persistence") or {}
+        ec = storage_meta.get("eventual_consistency") or {}
+        graph_pending = ec.get("graph_backfill_pending", False)
+
+        # observe_philology: 由 artifacts + observe_documents 组合计算，
+        # 历史会话可能需要 backfill_observe_philology_artifacts 补齐
+        philology = snapshot.get("observe_philology") or {}
+        philology_populated = bool(philology) and any(
+            bool(v) for v in philology.values() if isinstance(v, (list, dict))
+        )
+
+        # version_lineages: 由 observe_documents.version_metadata 分组，
+        # 历史会话可能需要 backfill_observe_document_version_metadata 补齐
+        lineages = snapshot.get("version_lineages") or []
+        lineages_populated = bool(lineages)
+
+        return {
+            "observe_philology": {
+                "populated": philology_populated,
+                "depends_on": ["backfill_observe_philology_artifacts"],
+                "note": "历史会话需执行 backfill 才完整" if not philology_populated else None,
+            },
+            "version_lineages": {
+                "populated": lineages_populated,
+                "depends_on": ["backfill_observe_document_version_metadata"],
+                "note": "历史会话需执行 backfill 才完整" if not lineages_populated else None,
+            },
+            "graph_projection": {
+                "backfill_pending": graph_pending,
+                "depends_on": ["backfill_structured_research_graph"],
+                "reason": ec.get("reason"),
+            },
+        }
 
     def backfill_observe_philology_artifacts(
         self,

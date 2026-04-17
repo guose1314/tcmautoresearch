@@ -40,6 +40,15 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _annotate_writeback(summary, *, fields_written):
+    """为 writeback/backfill 报告追加 fields_written 标注。"""
+    if summary is None:
+        return None
+    result = dict(summary)
+    result["fields_written"] = fields_written
+    return result
+
+
 def main() -> int:
     args = parse_args()
     settings = load_settings(
@@ -79,9 +88,23 @@ def main() -> int:
                     "loaded_files": list(settings.loaded_files),
                     "loaded_secret_files": list(settings.loaded_secret_files),
                     "storage": init_report,
-                    "observe_version_metadata_writeback": writeback_summary,
-                    "observe_philology_artifact_writeback": philology_artifact_writeback_summary,
-                    "backfill": summary,
+                    "observe_version_metadata_writeback": _annotate_writeback(
+                        writeback_summary,
+                        fields_written=["version_metadata", "witness_key", "version_lineage_key"],
+                    ),
+                    "observe_philology_artifact_writeback": _annotate_writeback(
+                        philology_artifact_writeback_summary,
+                        fields_written=["observe_philology_artifacts"],
+                    ),
+                    "backfill": _annotate_writeback(
+                        summary,
+                        fields_written=[
+                            "VersionLineage_nodes", "VersionWitness_nodes",
+                            "OBSERVED_WITNESS_edges", "BELONGS_TO_LINEAGE_edges",
+                            "ResearchSession_nodes", "ResearchPhaseExecution_nodes",
+                            "ResearchArtifact_nodes", "Entity_nodes",
+                        ],
+                    ),
                 },
                 ensure_ascii=False,
                 indent=2,

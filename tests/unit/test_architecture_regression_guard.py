@@ -9,6 +9,8 @@ Guard #4: research_utils.py 只在 canonical 基线上追加环境路径
 Guard #5: 共享 runtime profile 必须嵌入 canonical 默认值
 Guard #6: job_manager / research_job_runner 边界约束
 Guard #7: Web 层不得散落 runtime profile 默认值
+Guard #8: 结构化存储主写路径收口 + 一致性合同不可绕过
+Guard #9: 快照 backfill_dependency 标注不可缺失
 """
 
 import ast
@@ -386,6 +388,116 @@ class TestNoScatteredProfileDefaults(unittest.TestCase):
                 if "research_pipeline" in mod:
                     violations.append(f"{fpath.relative_to(_WORKSPACE)}: {mod}")
         self.assertEqual(violations, [], f"route 直接导入 ResearchPipeline: {violations}")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Guard #8 — 结构化存储主写路径收口 + 一致性合同不可绕过
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestStorageConvergenceGuard(unittest.TestCase):
+    """Guard #8: 结构化主写路径经由 StorageBackendFactory + TransactionCoordinator。
+
+    保护不变式：
+    - phase_orchestrator 的 _persist_result_structured 必须通过 factory.transaction()
+    - cycle.metadata.storage_persistence 包含 consistency_state 与 eventual_consistency
+    - TransactionResult 必须有完整观测字段（neo4j_error, compensation_details, needs_backfill）
+    - monitoring 的 persistence summary 必须嵌入 consistency_state
+    """
+
+    def test_persist_structured_uses_factory_transaction(self):
+        """_persist_result_structured 必须调用 factory.transaction()。"""
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        self.assertIn("factory.transaction()", source,
+                       "_persist_result_structured 未使用 factory.transaction()")
+
+    def test_persist_structured_embeds_consistency_state(self):
+        """storage_persistence 必须包含 consistency_state 与 eventual_consistency。"""
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        self.assertIn('"consistency_state": consistency_state.to_dict()', source,
+                       "storage_persistence 缺少 consistency_state.to_dict()")
+        self.assertIn('"eventual_consistency":', source,
+                       "storage_persistence 缺少 eventual_consistency 字段")
+
+    def test_transaction_result_observation_fields(self):
+        """TransactionResult 必须包含完整观测字段。"""
+        from src.storage.transaction import TransactionResult
+        r = TransactionResult(success=True)
+        self.assertTrue(hasattr(r, "neo4j_error"), "缺少 neo4j_error 字段")
+        self.assertTrue(hasattr(r, "compensation_details"), "缺少 compensation_details 字段")
+        self.assertTrue(hasattr(r, "needs_backfill"), "缺少 needs_backfill 字段")
+        self.assertTrue(hasattr(r, "storage_mode"), "缺少 storage_mode 字段")
+
+    def test_monitoring_embeds_consistency_state(self):
+        """monitoring._build_persistence_summary 内嵌 consistency_state。"""
+        source = (_SRC / "infrastructure" / "monitoring.py").read_text(encoding="utf-8")
+        self.assertIn("consistency_state", source,
+                       "monitoring 缺少 consistency_state 嵌入")
+        self.assertIn("_get_consistency_state_dict", source,
+                       "monitoring 缺少 _get_consistency_state_dict 方法")
+
+    def test_graph_report_includes_projection_scope(self):
+        """_project_cycle_to_neo4j 返回 graph_projection_scope。"""
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        self.assertIn('"graph_projection_scope":', source,
+                       "graph_report 缺少 graph_projection_scope")
+
+    def test_no_direct_neo4j_writes_in_research_main_path(self):
+        """研究主链 persist 路径不得绕过 transaction 直接写 Neo4j。
+
+        _project_cycle_to_neo4j 的 transaction 分支使用 transaction.neo4j_batch_*，
+        非 transaction 分支只用于 legacy/test；主链调用必须传 transaction。
+        """
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        # _persist_result_structured 调用 _project_cycle_to_neo4j 时必须传 transaction=txn
+        self.assertIn("transaction=txn", source,
+                       "_persist_result_structured 必须向 _project_cycle_to_neo4j 传递 transaction=txn")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Guard #9 — 快照 backfill_dependency 标注不可缺失
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestSnapshotBackfillAnnotationGuard(unittest.TestCase):
+    """Guard #9: 快照 backfill_dependency 标注完整性。
+
+    保护不变式：
+    - get_full_snapshot 返回 backfill_dependency 字段
+    - backfill_dependency 包含 observe_philology / version_lineages / graph_projection
+    - backfill 工具输出包含 fields_written 标注
+    """
+
+    def test_snapshot_includes_backfill_dependency(self):
+        """get_full_snapshot 必须返回 backfill_dependency 字段。"""
+        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(encoding="utf-8")
+        self.assertIn('backfill_dependency', source,
+                       "get_full_snapshot 缺少 backfill_dependency")
+        self.assertIn('_classify_backfill_dependency', source,
+                       "缺少 _classify_backfill_dependency 方法")
+
+    def test_backfill_dependency_covers_three_groups(self):
+        """_classify_backfill_dependency 必须标注三组字段。"""
+        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(encoding="utf-8")
+        for group in ["observe_philology", "version_lineages", "graph_projection"]:
+            self.assertIn(f'"{group}":', source,
+                           f"backfill_dependency 缺少 {group} 分组")
+
+    def test_backfill_dependency_includes_depends_on(self):
+        """每组标注必须包含 depends_on 字段。"""
+        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(encoding="utf-8")
+        self.assertIn('"depends_on":', source,
+                       "backfill_dependency 缺少 depends_on")
+
+    def test_backfill_tool_annotates_fields_written(self):
+        """backfill 工具输出必须包含 fields_written。"""
+        source = (_WORKSPACE / "tools" / "backfill_research_session_nodes.py").read_text(encoding="utf-8")
+        self.assertIn("fields_written", source,
+                       "backfill 工具缺少 fields_written 标注")
+
+    def test_classify_eventual_consistency_exists(self):
+        """_classify_eventual_consistency 必须存在于 phase_orchestrator。"""
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        self.assertIn("_classify_eventual_consistency", source,
+                       "缺少 _classify_eventual_consistency 方法")
 
 
 if __name__ == "__main__":

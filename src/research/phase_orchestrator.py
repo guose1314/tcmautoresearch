@@ -1144,6 +1144,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
 
             nodes = list(node_map.values())
             edges = list(edge_map.values())
+            _scope = "current_cycle"
             if transaction is not None:
                 if nodes:
                     transaction.neo4j_batch_nodes(nodes)
@@ -1154,6 +1155,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     "enabled": True,
                     "node_count": len(nodes),
                     "edge_count": len(edges),
+                    "graph_projection_scope": _scope,
                 }
             node_status = neo4j_driver.batch_create_nodes(nodes)
             edge_status = neo4j_driver.batch_create_relationships(edges)
@@ -1163,12 +1165,14 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     "enabled": True,
                     "node_count": len(nodes),
                     "edge_count": len(edges),
+                    "graph_projection_scope": _scope,
                 }
             return {
                 "status": "active",
                 "enabled": True,
                 "node_count": len(nodes),
                 "edge_count": len(edges),
+                "graph_projection_scope": _scope,
             }
         except Exception as exc:
             if transaction is not None:
