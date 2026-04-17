@@ -89,7 +89,7 @@ class TestAnalyzePhaseDegradedStatus(unittest.TestCase):
 
         self.assertEqual(analyze_result["phase"], "analyze")
         self.assertGreater(analyze_result["metadata"]["record_count"], 0)
-        self.assertNotIn("status", analyze_result["metadata"])
+        self.assertEqual(analyze_result["metadata"].get("status"), "completed")
 
         phase_history = cycle.metadata["phase_history"]
         analyze_entry = [e for e in phase_history if e["phase"] == "analyze"][-1]

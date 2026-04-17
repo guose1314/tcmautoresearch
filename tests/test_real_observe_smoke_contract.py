@@ -130,6 +130,7 @@ class TestRealObserveSmokeContract(unittest.TestCase):
                     }
                 }
             },
+            experiment_execution={},
             analyze={
                 "results": {
                     "statistical_analysis": {},
@@ -203,6 +204,7 @@ class TestRealObserveSmokeContract(unittest.TestCase):
             },
             hypothesis={"metadata": {"used_llm_generation": False}},
             experiment={"results": {"study_protocol": {"protocol_source": "template"}}},
+            experiment_execution={},
             analyze={
                 "phase": "analyze",
                 "status": "completed",

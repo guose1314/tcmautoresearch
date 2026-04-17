@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TOOL_FILES = [
     "code_quality_checks.py",
     "continuous_improvement_loop.py",
+    "cypher_injection_scan.py",
     "generate_dependency_graph.py",
     "logic_checks.py",
     "quality_assessment.py",
@@ -443,12 +444,17 @@ class TestInventorySignalQualityGateReplay(unittest.TestCase):
     def _write_minimal_source_tree(self, root: Path) -> None:
         (root / "src" / "core").mkdir(parents=True, exist_ok=True)
         (root / "src" / "research").mkdir(parents=True, exist_ok=True)
+        (root / "src" / "storage").mkdir(parents=True, exist_ok=True)
         (root / "src" / "core" / "module_base.py").write_text(
             "class BaseModule:\n    pass\n",
             encoding="utf-8",
         )
         (root / "src" / "research" / "pipeline.py").write_text(
             "from src.core.module_base import BaseModule\n\n\nclass ResearchPipeline(BaseModule):\n    pass\n",
+            encoding="utf-8",
+        )
+        (root / "src" / "storage" / "neo4j_driver.py").write_text(
+            "# Minimal stub for cypher injection scan target\n",
             encoding="utf-8",
         )
 

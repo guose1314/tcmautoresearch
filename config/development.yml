@@ -17,6 +17,7 @@ web_console:
     - "*"
   cors_headers:
     - "*"
+  job_storage_dir: "./output/development/web_console_jobs"
 
 database:
   type: "postgresql"
@@ -37,8 +38,7 @@ models:
   llm:
     cache_dir: "./cache/llm/development"
 
-web_console:
-  job_storage_dir: "./output/development/web_console_jobs"
+# web_console job_storage_dir 已合并到上方 web_console 块
 
 # ── 图数据库：开发环境默认启用 Neo4j ──
 neo4j:
