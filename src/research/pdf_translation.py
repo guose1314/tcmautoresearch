@@ -248,12 +248,12 @@ def _load_pdf_engine(use_llm: bool):
         return None
 
     try:
-        from src.llm.llm_engine import LLMEngine
+        from src.infra.llm_service import get_llm_service
 
-        engine = LLMEngine(temperature=0.1, max_tokens=2048)
-        engine.load()
+        svc = get_llm_service("translation")
+        svc.load()
         logger.info("LLM已加载，开始翻译。")
-        return engine
+        return svc
     except Exception as exc:
         logger.warning(f"LLM加载失败，将跳过翻译: {exc}")
         return None

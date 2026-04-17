@@ -265,11 +265,11 @@ class AssistantEngine:
         if self._llm is not None:
             return self._llm
         try:
-            from src.llm.llm_engine import LLMEngine
-            engine = LLMEngine()
-            engine.load()
-            self._llm = engine
-            return engine
+            from src.infra.llm_service import get_llm_service
+            svc = get_llm_service("assistant")
+            svc.load()
+            self._llm = svc
+            return svc
         except Exception as exc:
             # 加载失败时显式回滚，避免缓存未初始化引擎对象。
             self._llm = None

@@ -250,17 +250,15 @@ def export_cycle_demo_report(cycle_results: Dict[str, Any], output_path: Path, g
 # summarize_module_quality 及辅助函数已迁移至 src.research.module_pipeline，
 # 此处保留兼容重导出。
 from src.research.module_pipeline import (  # noqa: E402
-    summarize_module_quality,
-    _MODULE_EXPECTED_KEYS,
     _MODULE_CONTENT_KEYS,
-    _compute_completeness,
+    _MODULE_EXPECTED_KEYS,
     _compute_accuracy,
+    _compute_completeness,
     _compute_consistency,
+    summarize_module_quality,
 )
 
-
 # ── 科研报告导出 ───────────────────────────────────────────────────
-
 # extract_research_phase_results 已迁移至 src.research.phase_result，
 # 此处保留兼容重导出。
 from src.research.phase_result import extract_research_phase_results  # noqa: E402, F811

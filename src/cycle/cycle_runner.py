@@ -50,8 +50,9 @@ def create_sample_data() -> List[str]:
 # build_real_modules, initialize_real_modules, cleanup_real_modules,
 # ModuleLifecycle, execute_real_module_pipeline, summarize_module_quality
 # 已迁移至 src.research.module_pipeline，此处通过顶层 import 保留兼容。
-from src.research.module_pipeline import DEFAULT_MODULE_LIFECYCLE as _DEFAULT_MODULE_LIFECYCLE  # noqa: E402
-
+from src.research.module_pipeline import (
+    DEFAULT_MODULE_LIFECYCLE as _DEFAULT_MODULE_LIFECYCLE,  # noqa: E402
+)
 
 # ---------------------------------------------------------------------------
 # 真实迭代闭环辅助函数

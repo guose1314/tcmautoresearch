@@ -115,9 +115,9 @@ def _llm_translate_and_summarize(
         return text, summary, False
 
     try:
-        from src.llm.llm_engine import LLMEngine
+        from src.infra.llm_service import get_llm_service
 
-        engine = LLMEngine(temperature=0.2, max_tokens=1500)
+        engine = get_llm_service("paper_plugin")
         engine.load()
 
         prompt_translate = (
@@ -133,7 +133,6 @@ def _llm_translate_and_summarize(
             f"内容:\n{translated[:12000]}"
         )
         summary = engine.generate(prompt_summary, "You are an academic paper reading assistant.")
-        engine.unload()
         return translated, summary, True
     except Exception as exc:
         logger.warning("LLM unavailable, fallback to extractive summary: %s", exc)

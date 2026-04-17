@@ -394,3 +394,60 @@ class CachedLLMService(LLMService):
         """
         lc = llm_config or {}
         return cls.from_config(lc, gap_config=gap_config)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 全局 LLM 提供者 — 按用途单例化
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 预定义用途 → 参数覆盖；不在此表中的 purpose 使用全局 models.llm 原值。
+_LLM_PURPOSE_PROFILES: dict[str, dict[str, Any]] = {
+    "translation": {"temperature": 0.1, "max_tokens": 2048},
+    "paper_plugin": {"temperature": 0.2, "max_tokens": 1500},
+}
+
+# purpose → CachedLLMService 单例
+_llm_registry: dict[str, CachedLLMService] = {}
+
+
+def get_llm_service(
+    purpose: str = "default",
+    *,
+    llm_config: Optional[dict] = None,
+) -> CachedLLMService:
+    """按用途获取 ``CachedLLMService`` 单例。
+
+    首次调用会创建实例并缓存；后续相同 *purpose* 立即返回。
+
+    Parameters
+    ----------
+    purpose :
+        用途标识，如 ``"default"``、``"translation"``、``"paper_plugin"``。
+        预定义的 purpose 会自动覆盖 temperature / max_tokens 等参数。
+    llm_config :
+        可选全局 LLM 配置字典（``config["models"]["llm"]``）。
+        不提供时通过 ``config_loader`` 从 ``config.yml`` 读取。
+
+    Returns
+    -------
+    CachedLLMService
+        带磁盘缓存的 LLM 服务实例。
+    """
+    if purpose in _llm_registry:
+        return _llm_registry[purpose]
+
+    if llm_config is None:
+        from src.infrastructure.config_loader import load_settings_section
+        llm_config = load_settings_section("models.llm", default={})
+
+    overrides = _LLM_PURPOSE_PROFILES.get(purpose, {})
+    merged: dict[str, Any] = {**llm_config, **overrides}
+
+    service = CachedLLMService.from_config(merged)
+    _llm_registry[purpose] = service
+    return service
+
+
+def reset_llm_registry() -> None:
+    """清空 provider 单例缓存（测试用）。"""
+    _llm_registry.clear()

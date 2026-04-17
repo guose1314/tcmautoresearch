@@ -255,11 +255,11 @@ class WritingHelper:
         if self._llm is not None:
             return self._llm
         try:
-            from src.llm.llm_engine import LLMEngine
-            engine = LLMEngine()
-            engine.load()
-            self._llm = engine
-            return engine
+            from src.infra.llm_service import get_llm_service
+            svc = get_llm_service("assistant")
+            svc.load()
+            self._llm = svc
+            return svc
         except Exception as exc:
             self._llm = None
             logger.warning("无法加载 LLM 引擎: %s", exc)

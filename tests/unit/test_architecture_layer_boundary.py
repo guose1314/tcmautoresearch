@@ -108,23 +108,27 @@ class TestCanonicalLocationIsResearch(unittest.TestCase):
         self.assertTrue(callable(extract_research_phase_results))
 
     def test_canonical_and_reexport_are_same_object(self):
-        from src.research.module_pipeline import (
-            execute_real_module_pipeline as canonical_exec,
-            summarize_module_quality as canonical_qual,
-        )
         from src.cycle.cycle_runner import (
             execute_real_module_pipeline as compat_exec,
+        )
+        from src.cycle.cycle_runner import (
             summarize_module_quality as compat_qual,
+        )
+        from src.research.module_pipeline import (
+            execute_real_module_pipeline as canonical_exec,
+        )
+        from src.research.module_pipeline import (
+            summarize_module_quality as canonical_qual,
         )
         self.assertIs(canonical_exec, compat_exec)
         self.assertIs(canonical_qual, compat_qual)
 
     def test_extract_phase_results_same_object(self):
-        from src.research.phase_result import (
-            extract_research_phase_results as canonical,
-        )
         from src.cycle.cycle_reporter import (
             extract_research_phase_results as compat,
+        )
+        from src.research.phase_result import (
+            extract_research_phase_results as canonical,
         )
         self.assertIs(canonical, compat)
 

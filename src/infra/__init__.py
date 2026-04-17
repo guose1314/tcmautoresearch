@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .cache_service import DiskCacheStore, LLMDiskCache, _DiskCache
     from .lexicon_service import LexiconService, get_lexicon
-    from .llm_service import APILLMEngine, CachedLLMService, LLMService
+    from .llm_service import APILLMEngine, CachedLLMService, LLMService, get_llm_service, reset_llm_registry
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "DiskCacheStore": (".cache_service", "DiskCacheStore"),
@@ -23,6 +23,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "LLMService": (".llm_service", "LLMService"),
     "APILLMEngine": (".llm_service", "APILLMEngine"),
     "CachedLLMService": (".llm_service", "CachedLLMService"),
+    "get_llm_service": (".llm_service", "get_llm_service"),
+    "reset_llm_registry": (".llm_service", "reset_llm_registry"),
 }
 
 __all__ = list(_LAZY_IMPORTS.keys())

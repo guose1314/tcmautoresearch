@@ -12,7 +12,6 @@ from src.collector.corpus_bundle import (
     extract_text_entries,
     is_corpus_bundle,
 )
-from src.research.module_pipeline import execute_real_module_pipeline
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
     has_learning_strategy,
@@ -20,6 +19,7 @@ from src.research.learning_strategy import (
     resolve_learning_strategy,
     resolve_numeric_learning_parameter,
 )
+from src.research.module_pipeline import execute_real_module_pipeline
 from src.research.observe_philology import (
     build_observe_philology_artifact_payloads,
     extract_observe_philology_assets_from_phase_result,
