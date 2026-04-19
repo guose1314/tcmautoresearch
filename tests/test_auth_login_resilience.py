@@ -34,9 +34,18 @@ def test_auth_login_still_works_when_cwd_changes(tmp_path: Path, monkeypatch) ->
     fake_project_root.mkdir(parents=True, exist_ok=True)
     _write_secrets(fake_project_root / "secrets.yml")
 
-    monkeypatch.setattr(auth_routes, "_PROJECT_ROOT", fake_project_root)
+    # 注入安全配置（替代已移除的 _PROJECT_ROOT 补丁 —
+    # 配置现通过 ConfigCenter load_settings 加载，不再直接读 YAML）
+    import yaml
+
+    security_config = yaml.safe_load(
+        (fake_project_root / "secrets.yml").read_text(encoding="utf-8")
+    ).get("security", {})
+    monkeypatch.setattr(auth_routes, "_cached_security", security_config)
     monkeypatch.setenv("JWT_SECRET_KEY", "unit-test-jwt-secret-padded-to-32b")
     auth_routes.reset_user_cache()
+    # reset_user_cache 会清空 _cached_security，需要重新设置
+    auth_routes._cached_security = security_config
 
     original_cwd = Path.cwd()
     external_cwd = tmp_path / "external_cwd"

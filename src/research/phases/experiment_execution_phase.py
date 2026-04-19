@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Dict, List
 
+from src.research.import_quality_validator import ImportQualityValidator
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
     has_learning_strategy,
@@ -13,6 +15,8 @@ from src.research.phase_result import build_phase_result, get_phase_value
 
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
+
+logger = logging.getLogger(__name__)
 
 
 _EXECUTION_DISPLAY_NAME = "外部实验结果导入阶段"
@@ -113,6 +117,11 @@ class ExperimentExecutionPhaseMixin:
         execution_artifacts = self._resolve_execution_artifacts(context)
         output_files = self._build_execution_output_file_map(context, execution_artifacts)
 
+        # --- 导入数据质量校验 ---
+        import_validation = self._validate_import_quality(
+            context, execution_records, execution_relationships
+        )
+
         has_structured_external_inputs = any(
             (
                 execution_records,
@@ -159,6 +168,7 @@ class ExperimentExecutionPhaseMixin:
             "real_world_validation_status": real_world_validation_status,
             "learning_strategy_applied": has_learning_strategy(context, self.pipeline.config),
             "document_fallback_import_enabled": document_fallback_enabled,
+            "import_quality_validation": import_validation,
         }
         if hasattr(self, "_execution_tracker"):
             metadata["learning"] = self._execution_tracker.to_metadata()
@@ -329,6 +339,53 @@ class ExperimentExecutionPhaseMixin:
             if name and path:
                 output_files[name] = path
         return output_files
+
+    def _validate_import_quality(
+        self,
+        context: Dict[str, Any],
+        records: List[Dict[str, Any]],
+        relationships: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """对导入的 records 和 relationships 执行质量校验。"""
+        strictness = str(
+            context.get("import_validation_strictness")
+            or resolve_learning_strategy(context, self.pipeline.config).get(
+                "import_validation_strictness", "standard"
+            )
+        )
+        min_confidence = resolve_numeric_learning_parameter(
+            "import_min_confidence", 0.0, context, self.pipeline.config
+        )
+        validator = ImportQualityValidator(
+            strictness=strictness, min_confidence=min_confidence
+        )
+
+        record_report = validator.validate_records(records) if records else None
+        relationship_report = validator.validate_relationships(relationships) if relationships else None
+
+        result: Dict[str, Any] = {"strictness": strictness, "min_confidence": min_confidence}
+        if record_report:
+            result["records"] = {
+                "total": record_report.total_records,
+                "passed": record_report.passed,
+                "warned": record_report.warned,
+                "rejected": record_report.rejected,
+                "acceptance_rate": round(record_report.acceptance_rate, 4),
+            }
+            if record_report.has_rejections:
+                logger.warning(
+                    "experiment_execution 导入记录质量校验: %s", record_report.summary
+                )
+        if relationship_report:
+            result["relationships"] = {
+                "total": relationship_report.total_records,
+                "passed": relationship_report.passed,
+                "warned": relationship_report.warned,
+                "rejected": relationship_report.rejected,
+                "acceptance_rate": round(relationship_report.acceptance_rate, 4),
+            }
+
+        return result
 
     def _resolve_execution_flag(
         self,

@@ -15,6 +15,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.infra.lexicon_service import reset_lexicon  # noqa: E402
+from src.orchestration.research_runtime_service import (
+    ResearchRuntimeService,  # noqa: E402
+)
 from src.research.phase_result import (  # noqa: E402
     get_phase_artifact_map,
     get_phase_value,
@@ -30,7 +33,6 @@ from src.research.real_observe_smoke import (  # noqa: E402
     validate_smoke_summary,
     write_smoke_artifacts,
 )
-from src.research.research_pipeline import ResearchPhase, ResearchPipeline  # noqa: E402
 
 MISSING_LEXICON_PATH = ROOT / "data" / "__missing_tcm_lexicon__.jsonl"
 MISSING_SYNONYMS_PATH = ROOT / "data" / "__missing_tcm_synonyms__.jsonl"
@@ -159,34 +161,46 @@ def run_profile(mode_name: str, profile_path: Path, output_dir: Path, env_overri
         phase_context = build_phase_context(profile, include_paths, ROOT)
         started_at = datetime.now().isoformat()
         output_dir.mkdir(parents=True, exist_ok=True)
-        pipeline = ResearchPipeline(build_pipeline_config(profile, ROOT))
         publish_temp_dir: tempfile.TemporaryDirectory[str] | None = None
 
         try:
-            cycle = pipeline.create_research_cycle(
-                cycle_name=profile.cycle_name,
-                description=profile.description,
-                objective=profile.objective,
-                scope=profile.scope,
-                researchers=list(profile.researchers),
-            )
-            if not pipeline.start_research_cycle(cycle.cycle_id):
-                raise RuntimeError(f"Failed to start smoke cycle: {cycle.cycle_id}")
-
-            observe = pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.OBSERVE, dict(phase_context))
-            hypothesis = pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.HYPOTHESIS, dict(phase_context))
-            experiment = pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.EXPERIMENT, dict(phase_context))
-            analyze = pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.ANALYZE, dict(phase_context))
-
             publish_temp_dir = tempfile.TemporaryDirectory(dir=str(output_dir))
             publish_context = dict(phase_context)
             publish_context.setdefault("paper_output_formats", ["markdown"])
             publish_context.setdefault("report_output_formats", ["markdown"])
             publish_context["paper_output_dir"] = publish_temp_dir.name
             publish_context["output_dir"] = publish_temp_dir.name
-            publish = pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.PUBLISH, publish_context)
-            reflect = pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.REFLECT, dict(phase_context))
-            pipeline.complete_research_cycle(cycle.cycle_id)
+
+            runtime_service = ResearchRuntimeService({
+                "phases": ["observe", "hypothesis", "experiment", "analyze", "publish", "reflect"],
+                "pipeline_config": build_pipeline_config(profile, ROOT),
+                "researchers": list(profile.researchers),
+            })
+
+            runtime_result = runtime_service.run(
+                profile.objective,
+                cycle_name=profile.cycle_name,
+                description=profile.description,
+                scope=profile.scope,
+                phase_contexts={
+                    "observe": dict(phase_context),
+                    "hypothesis": dict(phase_context),
+                    "experiment": dict(phase_context),
+                    "analyze": dict(phase_context),
+                    "publish": publish_context,
+                    "reflect": dict(phase_context),
+                },
+                report_output_formats=["markdown"],
+                report_output_dir=publish_temp_dir.name,
+            )
+
+            phase_results = runtime_result.session_result.get("phase_results") or {}
+            observe = phase_results.get("observe") or {}
+            hypothesis = phase_results.get("hypothesis") or {}
+            experiment = phase_results.get("experiment") or {}
+            analyze = phase_results.get("analyze") or {}
+            publish = phase_results.get("publish") or {}
+            reflect = phase_results.get("reflect") or {}
 
             summary = build_smoke_summary(
                 profile,
@@ -224,7 +238,6 @@ def run_profile(mode_name: str, profile_path: Path, output_dir: Path, env_overri
         finally:
             if publish_temp_dir is not None:
                 publish_temp_dir.cleanup()
-            pipeline.cleanup()
 
 
 def build_diff(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str, Any]:

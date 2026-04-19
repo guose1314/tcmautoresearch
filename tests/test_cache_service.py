@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.infra.cache_service import DiskCacheStore, LLMDiskCache, _DiskCache
+from src.infra.layered_cache import LayeredTaskCache, describe_llm_engine
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 辅助
@@ -330,6 +331,61 @@ class TestThreadSafety(unittest.TestCase):
             t.join()
 
         self.assertEqual(errors, [])
+
+
+class TestLayeredTaskCache(unittest.TestCase):
+    def test_prompt_and_evidence_layers_are_isolated(self):
+        tmp = tempfile.mkdtemp()
+        cache = LayeredTaskCache(
+            settings={
+                "enabled": True,
+                "cache_dir": tmp,
+                "prompt": {"enabled": True, "namespace": "prompt", "ttl_seconds": None},
+                "evidence": {"enabled": True, "namespace": "evidence", "ttl_seconds": None},
+                "artifact": {"enabled": False},
+            }
+        )
+
+        payload = {"task": "same"}
+        cache.put_text("prompt", "task-a", payload, "prompt-value")
+        cache.put_text("evidence", "task-a", payload, "evidence-value")
+
+        self.assertEqual(cache.get_text("prompt", "task-a", payload), "prompt-value")
+        self.assertEqual(cache.get_text("evidence", "task-a", payload), "evidence-value")
+
+    def test_put_json_round_trip(self):
+        tmp = tempfile.mkdtemp()
+        cache = LayeredTaskCache(
+            settings={
+                "enabled": True,
+                "cache_dir": tmp,
+                "prompt": {"enabled": False},
+                "evidence": {"enabled": False},
+                "artifact": {"enabled": True, "namespace": "artifact", "ttl_seconds": None},
+            }
+        )
+
+        payload = {"objective": "artifact"}
+        value = {"output_data": {"metadata": {"objective": "artifact"}}}
+        cache.put_json("artifact", "output_generator.execute", payload, value)
+        self.assertEqual(cache.get_json("artifact", "output_generator.execute", payload), value)
+
+    def test_describe_llm_engine_prefers_wrapped_engine_attributes(self):
+        class Engine:
+            llm_mode = "local"
+            model_path = "./models/qwen.gguf"
+            temperature = 0.2
+            max_tokens = 512
+
+        class Wrapper:
+            def __init__(self):
+                self._engine = Engine()
+
+        descriptor = describe_llm_engine(Wrapper())
+        self.assertEqual(descriptor["mode"], "local")
+        self.assertEqual(descriptor["model"], "./models/qwen.gguf")
+        self.assertEqual(descriptor["temperature"], 0.2)
+        self.assertEqual(descriptor["max_tokens"], 512)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

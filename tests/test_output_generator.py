@@ -3,13 +3,14 @@ tests/test_output_generator.py
 测试 OutputGenerator 的 JSON / Markdown / DOCX 清晰输出及初始化
 """
 import json
-import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from src.generation.output_formatter import OutputGenerator
 from src.generation.report_generator import Report, ReportFormat, ReportGenerator
+from src.infra.layered_cache import LayeredTaskCache
 
 
 def _phase_result(phase, results=None, metadata=None):
@@ -132,6 +133,55 @@ class TestEmptyInput:
     def test_to_dict_empty_dict(self, generator):
         result = generator.to_dict({})
         assert result == {}
+
+
+class TestOutputGeneratorArtifactCache:
+    def test_execute_reuses_cached_artifact(self, tmp_path):
+        og = OutputGenerator({"max_entities": 10})
+        assert og.initialize() is True
+        context = {
+            "source_file": "input.txt",
+            "objective": "验证 artifact cache",
+            "entities": [{"name": "黄芪", "type": "herb"}],
+            "reasoning_results": {
+                "evidence_records": [
+                    {
+                        "source_entity": "黄芪",
+                        "target_entity": "补气",
+                        "relation_type": "功效",
+                        "confidence": 0.88,
+                        "excerpt": "黄芪补气固表",
+                        "title": "本草纲目",
+                        "source_type": "classic_text",
+                        "source_ref": "bencao:013",
+                    }
+                ]
+            },
+            "statistics": {"herbs_count": 1},
+            "confidence_score": 0.82,
+        }
+
+        cache = LayeredTaskCache(
+            settings={
+                "enabled": True,
+                "cache_dir": str(tmp_path),
+                "prompt": {"enabled": False},
+                "evidence": {"enabled": False},
+                "artifact": {"enabled": True, "namespace": "artifact", "ttl_seconds": None},
+            }
+        )
+
+        try:
+            with patch("src.generation.output_formatter.get_layered_task_cache", return_value=cache):
+                with patch.object(og, "_generate_output_format", wraps=og._generate_output_format) as wrapped:
+                    first = og._do_execute(context)
+                    second = og._do_execute(context)
+        finally:
+            cache.close()
+            og.cleanup()
+
+        assert first == second
+        assert wrapped.call_count == 1
 
 
 # ===================================================================

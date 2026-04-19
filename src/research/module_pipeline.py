@@ -15,6 +15,8 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Collection, Dict, List, NamedTuple, Optional
 
+from src.research.compute_tier_router import ComputeTierRouter
+
 logger = logging.getLogger(__name__)
 
 
@@ -108,9 +110,19 @@ def summarize_module_quality(
     }
 
     if llm_engine is not None and hasattr(llm_engine, "generate"):
-        llm_score = _llm_structured_quality(module_name, result, llm_engine)
-        if llm_score is not None:
-            metrics["llm_quality"] = llm_score
+        # 动态算力分配：质量评分仅在规则层证据不足时调用 LLM
+        tier_router = ComputeTierRouter()
+        tier_decision = tier_router.decide(
+            task_type="quality_scoring",
+            evidence={
+                "has_rule_result": True,  # 三维规则评分已完成
+                "rule_confidence": (completeness + accuracy + consistency) / 3,
+            },
+        )
+        if tier_decision.should_use_llm:
+            llm_score = _llm_structured_quality(module_name, result, llm_engine)
+            if llm_score is not None:
+                metrics["llm_quality"] = llm_score
 
     return metrics
 
@@ -162,7 +174,19 @@ def _llm_structured_quality(
 # ── 模块构建与生命周期 ────────────────────────────────────────────────────
 
 def build_real_modules() -> List[tuple[str, Any]]:
-    """构建真实处理链路模块。"""
+    """构建真实处理链路模块。
+
+    .. deprecated::
+        旧 5 模块链路径已被 ``ResearchPipeline`` + ``ModuleFactory`` 取代。
+        默认主链不再调用此函数。
+    """
+    import warnings
+    warnings.warn(
+        "build_real_modules() 是旧 5 模块链路径，"
+        "默认主链已迁移至 ResearchPipeline + ModuleFactory。",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     from src.analysis.entity_extractor import AdvancedEntityExtractor
     from src.analysis.preprocessor import DocumentPreprocessor
     from src.analysis.reasoning_engine import ReasoningEngine

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from src.core.module_base import BaseModule
+from src.infra.layered_cache import get_layered_task_cache
 from src.research.evidence_contract import build_evidence_protocol
 from src.research.phase_result import (
     get_phase_results,
@@ -38,19 +39,59 @@ class OutputGenerator(BaseModule):
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """执行输出生成"""
         try:
+            cache_payload = self._build_artifact_cache_payload(context)
+            task_cache = get_layered_task_cache()
+            cached_result = task_cache.get_json("artifact", "output_generator.execute", cache_payload)
+            if cached_result is not None:
+                return cached_result if isinstance(cached_result, dict) else {}
+
             # 构造输出格式
             output_data = self._generate_output_format(context)
             safe_output_data = self._make_json_safe(output_data)
-            
-            return {
+
+            result = {
                 "output_data": safe_output_data,
                 "output_format": "structured_json",
                 "generated_at": self._get_timestamp()
             }
+            task_cache.put_json(
+                "artifact",
+                "output_generator.execute",
+                cache_payload,
+                result,
+                meta={
+                    "module": self.module_name,
+                    "protocol_version": "research-output-v2",
+                },
+            )
+            return result
             
         except Exception as e:
             self.logger.error(f"输出生成执行失败: {e}")
             raise
+
+    def _build_artifact_cache_payload(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        hypothesis_payload = self._resolve_hypothesis_payload(context)
+        return {
+            "cache_version": "artifact-cache-v1",
+            "source_file": str(context.get("source_file", "unknown")),
+            "objective": context.get("objective", "unknown"),
+            "max_entities": self.max_entities,
+            "max_recommendations": self.max_recommendations,
+            "max_string_length": self.max_string_length,
+            "entities": context.get("entities", []),
+            "semantic_graph": context.get("semantic_graph", {}),
+            "reasoning_results": self._resolve_reasoning_payload(context),
+            "temporal_analysis": context.get("temporal_analysis", {}),
+            "pattern_recognition": context.get("pattern_recognition", {}),
+            "evidence_grade": self._resolve_evidence_grade_payload(context),
+            "hypothesis": hypothesis_payload,
+            "hypothesis_audit_summary": self._resolve_hypothesis_audit_summary(context, hypothesis_payload),
+            "data_mining_result": self._resolve_data_mining_payload(context),
+            "research_perspectives": self._resolve_research_perspectives(context),
+            "statistics": context.get("statistics", {}),
+            "confidence_score": context.get("confidence_score"),
+        }
     
     def _generate_output_format(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """生成输出格式"""

@@ -9,6 +9,12 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
 from src.core.module_base import BaseModule
+from src.infra.prompt_registry import (
+	call_registered_prompt,
+	parse_registered_output,
+	render_prompt,
+)
+from src.research.compute_tier_router import ComputeTierRouter, TierDecision
 from src.research.learning_strategy import (
 	has_learning_strategy,
 	resolve_learning_strategy,
@@ -218,6 +224,18 @@ class HypothesisEngine(BaseModule):
 		gap = self._normalize_gap(knowledge_gap, prepared_context)
 		active_llm_engine = self._resolve_llm_engine(prepared_context)
 
+		# --- 动态算力分配：评估是否需要 LLM ---
+		tier_decision = self._evaluate_compute_tier(prepared_context, gap)
+		if not tier_decision.should_use_llm:
+			self.logger.info(
+				"算力路由: 跳过 LLM (tier=%s, reason=%s)",
+				tier_decision.tier.name, tier_decision.reason,
+			)
+			return self._enrich_hypotheses(
+				self.rank_hypotheses(self._generate_with_rules(gap, prepared_context), prepared_context),
+				prepared_context,
+			)
+
 		# --- P3.2 KG 增强路径 ---
 		if active_llm_engine is not None:
 			kg_gaps = self.extract_kg_gaps(prepared_context)
@@ -362,21 +380,48 @@ class HypothesisEngine(BaseModule):
 		if not hasattr(llm_engine, "generate"):
 			return []
 
-		prompt = self.prompt_template.format(
+		template_override = None
+		if self.prompt_template != self.DEFAULT_HYPOTHESIS_PROMPT:
+			template_override = self.prompt_template
+
+		rendered = render_prompt(
+			"hypothesis_engine.default_hypothesis",
+			system_prompt_override=self.system_prompt,
+			user_template_override=template_override,
 			gap_type=gap["gap_type"],
 			entities="、".join(gap["entities"]) or gap["entity"],
 			description=gap["description"],
 			context_summary=self._build_context_summary(context),
 		)
 		try:
-			raw = llm_engine.generate(prompt, system_prompt=self.system_prompt)
+			raw = call_registered_prompt(
+				llm_engine,
+				"hypothesis_engine.default_hypothesis",
+				rendered=rendered,
+			)
 		except Exception as exc:
 			self.logger.warning("LLM 假设生成失败，回退规则引擎: %s", exc)
 			return []
-		return self._parse_llm_response(raw, gap)
+		return self._parse_llm_response(
+			raw,
+			gap,
+			prompt_name="hypothesis_engine.default_hypothesis",
+			generation_mode="llm",
+		)
 
-	def _parse_llm_response(self, raw: Any, gap: Dict[str, Any]) -> List[Hypothesis]:
-		if isinstance(raw, list):
+	def _parse_llm_response(
+		self,
+		raw: Any,
+		gap: Dict[str, Any],
+		*,
+		prompt_name: str = "hypothesis_engine.default_hypothesis",
+		generation_mode: str = "llm",
+		allowed_gap_types: Optional[set[str]] = None,
+	) -> List[Hypothesis]:
+		validation = parse_registered_output(prompt_name, raw)
+		if isinstance(validation.parsed, list):
+			payload = validation.parsed
+		elif isinstance(raw, list):
 			payload = raw
 		elif isinstance(raw, dict):
 			payload = raw.get("hypotheses") or raw.get("items") or [raw]
@@ -409,19 +454,25 @@ class HypothesisEngine(BaseModule):
 				or "通过知识图谱补边、文献回溯和专家复核验证该假设。"
 			).strip()
 			keywords = self._ensure_text_list(item.get("keywords"))
+			returned_gap_type = str(item.get("source_gap_type") or "").strip()
+			if returned_gap_type and (allowed_gap_types is None or returned_gap_type in allowed_gap_types):
+				source_gap_type = returned_gap_type
+			else:
+				source_gap_type = gap["gap_type"]
+			source_entities = self._ensure_text_list(item.get("source_entities")) or gap["entities"]
 			hypotheses.append(
 				self._build_hypothesis(
 					title=title,
 					statement=statement,
 					rationale=str(item.get("rationale") or gap["description"]).strip(),
-					source_gap_type=gap["gap_type"],
-					source_entities=gap["entities"],
+					source_gap_type=source_gap_type,
+					source_entities=source_entities,
 					validation_plan=validation_plan,
 					keywords=keywords or self._extract_keywords([title, statement]),
 					novelty=novelty,
 					feasibility=feasibility,
 					evidence_support=evidence_support,
-					generation_mode="llm",
+					generation_mode=generation_mode,
 				)
 			)
 		return hypotheses
@@ -463,7 +514,9 @@ class HypothesisEngine(BaseModule):
 		kg_summary = self._build_kg_structure_summary(kg_gaps, context)
 		context_summary = self._build_context_summary(context)
 
-		prompt = self.KG_ENHANCED_PROMPT.format(
+		rendered = render_prompt(
+			"hypothesis_engine.kg_enhanced",
+			system_prompt_override=self.system_prompt,
 			gap_count=len(kg_gaps),
 			gap_details=gap_details,
 			kg_structure_summary=kg_summary,
@@ -472,7 +525,11 @@ class HypothesisEngine(BaseModule):
 		)
 
 		try:
-			raw = llm_engine.generate(prompt, system_prompt=self.system_prompt)
+			raw = call_registered_prompt(
+				llm_engine,
+				"hypothesis_engine.kg_enhanced",
+				rendered=rendered,
+			)
 		except Exception as exc:
 			self.logger.warning("KG 增强 LLM 生成失败，回退: %s", exc)
 			return []
@@ -549,44 +606,15 @@ class HypothesisEngine(BaseModule):
 		kg_gaps: List[KnowledgeGap],
 		fallback_gap: Dict[str, Any],
 	) -> List[Hypothesis]:
-		"""解析 KG 增强 prompt 的 LLM 响应。
+		"""解析 KG 增强 prompt 的 LLM 响应。"""
 
-		比普通解析多处理 source_gap_type / source_entities 字段。
-		"""
-		# 复用基础解析逻辑
-		base_hypotheses = self._parse_llm_response(raw, fallback_gap)
-
-		# 对于成功解析的，覆盖 source_gap_type / source_entities（如果 LLM 返回了）
-		if isinstance(raw, str):
-			text = raw.strip()
-			if text.startswith("```"):
-				lines = text.splitlines()
-				if len(lines) >= 3:
-					text = "\n".join(lines[1:-1]).strip()
-			try:
-				payload = json.loads(text)
-			except Exception:
-				payload = []
-		elif isinstance(raw, list):
-			payload = raw
-		elif isinstance(raw, dict):
-			payload = raw.get("hypotheses") or raw.get("items") or [raw]
-		else:
-			payload = []
-
-		gap_type_set = {g.gap_type for g in kg_gaps}
-		for i, hyp in enumerate(base_hypotheses):
-			if i < len(payload) and isinstance(payload[i], dict):
-				item = payload[i]
-				returned_gap_type = str(item.get("source_gap_type") or "").strip()
-				returned_entities = self._ensure_text_list(item.get("source_entities"))
-				if returned_gap_type and returned_gap_type in gap_type_set:
-					hyp.source_gap_type = returned_gap_type
-				if returned_entities:
-					hyp.source_entities = returned_entities
-			hyp.generation_mode = "kg_enhanced"
-
-		return base_hypotheses
+		return self._parse_llm_response(
+			raw,
+			fallback_gap,
+			prompt_name="hypothesis_engine.kg_enhanced",
+			generation_mode="kg_enhanced",
+			allowed_gap_types={g.gap_type for g in kg_gaps},
+		)
 
 	def _generate_with_rules(self, gap: Dict[str, Any], context: Dict[str, Any]) -> List[Hypothesis]:
 		hypotheses: List[Hypothesis] = []
@@ -840,6 +868,36 @@ class HypothesisEngine(BaseModule):
 		objective = str(context.get("research_objective") or "研究对象")
 		return objective[:20] if objective else "研究对象"
 
+	def _evaluate_compute_tier(self, context: Dict[str, Any], gap: Dict[str, Any]) -> TierDecision:
+		"""使用 ComputeTierRouter 评估当前假设生成是否需要 LLM。"""
+		router = ComputeTierRouter(self.config)
+
+		# 收集现有证据指标
+		entities = context.get("entities") or []
+		relationships = context.get("relationships") or []
+		kg = context.get("knowledge_graph") or self.knowledge_graph
+		kg_entity_count = 0
+		if kg is not None and hasattr(kg, "entity_count"):
+			try:
+				kg_entity_count = kg.entity_count
+			except Exception:
+				pass
+
+		evidence = {
+			"entity_count": len(entities) + kg_entity_count,
+			"relationship_count": len(relationships),
+			"rule_confidence": float(context.get("inference_confidence") or 0.0),
+			"retrieval_hits": len(context.get("literature_titles") or []),
+			"evidence_items": len(context.get("observations") or []) + len(context.get("findings") or []),
+			"has_rule_result": bool(context.get("reasoning_summary")),
+		}
+
+		return router.decide(
+			task_type="hypothesis",
+			evidence=evidence,
+			force_tier=context.get("force_compute_tier"),
+		)
+
 	def _resolve_llm_engine(self, context: Dict[str, Any]) -> Any:
 		if "use_llm_generation" in context and not context.get("use_llm_generation"):
 			return None
@@ -871,6 +929,10 @@ class HypothesisEngine(BaseModule):
 		parts.extend(self._ensure_text_list(context.get("observations"))[:2])
 		parts.extend(self._ensure_text_list(context.get("findings"))[:2])
 		parts.extend(self._ensure_text_list(context.get("literature_titles"))[:2])
+		# 推理框架指导（Self-Discover）
+		reasoning_guidance = context.get("reasoning_guidance")
+		if reasoning_guidance:
+			parts.append(f"\n【推理框架指导】{reasoning_guidance}")
 		if not parts:
 			return "暂无额外上下文。"
 		return "；".join(parts)

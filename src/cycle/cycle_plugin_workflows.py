@@ -420,7 +420,8 @@ def run_arxiv_quick_helper_workflow(
     llm_engine = None
     if enable_translation:
         try:
-            llm_engine = _load_attr("src.llm.llm_engine", "LLMEngine")()
+            _get_llm_service = _load_attr("src.infra.llm_service", "get_llm_service")
+            llm_engine = _get_llm_service("translation")
         except Exception as exc:
             logger.warning("LLM 引擎初始化失败，将跳过摘要翻译: %s", exc)
             enable_translation = False
@@ -509,7 +510,8 @@ def run_google_scholar_helper_workflow(
     llm_engine = None
     if use_llm:
         try:
-            llm_engine = _load_attr("src.llm.llm_engine", "LLMEngine")()
+            _get_llm_service = _load_attr("src.infra.llm_service", "get_llm_service")
+            llm_engine = _get_llm_service("paper_plugin")
         except Exception as exc:
             logger.warning("LLM 引擎初始化失败，将使用 fallback 相关工作草稿: %s", exc)
             use_llm = False

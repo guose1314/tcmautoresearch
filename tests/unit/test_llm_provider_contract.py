@@ -18,11 +18,19 @@ class TestGetLlmServiceContract(unittest.TestCase):
 
     def setUp(self):
         from src.infra.llm_service import reset_llm_registry
+        from src.infra.token_budget_policy import (
+            reset_token_budget_policy_settings_cache,
+        )
         reset_llm_registry()
+        reset_token_budget_policy_settings_cache()
 
     def tearDown(self):
         from src.infra.llm_service import reset_llm_registry
+        from src.infra.token_budget_policy import (
+            reset_token_budget_policy_settings_cache,
+        )
         reset_llm_registry()
+        reset_token_budget_policy_settings_cache()
 
     @patch("src.infra.llm_service.CachedLLMService.from_config")
     @patch("src.infrastructure.config_loader.load_settings_section")
@@ -35,7 +43,10 @@ class TestGetLlmServiceContract(unittest.TestCase):
         svc = get_llm_service("default")
 
         mock_load.assert_called_once_with("models.llm", default={})
-        mock_from_config.assert_called_once_with({"mode": "local", "temperature": 0.7})
+        mock_from_config.assert_called_once_with(
+            {"mode": "local", "temperature": 0.7},
+            purpose="default",
+        )
         self.assertIs(svc, mock_svc)
 
     @patch("src.infra.llm_service.CachedLLMService.from_config")
@@ -179,6 +190,56 @@ class TestPurposeProfilesComplete(unittest.TestCase):
         p = _LLM_PURPOSE_PROFILES["paper_plugin"]
         self.assertAlmostEqual(p["temperature"], 0.2)
         self.assertEqual(p["max_tokens"], 1500)
+
+
+class TestCachedLlmServiceTokenBudget(unittest.TestCase):
+    def setUp(self):
+        from src.infra.token_budget_policy import (
+            reset_token_budget_policy_settings_cache,
+        )
+
+        reset_token_budget_policy_settings_cache()
+
+    def test_generate_applies_budget_before_engine_invocation(self):
+        class _StubEngine:
+            def __init__(self):
+                self.calls = []
+                self.llm_mode = "local"
+                self.model_path = "stub.gguf"
+                self.temperature = 0.2
+                self.max_tokens = 64
+                self.n_ctx = 256
+
+            def generate(self, prompt: str, system_prompt: str = "") -> str:
+                self.calls.append({"prompt": prompt, "system_prompt": system_prompt})
+                return "ok"
+
+        from src.infra.llm_service import CachedLLMService
+
+        engine = _StubEngine()
+        service = CachedLLMService(engine, cache_enabled=False, purpose="assistant")
+
+        with patch("src.infrastructure.config_loader.load_settings_section") as mock_load:
+            def _side_effect(path, default=None):
+                if path == "models.llm.token_budget_policy":
+                    return {
+                        "enabled": True,
+                        "default_input_tokens": 220,
+                        "min_input_tokens": 96,
+                        "max_context_tokens": 256,
+                        "reserve_output_tokens": 64,
+                        "trim_notice": "\n\n[..trimmed..]\n\n",
+                        "purpose_input_budgets": {"assistant": 140},
+                        "task_input_budgets": {},
+                    }
+                return default or {}
+
+            mock_load.side_effect = _side_effect
+            response = service.generate("研究材料：" + ("黄芪补气。" * 500), system_prompt="你是科研助手。")
+
+        self.assertEqual(response, "ok")
+        self.assertEqual(len(engine.calls), 1)
+        self.assertIn("[..trimmed..]", engine.calls[0]["prompt"])
 
 
 if __name__ == "__main__":

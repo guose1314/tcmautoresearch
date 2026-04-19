@@ -1,5 +1,7 @@
 """
-ResearchPipeline observe 阶段端到端演示：采集 -> 清洗 -> 抽取 -> 建模
+observe 阶段端到端演示：采集 -> 清洗 -> 抽取 -> 建模
+
+已迁移至 ResearchRuntimeService 统一主入口。
 """
 
 import argparse
@@ -9,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from src.collector.ctext_whitelist import load_whitelist
 from src.collector.multi_source_corpus import build_source_collection_plan
-from src.research.research_pipeline import ResearchPhase, ResearchPipeline
+from src.orchestration.research_runtime_service import ResearchRuntimeService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,7 +20,7 @@ logging.basicConfig(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="执行 ResearchPipeline 的 observe 首段主流程演示")
+    parser = argparse.ArgumentParser(description="执行 observe 首段主流程演示（via ResearchRuntimeService）")
     parser.add_argument("--group", action="append", dest="groups", help="白名单分组，可重复指定")
     parser.add_argument("--whitelist-path", default="data/ctext_whitelist.json", help="白名单配置文件")
     parser.add_argument("--output-dir", default="data/ctext", help="ctext 采集输出目录")
@@ -40,26 +42,6 @@ def resolve_groups(whitelist_path: str, groups: Optional[List[str]]) -> List[str
     return groups
 
 
-def build_pipeline_config(whitelist_path: str) -> Dict[str, Any]:
-    return {
-        "ctext_corpus": {
-            "enabled": True,
-            "api_base": "https://api.ctext.org",
-            "request_interval_sec": 0.2,
-            "retry_count": 2,
-            "timeout_sec": 20,
-            "whitelist": {
-                "enabled": True,
-                "path": whitelist_path,
-                "default_groups": ["tcm_classics"]
-            }
-        },
-        "observe_pipeline": {
-            "enabled": True
-        }
-    }
-
-
 def run_demo(
     groups: Optional[List[str]] = None,
     whitelist_path: str = "data/ctext_whitelist.json",
@@ -71,34 +53,49 @@ def run_demo(
     selected_groups = resolve_groups(whitelist_path, groups)
 
     def execute_observe(selected_demo_groups: List[str]) -> Dict[str, Any]:
-        pipeline = ResearchPipeline(build_pipeline_config(whitelist_path))
+        runtime_service = ResearchRuntimeService({
+            "phases": ["observe"],
+            "pipeline_config": {
+                "ctext_corpus": {
+                    "enabled": True,
+                    "api_base": "https://api.ctext.org",
+                    "request_interval_sec": 0.2,
+                    "retry_count": 2,
+                    "timeout_sec": 20,
+                    "whitelist": {
+                        "enabled": True,
+                        "path": whitelist_path,
+                        "default_groups": ["tcm_classics"]
+                    }
+                },
+                "observe_pipeline": {
+                    "enabled": True
+                }
+            },
+        })
 
-        cycle = pipeline.create_research_cycle(
+        runtime_result = runtime_service.run(
+            "ctext 标准语料观察阶段首段主流程演示",
             cycle_name="observe_ingestion_demo",
             description="ctext 标准语料观察阶段首段主流程演示",
-            objective="验证采集、清洗、实体抽取、语义建模的串联能力",
             scope="observe_ingestion_demo",
-            researchers=["demo_runner"]
+            phase_contexts={
+                "observe": {
+                    "use_ctext_whitelist": True,
+                    "whitelist_path": whitelist_path,
+                    "whitelist_groups": selected_demo_groups,
+                    "output_dir": output_dir,
+                    "recurse": True,
+                    "max_depth": max_depth,
+                    "max_texts": max_texts,
+                    "max_chars_per_text": max_chars_per_text,
+                    "save_to_disk": True,
+                    "run_preprocess_and_extract": True,
+                },
+            },
         )
-        if not pipeline.start_research_cycle(cycle.cycle_id):
-            raise RuntimeError("研究循环启动失败")
-
-        return pipeline.execute_research_phase(
-            cycle.cycle_id,
-            ResearchPhase.OBSERVE,
-            {
-                "use_ctext_whitelist": True,
-                "whitelist_path": whitelist_path,
-                "whitelist_groups": selected_demo_groups,
-                "output_dir": output_dir,
-                "recurse": True,
-                "max_depth": max_depth,
-                "max_texts": max_texts,
-                "max_chars_per_text": max_chars_per_text,
-                "save_to_disk": True,
-                "run_preprocess_and_extract": True
-            }
-        )
+        phase_results = runtime_result.session_result.get("phase_results") or {}
+        return phase_results.get("observe") or {}
 
     result = execute_observe(selected_groups)
 

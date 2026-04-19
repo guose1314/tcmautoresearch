@@ -775,7 +775,41 @@ class DatabaseManager:
         session_factory = sessionmaker(bind=self.engine, autoflush=False, expire_on_commit=False)
         self.Session = scoped_session(session_factory)
         Base.metadata.create_all(self.engine)
+        self._last_schema_completeness_report = self._verify_schema_completeness()
         self._last_schema_normalization_report = self._normalize_legacy_postgres_enums()
+
+    # ── schema 完整性验证 ─────────────────────────────────────────────
+
+    def _verify_schema_completeness(self) -> Dict[str, Any]:
+        """验证 create_all 后所有 ORM 声明的表均存在于数据库中。"""
+        from sqlalchemy import inspect as sa_inspect
+
+        expected_tables = set(Base.metadata.tables.keys())
+        actual_tables = set(sa_inspect(self.engine).get_table_names())
+        missing = sorted(expected_tables - actual_tables)
+        report: Dict[str, Any] = {
+            "status": "ok" if not missing else "incomplete",
+            "checked_at": datetime.utcnow().isoformat(),
+            "database_type": self.engine.dialect.name,
+            "expected_table_count": len(expected_tables),
+            "actual_table_count": len(actual_tables & expected_tables),
+            "missing_tables": missing,
+        }
+        if missing:
+            logger.warning(
+                "Schema 完整性检查：%d 张 ORM 表缺失: %s",
+                len(missing),
+                ", ".join(missing),
+            )
+        else:
+            logger.debug(
+                "Schema 完整性检查通过：%d 张表全部存在",
+                len(expected_tables),
+            )
+        return report
+
+    def get_schema_completeness_report(self) -> Dict[str, Any]:
+        return deepcopy(getattr(self, "_last_schema_completeness_report", {"status": "pending"}))
 
     def _normalize_legacy_postgres_enums(self) -> Dict[str, Any]:
         report: Dict[str, Any] = {

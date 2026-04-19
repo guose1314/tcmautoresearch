@@ -126,8 +126,16 @@ def create_app(
     )
 
     @app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok", "environment": resolved_settings.environment}
+    def health() -> dict[str, Any]:
+        payload: dict[str, Any] = {"status": "ok", "environment": resolved_settings.environment}
+        try:
+            monitoring_service: MonitoringService = app.state.monitoring_service
+            liveness = monitoring_service.get_liveness_report()
+            if liveness.get("status") == "error":
+                payload["status"] = "degraded"
+        except Exception:
+            pass
+        return payload
 
     @app.get("/liveness")
     def liveness(response: Response) -> Dict[str, Any]:

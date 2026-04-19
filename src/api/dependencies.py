@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Mapping, TypeVar
@@ -22,6 +23,7 @@ from web_console.job_manager import ResearchJobManager
 if TYPE_CHECKING:
     from web_console.console_auth import ConsoleAuthService
 
+logger = logging.getLogger(__name__)
 ServiceT = TypeVar("ServiceT")
 MANAGEMENT_API_KEY_HEADER = "X-API-Key"
 
@@ -174,6 +176,10 @@ def require_management_api_key(request: Request) -> None:
 def verify_management_api_key_for_websocket(websocket: WebSocket) -> None:
     settings = getattr(websocket.app.state, "settings", None)
     if settings is None:
+        logger.warning(
+            "websocket.app.state.settings 为空，回退到 load_settings() — "
+            "此路径绕过 RuntimeConfigAssembler 装配的 settings 实例"
+        )
         settings = load_settings()
         websocket.app.state.settings = settings
     console_auth_service = get_console_auth_service_from_state(websocket.app.state, settings)
@@ -316,6 +322,10 @@ def get_research_session_repository(request: Request) -> ResearchSessionReposito
 def get_settings(request: Request) -> AppSettings:
     settings = getattr(request.app.state, "settings", None)
     if settings is None:
+        logger.warning(
+            "request.app.state.settings 为空，回退到 load_settings() — "
+            "此路径绕过 RuntimeConfigAssembler 装配的 settings 实例"
+        )
         settings = load_settings()
         request.app.state.settings = settings
     return settings

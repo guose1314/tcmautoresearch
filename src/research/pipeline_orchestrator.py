@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import time
 from datetime import datetime
@@ -202,6 +203,7 @@ class ResearchPipelineOrchestrator:
             )
 
         research_cycle = self.pipeline.research_cycles[cycle_id]
+        phase_context_payload = self._attach_phase_dossiers_to_phase_context(research_cycle, phase_context_payload)
         phase_entry = self.pipeline._start_phase(research_cycle.metadata, phase.value, phase_context_payload)
 
         try:
@@ -245,6 +247,9 @@ class ResearchPipelineOrchestrator:
                     self.pipeline.logger.warning(
                         "analyze 阶段 findings=0，标记 status=degraded"
                     )
+
+            if raw_phase_status not in {"failed", "skipped", "blocked", "pending", "running"}:
+                self._sync_phase_dossier_metadata(research_cycle, phase)
 
             self.pipeline.logger.info(f"研究阶段执行完成: {phase.value}")
             return phase_result
@@ -310,6 +315,16 @@ class ResearchPipelineOrchestrator:
                 del self.pipeline.active_cycles[cycle_id]
             research_cycle.metadata["final_status"] = research_cycle.status.value
             research_cycle.metadata["analysis_summary"] = self.pipeline._build_cycle_analysis_summary(research_cycle)
+
+            # 构建研究 dossier（压缩长上下文，供后续 LLM 消费）
+            try:
+                self._sync_all_phase_dossiers(research_cycle)
+                builder = self._create_dossier_builder()
+                dossier = builder.build(research_cycle)
+                research_cycle.metadata["research_dossier"] = dossier.to_dict()
+            except Exception as dossier_exc:
+                self.pipeline.logger.warning("研究 dossier 构建失败（不影响持久化）: %s", dossier_exc)
+
             publish_audit_event(
                 self.pipeline.event_bus,
                 "cycle_completed",
@@ -333,6 +348,100 @@ class ResearchPipelineOrchestrator:
             )
             self.pipeline.logger.error(f"研究循环完成失败: {exc}")
             return False
+
+    def _get_dossier_config(self) -> Dict[str, Any]:
+        return (
+            (self.pipeline.config or {})
+            .get("iteration_cycle", {})
+            .get("research_pipeline", {})
+            .get("dossier", {})
+        )
+
+    def _create_dossier_builder(self):
+        from src.research.dossier_builder import ResearchDossierBuilder
+
+        dossier_cfg = self._get_dossier_config()
+        phase_max_context_tokens = (
+            dossier_cfg.get("phase_max_context_tokens")
+            if isinstance(dossier_cfg.get("phase_max_context_tokens"), dict)
+            else {}
+        )
+        return ResearchDossierBuilder(
+            max_context_tokens=int(dossier_cfg.get("max_context_tokens", 3072)),
+            enable_llm_summarization=bool(dossier_cfg.get("enable_llm_summarization", False)),
+            llm_purpose=str(dossier_cfg.get("llm_purpose", "default")),
+            phase_max_context_tokens=phase_max_context_tokens,
+        )
+
+    def _sync_phase_dossier_metadata(self, research_cycle: ResearchCycle, phase: ResearchPhase) -> None:
+        phase_name = str(getattr(phase, "value", phase)).strip().lower()
+        if phase_name not in {"observe", "analyze", "publish"}:
+            return
+
+        dossier_cfg = self._get_dossier_config()
+        if not bool(dossier_cfg.get("build_phase_dossiers", True)):
+            return
+
+        builder = self._create_dossier_builder()
+        phase_dossier = builder.build_phase_dossier(research_cycle, phase_name)
+        research_cycle.metadata.setdefault("phase_dossiers", {})[phase_name] = phase_dossier.to_dict()
+
+    def _sync_all_phase_dossiers(self, research_cycle: ResearchCycle) -> None:
+        dossier_cfg = self._get_dossier_config()
+        if not bool(dossier_cfg.get("build_phase_dossiers", True)):
+            return
+
+        builder = self._create_dossier_builder()
+        phase_dossiers = builder.build_phase_dossiers(research_cycle)
+        if phase_dossiers:
+            research_cycle.metadata.setdefault("phase_dossiers", {}).update(
+                {
+                    phase_name: dossier.to_dict()
+                    for phase_name, dossier in phase_dossiers.items()
+                }
+            )
+
+    def _attach_phase_dossiers_to_phase_context(
+        self,
+        research_cycle: ResearchCycle,
+        phase_context: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        payload = dict(phase_context or {})
+        dossier_cfg = self._get_dossier_config()
+        if not bool(dossier_cfg.get("attach_phase_dossiers_to_context", True)):
+            return payload
+
+        phase_dossiers = research_cycle.metadata.get("phase_dossiers")
+        if not isinstance(phase_dossiers, dict) or not phase_dossiers:
+            return payload
+
+        payload.setdefault("phase_dossiers", copy.deepcopy(phase_dossiers))
+        phase_dossier_texts = dict(payload.get("phase_dossier_texts") or {})
+        for phase_name, dossier_payload in phase_dossiers.items():
+            if not isinstance(dossier_payload, dict):
+                continue
+            payload.setdefault(f"{phase_name}_dossier", copy.deepcopy(dossier_payload))
+            dossier_text = self._render_dossier_text(dossier_payload)
+            if dossier_text:
+                payload.setdefault(f"{phase_name}_dossier_text", dossier_text)
+                phase_dossier_texts.setdefault(phase_name, dossier_text)
+        if phase_dossier_texts:
+            payload.setdefault("phase_dossier_texts", phase_dossier_texts)
+        return payload
+
+    @staticmethod
+    def _render_dossier_text(dossier_payload: Dict[str, Any]) -> str:
+        sections = dossier_payload.get("sections") if isinstance(dossier_payload.get("sections"), list) else []
+        parts = []
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            name = str(section.get("name") or "").strip()
+            content = str(section.get("content") or "").strip()
+            if not content:
+                continue
+            parts.append(f"## {name}\n{content}" if name else content)
+        return "\n\n".join(parts)
 
     def suspend_research_cycle(self, cycle_id: str) -> bool:
         event_result = self.pipeline.event_bus.request("cycle.suspend.requested", {"cycle_id": cycle_id})

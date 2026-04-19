@@ -427,9 +427,9 @@ def propose_hypothesis_with_llm(
     history: list[dict],
 ) -> Optional[Dict[str, float]]:
     try:
-        from src.llm.llm_engine import LLMEngine
+        from src.infra.llm_service import get_llm_service
 
-        engine = LLMEngine(temperature=0.2, max_tokens=512)
+        engine = get_llm_service("default")
         engine.load()
         prompt = (
             "你是 AutoResearch 智能体。请根据 program.md 约束与历史结果，给出下一轮 train.py 的超参数 JSON。"

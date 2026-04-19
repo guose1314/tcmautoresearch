@@ -154,5 +154,133 @@ class TransactionCoordinatorIntegrationTest(unittest.TestCase):
         )
 
 
+class TransactionTimingAndObserverTest(unittest.TestCase):
+    """验证事务观测：阶段耗时、观测摘要、observer 通知。"""
+
+    def test_successful_commit_records_timing(self):
+        pg_session = _RecordingPGSession()
+        txn = TransactionCoordinator(pg_session, auto_commit=False)
+        txn.pg_add({"id": 1})
+        result = txn.commit()
+
+        self.assertTrue(result.success)
+        self.assertGreaterEqual(result.pg_flush_ms, 0)
+        self.assertGreaterEqual(result.pg_commit_ms, 0)
+        self.assertGreaterEqual(result.total_ms, 0)
+        self.assertGreater(result.total_ms, 0)
+
+    def test_dual_write_timing_includes_neo4j(self):
+        pg_session = _RecordingPGSession()
+        neo4j_driver = _RecordingNeo4jDriver()
+        txn = TransactionCoordinator(pg_session, neo4j_driver, auto_commit=False)
+        txn.neo4j_write("CREATE node", id=1)
+        result = txn.commit()
+
+        self.assertTrue(result.success)
+        self.assertGreaterEqual(result.neo4j_execute_ms, 0)
+        self.assertEqual(result.neo4j_op_count, 1)
+        self.assertEqual(result.storage_mode, "dual_write")
+
+    def test_failed_commit_records_timing(self):
+        pg_session = _RecordingPGSession(flush_error=RuntimeError("flush err"))
+        txn = TransactionCoordinator(pg_session, auto_commit=False)
+        result = txn.commit()
+
+        self.assertFalse(result.success)
+        self.assertGreater(result.pg_flush_ms, 0)
+        self.assertGreater(result.total_ms, 0)
+
+    def test_to_observation_dict_contains_timing(self):
+        pg_session = _RecordingPGSession()
+        txn = TransactionCoordinator(pg_session, auto_commit=False)
+        result = txn.commit()
+
+        obs = result.to_observation_dict()
+        self.assertIn("timing_ms", obs)
+        self.assertIn("pg_flush", obs["timing_ms"])
+        self.assertIn("pg_commit", obs["timing_ms"])
+        self.assertIn("neo4j_execute", obs["timing_ms"])
+        self.assertIn("total", obs["timing_ms"])
+        self.assertEqual(obs["success"], True)
+        self.assertIn("neo4j_op_count", obs)
+
+    def test_observer_receives_commit_result(self):
+        received = []
+
+        class _TestObserver:
+            def on_transaction_complete(self, result):
+                received.append(result)
+
+        pg_session = _RecordingPGSession()
+        observer = _TestObserver()
+        txn = TransactionCoordinator(pg_session, auto_commit=False, observer=observer)
+        txn.pg_add({"id": 1})
+        result = txn.commit()
+
+        self.assertEqual(len(received), 1)
+        self.assertIs(received[0], result)
+        self.assertTrue(received[0].success)
+
+    def test_observer_receives_rollback_result(self):
+        received = []
+
+        class _TestObserver:
+            def on_transaction_complete(self, result):
+                received.append(result)
+
+        pg_session = _RecordingPGSession()
+        observer = _TestObserver()
+        txn = TransactionCoordinator(pg_session, auto_commit=False, observer=observer)
+        txn.rollback()
+
+        self.assertEqual(len(received), 1)
+        self.assertFalse(received[0].success)
+
+    def test_observer_receives_failure_result(self):
+        received = []
+
+        class _TestObserver:
+            def on_transaction_complete(self, result):
+                received.append(result)
+
+        pg_session = _RecordingPGSession(flush_error=RuntimeError("bad"))
+        observer = _TestObserver()
+        txn = TransactionCoordinator(pg_session, auto_commit=False, observer=observer)
+        result = txn.commit()
+
+        self.assertEqual(len(received), 1)
+        self.assertFalse(received[0].success)
+        self.assertIn("flush", received[0].error)
+
+    def test_last_result_available_after_auto_commit(self):
+        pg_session = _RecordingPGSession()
+        with TransactionCoordinator(pg_session) as txn:
+            txn.pg_add({"id": 1})
+
+        self.assertIsNotNone(txn.last_result)
+        self.assertTrue(txn.last_result.success)
+
+    def test_last_result_available_after_rollback(self):
+        pg_session = _RecordingPGSession()
+        txn = TransactionCoordinator(pg_session, auto_commit=False)
+        txn.rollback()
+        self.assertIsNotNone(txn.last_result)
+        self.assertFalse(txn.last_result.success)
+
+    def test_neo4j_failure_records_needs_backfill_and_timing(self):
+        pg_session = _RecordingPGSession()
+        neo4j_driver = _RecordingNeo4jDriver(fail_on_queries={"CREATE fail"})
+        txn = TransactionCoordinator(pg_session, neo4j_driver, auto_commit=False)
+        txn.neo4j_write("CREATE fail", compensate_cypher="DELETE fail", id=1)
+        result = txn.commit()
+
+        self.assertFalse(result.success)
+        self.assertTrue(result.needs_backfill)
+        self.assertGreater(result.neo4j_execute_ms, 0)
+        self.assertGreater(result.total_ms, 0)
+        obs = result.to_observation_dict()
+        self.assertTrue(obs["needs_backfill"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -259,7 +259,19 @@ def run_iteration_cycle(
     governance_config: Optional[Dict[str, Any]] = None,
     execute_pipeline=execute_real_module_pipeline,
 ) -> Dict[str, Any]:
-    """运行单次迭代循环。"""
+    """运行单次迭代循环。
+
+    .. deprecated::
+        旧 5 模块链执行路径，已被 ``_default_pipeline_iteration`` →
+        ``ResearchRuntimeService`` 7 阶段管道取代。
+    """
+    import warnings
+    warnings.warn(
+        "run_iteration_cycle() 是旧 5 模块链路径，"
+        "默认主链已迁移至 ResearchRuntimeService 7 阶段管道。",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     logger.info("开始第 %s 次迭代循环", iteration_number)
 
     start_time = time.time()
@@ -534,6 +546,10 @@ def run_full_cycle_demo(
     else:
         governance_config = config_loader(resolved_config_path)
 
+    # 当调用方未传入自定义 run_iteration 时，走 shared runtime service 路径，
+    # 不需要构建旧的 shared_modules（_default_pipeline_iteration 会立即丢弃）。
+    _uses_legacy_modules = run_iteration is not None
+
     if run_iteration is None:
         runtime_config = build_cycle_runtime_config(
             config_path=config_path,
@@ -607,10 +623,18 @@ def run_full_cycle_demo(
     shared_modules: List[tuple[str, Any]] = []
 
     try:
-        init_phase_started_at = start_phase(cycle_metadata, 'initialize_cycle_demo_modules', {'max_iterations': max_iterations})
-        shared_modules = lifecycle.build() or []
-        lifecycle.initialize(shared_modules)
-        complete_phase(cycle_metadata, 'initialize_cycle_demo_modules', init_phase_started_at, {'module_count': len(shared_modules)})
+        if _uses_legacy_modules:
+            init_phase_started_at = start_phase(cycle_metadata, 'initialize_cycle_demo_modules', {'max_iterations': max_iterations})
+            shared_modules = lifecycle.build() or []
+            lifecycle.initialize(shared_modules)
+            complete_phase(cycle_metadata, 'initialize_cycle_demo_modules', init_phase_started_at, {'module_count': len(shared_modules)})
+        else:
+            complete_phase(
+                cycle_metadata,
+                'initialize_cycle_demo_modules',
+                start_phase(cycle_metadata, 'initialize_cycle_demo_modules', {'max_iterations': max_iterations}),
+                {'module_count': 0, 'note': 'shared runtime service 路径，跳过旧模块构建'},
+            )
 
         iteration_phase_started_at = start_phase(cycle_metadata, 'run_cycle_demo_iterations', {'max_iterations': max_iterations})
         _run_demo_iterations(test_inputs, max_iterations, shared_modules, governance_config, run_iteration, cycle_results, cycle_failed_operations)
@@ -632,7 +656,8 @@ def run_full_cycle_demo(
         logger.error(traceback.format_exc())
         raise
     finally:
-        lifecycle.cleanup(shared_modules)
+        if _uses_legacy_modules:
+            lifecycle.cleanup(shared_modules)
 
 
 def run_academic_demo(

@@ -13,6 +13,7 @@ from src.research.learning_strategy import (
     resolve_numeric_learning_parameter,
 )
 from src.research.phase_result import build_phase_result, get_phase_value
+from src.research.reasoning_template_selector import select_reasoning_framework
 
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
@@ -39,6 +40,16 @@ class AnalyzePhaseMixin:
     def execute_analyze_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
         context = context or {}
         self._analyze_tracker = StrategyApplicationTracker("analyze", context, self.pipeline.config)
+
+        # ---- 推理结构自发现 ----
+        reasoning_framework = select_reasoning_framework(
+            getattr(cycle, "research_objective", "") or context.get("research_objective") or "",
+            context,
+            force_framework=context.get("force_reasoning_framework"),
+        )
+        context.setdefault("reasoning_framework", reasoning_framework)
+        context.setdefault("analyze_evidence_priority", reasoning_framework.analyze_evidence_priority)
+
         significance_level = self._resolve_analyze_significance_level(context)
         analyze_records = self._collect_analyze_records(cycle, context)
         analyze_relationships = self._collect_analyze_relationships(cycle, context)
@@ -93,6 +104,7 @@ class AnalyzePhaseMixin:
             "textual_evidence_chain_consumed": bool(textual_evidence_summary),
             "textual_evidence_chain_count": int(textual_evidence_summary.get("evidence_chain_count") or 0) if textual_evidence_summary else 0,
             "learning_strategy_applied": has_learning_strategy(context, self.pipeline.config),
+            "reasoning_framework": reasoning_framework.to_dict(),
         }
         if evidence_grade_error:
             metadata["evidence_grade_error"] = evidence_grade_error

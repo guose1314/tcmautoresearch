@@ -3788,17 +3788,18 @@ async def output_page(
 
 @router.get("/api/settings", response_class=HTMLResponse)
 async def settings_page(
+    request: Request,
     user: Dict[str, Any] = Depends(get_current_user),
 ) -> HTMLResponse:
-    # 读取配置 (通过统一配置中心)
+    # 读取配置 (通过 app.state.settings，由 RuntimeConfigAssembler 统一装配)
     sys_info = {}
     try:
-        from src.infrastructure.config_loader import load_settings
+        _st = getattr(request.app.state, "settings", None)
+        if _st is None:
+            from src.infrastructure.config_loader import load_settings
 
-        _st = load_settings()
+            _st = load_settings()
         sys_info = _st.get_section("system", default={})
-    except Exception:
-        pass
     except Exception:
         pass
 

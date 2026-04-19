@@ -9,6 +9,12 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from src.core.module_base import BaseModule
+from src.infra.prompt_registry import (
+    call_registered_prompt,
+    parse_registered_output,
+    render_prompt,
+)
+from src.research.compute_tier_router import ComputeTierRouter
 
 logger = logging.getLogger(__name__)
 
@@ -203,26 +209,21 @@ class GapAnalysisCore:
             f"{index}. {item}"
             for index, item in enumerate(self.config.report_requirements, 1)
         )
-        output_mode = str(payload.get("output_mode") or "report").strip().lower()
-        if output_mode == "json":
-            user_prompt = (
-                "请基于以下 JSON 输入执行临床/知识缺口分析，并仅输出 JSON 对象，不要输出 Markdown、说明或额外文本。\n"
-                "JSON 字段必须包含：clinical_question, coverage_overview, gaps, priority_summary, recommendations。\n"
-                f"{json.dumps({'payload': payload, 'core_analysis': core_analysis}, ensure_ascii=False, indent=2)}\n\n"
-                "要求：\n"
-                f"{requirements}"
-            )
-        else:
-            user_prompt = (
-                "请基于以下 JSON 输入执行临床/知识缺口分析。优先输出 JSON，对齐字段："
-                "report, gaps, priority_summary, recommendations, coverage_overview。\n"
-                f"{json.dumps({'payload': payload, 'core_analysis': core_analysis}, ensure_ascii=False, indent=2)}\n\n"
-                "要求：\n"
-                f"{requirements}"
-            )
+        rendered = render_prompt(
+            "gap_analyzer.structured_report",
+            system_prompt_override=self.config.system_prompt,
+            analysis_input=json.dumps(
+                {"payload": payload, "core_analysis": core_analysis},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            requirements=requirements,
+        )
         return {
-            "system_prompt": self.config.system_prompt,
-            "user_prompt": user_prompt,
+            "system_prompt": rendered.system_prompt,
+            "user_prompt": rendered.user_prompt,
+            "prompt_name": rendered.name,
+            "rendered_prompt": rendered,
             "payload": payload,
         }
 
@@ -315,9 +316,19 @@ class GapAnalysisCore:
 class GapAnalysisLLMAdapter:
     """LLM 调用适配层：负责把 prompt 提交给 llm_service。"""
 
-    def generate_report(self, llm_service: Any, user_prompt: str, system_prompt: str) -> str:
+    def generate_report(
+        self,
+        llm_service: Any,
+        user_prompt: str,
+        system_prompt: str,
+        *,
+        prompt_name: Optional[str] = None,
+        rendered_prompt: Any = None,
+    ) -> str:
         if llm_service is None or not hasattr(llm_service, "generate"):
             raise RuntimeError("GapAnalysisLLMAdapter 需要支持 generate(prompt, system_prompt) 的 llm_service")
+        if prompt_name and rendered_prompt is not None:
+            return str(call_registered_prompt(llm_service, prompt_name, rendered=rendered_prompt))
         return str(llm_service.generate(user_prompt, system_prompt))
 
 
@@ -353,13 +364,29 @@ class GapAnalyzer(BaseModule):
         use_llm = self.use_llm_refinement if raw_use_llm is None else bool(raw_use_llm)
         report = self.core.render_structured_report(core_analysis, request.output_language)
         used_llm = False
+
+        # 动态算力分配：评估是否需要 LLM 精炼
         if use_llm and llm_service is not None and hasattr(llm_service, "generate"):
-            report = self.llm_adapter.generate_report(
-                llm_service=llm_service,
-                user_prompt=prompt_data["user_prompt"],
-                system_prompt=prompt_data["system_prompt"],
+            tier_router = ComputeTierRouter(self.config)
+            tier_decision = tier_router.decide(
+                task_type="gap_analysis",
+                evidence={
+                    "entity_count": len(core_analysis.get("gaps", [])),
+                    "evidence_items": len(request.evidence_matrix or []) + len(request.literature_summaries or []),
+                    "rule_confidence": core_analysis.get("confidence", 0.0),
+                    "retrieval_hits": len(request.literature_summaries or []),
+                },
+                force_tier=context.get("force_compute_tier"),
             )
-            used_llm = True
+            if tier_decision.should_use_llm:
+                report = self.llm_adapter.generate_report(
+                    llm_service=llm_service,
+                    user_prompt=prompt_data["user_prompt"],
+                    system_prompt=prompt_data["system_prompt"],
+                    prompt_name=prompt_data.get("prompt_name"),
+                    rendered_prompt=prompt_data.get("rendered_prompt"),
+                )
+                used_llm = True
 
         parsed_analysis = self._parse_structured_output(report)
         resolved_analysis = self._merge_analysis(core_analysis, parsed_analysis)
@@ -517,19 +544,22 @@ class GapAnalyzer(BaseModule):
         return {}
 
     def _parse_json_output(self, report: str) -> Dict[str, Any]:
-        text = str(report or "").strip()
-        if not text:
-            return {}
-        if text.startswith("```"):
-            text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
-        if not self._looks_like_json_payload(text):
-            return {}
-        try:
-            payload = json.loads(text)
-        except Exception:
-            return {}
-        if not isinstance(payload, dict):
-            return {}
+        validation = parse_registered_output("gap_analyzer.structured_report", report)
+        payload = validation.parsed if isinstance(validation.parsed, dict) else None
+        if payload is None:
+            text = str(report or "").strip()
+            if not text:
+                return {}
+            if text.startswith("```"):
+                text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+            if not self._looks_like_json_payload(text):
+                return {}
+            try:
+                payload = json.loads(text)
+            except Exception:
+                return {}
+            if not isinstance(payload, dict):
+                return {}
         return {
             "report": str(payload.get("report") or "").strip(),
             "gaps": self._normalize_gaps(payload.get("gaps") or []),

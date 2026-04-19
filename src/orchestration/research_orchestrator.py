@@ -142,6 +142,12 @@ class ResearchOrchestrator:
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
+        import warnings
+        warnings.warn(
+            "ResearchOrchestrator 已弃用，请改用 ResearchRuntimeService。",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.config: Dict[str, Any] = config or {}
         self.pipeline_config: Dict[str, Any] = self.config.get("pipeline_config") or {}
         self.stop_on_failure: bool = bool(self.config.get("stop_on_failure", True))

@@ -10,6 +10,7 @@ from src.research.learning_strategy import (
     resolve_learning_strategy,
 )
 from src.research.phase_result import build_phase_result, get_phase_value
+from src.research.reasoning_template_selector import select_reasoning_framework
 from src.storage.graph_interface import IKnowledgeGraph
 from src.storage.neo4j_driver import create_knowledge_graph
 
@@ -54,6 +55,10 @@ class HypothesisPhaseMixin:
         metadata.setdefault("used_llm_generation", any(item.get("generation_mode") == "llm" for item in hypotheses))
         metadata.setdefault("used_llm_closed_loop", False)
         metadata.setdefault("llm_iteration_count", 0)
+        # 记录推理框架选择
+        reasoning_fw = hypothesis_context.get("reasoning_framework")
+        if reasoning_fw is not None:
+            metadata["reasoning_framework"] = reasoning_fw.to_dict() if hasattr(reasoning_fw, "to_dict") else str(reasoning_fw)
         if hasattr(self, "_hypothesis_tracker"):
             metadata["learning"] = self._hypothesis_tracker.to_metadata()
             self.pipeline.register_phase_learning_manifest(
@@ -104,6 +109,20 @@ class HypothesisPhaseMixin:
         )
         knowledge_gap = context.get("knowledge_gap") or self._derive_hypothesis_knowledge_gap(knowledge_graph, entities)
 
+        # ---- 推理结构自发现：选择最匹配的推理框架 ----
+        reasoning_framework = select_reasoning_framework(
+            getattr(cycle, "research_objective", "") or context.get("research_objective") or "",
+            {
+                "entities": entities,
+                "knowledge_gap": knowledge_gap,
+                "research_domain": context.get("research_domain") or self._infer_hypothesis_domain(cycle, observations, findings),
+                "research_scope": getattr(cycle, "research_scope", "") or context.get("research_scope") or "",
+                "learning_strategy": learning_strategy,
+                "reasoning_framework": context.get("reasoning_framework"),
+            },
+            force_framework=context.get("force_reasoning_framework"),
+        )
+
         return {
             "research_objective": cycle.research_objective or context.get("research_objective") or cycle.description,
             "research_scope": cycle.research_scope or context.get("research_scope") or "",
@@ -124,6 +143,8 @@ class HypothesisPhaseMixin:
             "knowledge_graph": knowledge_graph,
             "knowledge_gap": knowledge_gap,
             "learning_strategy": learning_strategy,
+            "reasoning_framework": reasoning_framework,
+            "reasoning_guidance": reasoning_framework.hypothesis_guidance,
         }
 
     def _resolve_hypothesis_use_llm_generation(

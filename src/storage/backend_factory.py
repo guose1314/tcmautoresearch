@@ -45,6 +45,9 @@ from src.infrastructure.persistence import (
     DatabaseManager,
 )
 from src.infrastructure.secret_resolution import resolve_config_password
+from src.storage.backfill_ledger import BackfillLedger
+from src.storage.degradation_governor import DegradationGovernor
+from src.storage.observability import StorageObservability
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +90,11 @@ class StorageBackendFactory:
         self._db_type: str = str(self._db_config.get("type", "sqlite")).strip().lower()
         self._initialized = False
 
+        # ── 治理与可观测性组件 ─────────────────────────────────────────
+        self._degradation_governor = DegradationGovernor()
+        self._backfill_ledger = BackfillLedger()
+        self._observability = StorageObservability()
+
     @property
     def db_type(self) -> str:
         return self._db_type
@@ -106,6 +114,18 @@ class StorageBackendFactory:
     @property
     def initialized(self) -> bool:
         return self._initialized
+
+    @property
+    def degradation_governor(self) -> DegradationGovernor:
+        return self._degradation_governor
+
+    @property
+    def backfill_ledger(self) -> BackfillLedger:
+        return self._backfill_ledger
+
+    @property
+    def observability(self) -> StorageObservability:
+        return self._observability
 
     # ── 生命周期 ──────────────────────────────────────────────────────────
 
@@ -141,6 +161,7 @@ class StorageBackendFactory:
                 DatabaseManager.create_default_relationships(session)
 
             report["pg_status"] = "active"
+            report["schema_completeness"] = self._db_manager.get_schema_completeness_report()
             logger.info("关系型数据库初始化完成: %s (%s)", self._db_type, conn_str.split("@")[-1] if "@" in conn_str else "local")
         except Exception as exc:
             report["pg_status"] = f"error: {exc}"
@@ -172,6 +193,9 @@ class StorageBackendFactory:
                 self._neo4j_driver = None
 
         self._initialized = True
+        self._degradation_governor.set_initial_mode(
+            self.get_consistency_state().mode
+        )
         return report
 
     def close(self) -> None:
@@ -195,13 +219,19 @@ class StorageBackendFactory:
     # ── 事务 ──────────────────────────────────────────────────────────────
 
     @contextmanager
-    def transaction(self) -> Iterator[Any]:
+    def transaction(self, *, observer: Any = None) -> Iterator[Any]:
         """创建跨后端事务协调器。
+
+        Parameters
+        ----------
+        observer :
+            可选的 ``TransactionObserver``，接收 commit/rollback 结构化结果。
 
         Yields
         ------
         TransactionCoordinator
-            事务协调器实例。
+            事务协调器实例。提交后可通过 ``txn.last_result`` 访问
+            ``TransactionResult``（含阶段耗时与补偿详情）。
         """
         if not self._initialized or self._db_manager is None:
             raise RuntimeError("StorageBackendFactory 尚未初始化")
@@ -210,8 +240,12 @@ class StorageBackendFactory:
 
         session = self._db_manager.get_session()
         try:
-            with TransactionCoordinator(session, self._neo4j_driver) as txn:
+            with TransactionCoordinator(session, self._neo4j_driver, observer=observer) as txn:
                 yield txn
+            # commit 完成后记录观测（__exit__ 已执行 auto_commit）
+            if txn.last_result is not None:
+                self._observability.record(txn.last_result)
+                self._degradation_governor.record_transaction_result(txn.last_result)
         finally:
             session.close()
 
@@ -233,6 +267,7 @@ class StorageBackendFactory:
         }
         if self._db_manager:
             result["db_healthy"] = self._db_manager.health_check()
+            result["schema_completeness"] = self._db_manager.get_schema_completeness_report()
         else:
             result["db_healthy"] = False
 
@@ -344,3 +379,15 @@ class StorageBackendFactory:
                 stats["neo4j_error"] = str(exc)
 
         return stats
+
+    def get_governance_report(self) -> Dict[str, Any]:
+        """获取完整的存储治理与可观测性报告。
+
+        聚合降级治理、backfill 台账和事务观测指标。
+        """
+        return {
+            "consistency_state": self.get_consistency_state().to_dict(),
+            "degradation": self._degradation_governor.to_governance_report(),
+            "backfill": self._backfill_ledger.get_summary(),
+            "observability": self._observability.get_health_report(),
+        }

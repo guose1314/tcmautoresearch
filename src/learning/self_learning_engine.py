@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
-import pickle
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.core.module_base import BaseModule
@@ -61,6 +62,7 @@ class SelfLearningEngine(BaseModule):
     """具备模式识别、反馈学习与自适应调参的学习引擎。"""
 
     _EWMA_DEFAULT_ALPHA = 0.15
+    _MAX_IMPROVEMENT_LOG = 2000
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__("self_learning_engine", config)
@@ -77,6 +79,7 @@ class SelfLearningEngine(BaseModule):
         self._adaptive_tuner = None
         self._dimension_trends: Dict[str, List[float]] = {}
         self._persisted_tuned_parameters: Dict[str, float] = {}
+        self._save_dirty = False
 
     def _do_initialize(self) -> bool:
         try:
@@ -205,7 +208,7 @@ class SelfLearningEngine(BaseModule):
         if len(self.performance_history) > 2000:
             self.performance_history.pop(0)
 
-        self._save_learning_data()
+        self._save_dirty = True
 
     def _generate_task_id(self, context: Dict[str, Any]) -> str:
         text_content = str(context.get("processed_text", ""))[:100]
@@ -295,7 +298,7 @@ class SelfLearningEngine(BaseModule):
                         "timestamp": datetime.now().isoformat(),
                     }
                 )
-                self._save_learning_data()
+                self._save_dirty = True
                 return True
         return False
 
@@ -375,7 +378,8 @@ class SelfLearningEngine(BaseModule):
                 "dimensions": dims,
                 "timestamp": datetime.now().isoformat(),
             })
-            self._save_learning_data()
+            self._cap_improvement_log()
+            self._save_dirty = True
             return True
         except Exception as exc:
             self.logger.warning("learn_from_quality_assessment 失败: %s", exc)
@@ -446,7 +450,8 @@ class SelfLearningEngine(BaseModule):
                 "weak_phase_count": len(weak_phases),
                 "timestamp": datetime.now().isoformat(),
             })
-            self._save_learning_data()
+            self._cap_improvement_log()
+            self._save_dirty = True
             return summary
         except Exception as exc:
             self.logger.warning("learn_from_cycle_reflection 失败: %s", exc)
@@ -693,44 +698,88 @@ class SelfLearningEngine(BaseModule):
                     self.logger.warning("保存学习数据时读取调参快照失败: %s", exc)
                 else:
                     self._persisted_tuned_parameters = dict(tuned_parameters)
-            with open(self.config.get("learning_data_file", "learning_data.pkl"), "wb") as f:
-                pickle.dump(
-                    {
-                        "records": [r.to_dict() for r in self.learning_records],
-                        "performance_history": self.performance_history,
-                        "model_improvement_log": self.model_improvement_log,
-                        "ewma_score": self._ewma_score,
-                        "dimension_trends": dict(self._dimension_trends),
-                        "tuned_parameters": tuned_parameters,
-                    },
-                    f,
-                )
+            payload = {
+                "records": [r.to_dict() for r in self.learning_records],
+                "performance_history": self.performance_history,
+                "model_improvement_log": self.model_improvement_log,
+                "ewma_score": self._ewma_score,
+                "dimension_trends": dict(self._dimension_trends),
+                "tuned_parameters": tuned_parameters,
+            }
+            raw_path = self.config.get("learning_data_file", "learning_data.json")
+            file_path = self._resolve_learning_data_path(raw_path)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = file_path.with_suffix(".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, default=str)
+            tmp_path.replace(file_path)
+            self._save_dirty = False
         except Exception as exc:
             self.logger.error("保存学习数据失败: %s", exc)
 
     def _load_learning_data(self) -> None:
-        try:
-            file_path = self.config.get("learning_data_file", "learning_data.pkl")
-            with open(file_path, "rb") as f:
-                data = pickle.load(f)
-            self.learning_records = [
-                LearningRecord.from_dict(item) for item in data.get("records", [])
-            ]
-            self.performance_history = list(data.get("performance_history", []))
-            self.model_improvement_log = list(data.get("model_improvement_log", []))
-            self._ewma_score = data.get("ewma_score")
-            self._dimension_trends = data.get("dimension_trends", {})
-            self._persisted_tuned_parameters = dict(data.get("tuned_parameters", {}))
-            self._apply_threshold_overrides(self._persisted_tuned_parameters)
-            self.logger.info("加载了 %d 条学习记录", len(self.learning_records))
-        except FileNotFoundError:
+        raw_path = self.config.get("learning_data_file", "learning_data.json")
+        file_path = self._resolve_learning_data_path(raw_path)
+
+        # 优先加载 JSON；若不存在则尝试同名 .pkl 迁移
+        if not file_path.exists():
+            pkl_path = file_path.with_suffix(".pkl")
+            if pkl_path.exists():
+                self._migrate_pickle_to_json(pkl_path, file_path)
+                return
             self.logger.info("未找到学习数据文件，将创建新的学习记录")
+            return
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self._apply_loaded_data(data)
         except Exception as exc:
             self.logger.error("加载学习数据失败: %s", exc)
 
+    def _migrate_pickle_to_json(self, pkl_path: Path, json_path: Path) -> None:
+        """将旧版 pickle 文件一次性迁移为 JSON，然后标记脏写。"""
+        import pickle as _pickle  # noqa: S403 — 仅用于一次性迁移
+
+        try:
+            with open(pkl_path, "rb") as f:
+                data = _pickle.load(f)  # noqa: S301
+            self._apply_loaded_data(data)
+            self.logger.info("从 pickle 迁移了 %d 条学习记录", len(self.learning_records))
+            self._save_dirty = True
+            self._save_learning_data()
+        except Exception as exc:
+            self.logger.error("pickle 迁移失败: %s", exc)
+
+    def _apply_loaded_data(self, data: Dict[str, Any]) -> None:
+        self.learning_records = [
+            LearningRecord.from_dict(item) for item in data.get("records", [])
+        ]
+        self.performance_history = list(data.get("performance_history", []))
+        self.model_improvement_log = list(data.get("model_improvement_log", []))
+        self._ewma_score = data.get("ewma_score")
+        self._dimension_trends = data.get("dimension_trends", {})
+        self._persisted_tuned_parameters = dict(data.get("tuned_parameters", {}))
+        self._apply_threshold_overrides(self._persisted_tuned_parameters)
+        self._cap_improvement_log()
+        self.logger.info("加载了 %d 条学习记录", len(self.learning_records))
+
+    @staticmethod
+    def _resolve_learning_data_path(raw_path: str) -> Path:
+        """将配置路径解析为绝对 Path，扩展名统一为 .json。"""
+        p = Path(raw_path).expanduser()
+        if p.suffix == ".pkl":
+            p = p.with_suffix(".json")
+        return p
+
+    def _cap_improvement_log(self) -> None:
+        if len(self.model_improvement_log) > self._MAX_IMPROVEMENT_LOG:
+            self.model_improvement_log = self.model_improvement_log[-self._MAX_IMPROVEMENT_LOG:]
+
     def _do_cleanup(self) -> bool:
         try:
-            self._save_learning_data()
+            if self._save_dirty:
+                self._save_learning_data()
             self.logger.info("自我学习引擎资源清理完成")
             return True
         except Exception as exc:

@@ -137,6 +137,17 @@ class DiskCacheStore:
         with self._cursor() as cur:
             cur.executescript(ddl)
 
+    def close(self) -> None:
+        """关闭当前线程持有的 SQLite 连接。"""
+
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            return
+        try:
+            conn.close()
+        finally:
+            self._local.conn = None
+
     # ── 静态工具 ──────────────────────────────────────────────────────────
 
     @staticmethod
@@ -246,6 +257,12 @@ class DiskCacheStore:
     @property
     def db_path(self) -> str:
         return str(self._db_path)
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────

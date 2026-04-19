@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import smtplib
 import socket
@@ -15,6 +16,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from prometheus_client import CollectorRegistry, Gauge, generate_latest
 from prometheus_client.exposition import CONTENT_TYPE_LATEST
+
+logger = logging.getLogger(__name__)
 
 try:
     import httpx
@@ -283,7 +286,11 @@ class MonitoringService:
         return summary
 
     def _get_consistency_state_dict(self) -> Optional[Dict[str, Any]]:
-        """从 StorageBackendFactory 获取一致性状态快照（懒加载，容错）。"""
+        """从 StorageBackendFactory 获取一致性状态快照（懒加载，容错）。
+
+        失败时返回带 ``error`` 键的降级字典，而非 None，
+        使消费方可区分"未初始化"与"获取失败"。
+        """
         try:
             from src.storage import StorageBackendFactory
             factory = StorageBackendFactory(self.settings.materialize_runtime_config())
@@ -292,8 +299,12 @@ class MonitoringService:
                 return factory.get_consistency_state().to_dict()
             finally:
                 factory.close()
-        except Exception:
-            return None
+        except Exception as exc:
+            logger.warning("获取 StorageConsistencyState 失败: %s", exc)
+            return {
+                "mode": "fetch_error",
+                "error": str(exc),
+            }
 
     def _build_structured_storage_summary(self) -> Dict[str, Any]:
         db_type = self.settings.database_type

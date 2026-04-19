@@ -168,8 +168,30 @@ philology_service:
   enabled: true
   max_recognized_terms: 12
   max_collation_diffs: 8
+
+# 推理结构自发现（Self-Discover）
+reasoning_template_selector:
+  enabled: true
+  # 可选强制指定: formula_compatibility, pathomechanism_evidence, textual_criticism, systematic_review
+  # force_framework: null
+  # 低于此阈值时退回默认 systematic_review
+  min_confidence_threshold: 0.15
   max_witnesses: 3
   collation_context_window: 12
+
+# §11.3 动态算力分配
+compute_tier_router:
+  enabled: true
+  # 强制层级: L1, L2, L3 (null = 自动)
+  # force_tier: null
+  # 按任务类型自定义阈值 (覆盖内置默认值)
+  # thresholds:
+  #   hypothesis:
+  #     l1_entity_count: 3
+  #     l1_relationship_count: 2
+  #     l1_rule_confidence: 0.6
+  #     l2_retrieval_hits: 3
+  #     l2_evidence_items: 5
   enable_glossary: true
   enable_version_collation: true
   artifact_output:
@@ -198,6 +220,49 @@ models:
     cache_size: 1000
     cache_dir: "./cache/llm"
     cache_ttl_seconds: null  # null = never expire; set integer (seconds) to enable TTL
+    task_policy:
+      enabled: true                      # 启用 §10.1 任务适配性检查
+      warn_on_unsuitable: true           # unsuitable_solo 任务发出 WARNING
+      log_on_cautious: true              # cautious 任务发出 INFO
+    prompt_registry:
+      enabled: true                      # 启用 Prompt Registry
+      include_schema_in_prompt: true     # 在 prompt 中附加 JSON Schema 约束
+      fail_on_schema_validation: false   # schema 不匹配时保留回退路径
+      max_schema_chars: 4000             # 避免 schema 文本过长
+    token_budget_policy:
+      enabled: true                      # 启用统一输入预算策略，保护本地 7B 稳定性
+      default_input_tokens: 1536         # 常规 prompt 输入预算
+      min_input_tokens: 512              # 预算硬下限，避免过度截断
+      max_context_tokens: 4096           # 默认 context window（可被运行时 n_ctx 覆盖）
+      reserve_output_tokens: 1024        # 为生成输出预留的最小 token 空间
+      keep_head_ratio: 0.72              # 超预算时保留前文比例
+      keep_tail_ratio: 0.28              # 超预算时保留尾部比例（保住 schema / 结论约束）
+      trim_notice: "\n\n[... 已按 token budget 截断上下文，保留关键前后文 ...]\n\n"
+      purpose_input_budgets:
+        default: 1536
+        assistant: 1536
+        translation: 1536
+        paper_plugin: 2048               # ↑ 从 1792: 翻译/摘要输出简单，允许更多源文本通过
+        hypothesis: 1280
+        reflect: 1280
+        discussion: 1792
+        entity_extraction: 1024
+        evidence_synthesis: 1792          # ↑ 从 1400: dossier 压缩输出短(~600字)，可承载更多证据
+      task_input_budgets:
+        question_rewrite: 768
+        terminology_explanation: 1024
+        structured_summary: 1536
+        hypothesis_generation: 1280
+        discussion_draft: 1792
+        reflect_diagnosis: 1280
+        translation: 1536
+        entity_extraction: 1024
+        long_form_generation: 1792
+        graph_reasoning: 1024             # ↓ 从 1152: 复杂结构化 JSON 输出需更多注意力余量
+        unsupported_conclusion: 1280
+        paper_full_section: 2048          # ↑ 从 1792: 翻译任务输出简单，放宽源文本预算
+        large_evidence_synthesis: 1792    # ↑ 从 1400: 摘要输出短，允许更多证据上下文
+        end_to_end_research_judgment: 1152
 
   # Embedding model configuration
   embedding:
@@ -510,6 +575,35 @@ iteration_cycle:
     persist_failed_operations: true
     minimum_stable_completion_rate: 0.8
     export_contract_version: "d44.v1"
+    dossier:
+      max_context_tokens: 3072
+      enable_llm_summarization: false
+      llm_purpose: "default"
+      build_phase_dossiers: true
+      attach_phase_dossiers_to_context: true
+      phase_max_context_tokens:
+        observe: 1280
+        analyze: 1536
+        publish: 1792
+    layered_cache:
+      enabled: true
+      cache_dir: "./cache/task_layers"
+      prompt:
+        enabled: true
+        namespace: "prompt"
+        ttl_seconds: null
+      evidence:
+        enabled: true
+        namespace: "evidence"
+        ttl_seconds: null
+      artifact:
+        enabled: true
+        namespace: "artifact"
+        ttl_seconds: null
+    learning_loop:
+      enabled: true
+      freeze_snapshot_before_cycle: true
+      prepare_next_cycle_strategy: true
   theoretical_framework:
     enable_phase_tracking: true
     persist_failed_operations: true

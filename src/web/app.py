@@ -144,10 +144,15 @@ def create_app(
 
     # ---- 健康检查 ----
     @app.get("/health", tags=["system"])
-    async def health_check() -> Dict[str, str]:
-        payload = {"status": "ok", "version": resolved_version}
+    async def health_check() -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"status": "ok", "version": resolved_version}
         if resolved_settings is not None:
             payload["environment"] = resolved_settings.environment
+        # 数据库连通性探测
+        db_mgr = getattr(getattr(app, "state", None), "db_manager", None)
+        if db_mgr is None:
+            payload["status"] = "degraded"
+            payload["db"] = "unavailable"
         return payload
 
     # ---- 关闭时清理数据库连接 ----

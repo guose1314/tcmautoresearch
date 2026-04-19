@@ -11,7 +11,6 @@ import logging
 import os
 import time
 from importlib import import_module
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, HTTPException
@@ -116,11 +115,10 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=Fals
 
 _DEFAULT_ALGORITHM = "HS256"
 _DEFAULT_EXPIRES = 3600  # 秒
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _load_jwt_config() -> Dict[str, Any]:
-    """从 secrets.yml / config.yml / 环境变量加载 JWT 配置。"""
+    """从环境变量或 ConfigCenter（secrets.yml / config.yml）加载 JWT 配置。"""
     secret_key = os.environ.get("JWT_SECRET_KEY")
     algorithm = os.environ.get("JWT_ALGORITHM", _DEFAULT_ALGORITHM)
     expires = int(os.environ.get("JWT_EXPIRES_SECONDS", _DEFAULT_EXPIRES))
@@ -140,36 +138,6 @@ def _load_jwt_config() -> Dict[str, Any]:
                 expires = int(settings.get("security.jwt_expires_seconds", expires) or expires)
         except Exception:
             pass
-
-    if not secret_key:
-        # 从 secrets 文件直接读取（优先项目根目录，避免依赖当前工作目录）
-        candidates = [
-            _PROJECT_ROOT / "secrets.yml",
-            _PROJECT_ROOT / "secrets.yaml",
-            Path("secrets.yml"),
-            Path("secrets.yaml"),
-        ]
-        seen: set[str] = set()
-        for secrets_path in candidates:
-            normalized = str(secrets_path.resolve(strict=False))
-            if normalized in seen:
-                continue
-            seen.add(normalized)
-            if not secrets_path.exists():
-                continue
-            try:
-                yaml_module = import_module("yaml")
-                secrets = yaml_module.safe_load(secrets_path.read_text(encoding="utf-8")) or {}
-                sec = secrets.get("security", {}) if isinstance(secrets, dict) else {}
-                if not isinstance(sec, dict):
-                    continue
-                secret_key = str(sec.get("jwt_secret_key", "") or "")
-                algorithm = str(sec.get("jwt_algorithm", algorithm) or algorithm)
-                expires = int(sec.get("jwt_expires_seconds", expires) or expires)
-                if secret_key:
-                    break
-            except Exception:
-                continue
 
     if not secret_key:
         raise RuntimeError(

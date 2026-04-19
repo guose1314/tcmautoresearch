@@ -160,8 +160,10 @@ class ResearchPipeline:
         reasoning_engine: Optional[Any] = None,
         llm_engine: Optional[Any] = None,
         self_learning_engine: Optional[Any] = None,
+        storage_factory: Optional[Any] = None,
     ):
         self.config = config or {}
+        self._injected_storage_factory = storage_factory
         self.event_bus = EventBus()
         self.module_factory = ModuleFactory.from_config(self.config.get("module_factory") or {})
 
@@ -258,7 +260,9 @@ class ResearchPipeline:
         )
         self.hypothesis_engine.initialize()
 
-        self.phase_orchestrator = PhaseOrchestrator(self)
+        self.phase_orchestrator = PhaseOrchestrator(
+            self, storage_factory=self._injected_storage_factory,
+        )
         self.phase_handlers = ResearchPhaseHandlers(self)
         self.orchestrator = ResearchPipelineOrchestrator(self, self.phase_handlers)
 
@@ -730,6 +734,7 @@ class ResearchPipeline:
             if self.self_learning_engine is not None and hasattr(self.self_learning_engine, "cleanup"):
                 self.self_learning_engine.cleanup()
             self.hypothesis_engine.cleanup()
+            self.phase_orchestrator.close_storage_factory()
             self.audit_history.detach_from_event_bus()
             self.research_cycles.clear()
             self.active_cycles.clear()

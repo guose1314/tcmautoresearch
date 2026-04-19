@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
 from src.research.phase_result import get_phase_results, get_phase_value
-from src.research.research_pipeline import ResearchPhase, ResearchPipeline
 
 REQUIRED_PUBLISH_ALIAS_FIELDS: List[str] = []
 
@@ -121,6 +120,8 @@ def execute_real_observe_smoke(
     output_dir: Path | None = None,
     root: Path | None = None,
 ) -> Dict[str, Any]:
+    from src.orchestration.research_runtime_service import ResearchRuntimeService
+
     resolved_root = root or repo_root()
     smoke_profile = profile or load_smoke_profile()
     include_paths = resolve_include_paths(smoke_profile, resolved_root)
@@ -134,76 +135,52 @@ def execute_real_observe_smoke(
     output_root.mkdir(parents=True, exist_ok=True)
     phase_context = build_phase_context(smoke_profile, include_paths, resolved_root)
 
-    started_at = datetime.now().isoformat()
-    pipeline = ResearchPipeline(build_pipeline_config(smoke_profile, resolved_root))
-    publish_temp_dir: tempfile.TemporaryDirectory[str] | None = None
+    publish_temp_dir = tempfile.TemporaryDirectory(dir=str(output_root))
+    publish_context = dict(phase_context)
+    publish_context.setdefault("paper_output_formats", ["markdown"])
+    publish_context.setdefault("report_output_formats", ["markdown"])
+    publish_context["paper_output_dir"] = publish_temp_dir.name
+    publish_context["output_dir"] = publish_temp_dir.name
 
+    phase_contexts = {
+        "observe": dict(phase_context),
+        "hypothesis": dict(phase_context),
+        "experiment": dict(phase_context),
+        "experiment_execution": dict(phase_context),
+        "analyze": dict(phase_context),
+        "publish": publish_context,
+        "reflect": dict(phase_context),
+    }
+
+    pipeline_config = build_pipeline_config(smoke_profile, resolved_root)
+    runtime_config = {
+        "pipeline_config": pipeline_config,
+        "researchers": list(smoke_profile.researchers),
+    }
+
+    started_at = datetime.now().isoformat()
     try:
-        cycle = pipeline.create_research_cycle(
+        service = ResearchRuntimeService(runtime_config)
+        result = service.run(
+            smoke_profile.objective,
             cycle_name=smoke_profile.cycle_name,
             description=smoke_profile.description,
-            objective=smoke_profile.objective,
             scope=smoke_profile.scope,
-            researchers=list(smoke_profile.researchers),
+            phase_contexts=phase_contexts,
         )
-        if not pipeline.start_research_cycle(cycle.cycle_id):
-            raise RuntimeError(f"Failed to start smoke cycle: {cycle.cycle_id}")
-
-        observe = pipeline.execute_research_phase(
-            cycle.cycle_id,
-            ResearchPhase.OBSERVE,
-            dict(phase_context),
-        )
-        hypothesis = pipeline.execute_research_phase(
-            cycle.cycle_id,
-            ResearchPhase.HYPOTHESIS,
-            dict(phase_context),
-        )
-        experiment = pipeline.execute_research_phase(
-            cycle.cycle_id,
-            ResearchPhase.EXPERIMENT,
-            dict(phase_context),
-        )
-        experiment_execution = pipeline.execute_research_phase(
-            cycle.cycle_id,
-            ResearchPhase.EXPERIMENT_EXECUTION,
-            dict(phase_context),
-        )
-        analyze = pipeline.execute_research_phase(
-            cycle.cycle_id,
-            ResearchPhase.ANALYZE,
-            dict(phase_context),
-        )
-
-        publish_temp_dir = tempfile.TemporaryDirectory(dir=str(output_root))
-        publish_context = dict(phase_context)
-        publish_context.setdefault("paper_output_formats", ["markdown"])
-        publish_context.setdefault("report_output_formats", ["markdown"])
-        publish_context["paper_output_dir"] = publish_temp_dir.name
-        publish_context["output_dir"] = publish_temp_dir.name
-        publish = pipeline.execute_research_phase(
-            cycle.cycle_id,
-            ResearchPhase.PUBLISH,
-            publish_context,
-        )
-        reflect = pipeline.execute_research_phase(
-            cycle.cycle_id,
-            ResearchPhase.REFLECT,
-            dict(phase_context),
-        )
-        pipeline.complete_research_cycle(cycle.cycle_id)
+        phase_results = result.phase_results or {}
 
         summary = build_smoke_summary(
             smoke_profile,
             phase_context,
             include_paths,
-            observe,
-            hypothesis,
-            experiment,
-            experiment_execution,
-            analyze,
-            publish,
-            reflect,
+            phase_results.get("observe", {}),
+            phase_results.get("hypothesis", {}),
+            phase_results.get("experiment", {}),
+            phase_results.get("experiment_execution", {}),
+            phase_results.get("analyze", {}),
+            phase_results.get("publish", {}),
+            phase_results.get("reflect", {}),
             started_at,
         )
         violations = validate_smoke_summary(summary, smoke_profile.thresholds)
@@ -212,9 +189,7 @@ def execute_real_observe_smoke(
         summary["artifacts"] = write_smoke_artifacts(summary, output_root)
         return summary
     finally:
-        if publish_temp_dir is not None:
-            publish_temp_dir.cleanup()
-        pipeline.cleanup()
+        publish_temp_dir.cleanup()
 
 
 def build_smoke_summary(

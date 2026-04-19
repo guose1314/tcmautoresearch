@@ -209,8 +209,8 @@ def run_ingestion(
     llm = None
     if use_llm:
         try:
-            from src.llm.llm_engine import LLMEngine
-            llm = LLMEngine(max_tokens=512, n_ctx=4096, temperature=0.1, verbose=False)
+            from src.infra.llm_service import get_llm_service
+            llm = get_llm_service("default")
             llm.load()
             logger.info("LLM 引擎已加载，将对前 %d 条进行知识增强", llm_sample)
         except Exception as exc:

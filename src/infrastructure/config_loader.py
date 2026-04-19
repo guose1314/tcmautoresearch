@@ -68,6 +68,7 @@ PATH_KEYS = (
     ("output", "backup_directory"),
     ("logging", "file"),
     ("models", "llm", "cache_dir"),
+    ("iteration_cycle", "research_pipeline", "layered_cache", "cache_dir"),
     ("ctext_corpus", "whitelist", "path"),
     ("ctext_corpus", "batch_manifest_output"),
     ("web_console", "job_storage_dir"),

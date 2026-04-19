@@ -47,6 +47,7 @@ from urllib import request as urllib_request
 from src.infra.cache_service import (
     LLMDiskCache as _DiskCache,  # noqa: F401  re-export alias
 )
+from src.infra.token_budget_policy import apply_token_budget_to_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,13 @@ class LLMService(ABC):
     @abstractmethod
     def generate(self, prompt: str, system_prompt: str = "") -> str:
         """执行一次生成推理，返回模型的文本响应。"""
+
+    def generate_registered(self, prompt_name: str, /, **variables: Any) -> str:
+        """基于 Prompt Registry 执行一次结构化 prompt 生成。"""
+
+        from src.infra.prompt_registry import call_registered_prompt
+
+        return call_registered_prompt(self, prompt_name, **variables)
 
     def load(self) -> None:
         """（可选）初始化/加载资源。默认无操作。"""
@@ -178,12 +186,14 @@ class CachedLLMService(LLMService):
         cache_dir: str | Path = "./cache/llm",
         cache_ttl_seconds: Optional[float] = None,
         cache_enabled: bool = True,
+        purpose: str = "default",
     ):
         self._engine = engine
         self._cache_enabled = cache_enabled
         self._cache = _DiskCache(cache_dir, ttl_seconds=cache_ttl_seconds) if cache_enabled else None
         self._hits = 0
         self._misses = 0
+        self._purpose = str(purpose or "default")
 
     # ── 生命周期 ──────────────────────────────────────────────────────────
 
@@ -201,6 +211,16 @@ class CachedLLMService(LLMService):
 
     def generate(self, prompt: str, system_prompt: str = "") -> str:
         """先查磁盘缓存，命中则直接返回；未命中则调用 engine 并缓存结果。"""
+        budgeted = apply_token_budget_to_prompt(
+            str(prompt or ""),
+            system_prompt=str(system_prompt or ""),
+            purpose=self._purpose,
+            context_window_tokens=getattr(self._engine, "n_ctx", None),
+            max_output_tokens=getattr(self._engine, "max_tokens", None),
+        )
+        prompt = budgeted.user_prompt
+        system_prompt = budgeted.system_prompt
+
         if not self._cache_enabled or self._cache is None:
             return self._engine.generate(prompt, system_prompt)
 
@@ -288,6 +308,7 @@ class CachedLLMService(LLMService):
         cache_dir = engine_options.get("cache_dir", "./cache/llm")
         cache_ttl_seconds = engine_options.get("cache_ttl_seconds", None)
         cache_enabled = bool(engine_options.get("cache_enabled", True))
+        purpose = str(engine_options.get("purpose") or "default")
 
         engine = LLMEngine(
             model_path=model_path,
@@ -299,7 +320,8 @@ class CachedLLMService(LLMService):
         )
         return cls(engine, cache_dir=cache_dir,
                    cache_ttl_seconds=cache_ttl_seconds,
-                   cache_enabled=cache_enabled)
+                   cache_enabled=cache_enabled,
+                   purpose=purpose)
 
     @classmethod
     def from_api_config(
@@ -317,6 +339,7 @@ class CachedLLMService(LLMService):
         cache_ttl_seconds = api_options.get("cache_ttl_seconds", None)
         cache_enabled = bool(api_options.get("cache_enabled", True))
         extra_headers = api_options.get("extra_headers")
+        purpose = str(api_options.get("purpose") or "default")
 
         engine = APILLMEngine(
             api_url=api_url,
@@ -332,10 +355,17 @@ class CachedLLMService(LLMService):
             cache_dir=cache_dir,
             cache_ttl_seconds=cache_ttl_seconds,
             cache_enabled=cache_enabled,
+            purpose=purpose,
         )
 
     @classmethod
-    def from_config(cls, llm_config: dict, gap_config: Optional[dict] = None) -> "CachedLLMService":
+    def from_config(
+        cls,
+        llm_config: dict,
+        gap_config: Optional[dict] = None,
+        *,
+        purpose: str = "default",
+    ) -> "CachedLLMService":
         """统一工厂：根据 mode 选择 local/api 引擎。"""
         gc = gap_config or {}
         lc = llm_config or {}
@@ -366,6 +396,7 @@ class CachedLLMService(LLMService):
                 cache_dir=cache_dir,
                 cache_ttl_seconds=cache_ttl_seconds,
                 cache_enabled=cache_enabled,
+                purpose=purpose,
             )
 
         return cls.from_engine_config(
@@ -378,10 +409,17 @@ class CachedLLMService(LLMService):
             cache_dir=cache_dir,
             cache_ttl_seconds=cache_ttl_seconds,
             cache_enabled=cache_enabled,
+            purpose=purpose,
         )
 
     @classmethod
-    def from_gap_config(cls, gap_config: dict, llm_config: Optional[dict] = None) -> "CachedLLMService":
+    def from_gap_config(
+        cls,
+        gap_config: dict,
+        llm_config: Optional[dict] = None,
+        *,
+        purpose: str = "default",
+    ) -> "CachedLLMService":
         """
         从 ``config.yml`` 的 ``clinical_gap_analysis`` 节点创建服务。
 
@@ -393,7 +431,7 @@ class CachedLLMService(LLMService):
             ``config["models"]["llm"]`` 或 ``None``（使用默认值）。
         """
         lc = llm_config or {}
-        return cls.from_config(lc, gap_config=gap_config)
+        return cls.from_config(lc, gap_config=gap_config, purpose=purpose)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -436,6 +474,13 @@ def get_llm_service(
     if purpose in _llm_registry:
         return _llm_registry[purpose]
 
+    # 适配性检查 — §10.1 职责分配策略
+    try:
+        from src.infra.llm_task_policy import check_suitability
+        check_suitability(purpose)
+    except Exception:  # pragma: no cover — 策略模块不可用时静默
+        pass
+
     if llm_config is None:
         from src.infrastructure.config_loader import load_settings_section
         llm_config = load_settings_section("models.llm", default={})
@@ -443,7 +488,7 @@ def get_llm_service(
     overrides = _LLM_PURPOSE_PROFILES.get(purpose, {})
     merged: dict[str, Any] = {**llm_config, **overrides}
 
-    service = CachedLLMService.from_config(merged)
+    service = CachedLLMService.from_config(merged, purpose=purpose)
     _llm_registry[purpose] = service
     return service
 
@@ -451,3 +496,32 @@ def get_llm_service(
 def reset_llm_registry() -> None:
     """清空 provider 单例缓存（测试用）。"""
     _llm_registry.clear()
+
+
+# ── Phase E: 小模型优化器单例 ────────────────────────────────────────────
+
+_small_model_optimizer: Optional["SmallModelOptimizer"] = None  # type: ignore[name-defined]
+
+
+def get_small_model_optimizer() -> "SmallModelOptimizer":  # type: ignore[name-defined]
+    """获取 SmallModelOptimizer 单例（懒初始化）。
+
+    Returns
+    -------
+    SmallModelOptimizer
+        Phase E 统一优化协调器。
+    """
+    global _small_model_optimizer
+    if _small_model_optimizer is None:
+        from src.infra.small_model_optimizer import SmallModelOptimizer
+        from src.infrastructure.config_loader import load_settings_section
+
+        llm_config = load_settings_section("models.llm", default={})
+        _small_model_optimizer = SmallModelOptimizer.from_config(llm_config)
+    return _small_model_optimizer
+
+
+def reset_small_model_optimizer() -> None:
+    """重置优化器单例（测试用）。"""
+    global _small_model_optimizer
+    _small_model_optimizer = None

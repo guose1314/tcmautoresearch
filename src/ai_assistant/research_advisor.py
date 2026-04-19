@@ -8,6 +8,12 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
+from src.infra.prompt_registry import (
+    call_registered_prompt,
+    parse_registered_output,
+    render_prompt,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -87,13 +93,15 @@ class ResearchAdvisor:
             每条含 ``hypothesis``, ``confidence``, ``rationale``, ``suggested_methods``。
         """
         lit_summary = self._summarize_literature(literature)
-        prompt = f"【研究主题】\n{topic}\n"
-        if lit_summary:
-            prompt += f"\n【已有文献摘要】\n{lit_summary}\n"
-        prompt += "\n请生成 2–3 条可检验的科研假说（JSON 数组）。"
+        rendered = render_prompt(
+            "research_advisor.hypothesis_suggestion",
+            topic=topic,
+            literature_section=(f"【已有文献摘要】\n{lit_summary}\n" if lit_summary else ""),
+        )
 
-        raw = self._call_llm(prompt, _HYPOTHESIS_SYSTEM)
-        hypotheses = self._parse_json_list(raw)
+        raw = self._call_registered_llm("research_advisor.hypothesis_suggestion", rendered)
+        validation = parse_registered_output("research_advisor.hypothesis_suggestion", raw)
+        hypotheses = validation.parsed if isinstance(validation.parsed, list) else self._parse_json_list(raw)
 
         # 确保每条都有必需字段
         result: List[Dict[str, Any]] = []
@@ -123,9 +131,13 @@ class ResearchAdvisor:
             含 ``study_type``, ``sample_size``, ``methods``, ``controls``,
             ``expected_outcomes`` 等。
         """
-        prompt = f"【研究假说】\n{hypothesis}\n\n请设计完整的实验方案（JSON 对象）。"
-        raw = self._call_llm(prompt, _EXPERIMENT_SYSTEM)
-        design = self._parse_json_dict(raw)
+        rendered = render_prompt(
+            "research_advisor.experiment_design",
+            hypothesis=hypothesis,
+        )
+        raw = self._call_registered_llm("research_advisor.experiment_design", rendered)
+        validation = parse_registered_output("research_advisor.experiment_design", raw)
+        design = validation.parsed if isinstance(validation.parsed, dict) else self._parse_json_dict(raw)
 
         # 确保核心字段存在
         defaults = {
@@ -166,13 +178,15 @@ class ResearchAdvisor:
             ``unique_aspects``, ``improvement_suggestions``。
         """
         lit_summary = self._summarize_literature(existing_literature)
-        prompt = f"【研究假说】\n{hypothesis}\n"
-        if lit_summary:
-            prompt += f"\n【已有文献】\n{lit_summary}\n"
-        prompt += "\n请评估该假说的创新性（JSON 对象）。"
+        rendered = render_prompt(
+            "research_advisor.novelty_evaluation",
+            hypothesis=hypothesis,
+            literature_section=(f"【已有文献】\n{lit_summary}\n" if lit_summary else ""),
+        )
 
-        raw = self._call_llm(prompt, _NOVELTY_SYSTEM)
-        result = self._parse_json_dict(raw)
+        raw = self._call_registered_llm("research_advisor.novelty_evaluation", rendered)
+        validation = parse_registered_output("research_advisor.novelty_evaluation", raw)
+        result = validation.parsed if isinstance(validation.parsed, dict) else self._parse_json_dict(raw)
 
         defaults: Dict[str, Any] = {
             "novelty_score": 5,
@@ -200,6 +214,17 @@ class ResearchAdvisor:
             return engine.generate(prompt, system_prompt=system_prompt)
         except Exception:
             logger.exception("LLM 生成失败")
+            return ""
+
+    def _call_registered_llm(self, prompt_name: str, rendered) -> str:
+        engine = self._get_llm()
+        if engine is None:
+            logger.warning("LLM 引擎不可用，返回空字符串")
+            return ""
+        try:
+            return call_registered_prompt(engine, prompt_name, rendered=rendered)
+        except Exception:
+            logger.exception("LLM 结构化生成失败")
             return ""
 
     def _get_llm(self):

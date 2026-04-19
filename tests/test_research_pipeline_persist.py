@@ -56,25 +56,29 @@ def _make_phase_execution(
 
 
 class TestPersistResultBasic(unittest.TestCase):
-    """基本读写测试"""
+    """基本读写测试 — 验证 _persist_result_via_factory 经由 ORM 写入 research_results"""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmp, "research_results.db")
-        self.pipeline = ResearchPipeline({"result_store_path": self.db_path})
+        self.pipeline = ResearchPipeline({"database": {"type": "sqlite", "path": self.db_path}})
+    def tearDown(self):
+        self.pipeline.phase_orchestrator.close_storage_factory()
+    def _persist_via_factory(self, cycle):
+        return self.pipeline.phase_orchestrator._persist_result_via_factory(cycle)
 
     def test_returns_true_on_success(self):
         cycle = _make_cycle()
-        result = self.pipeline._persist_result(cycle)
+        result = self._persist_via_factory(cycle)
         self.assertTrue(result)
 
     def test_creates_db_file(self):
-        self.pipeline._persist_result(_make_cycle())
+        self._persist_via_factory(_make_cycle())
         self.assertTrue(os.path.isfile(self.db_path))
 
     def test_row_written(self):
         cycle = _make_cycle("cycle_abc")
-        self.pipeline._persist_result(cycle)
+        self._persist_via_factory(cycle)
         conn = sqlite3.connect(self.db_path)
         row = conn.execute(
             "SELECT cycle_id, cycle_name, status FROM research_results WHERE cycle_id=?",
@@ -88,7 +92,7 @@ class TestPersistResultBasic(unittest.TestCase):
 
     def test_outcomes_serialized_as_json(self):
         cycle = _make_cycle()
-        self.pipeline._persist_result(cycle)
+        self._persist_via_factory(cycle)
         conn = sqlite3.connect(self.db_path)
         raw = conn.execute(
             "SELECT outcomes_json FROM research_results WHERE cycle_id=?",
@@ -101,7 +105,7 @@ class TestPersistResultBasic(unittest.TestCase):
 
     def test_metadata_serialized_as_json(self):
         cycle = _make_cycle()
-        self.pipeline._persist_result(cycle)
+        self._persist_via_factory(cycle)
         conn = sqlite3.connect(self.db_path)
         raw = conn.execute(
             "SELECT metadata_json FROM research_results WHERE cycle_id=?",
@@ -112,7 +116,7 @@ class TestPersistResultBasic(unittest.TestCase):
         self.assertIsInstance(data, dict)
 
     def test_persisted_at_is_set(self):
-        self.pipeline._persist_result(_make_cycle())
+        self._persist_via_factory(_make_cycle())
         conn = sqlite3.connect(self.db_path)
         row = conn.execute("SELECT persisted_at FROM research_results").fetchone()
         conn.close()
@@ -123,7 +127,7 @@ class TestPersistResultBasic(unittest.TestCase):
     def test_duration_stored(self):
         cycle = _make_cycle()
         cycle.duration = 99.5
-        self.pipeline._persist_result(cycle)
+        self._persist_via_factory(cycle)
         conn = sqlite3.connect(self.db_path)
         row = conn.execute(
             "SELECT duration FROM research_results WHERE cycle_id=?",
@@ -134,19 +138,25 @@ class TestPersistResultBasic(unittest.TestCase):
 
 
 class TestPersistResultUpsert(unittest.TestCase):
-    """幂等写入 / upsert 测试"""
+    """幂等写入 / upsert 测试 — 验证 _persist_result_via_factory 的 ORM 幂等写入"""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmp, "research_results.db")
-        self.pipeline = ResearchPipeline({"result_store_path": self.db_path})
+        self.pipeline = ResearchPipeline({"database": {"type": "sqlite", "path": self.db_path}})
+
+    def tearDown(self):
+        self.pipeline.phase_orchestrator.close_storage_factory()
+
+    def _persist_via_factory(self, cycle):
+        return self.pipeline.phase_orchestrator._persist_result_via_factory(cycle)
 
     def test_upsert_overwrites_existing(self):
         cycle = _make_cycle("cycle_dup")
-        self.pipeline._persist_result(cycle)
+        self._persist_via_factory(cycle)
         # 更新状态后再写
         cycle.status = ResearchCycleStatus.FAILED
-        self.pipeline._persist_result(cycle)
+        self._persist_via_factory(cycle)
         conn = sqlite3.connect(self.db_path)
         rows = conn.execute("SELECT status FROM research_results WHERE cycle_id=?", ("cycle_dup",)).fetchall()
         conn.close()
@@ -155,7 +165,7 @@ class TestPersistResultUpsert(unittest.TestCase):
 
     def test_multiple_cycles_stored(self):
         for i in range(5):
-            self.pipeline._persist_result(_make_cycle(f"cycle_{i:03d}"))
+            self._persist_via_factory(_make_cycle(f"cycle_{i:03d}"))
         conn = sqlite3.connect(self.db_path)
         count = conn.execute("SELECT COUNT(*) FROM research_results").fetchone()[0]
         conn.close()
@@ -168,17 +178,23 @@ class TestPersistResultErrorHandling(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmp, "research_results.db")
-        self.pipeline = ResearchPipeline({"result_store_path": self.db_path})
+        self.pipeline = ResearchPipeline({"database": {"type": "sqlite", "path": self.db_path}})
 
     def test_returns_false_on_db_error(self):
         cycle = _make_cycle()
-        with patch("sqlite3.connect", side_effect=sqlite3.OperationalError("boom")):
+        with patch(
+            "src.research.phase_orchestrator.PhaseOrchestrator._get_storage_factory",
+            side_effect=RuntimeError("boom"),
+        ):
             result = self.pipeline._persist_result(cycle)
         self.assertFalse(result)
 
     def test_does_not_raise_on_error(self):
         cycle = _make_cycle()
-        with patch("sqlite3.connect", side_effect=Exception("unexpected")):
+        with patch(
+            "src.research.phase_orchestrator.PhaseOrchestrator._get_storage_factory",
+            side_effect=Exception("unexpected"),
+        ):
             try:
                 self.pipeline._persist_result(cycle)
             except Exception:
@@ -186,14 +202,15 @@ class TestPersistResultErrorHandling(unittest.TestCase):
 
 
 class TestPersistResultDefaultPath(unittest.TestCase):
-    """默认路径（output/research_results.db）测试"""
+    """默认路径测试"""
 
     def test_creates_output_directory_if_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "subdir", "research_results.db")
-            pipeline = ResearchPipeline({"result_store_path": db_path})
-            pipeline._persist_result(_make_cycle())
+            pipeline = ResearchPipeline({"database": {"type": "sqlite", "path": db_path}})
+            pipeline.phase_orchestrator._persist_result_via_factory(_make_cycle())
             self.assertTrue(os.path.isfile(db_path))
+            pipeline.phase_orchestrator.close_storage_factory()
 
 
 class TestPersistResultIntegration(unittest.TestCase):
@@ -202,7 +219,10 @@ class TestPersistResultIntegration(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmp, "research_results.db")
-        self.pipeline = ResearchPipeline({"result_store_path": self.db_path})
+        self.pipeline = ResearchPipeline({"database": {"type": "sqlite", "path": self.db_path}})
+
+    def tearDown(self):
+        self.pipeline.phase_orchestrator.close_storage_factory()
 
     def test_complete_cycle_triggers_persist(self):
         cycle = self.pipeline.create_research_cycle(
@@ -215,8 +235,9 @@ class TestPersistResultIntegration(unittest.TestCase):
         self.pipeline.complete_research_cycle(cycle.cycle_id)
 
         conn = sqlite3.connect(self.db_path)
+        # structured path 写入 research_sessions
         row = conn.execute(
-            "SELECT status FROM research_results WHERE cycle_id=?",
+            "SELECT status FROM research_sessions WHERE cycle_id=?",
             (cycle.cycle_id,),
         ).fetchone()
         conn.close()
@@ -382,9 +403,6 @@ class TestStructuredPersistResult(unittest.TestCase):
         with patch("src.storage.StorageBackendFactory", return_value=fake_factory), patch(
             "src.infrastructure.research_session_repo.ResearchSessionRepository",
             return_value=fake_repo,
-        ), patch(
-            "src.research.phase_orchestrator.sqlite3.connect",
-            side_effect=AssertionError("structured path should not fall back to sqlite"),
         ):
             result = pipeline._persist_result(cycle)
 
@@ -401,7 +419,8 @@ class TestStructuredPersistResult(unittest.TestCase):
         self.assertIs(fake_repo.replace_observe_document_graphs.call_args.kwargs["session"], fake_txn.pg_session)
         self.assertIs(fake_repo.add_artifact.call_args.kwargs["session"], fake_txn.pg_session)
         self.assertIs(fake_repo.update_session.call_args.kwargs["session"], fake_txn.pg_session)
-        fake_factory.close.assert_called_once()
+        # factory 现为缓存实例，不再在每次 persist 后关闭
+        fake_factory.close.assert_not_called()
 
     def test_projects_research_assets_to_neo4j_when_enabled(self):
         pipeline = ResearchPipeline(

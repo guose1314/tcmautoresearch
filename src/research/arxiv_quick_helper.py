@@ -255,8 +255,12 @@ Abstract:
 
 Translated abstract (in {target_lang}):"""
         
-        # 调用 LLM
-        response = llm_engine.query(prompt)
+        # 调用 LLM — 优先 generate()（LLMService ABC 标准接口）
+        response = None
+        if hasattr(llm_engine, "generate"):
+            response = llm_engine.generate(prompt)
+        elif hasattr(llm_engine, "query"):
+            response = llm_engine.query(prompt)
         return response.strip() if response else abstract
         
     except Exception:

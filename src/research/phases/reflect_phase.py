@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
+from src.research.compute_tier_router import ComputeTierRouter
 from src.research.learning_feedback_contract import build_learning_feedback_library
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
@@ -14,6 +15,7 @@ from src.research.learning_strategy import (
     build_strategy_snapshot,
 )
 from src.research.phase_result import build_phase_result
+from src.research.reasoning_template_selector import select_reasoning_framework
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +47,30 @@ class ReflectPhaseMixin:
         outcomes: List[Dict[str, Any]] = getattr(cycle, "outcomes", None) or []
         quality_assessor = self.pipeline.quality_assessor
 
+        # ---- 推理结构自发现 ----
+        reasoning_framework = select_reasoning_framework(
+            getattr(cycle, "research_objective", "") or context.get("research_objective") or "",
+            context,
+            force_framework=context.get("force_reasoning_framework"),
+        )
+
         # ---- 1. 获取 LLM 引擎（可选） ----
         llm_engine = self.pipeline.config.get("llm_engine") or self.pipeline.config.get("llm_service")
         has_llm = llm_engine is not None and hasattr(llm_engine, "generate")
+
+        # ---- 动态算力分配 ----
+        tier_router = ComputeTierRouter(self.pipeline.config)
+        tier_decision = tier_router.decide(
+            task_type="reflection",
+            evidence={
+                "entity_count": len(context.get("entities") or []),
+                "evidence_items": len(outcomes),
+                "rule_confidence": min(len(outcomes) / 5, 1.0) if outcomes else 0.0,
+            },
+            force_tier=context.get("force_compute_tier"),
+        )
+        if not tier_decision.should_use_llm:
+            has_llm = False
 
         # ---- 2. 基于 QualityAssessor 评估各阶段（LLM 可用时启用深度诊断） ----
         if has_llm:
@@ -61,7 +84,10 @@ class ReflectPhaseMixin:
         # ---- 4. LLM 增强反思（可选，在评估级诊断之外追加反思级洞察） ----
         llm_enhanced = False
         if has_llm:
-            llm_reflection = self._generate_llm_reflection(llm_engine, cycle_assessment, outcomes)
+            llm_reflection = self._generate_llm_reflection(
+                llm_engine, cycle_assessment, outcomes,
+                reflect_lens=reasoning_framework.reflect_lens,
+            )
             if llm_reflection:
                 reflections.append(llm_reflection)
                 llm_enhanced = True
@@ -100,6 +126,7 @@ class ReflectPhaseMixin:
             "llm_enhanced": llm_enhanced,
             "assessed_phases": len(cycle_assessment["phase_assessments"]),
             "learning_fed": learning_summary is not None,
+            "reasoning_framework": reasoning_framework.to_dict(),
         }
         if hasattr(self, "_reflect_tracker"):
             metadata["learning"] = self._reflect_tracker.to_metadata()
@@ -213,6 +240,8 @@ class ReflectPhaseMixin:
         llm_engine: Any,
         assessment: Dict[str, Any],
         outcomes: List[Dict[str, Any]],
+        *,
+        reflect_lens: str = "",
     ) -> Dict[str, Any] | None:
         phase_summary = []
         for pa in assessment.get("phase_assessments", []):
@@ -225,13 +254,18 @@ class ReflectPhaseMixin:
                 f"GRADE={score.grade_level}"
             )
 
+        lens_section = ""
+        if reflect_lens:
+            lens_section = f"\n\n【反思视角】{reflect_lens}\n"
+
         user_prompt = (
             f"研究循环共执行 {len(outcomes)} 个阶段，各阶段质量评分如下：\n"
             + "\n".join(phase_summary)
             + f"\n\n整体评分: {assessment['overall_cycle_score']:.2f}\n"
             f"薄弱环节: {len(assessment['weaknesses'])} 个\n"
-            f"优势环节: {len(assessment['strengths'])} 个\n\n"
-            "请基于以上评估数据，给出一条高层反思和关键改进方向。"
+            f"优势环节: {len(assessment['strengths'])} 个\n"
+            + lens_section
+            + "\n请基于以上评估数据，给出一条高层反思和关键改进方向。"
             "输出严格 JSON: {\"reflection\": \"...\", \"action\": \"...\"}"
         )
 

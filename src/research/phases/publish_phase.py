@@ -194,6 +194,11 @@ class PublishPhaseMixin:
         if merged_output_files.get("imrd_docx"):
             deliverables.append("DOCX IMRD 报告")
 
+        cycle.metadata.setdefault("phase_dossier_sources", {})["publish"] = {
+            "paper_draft": copy.deepcopy(paper_result.get("paper_draft", {})) if isinstance(paper_result, dict) else {},
+            "paper_review_summary": copy.deepcopy(paper_result.get("review_summary", {})) if isinstance(paper_result, dict) else {},
+        }
+
         metadata = {
             "publication_count": len(publications),
             "deliverable_count": len(deliverables),
@@ -700,6 +705,10 @@ class PublishPhaseMixin:
             or context.get("title")
             or f"{cycle.research_objective or cycle.description}研究"
         ).strip()
+        phase_dossiers = context.get("phase_dossiers") if isinstance(context.get("phase_dossiers"), dict) else {}
+        observe_dossier = context.get("observe_dossier") if isinstance(context.get("observe_dossier"), dict) else phase_dossiers.get("observe", {})
+        analyze_dossier = context.get("analyze_dossier") if isinstance(context.get("analyze_dossier"), dict) else phase_dossiers.get("analyze", {})
+        phase_dossier_texts = context.get("phase_dossier_texts") if isinstance(context.get("phase_dossier_texts"), dict) else {}
 
         paper_context = {
             "title": title,
@@ -726,6 +735,12 @@ class PublishPhaseMixin:
             "analysis_results": analysis_results_payload,
             "research_artifact": research_artifact,
             "llm_analysis_context": llm_analysis_context,
+            "phase_dossiers": phase_dossiers,
+            "phase_dossier_texts": phase_dossier_texts,
+            "observe_dossier": observe_dossier,
+            "analyze_dossier": analyze_dossier,
+            "observe_dossier_text": context.get("observe_dossier_text") or phase_dossier_texts.get("observe") or "",
+            "analyze_dossier_text": context.get("analyze_dossier_text") or phase_dossier_texts.get("analyze") or "",
             "output_data": structured_payload,
             "quality_metrics": structured_payload.get("quality_metrics") if isinstance(structured_payload, dict) else {},
             "recommendations": structured_payload.get("recommendations") if isinstance(structured_payload, dict) else [],
@@ -1209,6 +1224,21 @@ class PublishPhaseMixin:
             module_name: self._has_publish_payload(module_value)
             for module_name, module_value in modules.items()
         }
+        phase_dossiers = context.get("phase_dossiers") if isinstance(context.get("phase_dossiers"), dict) else {}
+        for phase_name in ("observe", "analyze", "publish"):
+            dossier_payload = context.get(f"{phase_name}_dossier")
+            if not isinstance(dossier_payload, dict):
+                candidate = phase_dossiers.get(phase_name)
+                dossier_payload = candidate if isinstance(candidate, dict) else {}
+            if dossier_payload:
+                modules[f"{phase_name}_dossier"] = copy.deepcopy(dossier_payload)
+                module_presence[f"{phase_name}_dossier"] = True
+
+        phase_dossier_texts = context.get("phase_dossier_texts") if isinstance(context.get("phase_dossier_texts"), dict) else {}
+        if phase_dossier_texts:
+            modules["phase_dossier_texts"] = copy.deepcopy(phase_dossier_texts)
+            module_presence["phase_dossier_texts"] = True
+
         populated_modules = [
             module_name
             for module_name, present in module_presence.items()

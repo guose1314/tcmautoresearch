@@ -1,9 +1,16 @@
 """
-统一存储驱动 - PostgreSQL + Neo4j 集成
+统一存储驱动 - PostgreSQL + Neo4j 集成（已弃用）
 中医古籍全自动研究系统
+
+.. deprecated::
+    ``UnifiedStorageDriver`` 不使用 ``StorageBackendFactory`` /
+    ``TransactionCoordinator``，PG + Neo4j 写入非原子。
+    新代码请直接使用 ``StorageBackendFactory.transaction()``。
+    唯一历史调用方 ``cycle_storage_persist`` 已迁移到 factory 主链。
 """
 
 import logging
+import warnings
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
@@ -41,6 +48,10 @@ def _chunk_list(items: List[Dict[str, Any]], chunk_size: int) -> List[List[Dict[
 class UnifiedStorageDriver:
     """
     统一存储驱动 - 同时管理PostgreSQL和Neo4j
+
+    .. deprecated::
+        PG + Neo4j 写入非原子（先 commit PG 再写 Neo4j，失败无补偿）。
+        新代码请使用 ``StorageBackendFactory.transaction()``。
     
     职责：
     1. 实体存储和查询
@@ -52,6 +63,12 @@ class UnifiedStorageDriver:
     
     def __init__(self, pg_connection_string: str, neo4j_uri: str, 
                  neo4j_auth: Tuple[str, str]):
+        warnings.warn(
+            "UnifiedStorageDriver 已弃用，PG + Neo4j 写入非原子。"
+            "请改用 StorageBackendFactory.transaction()。",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         """
         初始化存储驱动
         

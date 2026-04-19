@@ -16,10 +16,20 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Sequence,
+    runtime_checkable,
+)
 
 from .neo4j_driver import _safe_cypher_label
 
@@ -35,6 +45,13 @@ class _Neo4jPendingOp:
     compensate_params: Optional[Dict[str, Any]] = None
 
 
+@runtime_checkable
+class TransactionObserver(Protocol):
+    """事务观测协议 — 接收每次 commit/rollback 的结构化结果。"""
+
+    def on_transaction_complete(self, result: "TransactionResult") -> None: ...
+
+
 @dataclass
 class TransactionResult:
     """事务执行结果。"""
@@ -48,6 +65,37 @@ class TransactionResult:
     compensation_details: List[str] = field(default_factory=list)
     needs_backfill: bool = False
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    # ── 事务观测：阶段耗时（毫秒）──────────────────────────────────────
+    pg_flush_ms: float = 0.0
+    neo4j_execute_ms: float = 0.0
+    pg_commit_ms: float = 0.0
+    total_ms: float = 0.0
+    neo4j_op_count: int = 0
+
+    def to_observation_dict(self) -> Dict[str, Any]:
+        """导出面向 monitoring / dashboard 的观测摘要。"""
+        d: Dict[str, Any] = {
+            "success": self.success,
+            "storage_mode": self.storage_mode,
+            "pg_committed": self.pg_committed,
+            "neo4j_committed": self.neo4j_committed,
+            "needs_backfill": self.needs_backfill,
+            "timing_ms": {
+                "pg_flush": round(self.pg_flush_ms, 2),
+                "neo4j_execute": round(self.neo4j_execute_ms, 2),
+                "pg_commit": round(self.pg_commit_ms, 2),
+                "total": round(self.total_ms, 2),
+            },
+            "neo4j_op_count": self.neo4j_op_count,
+            "compensations_applied": self.compensations_applied,
+            "timestamp": self.timestamp,
+        }
+        if self.error:
+            d["error"] = self.error
+        if self.compensation_details:
+            d["compensation_details"] = self.compensation_details
+        return d
 
 
 class TransactionCoordinator:
@@ -75,14 +123,17 @@ class TransactionCoordinator:
         neo4j_driver: Any = None,
         *,
         auto_commit: bool = True,
+        observer: Optional[TransactionObserver] = None,
     ):
         self._pg = pg_session
         self._neo4j = neo4j_driver
         self._auto_commit = auto_commit
+        self._observer = observer
         self._neo4j_pending: List[_Neo4jPendingOp] = []
         self._neo4j_executed: List[_Neo4jPendingOp] = []
         self._committed = False
         self._rolledback = False
+        self.last_result: Optional[TransactionResult] = None
 
     # ── Context Manager ──────────────────────────────────────────────────
 
@@ -95,6 +146,7 @@ class TransactionCoordinator:
             return False
         if self._auto_commit and not self._committed and not self._rolledback:
             result = self.commit()
+            self.last_result = result
             if not result.success:
                 raise RuntimeError(f"事务提交失败: {result.error}")
         return False
@@ -218,29 +270,38 @@ class TransactionCoordinator:
         if self._committed or self._rolledback:
             return TransactionResult(success=self._committed, pg_committed=self._committed)
 
+        t_start = time.monotonic()
         has_neo4j = self._neo4j is not None and self._neo4j_pending
         result = TransactionResult(
             success=False,
             storage_mode="dual_write" if has_neo4j else "pg_only",
+            neo4j_op_count=len(self._neo4j_pending),
         )
 
         # Phase 1: PG flush（验证约束，生成 ID，但不 commit）
+        t_flush = time.monotonic()
         try:
             self._pg.flush()
         except Exception as exc:
             self._pg.rollback()
+            result.pg_flush_ms = (time.monotonic() - t_flush) * 1000
+            result.total_ms = (time.monotonic() - t_start) * 1000
             result.error = f"PostgreSQL flush 失败: {exc}"
             self._rolledback = True
             logger.error(result.error)
+            self._notify_observer(result)
             return result
+        result.pg_flush_ms = (time.monotonic() - t_flush) * 1000
 
         # Phase 2: Neo4j execute（PG 尚未 commit，可安全回滚）
+        t_neo4j = time.monotonic()
         if self._neo4j is not None and self._neo4j_pending:
             neo4j_error = self._execute_neo4j_ops()
             if neo4j_error is not None:
                 # Neo4j 部分失败 → 补偿已执行的 Neo4j 操作 + 回滚 PG
                 compensations, comp_details = self._compensate_neo4j_detailed()
                 self._pg.rollback()
+                result.neo4j_execute_ms = (time.monotonic() - t_neo4j) * 1000
                 result.compensations_applied = compensations
                 result.compensation_details = comp_details
                 result.neo4j_error = neo4j_error
@@ -252,18 +313,23 @@ class TransactionCoordinator:
                 result.success = False
                 result.pg_committed = False
                 result.neo4j_committed = False
+                result.total_ms = (time.monotonic() - t_start) * 1000
                 self._rolledback = True
                 logger.error(result.error)
+                self._notify_observer(result)
                 return result
             result.neo4j_committed = True
         else:
             result.neo4j_committed = True  # 无 Neo4j 操作也视为成功
+        result.neo4j_execute_ms = (time.monotonic() - t_neo4j) * 1000
 
         # Phase 3: PG commit（Neo4j 已全部成功）
+        t_commit = time.monotonic()
         try:
             self._pg.commit()
             result.pg_committed = True
         except Exception as exc:
+            result.pg_commit_ms = (time.monotonic() - t_commit) * 1000
             # PG commit 失败 → 补偿已执行的 Neo4j 操作
             compensations, comp_details = self._compensate_neo4j_detailed()
             result.compensations_applied = compensations
@@ -275,14 +341,20 @@ class TransactionCoordinator:
             result.success = False
             result.pg_committed = False
             result.neo4j_committed = False
+            result.total_ms = (time.monotonic() - t_start) * 1000
             self._rolledback = True
             logger.error(result.error)
+            self._notify_observer(result)
             return result
+        result.pg_commit_ms = (time.monotonic() - t_commit) * 1000
 
         result.success = True
+        result.total_ms = (time.monotonic() - t_start) * 1000
         self._committed = True
-        logger.debug("事务成功提交: PG=%s, Neo4j ops=%d",
-                      result.pg_committed, len(self._neo4j_executed))
+        logger.debug("事务成功提交: PG=%s, Neo4j ops=%d, total=%.1fms",
+                      result.pg_committed, len(self._neo4j_executed),
+                      result.total_ms)
+        self._notify_observer(result)
         return result
 
     def rollback(self) -> None:
@@ -293,10 +365,31 @@ class TransactionCoordinator:
             self._pg.rollback()
         except Exception as exc:
             logger.warning("PG rollback 异常: %s", exc)
+        compensated = 0
         if self._neo4j_executed:
-            self._compensate_neo4j()
+            compensated = self._compensate_neo4j()
         self._neo4j_pending.clear()
         self._rolledback = True
+        result = TransactionResult(
+            success=False,
+            pg_committed=False,
+            neo4j_committed=False,
+            compensations_applied=compensated,
+            error="explicit rollback",
+        )
+        self.last_result = result
+        self._notify_observer(result)
+
+    # ── Observer ──────────────────────────────────────────────────────────
+
+    def _notify_observer(self, result: TransactionResult) -> None:
+        """向注册的观测者通知事务结果。同时缓存到 last_result。"""
+        self.last_result = result
+        if self._observer is not None:
+            try:
+                self._observer.on_transaction_complete(result)
+            except Exception as exc:
+                logger.warning("TransactionObserver 通知失败: %s", exc)
 
     # ── 内部方法 ──────────────────────────────────────────────────────────
 
@@ -351,6 +444,8 @@ class TransactionCoordinator:
 def transaction_scope(
     pg_session_factory: Callable[[], Any],
     neo4j_driver: Any = None,
+    *,
+    observer: Optional[TransactionObserver] = None,
 ):
     """便捷上下文管理器：自动创建 session + coordinator。
 
@@ -362,7 +457,7 @@ def transaction_scope(
     """
     session = pg_session_factory()
     try:
-        with TransactionCoordinator(session, neo4j_driver) as txn:
+        with TransactionCoordinator(session, neo4j_driver, observer=observer) as txn:
             yield txn
     finally:
         session.close()

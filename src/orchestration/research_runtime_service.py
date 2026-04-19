@@ -16,6 +16,7 @@ from src.orchestration.research_orchestrator import (
     _slug_topic,
     topic_to_phase_context,
 )
+from src.research.learning_loop_orchestrator import LearningLoopOrchestrator
 from src.research.observe_philology import resolve_observe_philology_assets
 from src.research.phase_result import (
     extract_research_phase_results,
@@ -254,6 +255,9 @@ class ResearchRuntimeService:
         normalized_phases = [str(item).strip().lower() for item in configured_phases if str(item).strip()]
         self.phase_names = normalized_phases or list(_DEFAULT_PHASES)
 
+        self._storage_factory: Optional[Any] = None
+        self._initialize_storage_factory()
+
     @staticmethod
     def _resolve_runtime_profile_config(runtime_profile: Optional[str]) -> Dict[str, Any]:
         normalized_profile = str(runtime_profile or "").strip().lower()
@@ -266,6 +270,51 @@ class ResearchRuntimeService:
             return {}
 
         return deepcopy(profile_defaults)
+
+    # ── Storage factory 生命周期 ─────────────────────────────────────────
+
+    def _initialize_storage_factory(self) -> None:
+        """根据 pipeline_config 中的 database 配置初始化 StorageBackendFactory。
+
+        若配置中无 database 节，则跳过（保持 _storage_factory = None）。
+        """
+        db_config = self.pipeline_config.get("database")
+        if not isinstance(db_config, dict) or not db_config:
+            return
+        try:
+            from src.storage import StorageBackendFactory
+
+            factory = StorageBackendFactory(self.pipeline_config)
+            factory.initialize()
+            self._storage_factory = factory
+            logger.info("ResearchRuntimeService: StorageBackendFactory 已初始化 (db_type=%s)", factory.db_type)
+        except Exception as exc:
+            logger.warning("ResearchRuntimeService: StorageBackendFactory 初始化失败，运行期降级: %s", exc)
+            self._storage_factory = None
+
+    @staticmethod
+    def _build_learning_loop_orchestrator() -> LearningLoopOrchestrator:
+        return LearningLoopOrchestrator()
+
+    def get_consistency_state(self) -> Optional[Any]:
+        """返回当前存储一致性状态，若 factory 未初始化则返回 None。"""
+        if self._storage_factory is None:
+            return None
+        return self._storage_factory.get_consistency_state()
+
+    @property
+    def storage_factory(self) -> Optional[Any]:
+        """已初始化的 StorageBackendFactory，可用于 dashboard / monitoring。"""
+        return self._storage_factory
+
+    def close(self) -> None:
+        """释放服务持有的存储资源。"""
+        if self._storage_factory is not None:
+            try:
+                self._storage_factory.close()
+            except Exception as exc:
+                logger.warning("ResearchRuntimeService: factory 关闭失败: %s", exc)
+            self._storage_factory = None
 
     def run(
         self,
@@ -318,9 +367,11 @@ class ResearchRuntimeService:
         publish_highlights: Dict[str, Dict[str, Any]] = {}
         observe_philology: Dict[str, Any] = {}
 
-        pipeline = ResearchPipeline(self.pipeline_config)
-        learning_strategy = self._extract_learning_strategy(pipeline)
-        previous_iteration_feedback = self._extract_previous_iteration_feedback(pipeline)
+        pipeline = ResearchPipeline(self.pipeline_config, storage_factory=self._storage_factory)
+        learning_loop = self._build_learning_loop_orchestrator()
+        _learning_prep = learning_loop.prepare_cycle(pipeline)
+        learning_strategy = _learning_prep["learning_strategy"]
+        previous_iteration_feedback = _learning_prep["previous_iteration_feedback"]
         cycle = pipeline.create_research_cycle(
             cycle_id=resolved_cycle_id,
             cycle_name=resolved_cycle_name,

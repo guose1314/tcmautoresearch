@@ -275,13 +275,18 @@ def _persist_to_orm(
 ) -> Dict[str, int]:
     """将抽取结果写入主应用数据库 (ORM 表)。
 
-    返回 {"orm_entities": N, "orm_relations": N}。
+    .. note::
+        此路径绕过 ``StorageBackendFactory.transaction()``，
+        仅写 PostgreSQL / SQLite，不写 Neo4j 图投影。
+        写入的实体/关系需后续 backfill 工具补齐图投影。
+
+    返回 {"orm_entities": N, "orm_relations": N, "needs_backfill": bool}。
     """
     db_mgr = getattr(getattr(request, "app", None), "state", None)
     db_mgr = getattr(db_mgr, "db_manager", None) if db_mgr else None
     if db_mgr is None:
         logger.debug("DatabaseManager 未就绪，跳过 ORM 持久化")
-        return {"orm_entities": 0, "orm_relations": 0}
+        return {"orm_entities": 0, "orm_relations": 0, "needs_backfill": False}
 
     from src.infrastructure.persistence import (
         Document,
@@ -421,7 +426,19 @@ def _persist_to_orm(
     except Exception:
         logger.exception("ORM 持久化失败（不影响 KG 侧已写入的数据）")
 
-    return {"orm_entities": orm_ent_count, "orm_relations": orm_rel_count}
+    if orm_ent_count > 0 or orm_rel_count > 0:
+        logger.info(
+            "ORM 持久化完成 (entities=%d, relations=%d) — "
+            "此路径绕过 StorageBackendFactory，未写 Neo4j 图投影，需后续 backfill",
+            orm_ent_count,
+            orm_rel_count,
+        )
+
+    return {
+        "orm_entities": orm_ent_count,
+        "orm_relations": orm_rel_count,
+        "needs_backfill": orm_ent_count > 0 or orm_rel_count > 0,
+    }
 
 
 # ---------------------------------------------------------------------------

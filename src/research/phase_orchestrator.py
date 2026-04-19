@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import re
-import sqlite3
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -34,9 +33,11 @@ CachedLLMService = _ImportedCachedLLMService
 class PhaseOrchestrator(PhaseTrackerMixin):
     """Coordinates phase lifecycle, execution dispatch, and export/persistence logic."""
 
-    def __init__(self, pipeline: Any):
+    def __init__(self, pipeline: Any, *, storage_factory: Any = None):
         self.pipeline = pipeline
         self.logger = logging.getLogger(__name__)
+        self._storage_factory: Any = storage_factory
+        self._storage_factory_owned: bool = storage_factory is None
         self._register_event_handlers()
 
     def _register_event_handlers(self) -> None:
@@ -1213,100 +1214,142 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 "edge_count": 0,
             }
 
+    # ── Storage factory 生命周期 ──────────────────────────────────────────
+
+    def _get_storage_factory(self) -> Any:
+        """惰性获取并缓存 StorageBackendFactory，避免每次 persist 重建连接池。"""
+        if self._storage_factory is not None and self._storage_factory.initialized:
+            return self._storage_factory
+        from src.storage import StorageBackendFactory
+        factory = StorageBackendFactory(self.pipeline.config)
+        factory.initialize()
+        self._storage_factory = factory
+        self._storage_factory_owned = True
+        return factory
+
+    def close_storage_factory(self) -> None:
+        """显式关闭缓存的 StorageBackendFactory，释放连接池。
+
+        外部注入的 factory 由调用方管理生命周期，此处仅解除引用。
+        """
+        if self._storage_factory is not None:
+            if self._storage_factory_owned:
+                try:
+                    self._storage_factory.close()
+                except Exception as exc:
+                    self.logger.warning("关闭缓存 StorageBackendFactory 失败: %s", exc)
+            self._storage_factory = None
+            self._storage_factory_owned = True
+
     def _persist_result_structured(self, cycle: ResearchCycle) -> bool:
         from src.infrastructure.research_session_repo import ResearchSessionRepository
-        from src.storage import StorageBackendFactory
 
-        factory = StorageBackendFactory(self.pipeline.config)
-        try:
-            persistence_report = factory.initialize()
-            consistency_state = factory.get_consistency_state()
-            repository = ResearchSessionRepository(factory.db_manager)
-            session_record: Dict[str, Any] = {}
-            phase_records: Dict[str, Dict[str, Any]] = {}
-            observe_documents: List[Dict[str, Any]] = []
-            artifact_records: List[Dict[str, Any]] = []
-            learning_feedback_library: Dict[str, Any] = {}
-            graph_report: Dict[str, Any] = {
-                "status": persistence_report.get("neo4j_status") if persistence_report.get("neo4j_status") != "active" else "skipped",
-                "enabled": bool(factory.neo4j_driver),
-                "node_count": 0,
-                "edge_count": 0,
-            }
+        factory = self._get_storage_factory()
+        consistency_state = factory.get_consistency_state()
+        persistence_report = {
+            "db_type": factory.db_type,
+            "neo4j_enabled": factory.neo4j_enabled,
+            "pg_status": consistency_state.pg_status,
+            "neo4j_status": consistency_state.neo4j_status,
+        }
+        repository = ResearchSessionRepository(factory.db_manager)
+        session_record: Dict[str, Any] = {}
+        phase_records: Dict[str, Dict[str, Any]] = {}
+        observe_documents: List[Dict[str, Any]] = []
+        artifact_records: List[Dict[str, Any]] = []
+        learning_feedback_library: Dict[str, Any] = {}
+        graph_report: Dict[str, Any] = {
+            "status": persistence_report.get("neo4j_status") if persistence_report.get("neo4j_status") != "active" else "skipped",
+            "enabled": bool(factory.neo4j_driver),
+            "node_count": 0,
+            "edge_count": 0,
+        }
 
-            with factory.transaction() as txn:
-                pg_session = txn.pg_session
-                if repository.get_session(cycle.cycle_id, session=pg_session):
-                    repository.delete_session(cycle.cycle_id, session=pg_session)
-                session_record = repository.save_from_cycle(cycle, session=pg_session)
-                phase_records = self._persist_cycle_phase_executions(repository, cycle, session=pg_session)
-                learning_feedback_library = self._persist_cycle_learning_feedback(
-                    repository,
-                    cycle,
-                    phase_records,
-                    session=pg_session,
-                )
-                observe_documents = self._persist_cycle_observe_documents(repository, cycle, phase_records, session=pg_session)
-                artifact_records = self._persist_cycle_artifacts(repository, cycle, phase_records, session=pg_session)
-                graph_report = self._project_cycle_to_neo4j(
-                    factory.neo4j_driver,
-                    cycle,
-                    session_record if isinstance(session_record, dict) else {},
-                    phase_records,
-                    artifact_records,
-                    observe_documents,
-                    transaction=txn,
-                )
+        with factory.transaction() as txn:
+            pg_session = txn.pg_session
+            if repository.get_session(cycle.cycle_id, session=pg_session):
+                repository.delete_session(cycle.cycle_id, session=pg_session)
+            session_record = repository.save_from_cycle(cycle, session=pg_session)
+            phase_records = self._persist_cycle_phase_executions(repository, cycle, session=pg_session)
+            learning_feedback_library = self._persist_cycle_learning_feedback(
+                repository,
+                cycle,
+                phase_records,
+                session=pg_session,
+            )
+            observe_documents = self._persist_cycle_observe_documents(repository, cycle, phase_records, session=pg_session)
+            artifact_records = self._persist_cycle_artifacts(repository, cycle, phase_records, session=pg_session)
+            graph_report = self._project_cycle_to_neo4j(
+                factory.neo4j_driver,
+                cycle,
+                session_record if isinstance(session_record, dict) else {},
+                phase_records,
+                artifact_records,
+                observe_documents,
+                transaction=txn,
+            )
 
-                cycle.metadata["storage_persistence"] = {
-                    "mode": consistency_state.mode,
-                    "consistency_state": consistency_state.to_dict(),
-                    "db_type": persistence_report.get("db_type"),
-                    "pg_status": persistence_report.get("pg_status"),
-                    "neo4j_status": graph_report.get("status") if graph_report.get("enabled") else persistence_report.get("neo4j_status"),
-                    "phase_execution_count": len(phase_records),
-                    "artifact_count": len(artifact_records),
-                    "learning_feedback_record_count": len(learning_feedback_library.get("records") or []),
-                    "observe_document_count": len(observe_documents),
-                    "observe_version_witness_count": sum(
-                        1
+            txn_observation: Dict[str, Any] = {}
+            if txn.last_result is not None:
+                txn_observation = txn.last_result.to_observation_dict()
+
+            cycle.metadata["storage_persistence"] = {
+                "mode": consistency_state.mode,
+                "consistency_state": consistency_state.to_dict(),
+                "db_type": persistence_report.get("db_type"),
+                "pg_status": persistence_report.get("pg_status"),
+                "neo4j_status": graph_report.get("status") if graph_report.get("enabled") else persistence_report.get("neo4j_status"),
+                "phase_execution_count": len(phase_records),
+                "artifact_count": len(artifact_records),
+                "learning_feedback_record_count": len(learning_feedback_library.get("records") or []),
+                "observe_document_count": len(observe_documents),
+                "observe_version_witness_count": sum(
+                    1
+                    for item in observe_documents
+                    if isinstance(item, dict)
+                    and (
+                        str((item.get("version_metadata") or {}).get("witness_key") or "").strip()
+                        or str(item.get("witness_key") or "").strip()
+                    )
+                ),
+                "observe_version_lineage_count": len(
+                    {
+                        str(
+                            ((item.get("version_metadata") or {}).get("version_lineage_key") or "").strip()
+                            or ((item.get("version_metadata") or {}).get("work_fragment_key") or "").strip()
+                            or str(item.get("version_lineage_key") or "").strip()
+                        )
                         for item in observe_documents
                         if isinstance(item, dict)
                         and (
-                            str((item.get("version_metadata") or {}).get("witness_key") or "").strip()
-                            or str(item.get("witness_key") or "").strip()
+                            str(((item.get("version_metadata") or {}).get("version_lineage_key") or "").strip())
+                            or str(((item.get("version_metadata") or {}).get("work_fragment_key") or "").strip())
+                            or str(item.get("version_lineage_key") or "").strip()
                         )
-                    ),
-                    "observe_version_lineage_count": len(
-                        {
-                            str(
-                                ((item.get("version_metadata") or {}).get("version_lineage_key") or "").strip()
-                                or ((item.get("version_metadata") or {}).get("work_fragment_key") or "").strip()
-                                or str(item.get("version_lineage_key") or "").strip()
-                            )
-                            for item in observe_documents
-                            if isinstance(item, dict)
-                            and (
-                                str(((item.get("version_metadata") or {}).get("version_lineage_key") or "").strip())
-                                or str(((item.get("version_metadata") or {}).get("work_fragment_key") or "").strip())
-                                or str(item.get("version_lineage_key") or "").strip()
-                            )
-                        }
-                    ),
-                    "observe_entity_count": sum(int(item.get("entity_count") or 0) for item in observe_documents if isinstance(item, dict)),
-                    "observe_relationship_count": sum(int(item.get("relationship_count") or 0) for item in observe_documents if isinstance(item, dict)),
-                    "graph_node_count": graph_report.get("node_count", 0),
-                    "graph_edge_count": graph_report.get("edge_count", 0),
-                    "eventual_consistency": self._classify_eventual_consistency(
-                        consistency_state, graph_report,
-                    ),
-                }
-                repository.update_session(cycle.cycle_id, {"metadata": cycle.metadata}, session=pg_session)
+                    }
+                ),
+                "observe_entity_count": sum(int(item.get("entity_count") or 0) for item in observe_documents if isinstance(item, dict)),
+                "observe_relationship_count": sum(int(item.get("relationship_count") or 0) for item in observe_documents if isinstance(item, dict)),
+                "graph_node_count": graph_report.get("node_count", 0),
+                "graph_edge_count": graph_report.get("edge_count", 0),
+                "eventual_consistency": self._classify_eventual_consistency(
+                    consistency_state, graph_report,
+                ),
+            }
+            repository.update_session(cycle.cycle_id, {"metadata": cycle.metadata}, session=pg_session)
 
-            self.pipeline.logger.info("研究结果已持久化到结构化存储: %s", cycle.cycle_id)
-            return True
-        finally:
-            factory.close()
+        # commit 后可从 txn.last_result 获取完整事务观测
+        if txn.last_result is not None:
+            txn_observation = txn.last_result.to_observation_dict()
+            cycle.metadata["storage_persistence"]["transaction_observation"] = txn_observation
+            if txn.last_result.needs_backfill:
+                self.logger.warning(
+                    "事务需要 backfill 补偿: cycle=%s, error=%s",
+                    cycle.cycle_id, txn.last_result.error,
+                )
+
+        self.pipeline.logger.info("研究结果已持久化到结构化存储: %s", cycle.cycle_id)
+        return True
 
     @staticmethod
     def _classify_eventual_consistency(
@@ -1341,59 +1384,60 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             reason = "图投影节点为零，需后续 backfill"
         return {"graph_backfill_pending": True, "reason": reason}
 
-    def _persist_result_legacy_sqlite(self, cycle: ResearchCycle) -> bool:
-        db_path = self.pipeline.config.get(
-            "result_store_path",
-            os.path.join("output", "research_results.db"),
-        )
-        db_dir = os.path.dirname(db_path)
-        if db_dir:
-            os.makedirs(db_dir, exist_ok=True)
+    def _persist_result_via_factory(self, cycle: ResearchCycle) -> bool:
+        """通过 StorageBackendFactory + ResearchRecord ORM 持久化研究结果。
 
-        ddl = """
-        CREATE TABLE IF NOT EXISTS research_results (
-            cycle_id          TEXT PRIMARY KEY,
-            cycle_name        TEXT NOT NULL,
-            status            TEXT NOT NULL,
-            started_at        TEXT,
-            completed_at      TEXT,
-            duration          REAL,
-            research_objective TEXT,
-            outcomes_json     TEXT,
-            metadata_json     TEXT,
-            persisted_at      TEXT NOT NULL
-        )
+        统一使用 factory 管理的连接池，不再绕过 ORM 直连 SQLite。
+        无 database 配置时 factory 默认走 SQLite backend，行为等价于原 legacy 路径。
+
+        注意：此路径不经过 TransactionCoordinator，不写 Neo4j，
+        需标记 ``storage_persistence`` 为 fallback 模式并声明 ``needs_backfill``。
         """
-        row = (
-            cycle.cycle_id,
-            cycle.cycle_name,
-            cycle.status.value,
-            cycle.started_at,
-            cycle.completed_at,
-            cycle.duration,
-            cycle.research_objective,
-            json.dumps(self._serialize_value(cycle.outcomes), ensure_ascii=False),
-            json.dumps(self._serialize_value(cycle.metadata), ensure_ascii=False),
-            datetime.now().isoformat(),
-        )
-        upsert = """
-        INSERT OR REPLACE INTO research_results
-            (cycle_id, cycle_name, status, started_at, completed_at, duration,
-             research_objective, outcomes_json, metadata_json, persisted_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
+        from src.infrastructure.persistence import ResearchRecord
+
         try:
-            conn = sqlite3.connect(db_path, timeout=10, isolation_level=None)
-            try:
-                conn.execute("PRAGMA journal_mode=WAL;")
-                conn.execute(ddl)
-                conn.execute(upsert, row)
-            finally:
-                conn.close()
-            self.pipeline.logger.info(f"研究结果已持久化: {cycle.cycle_id} → {db_path}")
+            factory = self._get_storage_factory()
+            with factory.session_scope() as session:
+                record = session.query(ResearchRecord).filter_by(cycle_id=cycle.cycle_id).one_or_none()
+                if record is None:
+                    record = ResearchRecord(
+                        cycle_id=cycle.cycle_id,
+                        cycle_name=cycle.cycle_name,
+                        status=cycle.status.value,
+                        persisted_at="",
+                    )
+                    session.add(record)
+
+                record.cycle_name = cycle.cycle_name
+                record.status = cycle.status.value
+                record.started_at = cycle.started_at
+                record.completed_at = cycle.completed_at
+                record.duration = float(cycle.duration or 0.0)
+                record.research_objective = cycle.research_objective
+                record.outcomes_json = json.dumps(
+                    self._serialize_value(cycle.outcomes), ensure_ascii=False,
+                )
+
+                # 标记 fallback 降级元数据
+                cycle.metadata["storage_persistence"] = {
+                    "mode": "factory_fallback",
+                    "needs_backfill": True,
+                    "reason": "结构化持久化失败，已回退到 ResearchRecord ORM fallback",
+                    "eventual_consistency": {
+                        "graph_backfill_pending": True,
+                        "reason": "factory_fallback 路径不写 Neo4j 图投影",
+                    },
+                }
+
+                record.metadata_json = json.dumps(
+                    self._serialize_value(cycle.metadata), ensure_ascii=False,
+                )
+                record.persisted_at = datetime.now().isoformat()
+
+            self.pipeline.logger.info("研究结果已持久化 (factory_fallback): %s", cycle.cycle_id)
             return True
         except Exception as exc:  # pragma: no cover
-            self.pipeline.logger.warning(f"研究结果持久化失败，已跳过: {exc}")
+            self.pipeline.logger.warning("研究结果持久化失败，已跳过: %s", exc)
             return False
 
     def _persist_result(self, cycle: ResearchCycle) -> bool:
@@ -1402,5 +1446,5 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 if self._persist_result_structured(cycle):
                     return True
             except Exception as exc:  # pragma: no cover
-                self.pipeline.logger.warning("结构化研究结果持久化失败，回退 legacy sqlite: %s", exc)
-        return self._persist_result_legacy_sqlite(cycle)
+                self.pipeline.logger.warning("结构化研究结果持久化失败，回退 factory fallback: %s", exc)
+        return self._persist_result_via_factory(cycle)

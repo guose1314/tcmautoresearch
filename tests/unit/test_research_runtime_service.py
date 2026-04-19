@@ -16,8 +16,9 @@ class _FakeCycle:
 
 
 class _FakePipeline:
-    def __init__(self, config=None):
+    def __init__(self, config=None, *, storage_factory=None):
         self.config = config or {}
+        self.storage_factory = storage_factory
         self.cycle = _FakeCycle()
         self.completed = False
         self.cleaned = False

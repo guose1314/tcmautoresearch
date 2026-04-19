@@ -130,8 +130,28 @@ class _FakeStorageFactory:
     def neo4j_driver(self):
         return self._neo4j_driver
 
+    @property
+    def initialized(self):
+        return True
+
+    @property
+    def db_type(self):
+        return self._init_report.get("db_type", "postgresql")
+
+    @property
+    def neo4j_enabled(self):
+        return self._init_report.get("neo4j_enabled", False)
+
     def initialize(self):
         return dict(self._init_report)
+
+    def health_check(self):
+        return {
+            "initialized": True,
+            "db_type": self.db_type,
+            "db_healthy": True,
+            "neo4j_healthy": True if self._neo4j_driver else None,
+        }
 
     def get_consistency_state(self):
         return self._consistency_state
@@ -284,10 +304,10 @@ class TestStructuredPersistVerification(unittest.TestCase):
             consistency_state=consistency_state,
         )
         orchestrator = PhaseOrchestrator(_FakePipeline())
+        orchestrator._storage_factory = fake_factory
         cycle = _make_cycle()
 
-        with patch("src.storage.StorageBackendFactory", return_value=fake_factory):
-            persisted = orchestrator._persist_result_structured(cycle)
+        persisted = orchestrator._persist_result_structured(cycle)
 
         self.assertTrue(persisted)
 

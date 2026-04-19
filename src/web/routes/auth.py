@@ -6,8 +6,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets as _secrets
-from importlib import import_module
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -18,7 +16,6 @@ from src.web.auth import create_access_token, get_current_user
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 # ---------------------------------------------------------------------------
 # 用户加载（从 secrets.yml → security.console_auth.users）
@@ -28,55 +25,22 @@ _cached_users: Optional[Dict[str, Dict[str, Any]]] = None
 _cached_security: Optional[Dict[str, Any]] = None
 
 
-def _deep_merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    merged = dict(base)
-    for key, value in override.items():
-        existing = merged.get(key)
-        if isinstance(existing, dict) and isinstance(value, dict):
-            merged[key] = _deep_merge_dict(existing, value)
-            continue
-        merged[key] = value
-    return merged
-
-
-def _candidate_secret_files() -> list[Path]:
-    candidates = [
-        _PROJECT_ROOT / "secrets.yml",
-        _PROJECT_ROOT / "secrets.yaml",
-        Path("secrets.yml"),
-        Path("secrets.yaml"),
-    ]
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        normalized = str(candidate.resolve(strict=False))
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        unique.append(candidate)
-    return unique
-
-
 def _load_security_config() -> Dict[str, Any]:
+    """通过 ConfigCenter 加载 security 密钥配置（缓存结果）。"""
     global _cached_security
     if _cached_security is not None:
         return _cached_security
 
-    merged: Dict[str, Any] = {}
-    for path in _candidate_secret_files():
-        if not path.exists():
-            continue
-        try:
-            yaml_module = import_module("yaml")
-            raw = yaml_module.safe_load(path.read_text(encoding="utf-8")) or {}
-            security = raw.get("security") if isinstance(raw, dict) else {}
-            if isinstance(security, dict):
-                merged = _deep_merge_dict(merged, security)
-        except Exception as exc:
-            logger.warning("加载 %s 安全配置失败: %s", path, exc)
+    try:
+        from src.infrastructure.config_loader import load_settings
 
-    _cached_security = merged
-    return merged
+        settings = load_settings()
+        _cached_security = settings.get_secret_section("security", default={})
+    except Exception as exc:
+        logger.warning("通过 ConfigCenter 加载安全配置失败: %s", exc)
+        _cached_security = {}
+
+    return _cached_security
 
 
 def _get_management_api_key_from_sources() -> str:

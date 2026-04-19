@@ -1,9 +1,379 @@
 from __future__ import annotations
 
+import json
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional
+
+from src.infra.layered_cache import get_layered_task_cache
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 平台级统一证据对象 — Typed Evidence Dataclasses
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CONTRACT_VERSION = "evidence-claim-v2"
+
+EVIDENCE_GRADES = ("high", "moderate", "low", "very_low")
+REVIEW_STATUSES = ("pending", "accepted", "rejected")
+
+
+@dataclass
+class EvidenceProvenance:
+    """证据溯源：记录一条证据的来源、版本、引用坐标。"""
+
+    source: str = ""
+    source_type: str = ""
+    source_ref: str = ""
+    document_urn: str = ""
+    document_title: str = ""
+    work_title: str = ""
+    version_lineage_key: str = ""
+    witness_key: str = ""
+    title: str = ""
+    excerpt: str = ""
+    doi: str = ""
+    url: str = ""
+    journal: str = ""
+    publisher: str = ""
+    year: Any = ""
+    authors: List[str] = field(default_factory=list)
+    abstract: str = ""
+    entry_type: str = ""
+    note: str = ""
+    entity_spans: List[Dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "EvidenceProvenance":
+        d = dict(data) if isinstance(data, Mapping) else {}
+        return cls(
+            source=str(d.get("source") or ""),
+            source_type=str(d.get("source_type") or ""),
+            source_ref=str(d.get("source_ref") or d.get("document_urn") or ""),
+            document_urn=str(d.get("document_urn") or ""),
+            document_title=str(d.get("document_title") or ""),
+            work_title=str(d.get("work_title") or ""),
+            version_lineage_key=str(d.get("version_lineage_key") or ""),
+            witness_key=str(d.get("witness_key") or ""),
+            title=str(d.get("title") or ""),
+            excerpt=str(d.get("excerpt") or d.get("text") or ""),
+            doi=str(d.get("doi") or ""),
+            url=str(d.get("url") or ""),
+            journal=str(d.get("journal") or ""),
+            publisher=str(d.get("publisher") or ""),
+            year=d.get("year", ""),
+            authors=list(d.get("authors") or []),
+            abstract=str(d.get("abstract") or ""),
+            entry_type=str(d.get("entry_type") or ""),
+            note=str(d.get("note") or ""),
+            entity_spans=list(d.get("entity_spans") or []),
+        )
+
+
+@dataclass
+class EvidenceRecord:
+    """单条证据记录 — 平台级统一结构。"""
+
+    evidence_id: str = ""
+    source_entity: str = ""
+    target_entity: str = ""
+    relation_type: str = "related"
+    confidence: float = 0.0
+    excerpt: str = ""
+    entity_spans: List[Dict[str, Any]] = field(default_factory=list)
+    evidence_grade: str = ""
+
+    # 引用元数据
+    title: str = ""
+    authors: List[str] = field(default_factory=list)
+    year: Any = ""
+    journal: str = ""
+    publisher: str = ""
+    doi: str = ""
+    url: str = ""
+    abstract: str = ""
+    note: str = ""
+
+    # 来源标识
+    source_type: str = ""
+    source_ref: str = ""
+    document_title: str = ""
+    work_title: str = ""
+    version_lineage_key: str = ""
+    witness_key: str = ""
+    entry_type: str = ""
+
+    # 嵌套溯源
+    provenance: EvidenceProvenance = field(default_factory=EvidenceProvenance)
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = asdict(self)
+        d["provenance"] = self.provenance.to_dict()
+        return d
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "EvidenceRecord":
+        """从 normalize_evidence_record 返回的 dict 构造类型化对象。"""
+        d = dict(data) if isinstance(data, Mapping) else {}
+        prov_data = d.pop("provenance", {})
+        provenance = EvidenceProvenance.from_dict(prov_data) if isinstance(prov_data, Mapping) else EvidenceProvenance()
+        return cls(
+            evidence_id=str(d.get("evidence_id") or ""),
+            source_entity=str(d.get("source_entity") or ""),
+            target_entity=str(d.get("target_entity") or ""),
+            relation_type=str(d.get("relation_type") or "related"),
+            confidence=float(d.get("confidence") or 0.0),
+            excerpt=str(d.get("excerpt") or ""),
+            entity_spans=list(d.get("entity_spans") or []),
+            evidence_grade=str(d.get("evidence_grade") or ""),
+            title=str(d.get("title") or ""),
+            authors=list(d.get("authors") or []),
+            year=d.get("year", ""),
+            journal=str(d.get("journal") or ""),
+            publisher=str(d.get("publisher") or ""),
+            doi=str(d.get("doi") or ""),
+            url=str(d.get("url") or ""),
+            abstract=str(d.get("abstract") or ""),
+            note=str(d.get("note") or ""),
+            source_type=str(d.get("source_type") or ""),
+            source_ref=str(d.get("source_ref") or ""),
+            document_title=str(d.get("document_title") or ""),
+            work_title=str(d.get("work_title") or ""),
+            version_lineage_key=str(d.get("version_lineage_key") or ""),
+            witness_key=str(d.get("witness_key") or ""),
+            entry_type=str(d.get("entry_type") or ""),
+            provenance=provenance,
+        )
+
+
+@dataclass
+class EvidenceClaim:
+    """证据声明 — 将一条或多条 EvidenceRecord 关联到实体关系判断。"""
+
+    claim_id: str = ""
+    source_entity: str = ""
+    target_entity: str = ""
+    relation_type: str = "related"
+    confidence: float = 0.0
+    support_count: int = 0
+    evidence_ids: List[str] = field(default_factory=list)
+
+    document_title: str = ""
+    work_title: str = ""
+    version_lineage_key: str = ""
+    witness_key: str = ""
+
+    # 审核流程
+    review_status: str = ""
+    needs_manual_review: bool = False
+    review_reasons: List[str] = field(default_factory=list)
+    reviewer: str = ""
+    reviewed_at: str = ""
+    decision_basis: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "EvidenceClaim":
+        d = dict(data) if isinstance(data, Mapping) else {}
+        return cls(
+            claim_id=str(d.get("claim_id") or ""),
+            source_entity=str(d.get("source_entity") or ""),
+            target_entity=str(d.get("target_entity") or ""),
+            relation_type=str(d.get("relation_type") or "related"),
+            confidence=float(d.get("confidence") or 0.0),
+            support_count=int(d.get("support_count") or 0),
+            evidence_ids=list(d.get("evidence_ids") or []),
+            document_title=str(d.get("document_title") or ""),
+            work_title=str(d.get("work_title") or ""),
+            version_lineage_key=str(d.get("version_lineage_key") or ""),
+            witness_key=str(d.get("witness_key") or ""),
+            review_status=str(d.get("review_status") or ""),
+            needs_manual_review=bool(d.get("needs_manual_review", False)),
+            review_reasons=list(d.get("review_reasons") or []),
+            reviewer=str(d.get("reviewer") or ""),
+            reviewed_at=str(d.get("reviewed_at") or ""),
+            decision_basis=str(d.get("decision_basis") or ""),
+        )
+
+
+@dataclass
+class EvidenceGradeSummary:
+    """GRADE 评估汇总。"""
+
+    overall_grade: str = ""
+    overall_score: float = 0.0
+    study_count: int = 0
+    factor_averages: Dict[str, float] = field(default_factory=dict)
+    bias_risk_distribution: Dict[str, int] = field(default_factory=dict)
+    summary: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "EvidenceGradeSummary":
+        d = dict(data) if isinstance(data, Mapping) else {}
+        return cls(
+            overall_grade=str(d.get("overall_grade") or ""),
+            overall_score=float(d.get("overall_score") or 0.0),
+            study_count=int(d.get("study_count") or 0),
+            factor_averages=dict(d.get("factor_averages") or {}),
+            bias_risk_distribution=dict(d.get("bias_risk_distribution") or {}),
+            summary=list(d.get("summary") or []),
+        )
+
+
+@dataclass
+class EvidenceEnvelope:
+    """平台级统一证据信封 — 打包 records + claims + grade + citations。
+
+    这是所有层（analyze / publish / dashboard / API / dossier）交换证据
+    的唯一权威容器。
+    """
+
+    contract_version: str = CONTRACT_VERSION
+    records: List[EvidenceRecord] = field(default_factory=list)
+    claims: List[EvidenceClaim] = field(default_factory=list)
+    grade_summary: EvidenceGradeSummary = field(default_factory=EvidenceGradeSummary)
+    citation_records: List[Dict[str, Any]] = field(default_factory=list)
+    evidence_summary: Dict[str, Any] = field(default_factory=dict)
+    research_grade: Dict[str, Any] = field(default_factory=dict)
+
+    # ── 汇总指标 ──
+    @property
+    def record_count(self) -> int:
+        return len(self.records)
+
+    @property
+    def claim_count(self) -> int:
+        return len(self.claims)
+
+    @property
+    def citation_count(self) -> int:
+        return len(self.citation_records)
+
+    @property
+    def linked_claim_count(self) -> int:
+        return sum(1 for c in self.claims if c.evidence_ids)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化为与现有 evidence_protocol dict 完全兼容的格式。"""
+        records_list = [r.to_dict() for r in self.records]
+        claims_list = [c.to_dict() for c in self.claims]
+        return {
+            "contract_version": self.contract_version,
+            "evidence_records": records_list,
+            "claims": claims_list,
+            "evidence_summary": self.evidence_summary,
+            "evidence_grade_summary": self.grade_summary.to_dict(),
+            "citation_records": list(self.citation_records),
+            "citation_count": self.citation_count,
+            "research_grade": self.research_grade,
+            "summary": _build_protocol_summary(
+                records_list, claims_list, self.citation_records,
+            ),
+            "contract": {
+                "required_fields": [
+                    "evidence_id", "source_type", "source_ref",
+                    "excerpt", "evidence_grade", "provenance",
+                ],
+                "claim_fields": [
+                    "claim_id", "source_entity", "target_entity",
+                    "relation_type", "confidence", "support_count", "evidence_ids",
+                ],
+                "citation_fields": [
+                    "title", "authors", "year", "source_type", "source_ref",
+                ],
+            },
+        }
+
+    def to_json(self, **kwargs: Any) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False, default=str, **kwargs)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "EvidenceEnvelope":
+        """从现有 evidence_protocol dict 构造类型化信封。"""
+        d = dict(data) if isinstance(data, Mapping) else {}
+        records = [
+            EvidenceRecord.from_dict(r)
+            for r in (d.get("evidence_records") or [])
+            if isinstance(r, Mapping)
+        ]
+        claims = [
+            EvidenceClaim.from_dict(c)
+            for c in (d.get("claims") or [])
+            if isinstance(c, Mapping)
+        ]
+        grade_summary = EvidenceGradeSummary.from_dict(
+            d.get("evidence_grade_summary") or {}
+        )
+        return cls(
+            contract_version=str(d.get("contract_version") or CONTRACT_VERSION),
+            records=records,
+            claims=claims,
+            grade_summary=grade_summary,
+            citation_records=list(d.get("citation_records") or []),
+            evidence_summary=dict(d.get("evidence_summary") or {}),
+            research_grade=dict(d.get("research_grade") or {}),
+        )
+
+    @classmethod
+    def from_protocol(cls, protocol: Mapping[str, Any]) -> "EvidenceEnvelope":
+        """Alias for from_dict — 从 build_evidence_protocol 返回值构建。"""
+        return cls.from_dict(protocol)
 
 
 def build_evidence_protocol(
+    reasoning_payload: Any,
+    *,
+    evidence_records: Optional[Iterable[Any]] = None,
+    evidence_grade: Optional[Mapping[str, Any]] = None,
+    evidence_summary: Optional[Mapping[str, Any]] = None,
+    max_evidence_records: Optional[int] = None,
+    max_claims: Optional[int] = None,
+) -> Dict[str, Any]:
+    resolved_evidence_records = list(evidence_records) if evidence_records is not None else None
+    cache_payload = {
+        "cache_version": "evidence-cache-v1",
+        "contract_version": CONTRACT_VERSION,
+        "reasoning_payload": reasoning_payload,
+        "evidence_records": resolved_evidence_records,
+        "evidence_grade": evidence_grade,
+        "evidence_summary": evidence_summary,
+        "max_evidence_records": max_evidence_records,
+        "max_claims": max_claims,
+    }
+    task_cache = get_layered_task_cache()
+    cached = task_cache.get_json("evidence", "build_evidence_protocol", cache_payload)
+    if cached is not None:
+        return cached if isinstance(cached, dict) else {}
+
+    protocol = _build_evidence_protocol_uncached(
+        reasoning_payload,
+        evidence_records=resolved_evidence_records,
+        evidence_grade=evidence_grade,
+        evidence_summary=evidence_summary,
+        max_evidence_records=max_evidence_records,
+        max_claims=max_claims,
+    )
+    task_cache.put_json(
+        "evidence",
+        "build_evidence_protocol",
+        cache_payload,
+        protocol,
+        meta={
+            "contract_version": CONTRACT_VERSION,
+            "record_count": len(protocol.get("evidence_records") or []),
+            "claim_count": len(protocol.get("claims") or []),
+        },
+    )
+    return protocol
+
+
+def _build_evidence_protocol_uncached(
     reasoning_payload: Any,
     *,
     evidence_records: Optional[Iterable[Any]] = None,
@@ -62,7 +432,7 @@ def build_evidence_protocol(
         return {}
 
     return {
-        "contract_version": "evidence-claim-v2",
+        "contract_version": CONTRACT_VERSION,
         "evidence_records": normalized_records,
         "claims": normalized_claims,
         "evidence_summary": raw_evidence_summary,

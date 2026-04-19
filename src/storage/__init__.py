@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .backend_factory import StorageBackendFactory
+    from .backfill_ledger import BackfillEntry, BackfillLedger
     from .consistency import (
         MODE_DUAL_WRITE,
         MODE_PG_ONLY,
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
         RelationshipType,
         ResearchAnalysis,
     )
+    from .degradation_governor import DegradationGovernor, DegradationMetrics
     from .graph_interface import IKnowledgeGraph, KnowledgeGap
     from .neo4j_driver import (
         Neo4jDriver,
@@ -44,11 +46,13 @@ if TYPE_CHECKING:
         entity_to_neo4j_node,
         relationship_to_neo4j_edge,
     )
+    from .observability import StorageObservability
     from .output_catalog import ArtifactRecord, OutputCatalog
     from .retention import RetentionManager, RetentionReport
     from .storage_driver import UnifiedStorageDriver
     from .transaction import (
         TransactionCoordinator,
+        TransactionObserver,
         TransactionResult,
         transaction_scope,
     )
@@ -90,6 +94,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     # Backend Factory + Transaction
     "StorageBackendFactory": (".backend_factory", "StorageBackendFactory"),
     "TransactionCoordinator": (".transaction", "TransactionCoordinator"),
+    "TransactionObserver": (".transaction", "TransactionObserver"),
     "TransactionResult": (".transaction", "TransactionResult"),
     "transaction_scope": (".transaction", "transaction_scope"),
     # Consistency State
@@ -99,6 +104,14 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "MODE_PG_ONLY": (".consistency", "MODE_PG_ONLY"),
     "MODE_SQLITE_FALLBACK": (".consistency", "MODE_SQLITE_FALLBACK"),
     "MODE_UNINITIALIZED": (".consistency", "MODE_UNINITIALIZED"),
+    # Degradation Governance
+    "DegradationGovernor": (".degradation_governor", "DegradationGovernor"),
+    "DegradationMetrics": (".degradation_governor", "DegradationMetrics"),
+    # Backfill Ledger
+    "BackfillLedger": (".backfill_ledger", "BackfillLedger"),
+    "BackfillEntry": (".backfill_ledger", "BackfillEntry"),
+    # Storage Observability
+    "StorageObservability": (".observability", "StorageObservability"),
     # Output Catalog
     "OutputCatalog": (".output_catalog", "OutputCatalog"),
     "ArtifactRecord": (".output_catalog", "ArtifactRecord"),

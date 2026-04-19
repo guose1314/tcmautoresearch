@@ -21,6 +21,9 @@ class _FakeDatabaseManager:
     def init_db(self):
         return None
 
+    def get_schema_completeness_report(self):
+        return {"status": "ok", "missing_tables": []}
+
     @staticmethod
     def create_default_relationships(session):
         return None
