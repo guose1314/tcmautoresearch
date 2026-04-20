@@ -46,9 +46,11 @@ _TASK_COMPLEXITY: Dict[str, str] = {
     "text_classification": "low",
     "summarization": "medium",
     "translation": "medium",
+    "quality_assessment": "medium",
     "hypothesis_generation": "high",
     "evidence_synthesis": "high",
     "reflection": "high",
+    "protocol_design": "high",
     "discussion_generation": "high",
     "paper_section": "high",
 }

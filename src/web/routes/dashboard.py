@@ -373,9 +373,14 @@ def _render_catalog_review_badge(status: str) -> str:
 
 def _resolve_dashboard_reviewer(current_user: Any) -> str:
     if isinstance(current_user, dict):
+        auth_source = str(current_user.get("auth_source") or "").strip()
+        if auth_source == "management_api_key":
+            return "管理 API"
         for field_name in ("display_name", "username", "principal", "user_id"):
             value = str(current_user.get(field_name) or "").strip()
             if value:
+                if value == "管理 API Key":
+                    return "管理 API"
                 return value
     return "工作台用户"
 
@@ -910,12 +915,19 @@ def _render_workbench_review_card(
     ) or '<p class="text-xs text-gray-400">暂无摘要说明</p>'
     subtitle = str(item.get("subtitle") or "").strip()
     card_review_status = str(item.get("review_status") or "pending").strip()
+    priority_label = str(item.get("priority_label") or "").strip()
     return f"""
-    <article class="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-3" data-review-status="{_safe_html(card_review_status)}">
+    <article class="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-3" data-workbench-card="1" data-review-status="{_safe_html(card_review_status)}" data-asset-type="{_safe_html(str(item.get('asset_type') or ''))}">
         <div class="flex flex-wrap items-start justify-between gap-2">
-            <div>
-                <h5 class="text-sm font-semibold text-gray-800">{_safe_html(item.get('title') or '未命名条目')}</h5>
-                <p class="text-xs text-gray-500 mt-1">{_safe_html(subtitle or '文献学工作台条目')}</p>
+            <div class="flex items-start gap-2">
+                <label class="mt-0.5 inline-flex items-center gap-1 text-[11px] text-gray-500">
+                    <input type="checkbox" class="wb-batch-checkbox rounded border-gray-300 text-emerald-600 focus:ring-emerald-500" onchange="updateWorkbenchBatchSelectionCount()">
+                    批量
+                </label>
+                <div>
+                    <h5 class="text-sm font-semibold text-gray-800">{_safe_html(item.get('title') or '未命名条目')}</h5>
+                    <p class="text-xs text-gray-500 mt-1">{_safe_html(subtitle or '文献学工作台条目')}{_safe_html(f' · {priority_label}' if priority_label else '')}</p>
+                </div>
             </div>
             {_render_catalog_review_badge(str(item.get('review_status') or 'pending'))}
         </div>
@@ -998,6 +1010,12 @@ def _render_philology_review_workbench(
         if isinstance(section, dict) and str(section.get("asset_type") or "") != "catalog_version_lineage"
     ]
     visible_sections = [section for section in sections if any(isinstance(item, dict) for item in (section.get("items") or []))]
+    queue_summary_raw = review_workbench.get("queue_summary")
+    queue_summary = dict(queue_summary_raw) if isinstance(queue_summary_raw, dict) else {}
+    review_queue_raw = review_workbench.get("review_queue")
+    review_queue = dict(review_queue_raw) if isinstance(review_queue_raw, dict) else {}
+    reviewer_workload_raw = review_queue.get("reviewer_workload")
+    reviewer_workload = [dict(item) for item in reviewer_workload_raw if isinstance(item, dict)] if isinstance(reviewer_workload_raw, list) else []
     if not visible_sections:
         return f"""
         <section class="rounded-2xl border border-gray-100 bg-gray-50/60 p-4 space-y-4">
@@ -1059,6 +1077,45 @@ def _render_philology_review_workbench(
             f'data-status="" onclick="toggleWorkbenchStatusFilter(this)">全部</button>'
             f'{review_status_chips}</div>'
         )
+    workload_html = ""
+    if reviewer_workload:
+        workload_lines = "\n".join(
+            _safe_html(
+                f"{str(item.get('reviewer_label') or '未认领').strip() or '未认领'}：待处理 {int(item.get('open') or 0)} / 总计 {int(item.get('total') or 0)}"
+            )
+            for item in reviewer_workload[:4]
+        )
+        workload_html = (
+            '<div class="rounded-xl border border-gray-100 bg-white px-3 py-2 text-xs text-gray-600 whitespace-pre-wrap">'
+            f'{workload_lines}'
+            '</div>'
+        )
+    batch_toolbar_html = f"""
+        <div class="rounded-2xl border border-gray-100 bg-white p-4 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+                <p id="wb-batch-selection-count">已选 0 条</p>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button type="button" class="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-600 hover:text-gray-900 hover:border-gray-300 transition" onclick="toggleWorkbenchBatchSelection(true)">全选当前筛选结果</button>
+                    <button type="button" class="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-600 hover:text-gray-900 hover:border-gray-300 transition" onclick="toggleWorkbenchBatchSelection(false)">清空已选</button>
+                </div>
+            </div>
+            <label class="block text-[11px] text-gray-500">批量共享审核依据 / 备注
+                <textarea id="wb-batch-decision-basis" rows="2" class="mt-1 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 placeholder:text-gray-400 focus:border-emerald-300 focus:bg-white focus:outline-none" placeholder="填写当前筛选结果的统一审核依据或补据说明"></textarea>
+            </label>
+            <label class="block text-[11px] text-gray-500">批量原因标签（逗号或换行分隔）
+                <textarea id="wb-batch-review-reasons" rows="2" class="mt-1 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 placeholder:text-gray-400 focus:border-emerald-300 focus:bg-white focus:outline-none" placeholder="needs_source, reviewer_batch"></textarea>
+            </label>
+            <div class="flex flex-wrap items-center gap-2">
+                <button type="button" class="inline-flex items-center px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition bg-emerald-600 text-white hover:bg-emerald-700" onclick="applyWorkbenchBatchReview('{_safe_html(str(cycle_id or ''))}', 'accepted')">批量标记已核</button>
+                <button type="button" class="inline-flex items-center px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition bg-rose-600 text-white hover:bg-rose-700" onclick="applyWorkbenchBatchReview('{_safe_html(str(cycle_id or ''))}', 'rejected')">批量标记驳回</button>
+                <button type="button" class="inline-flex items-center px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition bg-slate-800 text-white hover:bg-slate-900" onclick="applyWorkbenchBatchReview('{_safe_html(str(cycle_id or ''))}', 'needs_source')">批量待补据</button>
+                <button type="button" class="inline-flex items-center px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition bg-amber-100 text-amber-800 hover:bg-amber-200" onclick="applyWorkbenchBatchReview('{_safe_html(str(cycle_id or ''))}', 'pending')">批量退回待核</button>
+            </div>
+            <div class="text-xs text-gray-500 whitespace-pre-wrap">可见卡片 {total_cards} / 待处理 {int(queue_summary.get('total_pending') or 0)}</div>
+            {workload_html}
+            <p id="wb-batch-feedback" class="text-xs text-gray-500"></p>
+        </div>
+    """
     filter_script = """
     <script>
     function toggleWorkbenchStatusFilter(btn) {
@@ -1072,11 +1129,155 @@ def _render_philology_review_workbench(
       document.querySelectorAll("[data-review-status]").forEach(function(card) {
         card.style.display = (!status || card.getAttribute("data-review-status") === status) ? "" : "none";
       });
+            updateWorkbenchBatchSelectionCount();
     }
+
+        function updateWorkbenchBatchSelectionCount() {
+            var root = document.querySelector('[data-workbench-root="1"]');
+            if (!root) {
+                return;
+            }
+            var count = root.querySelectorAll('.wb-batch-checkbox:checked').length;
+            var counter = document.getElementById('wb-batch-selection-count');
+            if (counter) {
+                counter.textContent = '已选 ' + count + ' 条';
+            }
+        }
+
+        function toggleWorkbenchBatchSelection(selectAll) {
+            var root = document.querySelector('[data-workbench-root="1"]');
+            if (!root) {
+                return;
+            }
+            root.querySelectorAll('.wb-batch-checkbox').forEach(function(checkbox) {
+                var card = checkbox.closest('[data-workbench-card="1"]');
+                if (!card) {
+                    return;
+                }
+                if (!selectAll) {
+                    checkbox.checked = false;
+                    return;
+                }
+                checkbox.checked = card.style.display !== 'none';
+            });
+            updateWorkbenchBatchSelectionCount();
+        }
+
+        function _parseWorkbenchBatchReasons(text) {
+            return Array.from(new Set(String(text || '').split(/[\\n,;，；]+/).map(function(item) {
+                return item.trim();
+            }).filter(Boolean)));
+        }
+
+        async function applyWorkbenchBatchReview(cycleId, reviewStatus) {
+            var root = document.querySelector('[data-workbench-root="1"]');
+            if (!root) {
+                return;
+            }
+            var batchEndpoint = root.getAttribute('data-batch-endpoint') || ('/api/projects/' + encodeURIComponent(cycleId) + '/batch-philology-review');
+            var feedback = document.getElementById('wb-batch-feedback');
+            var sharedDecisionBasisNode = document.getElementById('wb-batch-decision-basis');
+            var sharedReasonsNode = document.getElementById('wb-batch-review-reasons');
+            var sharedDecisionBasis = sharedDecisionBasisNode ? sharedDecisionBasisNode.value.trim() : '';
+            var sharedReviewReasons = _parseWorkbenchBatchReasons(sharedReasonsNode ? sharedReasonsNode.value : '');
+            var decisions = [];
+            root.querySelectorAll('.wb-batch-checkbox:checked').forEach(function(checkbox) {
+                var card = checkbox.closest('[data-workbench-card="1"]');
+                var form = card ? card.querySelector('form') : null;
+                if (!form) {
+                    return;
+                }
+                var formData = new FormData(form);
+                decisions.push({
+                    asset_type: String(formData.get('asset_type') || ''),
+                    asset_key: String(formData.get('asset_key') || ''),
+                    review_status: reviewStatus,
+                    decision_basis: sharedDecisionBasis,
+                    review_reasons: sharedReviewReasons,
+                    needs_manual_review: reviewStatus !== 'accepted' && reviewStatus !== 'rejected',
+                    candidate_kind: String(formData.get('candidate_kind') || ''),
+                    document_title: String(formData.get('document_title') || ''),
+                    document_urn: String(formData.get('document_urn') || ''),
+                    work_title: String(formData.get('work_title') || ''),
+                    fragment_title: String(formData.get('fragment_title') || ''),
+                    version_lineage_key: String(formData.get('version_lineage_key') || ''),
+                    witness_key: String(formData.get('witness_key') || ''),
+                    canonical: String(formData.get('canonical') || ''),
+                    label: String(formData.get('label') || ''),
+                    difference_type: String(formData.get('difference_type') || ''),
+                    base_text: String(formData.get('base_text') || ''),
+                    witness_text: String(formData.get('witness_text') || ''),
+                    claim_id: String(formData.get('claim_id') || ''),
+                    source_entity: String(formData.get('source_entity') || ''),
+                    target_entity: String(formData.get('target_entity') || ''),
+                    relation_type: String(formData.get('relation_type') || ''),
+                    fragment_candidate_id: String(formData.get('fragment_candidate_id') || ''),
+                    evidence_chain_id: String(formData.get('evidence_chain_id') || ''),
+                    claim_type: String(formData.get('claim_type') || ''),
+                    claim_statement: String(formData.get('claim_statement') || ''),
+                    judgment_type: String(formData.get('judgment_type') || '')
+                });
+            });
+            if (decisions.length === 0) {
+                if (feedback) {
+                    feedback.textContent = '请至少选择 1 条工作台卡片。';
+                    feedback.classList.add('text-rose-600');
+                }
+                return;
+            }
+            if (feedback) {
+                feedback.classList.remove('text-rose-600');
+                feedback.textContent = '批量写回中...';
+            }
+            var payload = {
+                decisions: decisions,
+                selection_snapshot: {
+                    selection_strategy: 'current_filtered_selection',
+                    selected_count: decisions.length,
+                    visible_item_count: root.querySelectorAll('[data-workbench-card="1"]').length,
+                    active_filters: {
+                        document_title: root.getAttribute('data-document-title-filter') || '',
+                        work_title: root.getAttribute('data-work-title-filter') || '',
+                        version_lineage_key: root.getAttribute('data-version-lineage-key-filter') || '',
+                        witness_key: root.getAttribute('data-witness-key-filter') || ''
+                    }
+                },
+                shared_decision_basis: sharedDecisionBasis,
+                shared_review_reasons: sharedReviewReasons,
+                terminology_page: parseInt(root.getAttribute('data-terminology-page') || '1', 10) || 1,
+                collation_page: parseInt(root.getAttribute('data-collation-page') || '1', 10) || 1,
+                drawer: root.getAttribute('data-drawer') === '1',
+                document_title_filter: root.getAttribute('data-document-title-filter') || '',
+                work_title_filter: root.getAttribute('data-work-title-filter') || '',
+                version_lineage_key_filter: root.getAttribute('data-version-lineage-key-filter') || '',
+                witness_key_filter: root.getAttribute('data-witness-key-filter') || ''
+            };
+            try {
+                var response = await fetch(batchEndpoint, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                var html = await response.text();
+                if (!response.ok) {
+                    throw new Error(html || ('HTTP ' + response.status));
+                }
+                var targetId = root.getAttribute('data-target-id') || '#project-detail-panel';
+                var target = document.querySelector(targetId);
+                if (target) {
+                    target.outerHTML = html;
+                }
+            } catch (error) {
+                if (feedback) {
+                    feedback.textContent = '批量写回失败：' + error;
+                    feedback.classList.add('text-rose-600');
+                }
+            }
+        }
     </script>
     """
     return f"""
-    <section class="space-y-4">
+            <section class="space-y-4" data-workbench-root="1" data-target-id="{'#session-detail-drawer-content' if drawer else '#project-detail-panel'}" data-batch-endpoint="/api/projects/{quote(str(cycle_id or '').strip(), safe='')}/batch-philology-review" data-terminology-page="{max(1, terminology_page)}" data-collation-page="{max(1, collation_page)}" data-drawer="{'1' if drawer else '0'}" data-document-title-filter="{_safe_html(document_title)}" data-work-title-filter="{_safe_html(work_title)}" data-version-lineage-key-filter="{_safe_html(version_lineage_key)}" data-witness-key-filter="{_safe_html(witness_key)}">
         <div class="rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <div>
@@ -1090,6 +1291,7 @@ def _render_philology_review_workbench(
             </div>
             {review_filter_html}
         </div>
+        {batch_toolbar_html}
         {sections_html}
     </section>
     {filter_script}
@@ -2375,6 +2577,21 @@ async def project_detail_panel(
             )
         )
 
+    if not isinstance(session, dict):
+        return HTMLResponse(
+            _render_session_detail_panel(
+                None,
+                terminology_page=terminology_page,
+                collation_page=collation_page,
+                drawer=bool(drawer),
+                document_title=document_title,
+                work_title=work_title,
+                version_lineage_key=version_lineage_key,
+                witness_key=witness_key,
+                error_message=f"未找到研究任务: {cycle_id}",
+            )
+        )
+
     return HTMLResponse(
         _render_session_detail_panel(
             session,
@@ -2385,7 +2602,7 @@ async def project_detail_panel(
             work_title=work_title,
             version_lineage_key=version_lineage_key,
             witness_key=witness_key,
-            error_message=f"未找到研究任务: {cycle_id}",
+            error_message="",
         )
     )
 
@@ -2538,16 +2755,30 @@ async def batch_project_catalog_review(
     terminology_page = int(body.get("terminology_page") or 1)
     collation_page = int(body.get("collation_page") or 1)
     drawer = 1 if body.get("drawer") else 0
+    document_title = str(body.get("document_title_filter") or "").strip()
+    work_title = str(body.get("work_title_filter") or "").strip()
+    version_lineage_key = str(body.get("version_lineage_key_filter") or "").strip()
+    witness_key = str(body.get("witness_key_filter") or "").strip()
 
     decisions = []
     for d in decisions_raw:
         d["reviewer"] = reviewer
         if not str(d.get("decision_basis") or "").strip():
-            d["decision_basis"] = "仪表盘批量目录学审核"
+            d["decision_basis"] = str(body.get("shared_decision_basis") or "").strip() or "仪表盘批量目录学审核"
+        if not (d.get("review_reasons") or []):
+            d["review_reasons"] = list(body.get("shared_review_reasons") or [])
         decisions.append(d)
 
+    batch_payload = {
+        "decisions": decisions,
+        "selection_snapshot": body.get("selection_snapshot") or {},
+        "shared_decision_basis": body.get("shared_decision_basis") or "",
+        "shared_review_reasons": list(body.get("shared_review_reasons") or []),
+        "reviewer": reviewer,
+    }
+
     try:
-        updated_session = apply_catalog_review_batch(request.app, cycle_id, decisions)
+        updated_session = apply_catalog_review_batch(request.app, cycle_id, batch_payload)
         if updated_session is None:
             raise ValueError("Observe 阶段未持久化或研究任务不存在")
         session = updated_session
@@ -2566,6 +2797,10 @@ async def batch_project_catalog_review(
             terminology_page=terminology_page,
             collation_page=collation_page,
             drawer=bool(drawer),
+            document_title=document_title,
+            work_title=work_title,
+            version_lineage_key=version_lineage_key,
+            witness_key=witness_key,
             error_message=error_message,
         )
     )
@@ -2590,16 +2825,30 @@ async def batch_project_philology_review(
     terminology_page = int(body.get("terminology_page") or 1)
     collation_page = int(body.get("collation_page") or 1)
     drawer = 1 if body.get("drawer") else 0
+    document_title = str(body.get("document_title_filter") or "").strip()
+    work_title = str(body.get("work_title_filter") or "").strip()
+    version_lineage_key = str(body.get("version_lineage_key_filter") or "").strip()
+    witness_key = str(body.get("witness_key_filter") or "").strip()
 
     decisions = []
     for d in decisions_raw:
         d["reviewer"] = reviewer
         if not str(d.get("decision_basis") or "").strip():
-            d["decision_basis"] = "仪表盘批量文献学工作台审核"
+            d["decision_basis"] = str(body.get("shared_decision_basis") or "").strip() or "仪表盘批量文献学工作台审核"
+        if not (d.get("review_reasons") or []):
+            d["review_reasons"] = list(body.get("shared_review_reasons") or [])
         decisions.append(d)
 
+    batch_payload = {
+        "decisions": decisions,
+        "selection_snapshot": body.get("selection_snapshot") or {},
+        "shared_decision_basis": body.get("shared_decision_basis") or "",
+        "shared_review_reasons": list(body.get("shared_review_reasons") or []),
+        "reviewer": reviewer,
+    }
+
     try:
-        updated_session = apply_philology_review_batch(request.app, cycle_id, decisions)
+        updated_session = apply_philology_review_batch(request.app, cycle_id, batch_payload)
         if updated_session is None:
             raise ValueError("Observe 阶段未持久化或研究任务不存在")
         session = updated_session
@@ -2618,6 +2867,10 @@ async def batch_project_philology_review(
             terminology_page=terminology_page,
             collation_page=collation_page,
             drawer=bool(drawer),
+            document_title=document_title,
+            work_title=work_title,
+            version_lineage_key=version_lineage_key,
+            witness_key=witness_key,
             error_message=error_message,
         )
     )

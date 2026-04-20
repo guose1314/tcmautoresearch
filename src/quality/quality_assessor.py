@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from src.core.phase_tracker import PhaseTrackerMixin
+from src.infra.llm_service import prepare_planned_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -494,9 +495,26 @@ class QualityAssessor(PhaseTrackerMixin):
             "```"
         )
 
+        planned_call = prepare_planned_llm_call(
+            phase=str(result.get("phase") or "analyze"),
+            task_type="quality_assessment",
+            purpose="default",
+            dossier_sections={
+                "result_summary": result_summary,
+                "phase": str(result.get("phase") or "analyze"),
+                "status": str(result.get("status") or "unknown"),
+            },
+            llm_engine=llm_engine,
+        )
+        if not planned_call.should_call_llm:
+            return None
+
         try:
-            raw = llm_engine.generate(user_prompt, _QUALITY_SYSTEM_PROMPT)
-            return self._parse_llm_quality_response(raw)
+            raw = planned_call.create_proxy().generate(user_prompt, _QUALITY_SYSTEM_PROMPT)
+            parsed = self._parse_llm_quality_response(raw)
+            if parsed is not None:
+                parsed["planner"] = planned_call.to_metadata()
+            return parsed
         except Exception as exc:
             logger.warning("LLM 质量评估调用失败，回退规则评分: %s", exc)
             return None
@@ -539,9 +557,28 @@ class QualityAssessor(PhaseTrackerMixin):
             "```"
         )
 
+        planned_call = prepare_planned_llm_call(
+            phase="reflect",
+            task_type="reflection",
+            purpose="reflect",
+            dossier_sections={
+                "overall_score": str(overall),
+                "weaknesses": weakness_text,
+                "strengths": strength_text,
+            },
+            llm_engine=llm_engine,
+        )
+        if not planned_call.should_call_llm:
+            return None
+
         try:
-            raw = llm_engine.generate(user_prompt, _QUALITY_SYSTEM_PROMPT)
-            return self._parse_llm_cycle_diagnosis(raw)
+            raw = planned_call.create_proxy().generate(user_prompt, _QUALITY_SYSTEM_PROMPT)
+            diagnosis = self._parse_llm_cycle_diagnosis(raw)
+            if diagnosis is not None:
+                diagnosis["planner"] = planned_call.to_metadata()
+                diagnosis["llm_cost_report"] = planned_call.get_cost_report()
+                diagnosis["fallback_path"] = planned_call.fallback_path
+            return diagnosis
         except Exception as exc:
             logger.warning("LLM 循环诊断调用失败: %s", exc)
             return None

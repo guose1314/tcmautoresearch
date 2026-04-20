@@ -2078,6 +2078,8 @@
         let dashboardPhaseFilter = DASHBOARD_PHASE_FILTER_ALL;
         let latestDashboardPayload = null;
         let currentDashboardCatalogFilters = {};
+        let currentDashboardWorkbenchSelection = new Set();
+        let currentDashboardWorkbenchItems = {};
         let dashboardModalBound = false;
         let dashboardGraphModalBound = false;
 
@@ -2869,7 +2871,7 @@
                 return {};
             }
             const normalized = {};
-            ["work_title", "version_lineage_key", "witness_key"].forEach((fieldName) => {
+            ["document_title", "work_title", "version_lineage_key", "witness_key", "asset_type", "review_status", "priority_bucket", "reviewer"].forEach((fieldName) => {
                 const value = String(filters[fieldName] || "").trim();
                 if (value) {
                     normalized[fieldName] = value;
@@ -3983,18 +3985,28 @@
             if (!normalizedJobId || normalizedJobId === "-") {
                 throw new Error("当前任务尚未生成可审核的 job_id");
             }
+            const body = { decisions };
+            ["selection_snapshot", "shared_decision_basis", "shared_review_reasons"].forEach((fieldName) => {
+                if (context[fieldName] !== undefined) {
+                    body[fieldName] = context[fieldName];
+                }
+            });
             const response = await authenticatedFetch(`/api/research/jobs/${encodeURIComponent(normalizedJobId)}/batch-catalog-review`, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({decisions}),
+                body: JSON.stringify(body),
             });
             if (!response.ok) {
                 const errorPayload = await response.json().catch(() => ({}));
                 throw new Error(errorPayload.detail || `HTTP ${response.status}`);
             }
             const result = await response.json();
-            await refreshResearchDashboard(normalizedJobId);
-            setBanner(`批量目录学 review 已写回 ${result.applied_count} 条`, "success");
+            if (context.refreshDashboard !== false) {
+                await refreshResearchDashboard(normalizedJobId);
+            }
+            if (context.showBanner !== false) {
+                setBanner(`批量目录学 review 已写回 ${result.applied_count} 条`, "success");
+            }
             return result;
         }
 
@@ -4003,23 +4015,36 @@
             if (!normalizedJobId || normalizedJobId === "-") {
                 throw new Error("当前任务尚未生成可审核的 job_id");
             }
+            const body = { decisions };
+            ["selection_snapshot", "shared_decision_basis", "shared_review_reasons"].forEach((fieldName) => {
+                if (context[fieldName] !== undefined) {
+                    body[fieldName] = context[fieldName];
+                }
+            });
             const response = await authenticatedFetch(`/api/research/jobs/${encodeURIComponent(normalizedJobId)}/batch-philology-review`, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({decisions}),
+                body: JSON.stringify(body),
             });
             if (!response.ok) {
                 const errorPayload = await response.json().catch(() => ({}));
                 throw new Error(errorPayload.detail || `HTTP ${response.status}`);
             }
             const result = await response.json();
-            await refreshResearchDashboard(normalizedJobId);
-            setBanner(`批量文献学 review 已写回 ${result.applied_count} 条`, "success");
+            if (context.refreshDashboard !== false) {
+                await refreshResearchDashboard(normalizedJobId);
+            }
+            if (context.showBanner !== false) {
+                setBanner(`批量文献学 review 已写回 ${result.applied_count} 条`, "success");
+            }
             return result;
         }
 
         function buildReviewWorkbenchFilterSummary(activeFilters) {
             const labels = [];
+            if (activeFilters.document_title) {
+                labels.push(`文献=${activeFilters.document_title}`);
+            }
             if (activeFilters.work_title) {
                 labels.push(`作品=${activeFilters.work_title}`);
             }
@@ -4029,7 +4054,142 @@
             if (activeFilters.witness_key) {
                 labels.push(`见证本=${activeFilters.witness_key}`);
             }
+            if (activeFilters.asset_type) {
+                labels.push(`资产=${activeFilters.asset_type}`);
+            }
+            if (activeFilters.review_status) {
+                labels.push(`状态=${formatCatalogReviewStatus(activeFilters.review_status)}`);
+            }
+            if (activeFilters.priority_bucket) {
+                const priorityLabels = { high: "高优先", medium: "常规", low: "已完成" };
+                labels.push(`优先级=${priorityLabels[activeFilters.priority_bucket] || activeFilters.priority_bucket}`);
+            }
+            if (activeFilters.reviewer) {
+                labels.push(`审核人=${activeFilters.reviewer === "unassigned" ? "未认领" : activeFilters.reviewer}`);
+            }
             return labels.length > 0 ? labels.join("\n") : "未启用 catalog filter";
+        }
+
+        function parseSharedReviewReasons(text) {
+            return Array.from(new Set(
+                String(text || "")
+                    .split(/[\n,;，；]+/)
+                    .map((item) => item.trim())
+                    .filter(Boolean)
+            ));
+        }
+
+        function collectSelectedReviewWorkbenchItems() {
+            return Array.from(currentDashboardWorkbenchSelection)
+                .map((assetKey) => currentDashboardWorkbenchItems[assetKey])
+                .filter((item) => item && typeof item === "object");
+        }
+
+        function syncReviewWorkbenchSelectionState(boardRoot) {
+            if (!boardRoot) {
+                return;
+            }
+            const selectedItems = collectSelectedReviewWorkbenchItems();
+            const countNode = boardRoot.querySelector("[data-review-selection-count]");
+            if (countNode) {
+                countNode.textContent = `已选 ${selectedItems.length} 条`;
+            }
+            boardRoot.querySelectorAll("[data-batch-review-status]").forEach((button) => {
+                button.disabled = selectedItems.length === 0;
+            });
+        }
+
+        function buildReviewWorkbenchSelectionSnapshot(reviewWorkbench, activeFilters, selectedItems) {
+            const sectionCounts = reviewWorkbench?.review_queue?.section_counts && typeof reviewWorkbench.review_queue.section_counts === "object"
+                ? reviewWorkbench.review_queue.section_counts
+                : reviewWorkbench?.queue_summary?.section_counts && typeof reviewWorkbench.queue_summary.section_counts === "object"
+                    ? reviewWorkbench.queue_summary.section_counts
+                    : {};
+            return {
+                selection_strategy: "current_filtered_selection",
+                selected_count: selectedItems.length,
+                visible_item_count: safeNumber(reviewWorkbench?.total_item_count, 0),
+                total_item_count: safeNumber(reviewWorkbench?.all_item_count, safeNumber(reviewWorkbench?.total_item_count, 0)),
+                asset_keys: selectedItems.map((item) => String(item.asset_key || "").trim()).filter(Boolean),
+                asset_types: Array.from(new Set(selectedItems.map((item) => String(item.asset_type || "").trim()).filter(Boolean))),
+                review_statuses: Array.from(new Set(selectedItems.map((item) => String(item.review_status || "").trim()).filter(Boolean))),
+                active_filters: activeFilters,
+                section_counts: sectionCounts,
+            };
+        }
+
+        async function applyBatchReviewWorkbenchAction(payload, reviewWorkbench, reviewStatus, decisionBasis, sharedReasons, boardRoot, feedbackNode) {
+            const selectedItems = collectSelectedReviewWorkbenchItems();
+            if (selectedItems.length === 0) {
+                throw new Error("请至少选择 1 条工作台卡片");
+            }
+            const activeFilters = normalizeDashboardCatalogFilters({
+                ...(payload?.evidence_board?.active_catalog_filters || {}),
+                ...(reviewWorkbench?.queue_filters?.active_filters || {}),
+            });
+            const selectionSnapshot = buildReviewWorkbenchSelectionSnapshot(reviewWorkbench, activeFilters, selectedItems);
+            const catalogDecisions = [];
+            const philologyDecisions = [];
+
+            selectedItems.forEach((item) => {
+                if (item.submission_mode === "catalog") {
+                    catalogDecisions.push({
+                        scope: "version_lineage",
+                        version_lineage_key: item.version_lineage_key || item.asset_key,
+                        review_status: reviewStatus,
+                        decision_basis: decisionBasis,
+                        review_reasons: sharedReasons,
+                    });
+                    return;
+                }
+                philologyDecisions.push({
+                    ...buildPhilologyReviewPayload(item, reviewStatus, decisionBasis),
+                    review_reasons: sharedReasons,
+                });
+            });
+
+            if (feedbackNode) {
+                feedbackNode.classList.remove("error");
+                feedbackNode.textContent = `批量写回中... ${selectedItems.length} 条`;
+            }
+
+            const requestContext = {
+                selection_snapshot: selectionSnapshot,
+                shared_decision_basis: decisionBasis,
+                shared_review_reasons: sharedReasons,
+                refreshDashboard: false,
+                showBanner: false,
+            };
+
+            if (catalogDecisions.length > 0) {
+                await submitBatchCatalogReview(payload.job_id, catalogDecisions, requestContext);
+            }
+            if (philologyDecisions.length > 0) {
+                await submitBatchPhilologyReview(payload.job_id, philologyDecisions, requestContext);
+            }
+            await refreshResearchDashboard(payload.job_id);
+            currentDashboardWorkbenchSelection = new Set();
+            syncReviewWorkbenchSelectionState(boardRoot);
+            if (feedbackNode) {
+                feedbackNode.textContent = `已批量写回 ${selectedItems.length} 条。`;
+            }
+            setBanner(`批量文献学 review 已写回 ${selectedItems.length} 条`, "success");
+        }
+
+        function buildReviewerWorkloadSummary(reviewWorkbench) {
+            const items = Array.isArray(reviewWorkbench?.review_queue?.reviewer_workload)
+                ? reviewWorkbench.review_queue.reviewer_workload
+                : [];
+            if (items.length === 0) {
+                return null;
+            }
+            const wrapper = document.createElement("div");
+            wrapper.className = "dashboard-review-meta";
+            wrapper.textContent = items
+                .slice(0, 4)
+                .map((item) => `${item.reviewer_label || "未认领"}：待处理 ${safeNumber(item.open, 0)} / 总计 ${safeNumber(item.total, 0)}`)
+                .join("\n");
+            return wrapper;
         }
 
         function buildReviewWorkbenchFilterControl(jobId, fieldName, labelText, options, activeValue) {
@@ -4082,7 +4242,7 @@
             return wrapper;
         }
 
-        function buildReviewWorkbenchToolbar(payload, evidenceBoard, reviewWorkbench) {
+        function buildReviewWorkbenchToolbar(payload, evidenceBoard, reviewWorkbench, boardRoot) {
             const toolbar = document.createElement("div");
             toolbar.className = "dashboard-review-toolbar";
 
@@ -4092,11 +4252,21 @@
             const options = evidenceBoard?.catalog_filter_options && typeof evidenceBoard.catalog_filter_options === "object"
                 ? evidenceBoard.catalog_filter_options
                 : {};
-            const activeFilters = normalizeDashboardCatalogFilters(evidenceBoard?.active_catalog_filters);
+            const queueFilterOptions = reviewWorkbench?.queue_filters?.options && typeof reviewWorkbench.queue_filters.options === "object"
+                ? reviewWorkbench.queue_filters.options
+                : {};
+            const activeFilters = normalizeDashboardCatalogFilters({
+                ...(evidenceBoard?.active_catalog_filters || {}),
+                ...(reviewWorkbench?.queue_filters?.active_filters || {}),
+            });
 
             filters.appendChild(buildReviewWorkbenchFilterControl(payload.job_id, "work_title", "作品", options.work_title, activeFilters.work_title));
             filters.appendChild(buildReviewWorkbenchFilterControl(payload.job_id, "version_lineage_key", "谱系", options.version_lineage_key, activeFilters.version_lineage_key));
             filters.appendChild(buildReviewWorkbenchFilterControl(payload.job_id, "witness_key", "见证本", options.witness_key, activeFilters.witness_key));
+            filters.appendChild(buildReviewWorkbenchFilterControl(payload.job_id, "asset_type", "资产类型", queueFilterOptions.asset_type, activeFilters.asset_type));
+            filters.appendChild(buildReviewWorkbenchFilterControl(payload.job_id, "review_status", "复核状态", queueFilterOptions.review_status, activeFilters.review_status));
+            filters.appendChild(buildReviewWorkbenchFilterControl(payload.job_id, "priority_bucket", "优先级", queueFilterOptions.priority_bucket, activeFilters.priority_bucket));
+            filters.appendChild(buildReviewWorkbenchFilterControl(payload.job_id, "reviewer", "审核人", queueFilterOptions.reviewer, activeFilters.reviewer));
 
             const clearButton = document.createElement("button");
             clearButton.type = "button";
@@ -4110,10 +4280,116 @@
 
             const summary = document.createElement("div");
             summary.className = "dashboard-review-meta";
-            summary.textContent = `当前筛选：${buildReviewWorkbenchFilterSummary(activeFilters)}\n可见卡片：${safeNumber(reviewWorkbench?.total_item_count, 0)}`;
+            summary.textContent = `当前筛选：${buildReviewWorkbenchFilterSummary(activeFilters)}\n可见卡片：${safeNumber(reviewWorkbench?.total_item_count, 0)} / 总量：${safeNumber(reviewWorkbench?.all_item_count, safeNumber(reviewWorkbench?.total_item_count, 0))}\n待处理：${safeNumber(reviewWorkbench?.review_queue?.total_pending, 0)}`;
+
+            const batchPanel = document.createElement("div");
+            batchPanel.className = "dashboard-review-section";
+
+            const selectionMeta = document.createElement("div");
+            selectionMeta.className = "dashboard-review-meta";
+            selectionMeta.setAttribute("data-review-selection-count", "1");
+            selectionMeta.textContent = "已选 0 条";
+
+            const helperActions = document.createElement("div");
+            helperActions.className = "dashboard-review-actions";
+            const selectVisibleButton = document.createElement("button");
+            selectVisibleButton.type = "button";
+            selectVisibleButton.className = "dashboard-review-button pending";
+            selectVisibleButton.textContent = "全选当前筛选结果";
+            selectVisibleButton.addEventListener("click", function() {
+                boardRoot.querySelectorAll(".dashboard-review-select").forEach((checkbox) => {
+                    checkbox.checked = true;
+                    currentDashboardWorkbenchSelection.add(checkbox.value);
+                });
+                syncReviewWorkbenchSelectionState(boardRoot);
+            });
+            const clearSelectionButton = document.createElement("button");
+            clearSelectionButton.type = "button";
+            clearSelectionButton.className = "dashboard-review-button rejected";
+            clearSelectionButton.textContent = "清空已选";
+            clearSelectionButton.addEventListener("click", function() {
+                currentDashboardWorkbenchSelection = new Set();
+                boardRoot.querySelectorAll(".dashboard-review-select").forEach((checkbox) => {
+                    checkbox.checked = false;
+                });
+                syncReviewWorkbenchSelectionState(boardRoot);
+            });
+            helperActions.appendChild(selectVisibleButton);
+            helperActions.appendChild(clearSelectionButton);
+
+            const basisField = document.createElement("div");
+            basisField.className = "dashboard-review-field";
+            const basisLabel = document.createElement("label");
+            basisLabel.textContent = "批量共享审核依据 / 备注";
+            const basisInput = document.createElement("textarea");
+            basisInput.placeholder = "例如：按当前筛选结果统一标记待补据，待补目录来源。";
+            basisField.appendChild(basisLabel);
+            basisField.appendChild(basisInput);
+
+            const reasonsField = document.createElement("div");
+            reasonsField.className = "dashboard-review-field";
+            const reasonsLabel = document.createElement("label");
+            reasonsLabel.textContent = "批量原因标签（逗号或换行分隔）";
+            const reasonsInput = document.createElement("textarea");
+            reasonsInput.placeholder = "needs_source, reviewer_batch";
+            reasonsField.appendChild(reasonsLabel);
+            reasonsField.appendChild(reasonsInput);
+
+            const feedback = document.createElement("div");
+            feedback.className = "dashboard-review-feedback";
+
+            const batchActions = document.createElement("div");
+            batchActions.className = "dashboard-review-actions";
+            [
+                ["accepted", "批量标记已核"],
+                ["rejected", "批量标记驳回"],
+                ["needs_source", "批量待补据"],
+                ["pending", "批量退回待核"],
+            ].forEach(([statusValue, labelText]) => {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = `dashboard-review-button ${statusValue}`.trim();
+                button.textContent = labelText;
+                button.setAttribute("data-batch-review-status", statusValue);
+                button.disabled = true;
+                button.addEventListener("click", async function() {
+                    const sharedDecisionBasis = String(basisInput.value || "").trim();
+                    const sharedReviewReasons = parseSharedReviewReasons(reasonsInput.value);
+                    try {
+                        await applyBatchReviewWorkbenchAction(
+                            payload,
+                            reviewWorkbench,
+                            statusValue,
+                            sharedDecisionBasis,
+                            sharedReviewReasons,
+                            boardRoot,
+                            feedback,
+                        );
+                        basisInput.value = "";
+                        reasonsInput.value = "";
+                    } catch (error) {
+                        feedback.textContent = `批量写回失败：${error.message}`;
+                        feedback.classList.add("error");
+                    }
+                });
+                batchActions.appendChild(button);
+            });
+
+            batchPanel.appendChild(selectionMeta);
+            batchPanel.appendChild(helperActions);
+            batchPanel.appendChild(basisField);
+            batchPanel.appendChild(reasonsField);
+            batchPanel.appendChild(batchActions);
+            batchPanel.appendChild(feedback);
+
+            const workloadSummary = buildReviewerWorkloadSummary(reviewWorkbench);
 
             toolbar.appendChild(filters);
             toolbar.appendChild(summary);
+            if (workloadSummary) {
+                toolbar.appendChild(workloadSummary);
+            }
+            toolbar.appendChild(batchPanel);
             return toolbar;
         }
 
@@ -4122,6 +4398,7 @@
                 asset_type: item.asset_type,
                 asset_key: item.asset_key,
                 review_status: reviewStatus,
+                needs_manual_review: reviewStatus === "accepted" || reviewStatus === "rejected" ? false : true,
                 decision_basis: decisionBasis,
                 candidate_kind: item.candidate_kind || "",
                 document_title: item.document_title || "",
@@ -4140,21 +4417,48 @@
                 target_entity: item.target_entity || "",
                 relation_type: item.relation_type || "",
                 fragment_candidate_id: item.fragment_candidate_id || "",
+                evidence_chain_id: item.evidence_chain_id || "",
+                claim_type: item.claim_type || "",
+                claim_statement: item.claim_statement || "",
+                judgment_type: item.judgment_type || "",
             };
         }
 
-        function buildReviewWorkbenchCard(payload, section, item) {
+        function buildReviewWorkbenchCard(payload, section, item, boardRoot) {
             const card = document.createElement("article");
             card.className = "dashboard-review-card";
+            card.dataset.reviewStatus = String(item.review_status || "pending").trim().toLowerCase() || "pending";
+            card.dataset.assetType = String(item.asset_type || "").trim().toLowerCase();
+            card.dataset.priorityBucket = String(item.priority_bucket || "").trim().toLowerCase();
+            card.dataset.reviewer = String(item.reviewer || "").trim();
 
             const headRow = document.createElement("div");
             headRow.className = "dashboard-review-head";
+
+            const selectWrap = document.createElement("label");
+            selectWrap.className = "dashboard-review-meta";
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.className = "dashboard-review-select";
+            checkbox.value = String(item.asset_key || "").trim();
+            checkbox.checked = currentDashboardWorkbenchSelection.has(checkbox.value);
+            checkbox.addEventListener("change", function() {
+                if (checkbox.checked) {
+                    currentDashboardWorkbenchSelection.add(checkbox.value);
+                } else {
+                    currentDashboardWorkbenchSelection.delete(checkbox.value);
+                }
+                syncReviewWorkbenchSelectionState(boardRoot);
+            });
+            selectWrap.appendChild(checkbox);
+            selectWrap.appendChild(document.createTextNode(" 选入批量"));
 
             const titleWrap = document.createElement("div");
             const title = document.createElement("strong");
             title.textContent = item.title || "未命名条目";
             const meta = document.createElement("span");
-            meta.textContent = item.subtitle || section.title;
+            const priorityText = item.priority_label ? ` · ${item.priority_label}` : "";
+            meta.textContent = `${item.subtitle || section.title}${priorityText}`;
             titleWrap.appendChild(title);
             titleWrap.appendChild(meta);
 
@@ -4163,6 +4467,7 @@
             badge.className = `dashboard-review-badge ${statusKey}`.trim();
             badge.textContent = formatCatalogReviewStatus(statusKey);
 
+            headRow.appendChild(selectWrap);
             headRow.appendChild(titleWrap);
             headRow.appendChild(badge);
             card.appendChild(headRow);
@@ -4255,7 +4560,7 @@
             return card;
         }
 
-        function buildReviewWorkbenchSection(payload, section) {
+        function buildReviewWorkbenchSection(payload, section, boardRoot) {
             const block = document.createElement("div");
             block.className = "dashboard-review-section";
 
@@ -4289,7 +4594,7 @@
             const grid = document.createElement("div");
             grid.className = "dashboard-review-grid";
             section.items.forEach((item) => {
-                grid.appendChild(buildReviewWorkbenchCard(payload, section, item));
+                grid.appendChild(buildReviewWorkbenchCard(payload, section, item, boardRoot));
             });
             block.appendChild(grid);
             return block;
@@ -4303,7 +4608,27 @@
                 ? reviewWorkbench.sections.filter((item) => item && typeof item === "object")
                 : [];
 
-            setDashboardCatalogFilters(evidenceBoard?.active_catalog_filters);
+            const mergedFilters = {
+                ...(evidenceBoard?.active_catalog_filters || {}),
+                ...(reviewWorkbench?.queue_filters?.active_filters || {}),
+            };
+            setDashboardCatalogFilters(mergedFilters);
+
+            currentDashboardWorkbenchItems = {};
+            const availableKeys = new Set();
+            sections.forEach((section) => {
+                (Array.isArray(section.items) ? section.items : []).forEach((item) => {
+                    const assetKey = String(item?.asset_key || "").trim();
+                    if (!assetKey) {
+                        return;
+                    }
+                    currentDashboardWorkbenchItems[assetKey] = item;
+                    availableKeys.add(assetKey);
+                });
+            });
+            currentDashboardWorkbenchSelection = new Set(
+                Array.from(currentDashboardWorkbenchSelection).filter((assetKey) => availableKeys.has(assetKey))
+            );
 
             const section = document.createElement("section");
             section.className = "dashboard-review-board";
@@ -4326,7 +4651,7 @@
             head.appendChild(headingWrap);
             head.appendChild(summary);
             section.appendChild(head);
-            section.appendChild(buildReviewWorkbenchToolbar(payload, evidenceBoard, reviewWorkbench));
+            section.appendChild(buildReviewWorkbenchToolbar(payload, evidenceBoard, reviewWorkbench, section));
 
             if (sections.length === 0) {
                 const empty = document.createElement("div");
@@ -4336,9 +4661,18 @@
                 return section;
             }
 
-            sections.forEach((item) => {
-                section.appendChild(buildReviewWorkbenchSection(payload, item));
-            });
+            sections
+                .filter((item) => Array.isArray(item.items) && item.items.length > 0)
+                .forEach((item) => {
+                    section.appendChild(buildReviewWorkbenchSection(payload, item, section));
+                });
+            syncReviewWorkbenchSelectionState(section);
+            if (section.children.length === 2) {
+                const empty = document.createElement("div");
+                empty.className = "dashboard-review-empty";
+                empty.textContent = "当前筛选结果下没有可审核条目。";
+                section.appendChild(empty);
+            }
             return section;
         }
 

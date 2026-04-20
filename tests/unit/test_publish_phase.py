@@ -194,6 +194,24 @@ class TestPublishPhaseContract(unittest.TestCase):
 
 class TestPublishNormalPath(unittest.TestCase):
 
+    def test_publish_records_section_planner_preview_for_deterministic_writer(self):
+        handler = _make_handler()
+        cycle = _FakeCycle(phase_executions=_minimal_phase_executions())
+
+        result = handler.execute(cycle, {"citation_records": []})
+
+        planner = result["metadata"]["small_model_plan"]
+        self.assertIsInstance(planner, dict)
+        self.assertEqual(planner["phase"], "publish")
+        self.assertEqual(planner["task_type"], "paper_section")
+        self.assertTrue(planner["plan_only"])
+        self.assertEqual(planner["writer_mode"], "deterministic")
+        self.assertEqual(planner["section_count"], 1)
+        self.assertEqual(result["metadata"]["fallback_path"], "deterministic_paper_writer")
+        section_plans = result["metadata"]["publish_section_plans"]
+        self.assertEqual(section_plans["sections"][0]["section_type"], "introduction")
+        self.assertTrue(section_plans["sections"][0]["plan_only"])
+
     def test_citations_returned_from_citation_manager(self):
         handler = _make_handler()
         cycle = _FakeCycle(phase_executions=_minimal_phase_executions())

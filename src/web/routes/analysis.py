@@ -617,6 +617,20 @@ async def llm_distill(
 # ---------------------------------------------------------------------------
 
 
+def _get_graph_schema_info() -> Dict[str, Any]:
+    """返回 graph_schema 版本与 drift 信息（不依赖 Neo4j 连接）。"""
+    try:
+        from src.storage.graph_schema import GRAPH_SCHEMA_VERSION, get_schema_summary
+        summary = get_schema_summary()
+        return {
+            "schema_version": GRAPH_SCHEMA_VERSION,
+            "schema_node_label_count": summary["node_label_count"],
+            "schema_rel_type_count": summary["rel_type_count"],
+        }
+    except Exception:
+        return {}
+
+
 @router.get("/kg/stats")
 async def kg_stats(
     request: Request,
@@ -669,6 +683,7 @@ async def kg_stats(
         "entity_types": type_counts,
         "relation_types": rel_type_counts,
         **orm_stats,
+        **_get_graph_schema_info(),
     }
 
 

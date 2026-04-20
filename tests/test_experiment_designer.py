@@ -102,7 +102,7 @@ class TestStudyProtocol(unittest.TestCase):
     def test_to_dict_contains_enhanced_protocol_keys(self):
         sp = StudyProtocol(study_type="rct", hypothesis="H1")
         d = sp.to_dict()
-        for key in ("title", "objective", "arms", "visit_schedule", "data_collection_plan", "protocol_source"):
+        for key in ("title", "objective", "arms", "visit_schedule", "data_collection_plan", "protocol_source", "optimizer_metadata"):
             self.assertIn(key, d)
 
 
@@ -258,6 +258,8 @@ class TestExperimentDesigner(unittest.TestCase):
         self.assertEqual(proto.title, "黄芪颗粒治疗气虚乏力 RCT 方案")
         self.assertEqual(proto.pico.population, "气虚乏力成年患者")
         self.assertEqual(len(proto.arms), 2)
+        self.assertIsInstance(proto.optimizer_metadata.get("small_model_plan"), dict)
+        self.assertEqual(proto.optimizer_metadata["small_model_plan"]["phase"], "experiment")
         self.assertGreater(proto.sample_size.estimated_n, 0)
         self.assertEqual(proto.sample_size.outcome_type, "continuous")
 

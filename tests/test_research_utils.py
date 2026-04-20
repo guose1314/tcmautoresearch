@@ -673,6 +673,113 @@ class TestResearchUtils(unittest.TestCase):
         self.assertEqual(reviewed_item["reviewer"], "tester")
         self.assertEqual(reviewed_item["decision_basis"], "人工术语复核")
 
+    def test_build_research_dashboard_payload_exposes_review_queue_filters_workload_and_batch_audit(self):
+        snapshot = {
+            "job_id": "job-review-queue",
+            "topic": "批量复核队列看板",
+            "status": "completed",
+            "progress": 100,
+            "current_phase": "observe",
+            "result": {
+                "cycle_id": "cycle-review-queue",
+                "phases": [
+                    {
+                        "phase": "observe",
+                        "status": "completed",
+                        "duration_sec": 3.0,
+                        "summary": {"observation_count": 1},
+                    }
+                ],
+                "pipeline_metadata": {"cycle_name": "review-queue-demo"},
+                "observe_philology": {
+                    "terminology_standard_table": [
+                        {
+                            "document_title": "补血汤宋本",
+                            "document_urn": "doc:review-queue:1",
+                            "canonical": "黄芪",
+                            "label": "本草药名",
+                        }
+                    ],
+                    "catalog_summary": {
+                        "documents": [
+                            {
+                                "document_title": "补血汤宋本",
+                                "document_urn": "doc:review-queue:1",
+                                "source_type": "local",
+                                "catalog_id": "local:catalog:review-queue:1",
+                                "work_title": "补血汤",
+                                "fragment_title": "补血汤",
+                                "work_fragment_key": "补血汤|补血汤",
+                                "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                                "witness_key": "local:witness:review-queue:1",
+                                "dynasty": "明",
+                                "author": "李时珍",
+                                "edition": "宋本",
+                            }
+                        ]
+                    },
+                },
+            },
+        }
+
+        baseline_payload = build_research_dashboard_payload(snapshot)
+        terminology_item = next(
+            section["items"][0]
+            for section in baseline_payload["evidence_board"]["review_workbench"]["sections"]
+            if section["asset_type"] == "terminology_row" and section["items"]
+        )
+        snapshot["result"]["observe_philology"]["review_workbench_decisions"] = [
+            {
+                "asset_type": "terminology_row",
+                "asset_key": terminology_item["asset_key"],
+                "review_status": "accepted",
+                "reviewer": "tester",
+                "decision_basis": "批量术语复核",
+                "review_reasons": ["reviewer_batch"],
+            }
+        ]
+        snapshot["result"]["observe_philology"]["review_workbench_batch_audit_trail"] = [
+            {
+                "applied_at": "2026-04-20T12:00:00",
+                "applied_count": 1,
+                "reviewer": "tester",
+                "shared_decision_basis": "批量术语复核",
+                "shared_review_reasons": ["reviewer_batch"],
+                "selection_snapshot": {
+                    "selection_strategy": "current_filtered_selection",
+                    "selected_count": 1,
+                    "asset_types": ["terminology_row"],
+                },
+            }
+        ]
+
+        payload = build_research_dashboard_payload(
+            snapshot,
+            philology_filters={
+                "asset_type": "terminology_row",
+                "review_status": "accepted",
+                "reviewer": "tester",
+            },
+        )
+
+        evidence_board = payload["evidence_board"]
+        review_workbench = evidence_board["review_workbench"]
+        self.assertEqual(review_workbench["total_item_count"], 1)
+        self.assertGreater(review_workbench["all_item_count"], review_workbench["total_item_count"])
+        self.assertEqual(evidence_board["queue_filters"]["active_filters"]["asset_type"], "terminology_row")
+        self.assertEqual(evidence_board["queue_filters"]["active_filters"]["review_status"], "accepted")
+        self.assertEqual(evidence_board["queue_filters"]["active_filters"]["reviewer"], "tester")
+        self.assertEqual(evidence_board["review_queue"]["total_pending"], 0)
+        self.assertEqual(evidence_board["review_queue"]["reviewer_workload"][0]["reviewer"], "tester")
+        self.assertEqual(
+            review_workbench["review_queue"]["recent_batch_operations"][0]["shared_decision_basis"],
+            "批量术语复核",
+        )
+        self.assertEqual(
+            review_workbench["review_queue"]["recent_batch_operations"][0]["selection_snapshot"]["selected_count"],
+            1,
+        )
+
     def test_build_research_dashboard_payload_includes_learning_feedback_board(self):
         snapshot = {
             "job_id": "job-learning-feedback",

@@ -91,6 +91,16 @@ def create_app(
 
     @app.on_event("shutdown")
     def shutdown_job_manager() -> None:
+        # Close storage factory (Neo4j driver) via monitoring service
+        monitoring_service = getattr(app.state, "monitoring_service", None)
+        if monitoring_service is not None:
+            factory = getattr(monitoring_service, "_storage_factory", None)
+            if factory is not None:
+                try:
+                    factory.close()
+                except Exception:
+                    pass
+                monitoring_service.unbind_storage_factory()
         if hasattr(app.state, "db_manager") and app.state.db_manager:
             app.state.db_manager.close()
         manager.close()

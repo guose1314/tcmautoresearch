@@ -1,0 +1,31 @@
+[
+  {
+    "case_id": "reflect_cycle_diagnosis",
+    "phase": "reflect",
+    "task_type": "reflection",
+    "purpose": "reflect",
+    "expected_action": "proceed",
+    "expected_framework": "dialectical",
+    "max_input_tokens": 1500,
+    "dossier_sections": {
+      "phase_summary": "observe: 0.88\nanalyze: 0.74\npublish: 0.81",
+      "weaknesses": "analyze 阶段统计检验解释不足。",
+      "strengths": "observe 阶段证据链完整。"
+    }
+  },
+  {
+    "case_id": "reflect_cached_feedback",
+    "phase": "reflect",
+    "task_type": "reflection",
+    "purpose": "reflect",
+    "expected_action": "skip",
+    "expected_framework": "dialectical",
+    "cache_hit_likelihood": 0.97,
+    "max_input_tokens": 1500,
+    "dossier_sections": {
+      "phase_summary": "上一轮反思已缓存并经人工确认。",
+      "weaknesses": "无新增问题。",
+      "strengths": "基线稳定。"
+    }
+  }
+]

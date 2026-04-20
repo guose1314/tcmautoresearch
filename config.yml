@@ -229,6 +229,18 @@ models:
       include_schema_in_prompt: true     # 在 prompt 中附加 JSON Schema 约束
       fail_on_schema_validation: false   # schema 不匹配时保留回退路径
       max_schema_chars: 4000             # 避免 schema 文本过长
+    small_model_optimizer:
+      enabled: true                      # 让 SmallModelOptimizer 成为默认 LLM 规划层
+      phase_overrides:
+        hypothesis: true
+        experiment: true
+        reflect: true
+        publish: true
+      purpose_overrides:
+        publish: paper_plugin
+      benchmark:
+        output_dir: "./output/phase_benchmarks"
+        compare_baseline: true
     token_budget_policy:
       enabled: true                      # 启用统一输入预算策略，保护本地 7B 稳定性
       default_input_tokens: 1536         # 常规 prompt 输入预算
@@ -252,9 +264,11 @@ models:
         question_rewrite: 768
         terminology_explanation: 1024
         structured_summary: 1536
+        quality_assessment: 1280
         hypothesis_generation: 1280
         discussion_draft: 1792
         reflect_diagnosis: 1280
+        protocol_design: 1536
         translation: 1536
         entity_extraction: 1024
         long_form_generation: 1792
@@ -385,6 +399,7 @@ logging:
 monitoring:
   enabled: true
   interval_seconds: 60
+  storage_governance: true
   metrics:
     system_health: true
     cpu_usage: true

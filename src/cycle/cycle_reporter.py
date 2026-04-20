@@ -250,18 +250,30 @@ def export_cycle_demo_report(cycle_results: Dict[str, Any], output_path: Path, g
 # summarize_module_quality 及辅助函数已迁移至 src.research.module_pipeline，
 # 此处保留兼容重导出。
 from src.research.module_pipeline import (  # noqa: E402
-    _MODULE_CONTENT_KEYS,
-    _MODULE_EXPECTED_KEYS,
-    _compute_accuracy,
-    _compute_completeness,
-    _compute_consistency,
-    summarize_module_quality,
+    _MODULE_CONTENT_KEYS as _MODULE_CONTENT_KEYS,
+)
+from src.research.module_pipeline import (
+    _MODULE_EXPECTED_KEYS as _MODULE_EXPECTED_KEYS,
+)
+from src.research.module_pipeline import (
+    _compute_accuracy as _compute_accuracy,
+)
+from src.research.module_pipeline import (
+    _compute_completeness as _compute_completeness,
+)
+from src.research.module_pipeline import (
+    _compute_consistency as _compute_consistency,
+)
+from src.research.module_pipeline import (
+    summarize_module_quality as summarize_module_quality,
 )
 
 # ── 科研报告导出 ───────────────────────────────────────────────────
 # extract_research_phase_results 已迁移至 src.research.phase_result，
 # 此处保留兼容重导出。
-from src.research.phase_result import extract_research_phase_results  # noqa: E402, F811
+from src.research.phase_result import (  # noqa: E402, F811
+    extract_research_phase_results as extract_research_phase_results,
+)
 
 
 def export_research_session_reports(

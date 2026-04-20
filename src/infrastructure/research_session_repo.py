@@ -692,7 +692,7 @@ class ResearchSessionRepository:
     def upsert_observe_catalog_review_batch(
         self,
         cycle_id: str,
-        decisions: Sequence[Mapping[str, Any]],
+        decisions: Sequence[Mapping[str, Any]] | Mapping[str, Any],
         *,
         session: Optional[Session] = None,
     ) -> Optional[Dict[str, Any]]:
@@ -722,12 +722,13 @@ class ResearchSessionRepository:
                 .one_or_none()
             )
             existing_content = _json_loads(artifact.content_json, {}) if artifact is not None else {}
-            content = upsert_observe_catalog_review_artifact_content_batch(existing_content, list(decisions))
+            content = upsert_observe_catalog_review_artifact_content_batch(existing_content, decisions)
             if not content:
                 return None
             metadata = {
                 "asset_kind": "catalog_review_decisions",
                 "decision_count": int(content.get("decision_count") or 0),
+                "batch_operation_count": int(content.get("batch_operation_count") or 0),
                 "last_reviewer": content.get("last_reviewer"),
                 "updated_at": content.get("updated_at"),
             }
@@ -758,7 +759,7 @@ class ResearchSessionRepository:
     def upsert_observe_workbench_review_batch(
         self,
         cycle_id: str,
-        decisions: Sequence[Mapping[str, Any]],
+        decisions: Sequence[Mapping[str, Any]] | Mapping[str, Any],
         *,
         session: Optional[Session] = None,
     ) -> Optional[Dict[str, Any]]:
@@ -788,12 +789,13 @@ class ResearchSessionRepository:
                 .one_or_none()
             )
             existing_content = _json_loads(artifact.content_json, {}) if artifact is not None else {}
-            content = upsert_observe_review_workbench_artifact_content_batch(existing_content, list(decisions))
+            content = upsert_observe_review_workbench_artifact_content_batch(existing_content, decisions)
             if not content:
                 return None
             metadata = {
                 "asset_kind": "review_workbench_decisions",
                 "decision_count": int(content.get("decision_count") or 0),
+                "batch_operation_count": int(content.get("batch_operation_count") or 0),
                 "last_reviewer": content.get("last_reviewer"),
                 "updated_at": content.get("updated_at"),
             }

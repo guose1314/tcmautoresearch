@@ -1,0 +1,31 @@
+[
+  {
+    "case_id": "analyze_evidence_synthesis",
+    "phase": "analyze",
+    "task_type": "evidence_synthesis",
+    "purpose": "default",
+    "expected_action": "proceed",
+    "expected_framework": "analytical",
+    "max_input_tokens": 1800,
+    "dossier_sections": {
+      "objective": "综合评估黄芪干预对气虚相关疲劳评分的证据强度。",
+      "evidence": "随机对照试验提示疲劳量表改善。\n系统综述显示异质性中等但方向一致。",
+      "entities": "黄芪\n气虚\n疲劳量表",
+      "graph": "黄芪 connects_to 补气\n补气 associates_with 气虚改善"
+    }
+  },
+  {
+    "case_id": "analyze_cached_summary",
+    "phase": "analyze",
+    "task_type": "evidence_synthesis",
+    "purpose": "default",
+    "expected_action": "skip",
+    "expected_framework": "analytical",
+    "cache_hit_likelihood": 0.96,
+    "max_input_tokens": 1800,
+    "dossier_sections": {
+      "objective": "复用上一轮 analyze 结论生成结构化摘要。",
+      "evidence": "上一轮 summary 已缓存。"
+    }
+  }
+]

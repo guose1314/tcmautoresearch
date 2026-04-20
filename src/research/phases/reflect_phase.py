@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
+from src.infra.llm_service import prepare_planned_llm_call
 from src.research.compute_tier_router import ComputeTierRouter
+from src.research.evidence_contract import build_phase_evidence_protocol
 from src.research.learning_feedback_contract import build_learning_feedback_library
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
@@ -128,6 +130,29 @@ class ReflectPhaseMixin:
             "learning_fed": learning_summary is not None,
             "reasoning_framework": reasoning_framework.to_dict(),
         }
+        llm_diagnosis = cycle_assessment.get("llm_diagnosis") if isinstance(cycle_assessment, dict) else None
+        if isinstance(llm_diagnosis, dict):
+            if llm_diagnosis.get("planner") is not None:
+                metadata["small_model_plan"] = llm_diagnosis.get("planner")
+            if llm_diagnosis.get("llm_cost_report") is not None:
+                metadata["llm_cost_report"] = llm_diagnosis.get("llm_cost_report")
+            if llm_diagnosis.get("fallback_path") is not None:
+                metadata["fallback_path"] = llm_diagnosis.get("fallback_path")
+        llm_reflection_entry = next(
+            (
+                item
+                for item in reflections
+                if isinstance(item, dict) and item.get("source") == "llm"
+            ),
+            None,
+        )
+        if isinstance(llm_reflection_entry, dict):
+            if llm_reflection_entry.get("planner") is not None:
+                metadata["small_model_plan"] = llm_reflection_entry.get("planner")
+            if llm_reflection_entry.get("llm_cost_report") is not None:
+                metadata["llm_cost_report"] = llm_reflection_entry.get("llm_cost_report")
+            if llm_reflection_entry.get("fallback_path") is not None:
+                metadata["fallback_path"] = llm_reflection_entry.get("fallback_path")
         if hasattr(self, "_reflect_tracker"):
             metadata["learning"] = self._reflect_tracker.to_metadata()
             self.pipeline.register_phase_learning_manifest(
@@ -159,6 +184,14 @@ class ReflectPhaseMixin:
                 "quality_assessment": quality_assessment,
                 "learning_summary": learning_summary,
                 "learning_feedback_library": learning_feedback_library,
+                "evidence_protocol": build_phase_evidence_protocol(
+                    "reflect",
+                    evidence_grade="reflection",
+                    evidence_summary={
+                        "phase": "reflect",
+                        "quality_score": (quality_assessment.get("overall_score") if isinstance(quality_assessment, dict) else None),
+                    },
+                ),
             },
             metadata=metadata,
             extra_fields={
@@ -269,14 +302,31 @@ class ReflectPhaseMixin:
             "输出严格 JSON: {\"reflection\": \"...\", \"action\": \"...\"}"
         )
 
+        planned_call = prepare_planned_llm_call(
+            phase="reflect",
+            task_type="reflection",
+            purpose="reflect",
+            dossier_sections={
+                "phase_summary": "\n".join(phase_summary),
+                "overall_score": f"{assessment['overall_cycle_score']:.2f}",
+                "reflect_lens": reflect_lens,
+            },
+            llm_engine=llm_engine,
+        )
+        if not planned_call.should_call_llm:
+            return None
+
         try:
-            raw = llm_engine.generate(user_prompt, _REFLECT_SYSTEM_PROMPT)
+            raw = planned_call.create_proxy().generate(user_prompt, _REFLECT_SYSTEM_PROMPT)
             parsed = json.loads(raw)
             return {
                 "topic": "LLM 深度反思",
                 "reflection": str(parsed.get("reflection", raw)),
                 "action": str(parsed.get("action", "")),
                 "source": "llm",
+                "planner": planned_call.to_metadata(),
+                "llm_cost_report": planned_call.get_cost_report(),
+                "fallback_path": planned_call.fallback_path,
             }
         except Exception as exc:
             logger.warning("LLM 反思生成失败，回退规则反思: %s", exc)

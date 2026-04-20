@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Dict, List
 
+from src.research.evidence_contract import build_phase_evidence_protocol
 from src.research.import_quality_validator import ImportQualityValidator
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
@@ -176,6 +177,17 @@ class ExperimentExecutionPhaseMixin:
                 {"phase": "experiment_execution", **self._execution_tracker.to_metadata()}
             )
 
+        execution_boundary = {
+            "execution_records": execution_records,
+            "analysis_records": execution_records,
+            "execution_relationships": execution_relationships,
+            "analysis_relationships": execution_relationships,
+            "sampling_events": sampling_events,
+            "output_files": output_files,
+            "execution_status": execution_status,
+            "real_world_validation_status": real_world_validation_status,
+        }
+
         return build_phase_result(
             "experiment_execution",
             status=status,
@@ -192,6 +204,16 @@ class ExperimentExecutionPhaseMixin:
                 "output_files": output_files,
                 "execution_status": execution_status,
                 "real_world_validation_status": real_world_validation_status,
+                "execution_boundary": execution_boundary,
+                "evidence_protocol": build_phase_evidence_protocol(
+                    "experiment_execution",
+                    evidence_records=[
+                        {"content": r.get("content") or r.get("description") or "", "source_type": "execution_record"}
+                        for r in execution_records if isinstance(r, dict)
+                    ],
+                    evidence_grade="execution",
+                    evidence_summary={"phase": "experiment_execution", "record_count": len(execution_records)},
+                ),
             },
             artifacts=execution_artifacts,
             metadata=metadata,

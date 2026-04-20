@@ -6,6 +6,19 @@ from typing import Any, Dict, Iterable, List, Optional
 _CONTRACT_VERSION = "phase_result.v1"
 _STANDARD_KEYS = frozenset({"phase", "status", "results", "artifacts", "metadata", "error"})
 _DEPRECATED_FALLBACKS_KEY = "deprecated_field_fallbacks"
+
+# F-3: Phase output 形状收口 — 最小公约键
+PHASE_RESULT_COMMON_RESULT_KEYS = frozenset({"evidence_protocol", "summary"})
+PHASE_RESULT_COMMON_METADATA_KEYS = frozenset(
+    {
+        "learning",
+        "learning_strategy_applied",
+        "contract_version",
+        "small_model_plan",
+        "llm_cost_report",
+        "fallback_path",
+    }
+)
 _REMOVED_COMPATIBILITY_EXTRA_FIELDS_BY_PHASE = {
     "publish": frozenset(
         {
@@ -81,10 +94,17 @@ def build_phase_result(
     normalized_metadata.setdefault("contract_version", _CONTRACT_VERSION)
     normalized_metadata.setdefault("artifact_count", len(normalized_artifacts))
     normalized_metadata.setdefault("status", status)
+    # F-3: 自动注入公约 metadata keys
+    for _mk in PHASE_RESULT_COMMON_METADATA_KEYS:
+        normalized_metadata.setdefault(_mk, None)
+    normalized_results = dict(results or {})
+    # F-3: 自动注入公约 results keys
+    for _rk in PHASE_RESULT_COMMON_RESULT_KEYS:
+        normalized_results.setdefault(_rk, None)
     payload = PhaseResult(
         phase=str(phase),
         status=str(status),
-        results=dict(results or {}),
+        results=normalized_results,
         artifacts=normalized_artifacts,
         metadata=normalized_metadata,
         error=_normalize_error(error),
@@ -141,6 +161,15 @@ def get_phase_results(result: Any) -> Dict[str, Any]:
     if isinstance(payload, dict):
         return payload
     return {}
+
+
+def get_evidence_protocol(result: Any) -> Optional[Dict[str, Any]]:
+    """从 PhaseResult payload 中提取 evidence_protocol（如有）。"""
+    results = get_phase_results(result)
+    proto = results.get("evidence_protocol")
+    if isinstance(proto, dict) and proto.get("contract_version"):
+        return proto
+    return None
 
 
 def is_phase_result_payload(result: Any) -> bool:

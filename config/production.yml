@@ -18,6 +18,10 @@ api:
     - "X-API-Key"
     - "X-Request-ID"
 
+# ── Monitoring ──
+monitoring:
+  storage_governance: true
+
 web_console:
   cors_origins:
     - "http://localhost:8000"
@@ -33,6 +37,7 @@ web_console:
     - "Authorization"
     - "X-API-Key"
     - "X-Request-ID"
+  job_storage_dir: "./output/production/web_console_jobs"
 
 # ── 关系型数据库：生产环境使用 PostgreSQL ──
 database:
@@ -63,6 +68,7 @@ logging:
 models:
   llm:
     cache_dir: "./cache/llm/production"
-
-web_console:
-  job_storage_dir: "./output/production/web_console_jobs"
+    small_model_optimizer:
+      enabled: true
+      benchmark:
+        output_dir: "./output/production/phase_benchmarks"

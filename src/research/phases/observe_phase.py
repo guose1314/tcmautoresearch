@@ -12,6 +12,7 @@ from src.collector.corpus_bundle import (
     extract_text_entries,
     is_corpus_bundle,
 )
+from src.research.evidence_contract import build_phase_evidence_protocol
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
     has_learning_strategy,
@@ -63,6 +64,15 @@ class ObservePhaseMixin:
             isinstance(item, dict) and item.get("error")
             for item in (corpus_result, ingestion_result, literature_result)
         ) else "completed"
+        evidence_protocol = build_phase_evidence_protocol(
+            "observe",
+            evidence_records=[
+                {"content": f, "source_type": "classical_text", "evidence_grade": "preliminary"}
+                for f in findings if f
+            ],
+            evidence_grade="preliminary",
+            evidence_summary={"phase": "observe", "finding_count": len(findings)},
+        )
         return build_phase_result(
             "observe",
             status=status,
@@ -72,6 +82,7 @@ class ObservePhaseMixin:
                 "corpus_collection": corpus_result,
                 "ingestion_pipeline": ingestion_result,
                 "literature_pipeline": literature_result,
+                "evidence_protocol": evidence_protocol,
             },
             artifacts=artifacts,
             metadata=metadata,
@@ -325,6 +336,9 @@ class ObservePhaseMixin:
             self.pipeline.register_phase_learning_manifest(
                 {"phase": "observe", **self._observe_tracker.to_metadata()}
             )
+        else:
+            metadata.setdefault("learning", None)
+        metadata.setdefault("learning_strategy_applied", learning_strategy_applied)
         return metadata
 
     def _resolve_observe_literature_max_results(

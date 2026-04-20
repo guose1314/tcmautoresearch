@@ -324,5 +324,145 @@ class TestEvidenceProtocolCache(unittest.TestCase):
         self.assertEqual(wrapped.call_count, 1)
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# Phase F-1: phase_origin + build_phase_evidence_protocol tests
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestEvidenceEnvelopePhaseOrigin(unittest.TestCase):
+    """phase_origin 字段序列化与反序列化。"""
+
+    def test_default_phase_origin_is_empty(self):
+        from src.research.evidence_contract import EvidenceEnvelope
+        env = EvidenceEnvelope()
+        self.assertEqual(env.phase_origin, "")
+
+    def test_phase_origin_round_trip(self):
+        from src.research.evidence_contract import EvidenceEnvelope
+        env = EvidenceEnvelope(phase_origin="observe")
+        d = env.to_dict()
+        self.assertEqual(d["phase_origin"], "observe")
+        restored = EvidenceEnvelope.from_dict(d)
+        self.assertEqual(restored.phase_origin, "observe")
+
+    def test_from_dict_missing_phase_origin_defaults_empty(self):
+        from src.research.evidence_contract import CONTRACT_VERSION, EvidenceEnvelope
+        d = {"contract_version": CONTRACT_VERSION}
+        env = EvidenceEnvelope.from_dict(d)
+        self.assertEqual(env.phase_origin, "")
+
+    def test_to_dict_includes_phase_origin_key(self):
+        from src.research.evidence_contract import EvidenceEnvelope
+        env = EvidenceEnvelope(phase_origin="analyze")
+        self.assertIn("phase_origin", env.to_dict())
+
+
+class TestBuildPhaseEvidenceProtocol(unittest.TestCase):
+    """build_phase_evidence_protocol 轻量构建器。"""
+
+    def test_returns_dict(self):
+        from src.research.evidence_contract import build_phase_evidence_protocol
+        self.assertIsInstance(build_phase_evidence_protocol("observe"), dict)
+
+    def test_contract_version(self):
+        from src.research.evidence_contract import (
+            CONTRACT_VERSION,
+            build_phase_evidence_protocol,
+        )
+        self.assertEqual(build_phase_evidence_protocol("observe")["contract_version"], CONTRACT_VERSION)
+
+    def test_phase_origin_set(self):
+        from src.research.evidence_contract import build_phase_evidence_protocol
+        self.assertEqual(build_phase_evidence_protocol("hypothesis")["phase_origin"], "hypothesis")
+
+    def test_empty_records_and_claims(self):
+        from src.research.evidence_contract import build_phase_evidence_protocol
+        r = build_phase_evidence_protocol("observe")
+        self.assertIsInstance(r["evidence_records"], list)
+        self.assertIsInstance(r["claims"], list)
+
+    def test_evidence_grade_in_summary(self):
+        from src.research.evidence_contract import build_phase_evidence_protocol
+        r = build_phase_evidence_protocol("observe", evidence_grade="preliminary")
+        self.assertIn("overall_grade", r["evidence_grade_summary"])
+
+    def test_with_evidence_records(self):
+        from src.research.evidence_contract import build_phase_evidence_protocol
+        records = [{"content": "桂枝汤主治", "source_type": "classical_text"}]
+        r = build_phase_evidence_protocol("observe", evidence_records=records)
+        self.assertGreaterEqual(len(r["evidence_records"]), 1)
+
+    def test_with_claims(self):
+        from src.research.evidence_contract import build_phase_evidence_protocol
+        claims = [{"claim_text": "桂枝解表", "claim_type": "hypothesis"}]
+        r = build_phase_evidence_protocol("hypothesis", claims=claims)
+        self.assertGreaterEqual(len(r["claims"]), 1)
+
+    def test_citation_count_type(self):
+        from src.research.evidence_contract import build_phase_evidence_protocol
+        self.assertIsInstance(build_phase_evidence_protocol("observe")["citation_count"], int)
+
+    def test_summary_dict(self):
+        from src.research.evidence_contract import build_phase_evidence_protocol
+        self.assertIsInstance(build_phase_evidence_protocol("observe")["summary"], dict)
+
+    def test_evidence_summary_passthrough(self):
+        from src.research.evidence_contract import build_phase_evidence_protocol
+        es = {"phase": "observe", "finding_count": 5}
+        r = build_phase_evidence_protocol("observe", evidence_summary=es)
+        self.assertEqual(r["evidence_summary"]["finding_count"], 5)
+
+    def test_research_grade_empty_by_default(self):
+        from src.research.evidence_contract import build_phase_evidence_protocol
+        self.assertEqual(build_phase_evidence_protocol("observe")["research_grade"], {})
+
+    def test_non_dict_records_skipped(self):
+        from src.research.evidence_contract import build_phase_evidence_protocol
+        records = ["not_a_dict", 42, {"content": "ok"}]
+        r = build_phase_evidence_protocol("observe", evidence_records=records)
+        self.assertGreaterEqual(len(r["evidence_records"]), 1)
+
+    def test_non_dict_claims_skipped(self):
+        from src.research.evidence_contract import build_phase_evidence_protocol
+        claims = [None, "string", {"claim_text": "ok"}]
+        r = build_phase_evidence_protocol("hypothesis", claims=claims)
+        self.assertGreaterEqual(len(r["claims"]), 1)
+
+    def test_all_phases(self):
+        from src.research.evidence_contract import (
+            CONTRACT_VERSION,
+            build_phase_evidence_protocol,
+        )
+        for phase in ("observe", "hypothesis", "experiment_execution", "reflect", "analyze"):
+            r = build_phase_evidence_protocol(phase)
+            self.assertEqual(r["phase_origin"], phase)
+            self.assertEqual(r["contract_version"], CONTRACT_VERSION)
+
+
+class TestGetEvidenceProtocolHelper(unittest.TestCase):
+    """phase_result.get_evidence_protocol 帮助函数。"""
+
+    def test_returns_none_for_empty(self):
+        from src.research.phase_result import get_evidence_protocol
+        self.assertIsNone(get_evidence_protocol({}))
+
+    def test_returns_none_for_non_dict(self):
+        from src.research.phase_result import get_evidence_protocol
+        self.assertIsNone(get_evidence_protocol("string"))
+
+    def test_returns_protocol_from_results(self):
+        from src.research.evidence_contract import CONTRACT_VERSION
+        from src.research.phase_result import get_evidence_protocol
+        proto = {"contract_version": CONTRACT_VERSION, "phase_origin": "observe"}
+        payload = {"results": {"evidence_protocol": proto}}
+        self.assertEqual(get_evidence_protocol(payload), proto)
+
+    def test_returns_none_if_no_contract_version(self):
+        from src.research.phase_result import get_evidence_protocol
+        proto = {"phase_origin": "observe"}
+        payload = {"results": {"evidence_protocol": proto}}
+        self.assertIsNone(get_evidence_protocol(payload))
+
+
 if __name__ == "__main__":
     unittest.main()

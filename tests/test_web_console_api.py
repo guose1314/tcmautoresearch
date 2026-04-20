@@ -559,6 +559,9 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertIn("文献学校核工作台", response.text)
         self.assertIn("submitCatalogReview", response.text)
         self.assertIn("submitPhilologyReview", response.text)
+        self.assertIn("submitBatchPhilologyReview", response.text)
+        self.assertIn("全选当前筛选结果", response.text)
+        self.assertIn("批量标记已核", response.text)
         self.assertIn("清空筛选", response.text)
         self.assertIn("queueResearchDashboardRefresh", response.text)
         self.assertIn("resolveHealthTier", response.text)
@@ -1185,6 +1188,85 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertEqual(reviewed_claim["review_status"], "accepted")
         self.assertEqual(reviewed_claim["decision_basis"], "控制台考据 claim 复核")
         self.assertFalse(reviewed_claim["needs_manual_review"])
+
+    def test_batch_philology_review_writeback_records_batch_audit_summary(self):
+        create_response = self.client.post("/api/research/jobs", json={"topic": "批量 claim 写回看板"})
+        self.assertEqual(create_response.status_code, 202)
+        job_id = create_response.json()["job_id"]
+
+        for _ in range(20):
+            status_response = self.client.get(f"/api/research/jobs/{job_id}")
+            status_payload = status_response.json()
+            if status_payload["status"] in {"completed", "partial", "failed"}:
+                break
+            time.sleep(0.01)
+
+        self._persist_catalog_review_session("cycle-1")
+        initial_dashboard = self.client.get(f"/api/research/jobs/{job_id}/dashboard")
+        self.assertEqual(initial_dashboard.status_code, 200)
+        initial_payload = initial_dashboard.json()
+        section_map = {
+            section["asset_type"]: section
+            for section in initial_payload["evidence_board"]["review_workbench"]["sections"]
+        }
+        claim_item = section_map["claim"]["items"][0]
+
+        review_response = self.client.post(
+            f"/api/research/jobs/{job_id}/batch-philology-review",
+            json={
+                "decisions": [
+                    {
+                        "asset_type": "claim",
+                        "asset_key": claim_item["asset_key"],
+                        "review_status": "needs_source",
+                        "claim_id": claim_item.get("claim_id"),
+                        "source_entity": claim_item.get("source_entity"),
+                        "target_entity": claim_item.get("target_entity"),
+                        "relation_type": claim_item.get("relation_type"),
+                    }
+                ],
+                "selection_snapshot": {
+                    "selection_strategy": "current_filtered_selection",
+                    "selected_count": 1,
+                    "asset_types": ["claim"],
+                },
+                "shared_decision_basis": "控制台批量文献学校核",
+                "shared_review_reasons": ["needs_source", "reviewer_batch"],
+            },
+        )
+        self.assertEqual(review_response.status_code, 200)
+        review_payload = review_response.json()
+        self.assertEqual(review_payload["applied_count"], 1)
+        self.assertEqual(
+            review_payload["observe_philology"]["review_workbench_last_batch_summary"]["shared_decision_basis"],
+            "控制台批量文献学校核",
+        )
+        self.assertEqual(
+            review_payload["observe_philology"]["review_workbench_last_batch_summary"]["selection_snapshot"]["selected_count"],
+            1,
+        )
+        self.assertEqual(
+            review_payload["observe_philology"]["review_workbench_last_batch_summary"]["shared_review_reasons"],
+            ["needs_source", "reviewer_batch"],
+        )
+
+        dashboard_response = self.client.get(
+            f"/api/research/jobs/{job_id}/dashboard?asset_type=claim&review_status=needs_source&reviewer=%E7%AE%A1%E7%90%86%20API"
+        )
+        self.assertEqual(dashboard_response.status_code, 200)
+        dashboard_payload = dashboard_response.json()
+        self.assertEqual(dashboard_payload["evidence_board"]["queue_filters"]["active_filters"]["asset_type"], "claim")
+        self.assertEqual(dashboard_payload["evidence_board"]["queue_filters"]["active_filters"]["review_status"], "needs_source")
+        self.assertEqual(dashboard_payload["evidence_board"]["queue_filters"]["active_filters"]["reviewer"], "管理 API")
+        self.assertGreaterEqual(dashboard_payload["evidence_board"]["review_queue"]["total_pending"], 1)
+        reviewed_section_map = {
+            section["asset_type"]: section
+            for section in dashboard_payload["evidence_board"]["review_workbench"]["sections"]
+            if section.get("items")
+        }
+        reviewed_claim = reviewed_section_map["claim"]["items"][0]
+        self.assertEqual(reviewed_claim["review_status"], "needs_source")
+        self.assertEqual(reviewed_claim["decision_basis"], "控制台批量文献学校核")
 
     def test_list_jobs_endpoint_returns_recent_persisted_jobs(self):
         first_job = self.client.post("/api/research/jobs", json={"topic": "最近任务 A"}).json()["job_id"]

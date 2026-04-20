@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 
+from src.storage.graph_schema import NodeLabel, RelType, resolve_node_label
 from src.storage.neo4j_driver import Neo4jEdge, Neo4jNode
 
 _GRAPH_IDENTIFIER_PATTERN = re.compile(r"[^0-9A-Za-z_]+")
@@ -28,7 +29,7 @@ def _normalize_graph_identifier(value: Any, default: str) -> str:
     return text
 
 
-def _normalize_graph_label(value: Any, default: str = "Entity") -> str:
+def _normalize_graph_label(value: Any, default: str = NodeLabel.ENTITY.value) -> str:
     normalized = _normalize_graph_identifier(value, default)
     parts = [part for part in normalized.split("_") if part]
     if not parts:
@@ -36,7 +37,7 @@ def _normalize_graph_label(value: Any, default: str = "Entity") -> str:
     return "".join(part[:1].upper() + part[1:] for part in parts)
 
 
-def _normalize_graph_relationship_type(value: Any, default: str = "RELATED_TO") -> str:
+def _normalize_graph_relationship_type(value: Any, default: str = RelType.RELATED_TO.value) -> str:
     return _normalize_graph_identifier(value, default).upper()
 
 
@@ -186,7 +187,7 @@ def build_research_session_graph_nodes(session_records: Sequence[Mapping[str, An
         nodes.append(
             Neo4jNode(
                 id=cycle_id,
-                label="ResearchSession",
+                label=NodeLabel.RESEARCH_SESSION.value,
                 properties=build_research_session_graph_properties(session_record),
             )
         )
@@ -212,7 +213,7 @@ def build_research_phase_execution_graph_nodes(
         nodes.append(
             Neo4jNode(
                 id=phase_id,
-                label="ResearchPhaseExecution",
+                label=NodeLabel.RESEARCH_PHASE_EXECUTION.value,
                 properties=properties,
             )
         )
@@ -238,7 +239,7 @@ def build_research_artifact_graph_nodes(
         nodes.append(
             Neo4jNode(
                 id=artifact_id,
-                label="ResearchArtifact",
+                label=NodeLabel.RESEARCH_ARTIFACT.value,
                 properties=properties,
             )
         )
@@ -258,7 +259,7 @@ def build_observe_entity_graph_nodes(
             entity_name = str(entity_record.get("name") or "").strip()
             if not entity_name:
                 continue
-            label = _normalize_graph_label(_observe_entity_raw_type(entity_record), "Entity")
+            label = _normalize_graph_label(_observe_entity_raw_type(entity_record), NodeLabel.ENTITY.value)
             node_id = f"entity::{entity_name}"
             key = (label, node_id)
             if key in seen:
@@ -292,7 +293,7 @@ def build_observe_version_graph_nodes(
                 nodes.append(
                     Neo4jNode(
                         id=lineage_node_id,
-                        label="VersionLineage",
+                        label=NodeLabel.VERSION_LINEAGE.value,
                         properties=build_observe_version_lineage_graph_properties(document_record),
                     )
                 )
@@ -305,7 +306,7 @@ def build_observe_version_graph_nodes(
                 nodes.append(
                     Neo4jNode(
                         id=witness_node_id,
-                        label="VersionWitness",
+                        label=NodeLabel.VERSION_WITNESS.value,
                         properties=build_observe_version_witness_graph_properties(document_record),
                     )
                 )
@@ -329,7 +330,7 @@ def build_research_graph_edges(
                 Neo4jEdge(
                     source_id=normalized_cycle_id,
                     target_id=phase_id,
-                    relationship_type="HAS_PHASE",
+                    relationship_type=RelType.HAS_PHASE.value,
                     properties=_compact_graph_properties(
                         {
                             "cycle_id": normalized_cycle_id,
@@ -337,8 +338,8 @@ def build_research_graph_edges(
                         }
                     ),
                 ),
-                "ResearchSession",
-                "ResearchPhaseExecution",
+                NodeLabel.RESEARCH_SESSION.value,
+                NodeLabel.RESEARCH_PHASE_EXECUTION.value,
             )
         )
 
@@ -359,11 +360,11 @@ def build_research_graph_edges(
                     Neo4jEdge(
                         source_id=phase_execution_id,
                         target_id=artifact_id,
-                        relationship_type="GENERATED",
+                        relationship_type=RelType.GENERATED.value,
                         properties=edge_properties,
                     ),
-                    "ResearchPhaseExecution",
-                    "ResearchArtifact",
+                    NodeLabel.RESEARCH_PHASE_EXECUTION.value,
+                    NodeLabel.RESEARCH_ARTIFACT.value,
                 )
             )
             continue
@@ -374,11 +375,11 @@ def build_research_graph_edges(
                 Neo4jEdge(
                     source_id=normalized_cycle_id,
                     target_id=artifact_id,
-                    relationship_type="HAS_ARTIFACT",
+                    relationship_type=RelType.HAS_ARTIFACT.value,
                     properties=edge_properties,
                 ),
-                "ResearchSession",
-                "ResearchArtifact",
+                NodeLabel.RESEARCH_SESSION.value,
+                NodeLabel.RESEARCH_ARTIFACT.value,
             )
         )
 
@@ -413,12 +414,12 @@ def build_observe_graph_edges(
             if not entity_name or not normalized_phase_id:
                 continue
             raw_type = _observe_entity_raw_type(entity_record)
-            entity_label = _normalize_graph_label(raw_type, "Entity")
+            entity_label = _normalize_graph_label(raw_type, NodeLabel.ENTITY.value)
             _append_edge(
                 Neo4jEdge(
                     source_id=normalized_phase_id,
                     target_id=f"entity::{entity_name}",
-                    relationship_type="CAPTURED",
+                    relationship_type=RelType.CAPTURED.value,
                     properties=_compact_graph_properties(
                         {
                             "cycle_id": normalized_cycle_id,
@@ -430,7 +431,7 @@ def build_observe_graph_edges(
                         }
                     ),
                 ),
-                "ResearchPhaseExecution",
+                NodeLabel.RESEARCH_PHASE_EXECUTION.value,
                 entity_label,
             )
 
@@ -474,8 +475,8 @@ def build_observe_graph_edges(
                         }
                     ),
                 ),
-                _normalize_graph_label(source_type, "Entity"),
-                _normalize_graph_label(target_type, "Entity"),
+                _normalize_graph_label(source_type, NodeLabel.ENTITY.value),
+                _normalize_graph_label(target_type, NodeLabel.ENTITY.value),
             )
 
     return edges
@@ -514,7 +515,7 @@ def build_observe_version_graph_edges(
                 Neo4jEdge(
                     source_id=normalized_phase_id,
                     target_id=witness_node_id,
-                    relationship_type="OBSERVED_WITNESS",
+                    relationship_type=RelType.OBSERVED_WITNESS.value,
                     properties=_compact_graph_properties(
                         {
                             "cycle_id": normalized_cycle_id,
@@ -528,8 +529,8 @@ def build_observe_version_graph_edges(
                         }
                     ),
                 ),
-                "ResearchPhaseExecution",
-                "VersionWitness",
+                NodeLabel.RESEARCH_PHASE_EXECUTION.value,
+                NodeLabel.VERSION_WITNESS.value,
             )
 
         if witness_node_id and lineage_node_id:
@@ -537,7 +538,7 @@ def build_observe_version_graph_edges(
                 Neo4jEdge(
                     source_id=witness_node_id,
                     target_id=lineage_node_id,
-                    relationship_type="BELONGS_TO_LINEAGE",
+                    relationship_type=RelType.BELONGS_TO_LINEAGE.value,
                     properties=_compact_graph_properties(
                         {
                             "cycle_id": normalized_cycle_id or str(document_record.get("cycle_id") or "").strip(),
@@ -547,8 +548,8 @@ def build_observe_version_graph_edges(
                         }
                     ),
                 ),
-                "VersionWitness",
-                "VersionLineage",
+                NodeLabel.VERSION_WITNESS.value,
+                NodeLabel.VERSION_LINEAGE.value,
             )
 
     return edges

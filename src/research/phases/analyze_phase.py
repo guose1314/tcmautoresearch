@@ -80,6 +80,7 @@ class AnalyzePhaseMixin:
             evidence_grade=evidence_grade_payload,
         )
         if evidence_protocol:
+            evidence_protocol.setdefault("phase_origin", "analyze")
             analysis_results["evidence_protocol"] = evidence_protocol
 
         textual_evidence_summary = self._extract_textual_evidence_summary(cycle)

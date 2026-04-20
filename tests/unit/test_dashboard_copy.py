@@ -311,8 +311,69 @@ class TestDashboardCopy(unittest.TestCase):
         text = response.text
         self.assertIn("文献学校核工作台", text)
         self.assertIn("/api/projects/cycle-structured-1/philology-review", text)
+        self.assertIn("/api/projects/cycle-structured-1/batch-philology-review", text)
+        self.assertIn("全选当前筛选结果", text)
+        self.assertIn("批量共享审核依据 / 备注", text)
+        self.assertIn("wb-batch-selection-count", text)
         self.assertIn("辑佚候选", text)
         self.assertIn("考据 Claim", text)
+
+    def test_project_detail_batch_philology_review_post_rerenders_updated_card(self):
+        updated_session = deepcopy(_StructuredStore().get_session("cycle-structured-1"))
+        updated_session["observe_philology"]["review_workbench_decisions"] = [
+            {
+                "asset_type": "fragment_candidate",
+                "asset_key": "fragment_candidate::candidate_kind=fragment_candidates|fragment_candidate_id=frag-structured-1|document_urn=doc:structured:1|version_lineage_key=补血汤|补血汤|明|李时珍|宋本|witness_key=local:doc:structured:1|fragment_title=补血汤",
+                "review_status": "accepted",
+                "needs_manual_review": False,
+                "reviewer": "user-1",
+                "reviewed_at": "2026-04-16T12:20:00",
+                "decision_basis": "批量辑佚复核",
+                "review_source": "manual_review",
+                "fragment_candidate_id": "frag-structured-1",
+            }
+        ]
+
+        with patch("src.web.routes.dashboard.apply_philology_review_batch", return_value=updated_session) as apply_review_batch:
+            with self._build_client() as client:
+                response = client.post(
+                    "/api/projects/cycle-structured-1/batch-philology-review",
+                    json={
+                        "decisions": [
+                            {
+                                "asset_type": "fragment_candidate",
+                                "asset_key": "fragment_candidate::candidate_kind=fragment_candidates|fragment_candidate_id=frag-structured-1|document_urn=doc:structured:1|version_lineage_key=补血汤|补血汤|明|李时珍|宋本|witness_key=local:doc:structured:1|fragment_title=补血汤",
+                                "review_status": "accepted",
+                                "fragment_candidate_id": "frag-structured-1",
+                                "document_title": "补血汤宋本",
+                                "document_urn": "doc:structured:1",
+                                "work_title": "补血汤",
+                                "fragment_title": "补血汤",
+                                "version_lineage_key": "补血汤|补血汤|明|李时珍|宋本",
+                                "witness_key": "local:doc:structured:1",
+                                "candidate_kind": "fragment_candidates",
+                            }
+                        ],
+                        "selection_snapshot": {
+                            "selection_strategy": "current_filtered_selection",
+                            "selected_count": 1,
+                        },
+                        "shared_decision_basis": "批量辑佚复核",
+                        "shared_review_reasons": ["reviewer_batch"],
+                        "work_title_filter": "补血汤",
+                    },
+                )
+
+        self.assertEqual(apply_review_batch.call_count, 1)
+        batch_payload = apply_review_batch.call_args.args[2]
+        self.assertEqual(batch_payload["shared_decision_basis"], "批量辑佚复核")
+        self.assertEqual(batch_payload["shared_review_reasons"], ["reviewer_batch"])
+        self.assertEqual(batch_payload["selection_snapshot"]["selected_count"], 1)
+
+        self.assertEqual(response.status_code, 200)
+        text = response.text
+        self.assertIn("批量辑佚复核", text)
+        self.assertIn("当前筛选：补血汤", text)
 
     def test_project_detail_catalog_review_post_rerenders_updated_lineage(self):
         updated_session = deepcopy(_StructuredStore().get_session("cycle-structured-1"))

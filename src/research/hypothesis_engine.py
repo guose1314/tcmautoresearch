@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
 from src.core.module_base import BaseModule
+from src.infra.llm_service import prepare_planned_llm_call
 from src.infra.prompt_registry import (
 	call_registered_prompt,
 	parse_registered_output,
@@ -177,6 +178,9 @@ class HypothesisEngine(BaseModule):
 		return True
 
 	def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+		self._last_small_model_plan = None
+		self._last_llm_cost_report = None
+		self._last_fallback_path = None
 		knowledge_gap = context.get("knowledge_gap")
 		runtime_graph = context.get("knowledge_graph")
 		previous_graph = self.knowledge_graph
@@ -208,6 +212,9 @@ class HypothesisEngine(BaseModule):
 				"used_llm_closed_loop": False,
 				"llm_iteration_count": 0,
 				"research_direction": top_hypothesis.title if top_hypothesis else str(context.get("research_objective") or ""),
+				"small_model_plan": self._last_small_model_plan,
+				"llm_cost_report": self._last_llm_cost_report,
+				"fallback_path": self._last_fallback_path,
 			},
 		}
 
@@ -380,6 +387,18 @@ class HypothesisEngine(BaseModule):
 		if not hasattr(llm_engine, "generate"):
 			return []
 
+		planned_call = prepare_planned_llm_call(
+			phase="hypothesis",
+			task_type="hypothesis_generation",
+			purpose="hypothesis",
+			dossier_sections=self._build_hypothesis_dossier_sections(gap, context),
+			llm_engine=llm_engine,
+			template_preferences=self._extract_template_preferences(context),
+		)
+		self._record_planned_call(planned_call)
+		if not planned_call.should_call_llm:
+			return []
+
 		template_override = None
 		if self.prompt_template != self.DEFAULT_HYPOTHESIS_PROMPT:
 			template_override = self.prompt_template
@@ -395,7 +414,7 @@ class HypothesisEngine(BaseModule):
 		)
 		try:
 			raw = call_registered_prompt(
-				llm_engine,
+				planned_call.create_proxy(),
 				"hypothesis_engine.default_hypothesis",
 				rendered=rendered,
 			)
@@ -513,6 +532,22 @@ class HypothesisEngine(BaseModule):
 		gap_details = self._format_kg_gaps(kg_gaps)
 		kg_summary = self._build_kg_structure_summary(kg_gaps, context)
 		context_summary = self._build_context_summary(context)
+		planned_call = prepare_planned_llm_call(
+			phase="hypothesis",
+			task_type="hypothesis_generation",
+			purpose="hypothesis",
+			dossier_sections={
+				"objective": str(context.get("research_objective") or "").strip(),
+				"kg_gap_details": gap_details,
+				"kg_structure_summary": kg_summary,
+				"context_summary": context_summary,
+			},
+			llm_engine=llm_engine,
+			template_preferences=self._extract_template_preferences(context),
+		)
+		self._record_planned_call(planned_call)
+		if not planned_call.should_call_llm:
+			return []
 
 		rendered = render_prompt(
 			"hypothesis_engine.kg_enhanced",
@@ -526,7 +561,7 @@ class HypothesisEngine(BaseModule):
 
 		try:
 			raw = call_registered_prompt(
-				llm_engine,
+				planned_call.create_proxy(),
 				"hypothesis_engine.kg_enhanced",
 				rendered=rendered,
 			)
@@ -908,6 +943,46 @@ class HypothesisEngine(BaseModule):
 			if "use_llm_generation" in strategy and not strategy.get("use_llm_generation"):
 				return None
 		return context.get("llm_service") or context.get("llm_engine") or self.llm_engine
+
+	def _record_planned_call(self, planned_call: Any) -> None:
+		if planned_call is None:
+			return
+		self._last_small_model_plan = planned_call.to_metadata()
+		self._last_llm_cost_report = planned_call.get_cost_report()
+		self._last_fallback_path = planned_call.fallback_path
+
+	def _extract_template_preferences(self, context: Dict[str, Any]) -> Dict[str, float]:
+		strategy = resolve_learning_strategy(context, self.config)
+		preferences = strategy.get("template_preferences")
+		return dict(preferences) if isinstance(preferences, dict) else {}
+
+	def _build_hypothesis_dossier_sections(
+		self,
+		gap: Dict[str, Any],
+		context: Dict[str, Any],
+	) -> Dict[str, str]:
+		entities = gap.get("entities") or []
+		entity_names: List[str] = []
+		for item in entities:
+			if isinstance(item, dict):
+				name = str(item.get("name") or "").strip()
+			else:
+				name = str(item or "").strip()
+			if name:
+				entity_names.append(name)
+		observations = [str(item).strip() for item in (context.get("observations") or []) if str(item).strip()]
+		findings = [str(item).strip() for item in (context.get("findings") or []) if str(item).strip()]
+		literature_titles = [str(item).strip() for item in (context.get("literature_titles") or []) if str(item).strip()]
+		reasoning_summary = context.get("reasoning_summary") or {}
+		return {
+			"objective": str(context.get("research_objective") or "").strip(),
+			"knowledge_gap": str(gap.get("description") or "").strip(),
+			"entities": "、".join(entity_names),
+			"observations": "\n".join(observations[:8]),
+			"findings": "\n".join(findings[:8]),
+			"literature_titles": "\n".join(literature_titles[:10]),
+			"reasoning_summary": json.dumps(reasoning_summary, ensure_ascii=False),
+		}
 
 	def _estimate_evidence_support(
 		self,

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
+from src.research.evidence_contract import build_phase_evidence_protocol
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
     has_learning_strategy,
@@ -123,6 +124,9 @@ class ExperimentPhaseMixin:
             "study_type": experiment.experimental_design,
             "protocol_study_type": study_protocol.get("study_type", ""),
             "protocol_source": study_protocol.get("protocol_source", ""),
+            "small_model_plan": (study_protocol.get("optimizer_metadata") or {}).get("small_model_plan"),
+            "llm_cost_report": (study_protocol.get("optimizer_metadata") or {}).get("llm_cost_report"),
+            "fallback_path": (study_protocol.get("optimizer_metadata") or {}).get("fallback_path"),
             "phase_semantics": "protocol_design",
             "phase_display_name": _PROTOCOL_DESIGN_DISPLAY_NAME,
             "protocol_design_only": True,
@@ -144,6 +148,17 @@ class ExperimentPhaseMixin:
             self.pipeline.register_phase_learning_manifest(
                 {"phase": "experiment", **self._experiment_tracker.to_metadata()}
             )
+        evidence_protocol = build_phase_evidence_protocol(
+            "experiment",
+            evidence_records=experiment_context.get("evidence_records") or [],
+            evidence_grade="protocol_design",
+            evidence_summary={
+                "study_design": experiment.experimental_design,
+                "sample_size": experiment.sample_size,
+                "methodology": experiment.methodology,
+            },
+        )
+        experiment_results["evidence_protocol"] = evidence_protocol
         return build_phase_result(
             "experiment",
             status="completed",

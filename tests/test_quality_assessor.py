@@ -669,6 +669,8 @@ class TestAssessCycleForReflectionWithLlm(unittest.TestCase):
         self.assertEqual(result["llm_diagnosis"]["diagnosis"], "分析阶段方法学不足")
         self.assertEqual(result["llm_diagnosis"]["confidence"], 0.85)
         self.assertEqual(len(result["llm_diagnosis"]["root_causes"]), 1)
+        self.assertIsInstance(result["llm_diagnosis"].get("planner"), dict)
+        self.assertEqual(result["llm_diagnosis"]["planner"]["phase"], "reflect")
 
     def test_no_llm_diagnosis_without_engine(self):
         a = _assessor()

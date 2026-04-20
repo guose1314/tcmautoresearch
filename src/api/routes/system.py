@@ -79,6 +79,44 @@ def readiness(
     return payload
 
 
+@router.get("/storage/health")
+def storage_health(
+    response: Response,
+    settings: AppSettings = Depends(get_settings),
+    monitoring_service: MonitoringService = Depends(get_monitoring_service),
+    _: None = Depends(require_management_api_key),
+) -> Dict[str, Any]:
+    """F-2-4: 返回 StorageObservability + DegradationGovernor + BackfillLedger 合并报告。
+
+    优先使用 MonitoringService 绑定的活跃 factory（含真实运行时计数器），
+    若无绑定则回退到创建临时 factory（仅配置/模式信息）。
+    """
+    factory = monitoring_service.bound_storage_factory
+    is_transient = factory is None
+    try:
+        if is_transient:
+            from src.storage import StorageBackendFactory
+            factory = StorageBackendFactory(settings.materialize_runtime_config())
+            factory.initialize()
+        obs_report = factory.observability.get_health_report()
+        gov_report = factory.degradation_governor.to_governance_report()
+        backfill_summary = factory.backfill_ledger.get_summary()
+    except Exception as exc:
+        response.status_code = 503
+        return {"error": str(exc), "storage_health": None, "governance": None, "backfill": None}
+    finally:
+        if is_transient and factory is not None:
+            try:
+                factory.close()
+            except Exception:
+                pass
+    return {
+        "storage_health": obs_report,
+        "governance": gov_report,
+        "backfill": backfill_summary,
+    }
+
+
 @router.get("/status")
 def get_system_status(
     monitoring_service: MonitoringService = Depends(get_monitoring_service),

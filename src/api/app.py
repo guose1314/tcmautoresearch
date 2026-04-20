@@ -60,7 +60,27 @@ def configure_api_services(
         resolved_architecture,
         manager,
     )
+    _try_bind_monitoring_storage_factory(app.state.monitoring_service, resolved_settings)
     return manager
+
+
+def _try_bind_monitoring_storage_factory(
+    monitoring_service: MonitoringService,
+    settings: AppSettings,
+) -> None:
+    """尝试创建长生命周期的 StorageBackendFactory 并绑定到 MonitoringService。
+
+    成功后 Prometheus gauge 将采集真实运行时计数器；
+    失败则静默降级（gauge 仍可通过临时 factory 获取配置/模式信息）。
+    """
+    try:
+        from src.storage import StorageBackendFactory
+        factory = StorageBackendFactory(settings.materialize_runtime_config())
+        factory.initialize()
+        monitoring_service.bind_storage_factory(factory)
+        logger.info("MonitoringService: StorageBackendFactory 绑定成功 (db_type=%s)", factory.db_type)
+    except Exception as exc:
+        logger.info("MonitoringService: StorageBackendFactory 绑定跳过: %s", exc)
 
 
 def include_api_routers(app: FastAPI, *, base_prefix: str) -> None:
@@ -149,6 +169,16 @@ def create_app(
 
     @app.on_event("shutdown")
     def shutdown_job_manager() -> None:
+        # Close storage factory (Neo4j driver) via monitoring service
+        monitoring_service = getattr(app.state, "monitoring_service", None)
+        if monitoring_service is not None:
+            factory = getattr(monitoring_service, "_storage_factory", None)
+            if factory is not None:
+                try:
+                    factory.close()
+                except Exception:
+                    pass
+                monitoring_service.unbind_storage_factory()
         db_mgr = getattr(app.state, "db_manager", None)
         if db_mgr is not None:
             db_mgr.close()

@@ -118,6 +118,23 @@ REVIEW_WORKBENCH_SECTION_META = {
         "empty_message": "当前筛选结果下没有可审核的考据证据链。",
     },
 }
+REVIEW_WORKBENCH_STATUS_LABELS = {
+    "pending": "待审核",
+    "accepted": "已通过",
+    "rejected": "已驳回",
+    "needs_source": "待补据",
+}
+REVIEW_QUEUE_PRIORITY_LABELS = {
+    "high": "高优先",
+    "medium": "常规",
+    "low": "已完成",
+}
+REVIEW_QUEUE_FILTER_FIELDS = (
+    "asset_type",
+    "review_status",
+    "priority_bucket",
+    "reviewer",
+)
 
 
 def _normalize_optional_text(value: Any) -> Optional[str]:
@@ -525,6 +542,189 @@ def _build_review_workbench_section(asset_type: str, items: list[Dict[str, Any]]
     }
 
 
+def _normalize_review_queue_filters(raw_filters: Any) -> Dict[str, str]:
+    filters = _as_dict(raw_filters)
+    normalized: Dict[str, str] = {}
+
+    asset_type = _as_text(filters.get("asset_type")).lower()
+    if asset_type:
+        normalized["asset_type"] = asset_type
+
+    review_status = _normalize_workbench_review_status(filters.get("review_status"))
+    if review_status and _as_text(filters.get("review_status")):
+        normalized["review_status"] = review_status
+
+    priority_bucket = _as_text(filters.get("priority_bucket")).lower()
+    if priority_bucket in {"high", "medium", "low"}:
+        normalized["priority_bucket"] = priority_bucket
+
+    reviewer = _as_text(filters.get("reviewer"))
+    if reviewer:
+        normalized["reviewer"] = reviewer
+
+    return normalized
+
+
+def _resolve_review_queue_priority(item: Dict[str, Any]) -> str:
+    review_status = _normalize_workbench_review_status(item.get("review_status"))
+    asset_type = _as_text(item.get("asset_type")).lower()
+    needs_manual_review = bool(item.get("needs_manual_review", True))
+    if review_status in {"accepted", "rejected"} and not needs_manual_review:
+        return "low"
+    if review_status == "needs_source":
+        return "high"
+    if asset_type in {"claim", "evidence_chain"} and needs_manual_review:
+        return "high"
+    return "medium" if needs_manual_review or review_status == "pending" else "low"
+
+
+def _enrich_review_workbench_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    enriched = dict(item)
+    review_status = _normalize_workbench_review_status(enriched.get("review_status"))
+    reviewer = _as_text(enriched.get("reviewer"))
+    priority_bucket = _resolve_review_queue_priority(enriched)
+    queue_status = "open" if review_status in {"pending", "needs_source"} or bool(enriched.get("needs_manual_review", True)) else "closed"
+
+    enriched["review_status"] = review_status
+    enriched["review_status_label"] = REVIEW_WORKBENCH_STATUS_LABELS.get(review_status, review_status or "待审核")
+    enriched["priority_bucket"] = priority_bucket
+    enriched["priority_label"] = REVIEW_QUEUE_PRIORITY_LABELS.get(priority_bucket, priority_bucket)
+    enriched["queue_status"] = queue_status
+    enriched["queue_status_label"] = "待处理" if queue_status == "open" else "已完成"
+    enriched["reviewer"] = reviewer
+    enriched["reviewer_label"] = reviewer or "未认领"
+    return enriched
+
+
+def _item_matches_review_queue_filters(item: Dict[str, Any], active_filters: Dict[str, Any]) -> bool:
+    asset_type = _as_text(active_filters.get("asset_type")).lower()
+    if asset_type and _as_text(item.get("asset_type")).lower() != asset_type:
+        return False
+
+    review_status = _as_text(active_filters.get("review_status")).lower()
+    if review_status and _normalize_workbench_review_status(item.get("review_status")) != review_status:
+        return False
+
+    priority_bucket = _as_text(active_filters.get("priority_bucket")).lower()
+    if priority_bucket and _as_text(item.get("priority_bucket")).lower() != priority_bucket:
+        return False
+
+    reviewer = _as_text(active_filters.get("reviewer"))
+    if reviewer:
+        reviewer_label = _as_text(item.get("reviewer")) or "未认领"
+        if reviewer not in {reviewer_label, "unassigned" if reviewer_label == "未认领" else reviewer_label}:
+            return False
+
+    return True
+
+
+def _count_review_queue_distribution(items: list[Dict[str, Any]], field_name: str) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for item in items:
+        value = _as_text(item.get(field_name))
+        if not value:
+            continue
+        counts[value] = counts.get(value, 0) + 1
+    return {key: counts[key] for key in sorted(counts)}
+
+
+def _build_review_queue_filter_options(items: list[Dict[str, Any]]) -> Dict[str, list[Dict[str, Any]]]:
+    asset_type_counts = _count_review_queue_distribution(items, "asset_type")
+    review_status_counts = _count_review_queue_distribution(items, "review_status")
+    priority_counts = _count_review_queue_distribution(items, "priority_bucket")
+    reviewer_counts = _count_review_queue_distribution(
+        [
+            {**item, "reviewer": _as_text(item.get("reviewer")) or "未认领"}
+            for item in items
+        ],
+        "reviewer",
+    )
+    return {
+        "asset_type": [
+            {
+                "value": asset_type,
+                "label": REVIEW_WORKBENCH_SECTION_META.get(asset_type, {}).get("title") or asset_type,
+                "count": count,
+            }
+            for asset_type, count in asset_type_counts.items()
+        ],
+        "review_status": [
+            {
+                "value": review_status,
+                "label": REVIEW_WORKBENCH_STATUS_LABELS.get(review_status, review_status),
+                "count": count,
+            }
+            for review_status, count in review_status_counts.items()
+        ],
+        "priority_bucket": [
+            {
+                "value": priority_bucket,
+                "label": REVIEW_QUEUE_PRIORITY_LABELS.get(priority_bucket, priority_bucket),
+                "count": count,
+            }
+            for priority_bucket, count in priority_counts.items()
+        ],
+        "reviewer": [
+            {
+                "value": "unassigned" if reviewer == "未认领" else reviewer,
+                "label": reviewer,
+                "count": count,
+            }
+            for reviewer, count in reviewer_counts.items()
+        ],
+    }
+
+
+def _build_reviewer_workload(items: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for item in items:
+        reviewer_label = _as_text(item.get("reviewer")) or "未认领"
+        bucket = buckets.setdefault(
+            reviewer_label,
+            {
+                "reviewer": "" if reviewer_label == "未认领" else reviewer_label,
+                "reviewer_label": reviewer_label,
+                "total": 0,
+                "open": 0,
+                "accepted": 0,
+                "rejected": 0,
+                "needs_source": 0,
+                "pending": 0,
+                "high_priority": 0,
+                "medium_priority": 0,
+                "low_priority": 0,
+            },
+        )
+        bucket["total"] += 1
+        review_status = _normalize_workbench_review_status(item.get("review_status"))
+        if review_status:
+            bucket[review_status] += 1
+        if _as_text(item.get("queue_status")) == "open":
+            bucket["open"] += 1
+        priority_bucket = _as_text(item.get("priority_bucket"))
+        if priority_bucket:
+            bucket[f"{priority_bucket}_priority"] += 1
+    return sorted(
+        buckets.values(),
+        key=lambda item: (-int(item.get("open") or 0), -int(item.get("total") or 0), str(item.get("reviewer_label") or "")),
+    )
+
+
+def _build_recent_batch_operations(observe_philology: Dict[str, Any]) -> list[Dict[str, Any]]:
+    operations: list[Dict[str, Any]] = []
+    for source_name, field_name in (
+        ("catalog_review", "catalog_review_batch_audit_trail"),
+        ("review_workbench", "review_workbench_batch_audit_trail"),
+    ):
+        for entry in _as_dict_list(observe_philology.get(field_name)):
+            operations.append({
+                **entry,
+                "source": source_name,
+            })
+    operations.sort(key=lambda item: _as_text(item.get("applied_at")), reverse=True)
+    return operations[:8]
+
+
 def _build_catalog_lineage_review_items(observe_philology: Dict[str, Any]) -> list[Dict[str, Any]]:
     catalog_summary = _as_dict(observe_philology.get("catalog_summary"))
     lineages = _as_dict_list(catalog_summary.get("version_lineages"))
@@ -896,20 +1096,71 @@ def _build_review_workbench(
     evidence_protocol: Dict[str, Any],
     observe_philology: Dict[str, Any],
     active_filters: Dict[str, Any],
+    review_queue_filters: Dict[str, Any],
 ) -> Dict[str, Any]:
     decision_lookup = _build_review_workbench_decision_lookup(observe_philology)
-    sections = [
-        _build_review_workbench_section("catalog_version_lineage", _build_catalog_lineage_review_items(observe_philology)),
-        _build_review_workbench_section("terminology_row", _build_terminology_review_items(observe_philology, decision_lookup)),
-        _build_review_workbench_section("collation_entry", _build_collation_review_items(observe_philology, decision_lookup)),
-        _build_review_workbench_section("fragment_candidate", _build_fragment_candidate_review_items(observe_philology, decision_lookup, active_filters)),
-        _build_review_workbench_section("claim", _build_claim_review_items(evidence_protocol, decision_lookup, active_filters)),
-        _build_review_workbench_section("evidence_chain", _build_evidence_chain_review_items(observe_philology, decision_lookup, active_filters)),
+    section_payloads = [
+        ("catalog_version_lineage", _build_catalog_lineage_review_items(observe_philology)),
+        ("terminology_row", _build_terminology_review_items(observe_philology, decision_lookup)),
+        ("collation_entry", _build_collation_review_items(observe_philology, decision_lookup)),
+        ("fragment_candidate", _build_fragment_candidate_review_items(observe_philology, decision_lookup, active_filters)),
+        ("claim", _build_claim_review_items(evidence_protocol, decision_lookup, active_filters)),
+        ("evidence_chain", _build_evidence_chain_review_items(observe_philology, decision_lookup, active_filters)),
     ]
+    filter_source_items: list[Dict[str, Any]] = []
+    sections = []
+    for asset_type, items in section_payloads:
+        enriched_items = [_enrich_review_workbench_item(item) for item in items]
+        filter_source_items.extend(enriched_items)
+        filtered_items = [item for item in enriched_items if _item_matches_review_queue_filters(item, review_queue_filters)]
+        sections.append(_build_review_workbench_section(asset_type, filtered_items))
+
+    queue_items = [
+        item
+        for section in sections
+        for item in (section.get("items") or [])
+        if isinstance(item, dict)
+    ]
+    open_queue_items = [item for item in queue_items if _as_text(item.get("queue_status")) == "open"]
+    section_counts = {
+        str(section.get("asset_type") or ""): int(section.get("count") or 0)
+        for section in sections
+        if int(section.get("count") or 0) > 0
+    }
+    queue_summary = {
+        "all_item_count": len(filter_source_items),
+        "visible_item_count": len(queue_items),
+        "total_pending": len(open_queue_items),
+        "section_counts": section_counts,
+        "priority_distribution": _count_review_queue_distribution(open_queue_items, "priority_bucket"),
+        "review_status_distribution": _count_review_queue_distribution(queue_items, "review_status"),
+        "reviewer_distribution": _count_review_queue_distribution(
+            [{**item, "reviewer_label": _as_text(item.get("reviewer_label")) or "未认领"} for item in open_queue_items],
+            "reviewer_label",
+        ),
+    }
+    queue_filters = {
+        "active_filters": review_queue_filters,
+        "options": _build_review_queue_filter_options(filter_source_items),
+    }
+    recent_batch_operations = _build_recent_batch_operations(observe_philology)
     return {
         "sections": sections,
         "section_count": len(sections),
-        "total_item_count": sum(int(section.get("count") or 0) for section in sections),
+        "total_item_count": len(queue_items),
+        "all_item_count": len(filter_source_items),
+        "active_filters": review_queue_filters,
+        "queue_summary": queue_summary,
+        "queue_filters": queue_filters,
+        "review_queue": {
+            **queue_summary,
+            "items": queue_items,
+            "reviewer_workload": _build_reviewer_workload(queue_items),
+            "recent_batch_operations": recent_batch_operations,
+            "last_batch_summary": recent_batch_operations[0] if recent_batch_operations else {},
+        },
+        "selection_supported": True,
+        "batch_audit_supported": True,
     }
 
 
@@ -1335,6 +1586,7 @@ def _build_dashboard_evidence_board(
     data_mining_methods: list[str],
     observe_philology: Dict[str, Any],
     philology_filter_contract: Dict[str, Any],
+    review_queue_filters: Dict[str, Any],
 ) -> Dict[str, Any]:
     evidence_records = _as_list(evidence_protocol.get("evidence_records"))
     claims = _as_list(evidence_protocol.get("claims"))
@@ -1347,7 +1599,12 @@ def _build_dashboard_evidence_board(
             0.0,
         )
     )
-    review_workbench = _build_review_workbench(evidence_protocol, observe_philology, active_catalog_filters)
+    review_workbench = _build_review_workbench(
+        evidence_protocol,
+        observe_philology,
+        active_catalog_filters,
+        review_queue_filters,
+    )
     return {
         "evidence_count": len(evidence_records),
         "claim_count": len(claims),
@@ -1381,6 +1638,9 @@ def _build_dashboard_evidence_board(
         ),
         "active_catalog_filters": active_catalog_filters,
         "catalog_filter_options": _as_dict(philology_filter_contract.get("options")),
+        "queue_summary": _as_dict(review_workbench.get("queue_summary")),
+        "queue_filters": _as_dict(review_workbench.get("queue_filters")),
+        "review_queue": _as_dict(review_workbench.get("review_queue")),
         "review_workbench": review_workbench,
     }
 
@@ -1588,6 +1848,7 @@ def build_research_dashboard_payload(
     data_mining_summary = _resolve_data_mining_summary(analysis_results, research_artifact)
     data_mining_methods = _resolve_dashboard_data_mining_methods(analysis_results, data_mining_summary)
     observe_philology_raw = _resolve_observe_philology(result)
+    review_queue_filters = _normalize_review_queue_filters(philology_filters)
     philology_filter_contract = build_observe_philology_filter_contract(observe_philology_raw, philology_filters)
     observe_philology = filter_observe_philology_assets(observe_philology_raw, philology_filters)
     learning_feedback_library = _resolve_dashboard_learning_feedback_library(snapshot, result)
@@ -1633,6 +1894,7 @@ def build_research_dashboard_payload(
             data_mining_methods,
             observe_philology,
             philology_filter_contract,
+            review_queue_filters,
         ),
         "learning_feedback_board": learning_feedback_board,
         "knowledge_graph_board": knowledge_graph_board,

@@ -88,6 +88,7 @@ _CATALOG_REVIEW_SCOPE_ORDER = {
     "document": 3,
 }
 _CATALOG_REVIEW_ASSET_KIND = "catalog_review_decisions"
+_BATCH_AUDIT_HISTORY_LIMIT = 20
 _EXEGESIS_LABEL_CATEGORY_MAP = {
     "本草药名": "herb",
     "方剂名": "formula",
@@ -337,6 +338,101 @@ def _append_catalog_audit_trail(
         new_decision["decision_history"] = existing_history
 
 
+def _normalize_batch_selection_snapshot(value: Any) -> Dict[str, Any]:
+    payload = _as_dict(value)
+    if not payload:
+        return {}
+
+    normalized: Dict[str, Any] = {}
+    for field_name in ("selection_strategy", "scope"):
+        text = _as_text(payload.get(field_name))
+        if text:
+            normalized[field_name] = text
+
+    for field_name in ("selected_count", "visible_item_count", "total_item_count"):
+        raw_value = payload.get(field_name)
+        try:
+            numeric = int(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if numeric >= 0:
+            normalized[field_name] = numeric
+
+    for field_name in ("asset_keys", "asset_types", "review_statuses"):
+        values = _as_string_list(payload.get(field_name))
+        if values:
+            normalized[field_name] = values
+
+    active_filters = payload.get("active_filters")
+    if isinstance(active_filters, Mapping):
+        normalized_filters = {
+            key: text
+            for key, raw in active_filters.items()
+            if (text := _as_text(raw))
+        }
+        if normalized_filters:
+            normalized["active_filters"] = normalized_filters
+
+    section_counts = payload.get("section_counts")
+    if isinstance(section_counts, Mapping):
+        normalized_section_counts: Dict[str, int] = {}
+        for key, raw_value in section_counts.items():
+            name = _as_text(key)
+            if not name:
+                continue
+            try:
+                numeric = int(raw_value)
+            except (TypeError, ValueError):
+                continue
+            if numeric >= 0:
+                normalized_section_counts[name] = numeric
+        if normalized_section_counts:
+            normalized["section_counts"] = normalized_section_counts
+
+    return normalized
+
+
+def _build_catalog_batch_audit_entry(
+    decisions: Sequence[Dict[str, Any]],
+    payload: Mapping[str, Any],
+    *,
+    reviewer: str,
+    applied_at: str,
+) -> Dict[str, Any]:
+    scope_distribution: Dict[str, int] = {}
+    review_status_distribution: Dict[str, int] = {}
+    for decision in decisions:
+        scope = _as_text(decision.get("scope"))
+        review_status = _as_text(decision.get("review_status"))
+        if scope:
+            scope_distribution[scope] = scope_distribution.get(scope, 0) + 1
+        if review_status:
+            review_status_distribution[review_status] = review_status_distribution.get(review_status, 0) + 1
+
+    entry: Dict[str, Any] = {
+        "applied_at": applied_at,
+        "applied_count": len(decisions),
+        "scope_distribution": scope_distribution,
+        "review_status_distribution": review_status_distribution,
+    }
+    if reviewer:
+        entry["reviewer"] = reviewer
+
+    shared_decision_basis = _as_text(payload.get("shared_decision_basis"))
+    if shared_decision_basis:
+        entry["shared_decision_basis"] = shared_decision_basis
+
+    shared_review_reasons = _as_string_list(payload.get("shared_review_reasons"))
+    if shared_review_reasons:
+        entry["shared_review_reasons"] = shared_review_reasons
+
+    selection_snapshot = _normalize_batch_selection_snapshot(payload.get("selection_snapshot"))
+    if selection_snapshot:
+        entry["selection_snapshot"] = selection_snapshot
+
+    return entry
+
+
 def upsert_observe_catalog_review_artifact_content(
     raw_content: Any,
     raw_decision: Any,
@@ -397,18 +493,41 @@ def upsert_observe_catalog_review_artifact_content_batch(
     raw_decisions: Any,
 ) -> Dict[str, Any]:
     """Apply multiple catalog review decisions in one pass, preserving audit trails."""
-    items: List[Any] = list(raw_decisions) if isinstance(raw_decisions, list) else []
+    payload = _as_dict(raw_decisions)
+    items: List[Any] = list(raw_decisions) if isinstance(raw_decisions, list) else list(payload.get("decisions") or [])
     if not items:
         return {}
 
     content = raw_content
+    normalized_decisions: List[Dict[str, Any]] = []
     for raw_decision in items:
+        normalized_decision = normalize_observe_catalog_review_decision(raw_decision)
+        if not normalized_decision:
+            continue
+        normalized_decisions.append(normalized_decision)
         result = upsert_observe_catalog_review_artifact_content(content, raw_decision)
         if result:
             content = result
 
-    if not isinstance(content, dict) or not content:
+    if not isinstance(content, dict) or not content or not normalized_decisions:
         return {}
+
+    applied_at = _as_text(payload.get("applied_at")) or _as_text(content.get("updated_at")) or _utc_now_iso()
+    reviewer = _as_text(payload.get("reviewer")) or _as_text(content.get("last_reviewer"))
+    batch_entry = _build_catalog_batch_audit_entry(
+        normalized_decisions,
+        payload,
+        reviewer=reviewer,
+        applied_at=applied_at,
+    )
+    batch_audit_trail = list(content.get("batch_audit_trail") or [])
+    batch_audit_trail.append(batch_entry)
+    content["batch_audit_trail"] = batch_audit_trail[-_BATCH_AUDIT_HISTORY_LIMIT:]
+    content["batch_operation_count"] = len(content["batch_audit_trail"])
+    content["last_batch_summary"] = batch_entry
+    content["updated_at"] = applied_at
+    if reviewer:
+        content["last_reviewer"] = reviewer
     return content
 
 
@@ -1976,6 +2095,10 @@ def filter_observe_philology_assets(
         "catalog_summary": filtered_catalog_summary,
         "catalog_review_decisions": _as_dict_list(normalized.get("catalog_review_decisions")),
         "review_workbench_decisions": _as_dict_list(normalized.get("review_workbench_decisions")),
+        "catalog_review_batch_audit_trail": _as_dict_list(normalized.get("catalog_review_batch_audit_trail")),
+        "catalog_review_last_batch_summary": _as_dict(normalized.get("catalog_review_last_batch_summary")),
+        "review_workbench_batch_audit_trail": _as_dict_list(normalized.get("review_workbench_batch_audit_trail")),
+        "review_workbench_last_batch_summary": _as_dict(normalized.get("review_workbench_last_batch_summary")),
     }
     for field_name, items in filtered_fragment_candidates.items():
         filtered_assets[field_name] = items
@@ -2105,7 +2228,11 @@ def _merge_philology_candidates(
             "annotation_report",
             "catalog_summary",
             "catalog_review_decisions",
+            "catalog_review_batch_audit_trail",
+            "catalog_review_last_batch_summary",
             "review_workbench_decisions",
+            "review_workbench_batch_audit_trail",
+            "review_workbench_last_batch_summary",
             "evidence_chains",
             "conflict_claims",
             *_FRAGMENT_CANDIDATE_FIELDS,
@@ -2267,8 +2394,22 @@ def normalize_observe_philology_assets(raw_assets: Any) -> Dict[str, Any]:
     assets = _as_dict(raw_assets)
     source = _as_text(assets.get("source"))
     sources = _as_string_list(assets.get("sources"))
+    catalog_review_payload = _as_dict(assets.get("catalog_review_decisions"))
+    review_workbench_payload = _as_dict(assets.get("review_workbench_decisions"))
     catalog_review_decisions = _normalize_catalog_review_decisions(assets.get("catalog_review_decisions"))
     review_workbench_decisions = normalize_observe_review_workbench_decisions(assets.get("review_workbench_decisions"))
+    catalog_review_batch_audit_trail = _as_dict_list(
+        assets.get("catalog_review_batch_audit_trail") or catalog_review_payload.get("batch_audit_trail")
+    )
+    catalog_review_last_batch_summary = _as_dict(
+        assets.get("catalog_review_last_batch_summary") or catalog_review_payload.get("last_batch_summary")
+    )
+    review_workbench_batch_audit_trail = _as_dict_list(
+        assets.get("review_workbench_batch_audit_trail") or review_workbench_payload.get("batch_audit_trail")
+    )
+    review_workbench_last_batch_summary = _as_dict(
+        assets.get("review_workbench_last_batch_summary") or review_workbench_payload.get("last_batch_summary")
+    )
     terminology_rows = _as_dict_list(assets.get("terminology_standard_table"))
     collation_entries = _as_dict_list(assets.get("collation_entries"))
     fragment_candidate_payloads = {
@@ -2345,7 +2486,13 @@ def normalize_observe_philology_assets(raw_assets: Any) -> Dict[str, Any]:
         "annotation_report": normalized_report,
         "catalog_summary": catalog_summary,
         "catalog_review_decisions": catalog_review_decisions,
+        "catalog_review_batch_audit_trail": catalog_review_batch_audit_trail,
+        "catalog_review_last_batch_summary": catalog_review_last_batch_summary,
+        "catalog_review_batch_operation_count": len(catalog_review_batch_audit_trail),
         "review_workbench_decisions": review_workbench_decisions,
+        "review_workbench_batch_audit_trail": review_workbench_batch_audit_trail,
+        "review_workbench_last_batch_summary": review_workbench_last_batch_summary,
+        "review_workbench_batch_operation_count": len(review_workbench_batch_audit_trail),
         "catalog_document_count": _safe_int(catalog_metrics.get("catalog_document_count"), len(_as_dict_list(catalog_summary.get("documents")))),
         "version_lineage_count": _safe_int(catalog_metrics.get("version_lineage_count"), len(_as_dict_list(catalog_summary.get("version_lineages")))),
         "witness_count": _safe_int(catalog_metrics.get("witness_count"), 0),
@@ -2606,6 +2753,12 @@ def extract_observe_philology_assets_from_artifacts(artifacts: Sequence[Mapping[
             collected["catalog_summary"] = content
         elif asset_kind == _CATALOG_REVIEW_ASSET_KIND and content:
             collected["catalog_review_decisions"] = content
+            batch_audit_trail = _as_dict_list(content.get("batch_audit_trail"))
+            if batch_audit_trail:
+                collected["catalog_review_batch_audit_trail"] = batch_audit_trail
+            last_batch_summary = _as_dict(content.get("last_batch_summary"))
+            if last_batch_summary:
+                collected["catalog_review_last_batch_summary"] = last_batch_summary
         elif asset_kind == "fragment_reconstruction" and content:
             for fk in CANDIDATE_KINDS:
                 items = _as_dict_list(content.get(fk))
@@ -2620,6 +2773,12 @@ def extract_observe_philology_assets_from_artifacts(artifacts: Sequence[Mapping[
                 collected["conflict_claims"] = conflicts
         elif asset_kind == REVIEW_WORKBENCH_ASSET_KIND and content:
             collected["review_workbench_decisions"] = content
+            batch_audit_trail = _as_dict_list(content.get("batch_audit_trail"))
+            if batch_audit_trail:
+                collected["review_workbench_batch_audit_trail"] = batch_audit_trail
+            last_batch_summary = _as_dict(content.get("last_batch_summary"))
+            if last_batch_summary:
+                collected["review_workbench_last_batch_summary"] = last_batch_summary
     return normalize_observe_philology_assets(collected)
 
 

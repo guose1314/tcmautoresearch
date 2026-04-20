@@ -983,6 +983,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 build_research_phase_execution_graph_properties,
                 build_research_session_graph_properties,
             )
+            from src.storage.graph_schema import NodeLabel, RelType
             from src.storage.neo4j_driver import Neo4jEdge, Neo4jNode
 
             node_map: Dict[tuple[str, str], Any] = {}
@@ -1020,7 +1021,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     )
 
             _add_node(
-                "ResearchSession",
+                NodeLabel.RESEARCH_SESSION.value,
                 cycle.cycle_id,
                 build_research_session_graph_properties(
                     {
@@ -1042,7 +1043,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             for phase_name, record in phase_records.items():
                 phase_id = str(record.get("id") or f"{cycle.cycle_id}:{phase_name}")
                 _add_node(
-                    "ResearchPhaseExecution",
+                    NodeLabel.RESEARCH_PHASE_EXECUTION.value,
                     phase_id,
                     build_research_phase_execution_graph_properties(
                         {
@@ -1055,9 +1056,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 _add_edge(
                     cycle.cycle_id,
                     phase_id,
-                    "HAS_PHASE",
-                    "ResearchSession",
-                    "ResearchPhaseExecution",
+                    RelType.HAS_PHASE.value,
+                    NodeLabel.RESEARCH_SESSION.value,
+                    NodeLabel.RESEARCH_PHASE_EXECUTION.value,
                     {"cycle_id": cycle.cycle_id, "phase": phase_name},
                 )
 
@@ -1066,7 +1067,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 if not artifact_id:
                     continue
                 _add_node(
-                    "ResearchArtifact",
+                    NodeLabel.RESEARCH_ARTIFACT.value,
                     artifact_id,
                     build_research_artifact_graph_properties(
                         {
@@ -1080,18 +1081,18 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     _add_edge(
                         phase_execution_id,
                         artifact_id,
-                        "GENERATED",
-                        "ResearchPhaseExecution",
-                        "ResearchArtifact",
+                        RelType.GENERATED.value,
+                        NodeLabel.RESEARCH_PHASE_EXECUTION.value,
+                        NodeLabel.RESEARCH_ARTIFACT.value,
                         {"cycle_id": cycle.cycle_id},
                     )
                 else:
                     _add_edge(
                         cycle.cycle_id,
                         artifact_id,
-                        "HAS_ARTIFACT",
-                        "ResearchSession",
-                        "ResearchArtifact",
+                        RelType.HAS_ARTIFACT.value,
+                        NodeLabel.RESEARCH_SESSION.value,
+                        NodeLabel.RESEARCH_ARTIFACT.value,
                         {"cycle_id": cycle.cycle_id},
                     )
 
@@ -1134,8 +1135,8 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     target_name = str(relation.get("target") or "").strip()
                     if not source_name or not target_name:
                         continue
-                    source_type = self._normalize_graph_label(relation.get("source_type") or "Entity", "Entity")
-                    target_type = self._normalize_graph_label(relation.get("target_type") or "Entity", "Entity")
+                    source_type = self._normalize_graph_label(relation.get("source_type") or NodeLabel.ENTITY.value, NodeLabel.ENTITY.value)
+                    target_type = self._normalize_graph_label(relation.get("target_type") or NodeLabel.ENTITY.value, NodeLabel.ENTITY.value)
                     source_id = f"entity::{source_name}"
                     target_id = f"entity::{target_name}"
                     _add_node(source_type, source_id, {"name": source_name, "entity_type": relation.get("source_type") or source_type})
@@ -1143,7 +1144,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     _add_edge(
                         source_id,
                         target_id,
-                        relation.get("type") or "RELATED_TO",
+                        relation.get("type") or RelType.RELATED_TO.value,
                         source_type,
                         target_type,
                         {
@@ -1156,16 +1157,16 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                         _add_edge(
                             observe_phase_id,
                             source_id,
-                            "CAPTURED",
-                            "ResearchPhaseExecution",
+                            RelType.CAPTURED.value,
+                            NodeLabel.RESEARCH_PHASE_EXECUTION.value,
                             source_type,
                             {"cycle_id": cycle.cycle_id, "phase": "observe"},
                         )
                         _add_edge(
                             observe_phase_id,
                             target_id,
-                            "CAPTURED",
-                            "ResearchPhaseExecution",
+                            RelType.CAPTURED.value,
+                            NodeLabel.RESEARCH_PHASE_EXECUTION.value,
                             target_type,
                             {"cycle_id": cycle.cycle_id, "phase": "observe"},
                         )

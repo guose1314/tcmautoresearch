@@ -14,6 +14,10 @@ logging:
 models:
   llm:
     cache_dir: "./cache/llm/test"
+    small_model_optimizer:
+      enabled: true
+      benchmark:
+        output_dir: "./output/test/phase_benchmarks"
 
 modules:
   document_preprocessing:

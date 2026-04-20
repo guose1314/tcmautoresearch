@@ -1,0 +1,33 @@
+[
+  {
+    "case_id": "hypothesis_gap_proceed",
+    "phase": "hypothesis",
+    "task_type": "hypothesis_generation",
+    "purpose": "hypothesis",
+    "expected_action": "proceed",
+    "expected_framework": "analytical",
+    "max_input_tokens": 1400,
+    "dossier_sections": {
+      "objective": "围绕黄芪与脾气虚证的关系提出可验证假说。",
+      "knowledge_gap": "图谱中存在间接路径，但缺少黄芪到脾气虚证的直接关系。",
+      "observations": "黄芪在补气类文献中高频出现。\n补中益气汤多次指向脾气虚证。",
+      "findings": "已有证据提示黄芪与补气机制相关。",
+      "literature_titles": "黄芪补气作用机制研究进展\n补中益气汤治疗脾气虚证的证据综述"
+    }
+  },
+  {
+    "case_id": "hypothesis_gap_skip_cache",
+    "phase": "hypothesis",
+    "task_type": "hypothesis_generation",
+    "purpose": "hypothesis",
+    "expected_action": "skip",
+    "expected_framework": "analytical",
+    "cache_hit_likelihood": 0.95,
+    "max_input_tokens": 1400,
+    "dossier_sections": {
+      "objective": "围绕黄芪与脾气虚证的关系提出可验证假说。",
+      "knowledge_gap": "同一知识缺口已在上一轮生成并缓存。",
+      "observations": "上轮已有结构化假说输出。"
+    }
+  }
+]

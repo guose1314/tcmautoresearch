@@ -60,11 +60,32 @@ class MonitoringService:
         self._alert_history: Dict[str, float] = {}
         self._registry = CollectorRegistry(auto_describe=True)
         self._gauges = self._create_gauges()
+        self._storage_governance_enabled = bool(self.monitoring_config.get("storage_governance", False))
+        if self._storage_governance_enabled:
+            self._gauges.update(self._create_storage_governance_gauges())
+        self._bound_storage_factory: Optional[Any] = None
         self._structured_storage_summary = self._build_structured_storage_summary()
 
     def bind_db_manager(self, db_manager: DatabaseManager) -> None:
         self._db_manager = db_manager
         self._structured_storage_summary = self._build_structured_storage_summary()
+
+    def bind_storage_factory(self, factory: Any) -> None:
+        """绑定活跃的 StorageBackendFactory 实例以采集运行时指标。
+
+        绑定后 Prometheus gauge 将读取该实例的实时计数器，
+        而非每次采集时创建临时 factory（临时 factory 计数器始终为零）。
+        """
+        self._bound_storage_factory = factory
+
+    def unbind_storage_factory(self) -> None:
+        """解除绑定的 StorageBackendFactory。"""
+        self._bound_storage_factory = None
+
+    @property
+    def bound_storage_factory(self) -> Optional[Any]:
+        """当前绑定的 StorageBackendFactory 实例（可为 None）。"""
+        return self._bound_storage_factory
 
     @property
     def prometheus_content_type(self) -> str:
@@ -226,6 +247,83 @@ class MonitoringService:
             "health_degraded_checks": Gauge(
                 "tcm_health_degraded_checks_total",
                 "Number of degraded health checks in the latest snapshot.",
+                registry=self._registry,
+            ),
+        }
+
+    def _create_storage_governance_gauges(self) -> Dict[str, Gauge]:
+        """F-2: StorageObservability / DegradationGovernor Prometheus gauges.
+
+        仅在 monitoring.storage_governance 为 true 时调用。
+        """
+        return {
+            # F-2-1 — StorageObservability
+            "storage_health_score": Gauge(
+                "tcm_storage_health_score",
+                "Rolling-window storage health score from StorageObservability.",
+                registry=self._registry,
+            ),
+            "storage_success_rate": Gauge(
+                "tcm_storage_success_rate",
+                "Rolling-window storage transaction success rate.",
+                registry=self._registry,
+            ),
+            "storage_latency_p50_ms": Gauge(
+                "tcm_storage_latency_p50_ms",
+                "Rolling-window storage latency p50 in milliseconds.",
+                registry=self._registry,
+            ),
+            "storage_latency_p95_ms": Gauge(
+                "tcm_storage_latency_p95_ms",
+                "Rolling-window storage latency p95 in milliseconds.",
+                registry=self._registry,
+            ),
+            "storage_latency_p99_ms": Gauge(
+                "tcm_storage_latency_p99_ms",
+                "Rolling-window storage latency p99 in milliseconds.",
+                registry=self._registry,
+            ),
+            "storage_lifetime_transactions": Gauge(
+                "tcm_storage_lifetime_transactions",
+                "Total lifetime storage transactions.",
+                registry=self._registry,
+            ),
+            # F-2-1b — BackfillLedger
+            "storage_backfill_pending": Gauge(
+                "tcm_storage_backfill_pending",
+                "Backfill ledger entries in pending state.",
+                registry=self._registry,
+            ),
+            "storage_backfill_completed": Gauge(
+                "tcm_storage_backfill_completed",
+                "Backfill ledger entries completed.",
+                registry=self._registry,
+            ),
+            "storage_backfill_failed": Gauge(
+                "tcm_storage_backfill_failed",
+                "Backfill ledger entries failed.",
+                registry=self._registry,
+            ),
+            # F-2-2 — DegradationGovernor
+            "storage_mode": Gauge(
+                "tcm_storage_mode_info",
+                "Current storage mode encoded as label (1=active).",
+                ["mode"],
+                registry=self._registry,
+            ),
+            "storage_is_degraded": Gauge(
+                "tcm_storage_is_degraded",
+                "1 if storage is in degraded mode, 0 otherwise.",
+                registry=self._registry,
+            ),
+            "storage_failure_rate": Gauge(
+                "tcm_storage_failure_rate",
+                "Lifetime storage transaction failure rate.",
+                registry=self._registry,
+            ),
+            "storage_compensations_total": Gauge(
+                "tcm_storage_compensations_total",
+                "Lifetime compensation transactions applied.",
                 registry=self._registry,
             ),
         }
@@ -1158,3 +1256,70 @@ class MonitoringService:
             summary = health.get("summary") if isinstance(health.get("summary"), dict) else {}
             self._gauges["health_failed_checks"].set(float(summary.get("failed", 0) or 0))
             self._gauges["health_degraded_checks"].set(float(summary.get("degraded", 0) or 0))
+
+            # F-2: 存储治理指标
+            if self._storage_governance_enabled:
+                self._update_storage_governance_gauges()
+
+    def _resolve_storage_factory(self) -> Optional[Any]:
+        """返回可用的 StorageBackendFactory 实例。
+
+        优先使用 ``bind_storage_factory()`` 绑定的活跃实例（含真实运行时计数器），
+        若无绑定则回退到创建临时实例（仅能获取配置/模式信息，计数器为零）。
+        """
+        if self._bound_storage_factory is not None:
+            return self._bound_storage_factory
+        try:
+            from src.storage import StorageBackendFactory
+            factory = StorageBackendFactory(self.settings.materialize_runtime_config())
+            factory.initialize()
+            return factory
+        except Exception as exc:
+            logger.debug("存储治理指标采集失败（临时 factory 创建失败）: %s", exc)
+            return None
+
+    def _update_storage_governance_gauges(self) -> None:
+        """从 StorageBackendFactory 拉取 observability + governor + backfill 指标并更新 Prometheus gauges。"""
+        factory = self._resolve_storage_factory()
+        if factory is None:
+            return
+        is_transient = factory is not self._bound_storage_factory
+        try:
+            obs_report = factory.observability.get_health_report()
+            gov_report = factory.degradation_governor.to_governance_report()
+            backfill_summary = factory.backfill_ledger.get_summary()
+        except Exception as exc:
+            logger.debug("存储治理指标采集失败: %s", exc)
+            return
+        finally:
+            if is_transient:
+                try:
+                    factory.close()
+                except Exception:
+                    pass
+
+        # F-2-1 — StorageObservability
+        self._gauges["storage_health_score"].set(float(obs_report.get("health_score", 0.0) or 0.0))
+        window_metrics = obs_report.get("window_metrics") if isinstance(obs_report.get("window_metrics"), dict) else {}
+        self._gauges["storage_success_rate"].set(float(window_metrics.get("success_rate", 0.0) or 0.0))
+        latency = obs_report.get("latency_ms") if isinstance(obs_report.get("latency_ms"), dict) else {}
+        self._gauges["storage_latency_p50_ms"].set(float(latency.get("p50", 0.0) or 0.0))
+        self._gauges["storage_latency_p95_ms"].set(float(latency.get("p95", 0.0) or 0.0))
+        self._gauges["storage_latency_p99_ms"].set(float(latency.get("p99", 0.0) or 0.0))
+        self._gauges["storage_lifetime_transactions"].set(float(obs_report.get("lifetime_transactions", 0) or 0))
+
+        # F-2-1b — BackfillLedger
+        self._gauges["storage_backfill_pending"].set(float(backfill_summary.get("pending", 0) or 0))
+        self._gauges["storage_backfill_completed"].set(float(backfill_summary.get("completed", 0) or 0))
+        self._gauges["storage_backfill_failed"].set(float(backfill_summary.get("failed", 0) or 0))
+
+        # F-2-2 — DegradationGovernor
+        current_mode = str(gov_report.get("current_mode", "unknown"))
+        for mode_label in ("dual_write", "pg_only", "sqlite_fallback", "uninitialized"):
+            self._gauges["storage_mode"].labels(mode=mode_label).set(1.0 if mode_label == current_mode else 0.0)
+        self._gauges["storage_is_degraded"].set(1.0 if gov_report.get("is_degraded") else 0.0)
+        gov_metrics = gov_report.get("metrics") if isinstance(gov_report.get("metrics"), dict) else {}
+        total_tx = int(gov_metrics.get("total_transactions", 0) or 0)
+        failed_tx = int(gov_metrics.get("failed_transactions", 0) or 0)
+        self._gauges["storage_failure_rate"].set(failed_tx / total_tx if total_tx > 0 else 0.0)
+        self._gauges["storage_compensations_total"].set(float(gov_metrics.get("compensations_applied", 0) or 0))

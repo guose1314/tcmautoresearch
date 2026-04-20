@@ -166,7 +166,10 @@ class TestPhaseResultContract(unittest.TestCase):
             },
         )
 
-        self.assertEqual(normalized["results"], {})
+        # F-3: common keys 自动注入, 只验证 removed 字段不回流
+        for removed_key in ("paper_draft", "imrd_reports", "paper_language",
+                            "report_output_files", "report_generation_errors", "report_session_result"):
+            self.assertNotIn(removed_key, normalized["results"], f"{removed_key} should not be in results")
         self.assertEqual(get_phase_artifact_map(normalized)["imrd_markdown"], "output/imrd.md")
         self.assertNotIn("paper_draft", normalized)
         self.assertNotIn("imrd_reports", normalized)

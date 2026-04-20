@@ -183,6 +183,8 @@ class TestReflectLLMEnhanced(unittest.TestCase):
         llm_reflections = [r for r in result["reflections"] if r.get("source") == "llm"]
         self.assertEqual(len(llm_reflections), 1)
         self.assertIn("跨学科", llm_reflections[0]["reflection"])
+        self.assertIsInstance(result["metadata"].get("small_model_plan"), dict)
+        self.assertEqual(result["metadata"]["small_model_plan"]["phase"], "reflect")
 
     def test_llm_failure_falls_back_gracefully(self):
         llm = MagicMock()

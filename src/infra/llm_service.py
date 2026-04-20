@@ -39,17 +39,280 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from src.infra.cache_service import (
     LLMDiskCache as _DiskCache,  # noqa: F401  re-export alias
 )
-from src.infra.token_budget_policy import apply_token_budget_to_prompt
+from src.infra.token_budget_policy import (
+    apply_token_budget_to_prompt,
+    estimate_text_tokens,
+)
 
 logger = logging.getLogger(__name__)
+
+
+_DEFAULT_SMALL_MODEL_OPTIMIZER_SETTINGS: Dict[str, Any] = {
+    "enabled": True,
+    "phase_overrides": {},
+    "purpose_overrides": {"publish": "paper_plugin"},
+    "benchmark": {
+        "output_dir": "./output/phase_benchmarks",
+        "compare_baseline": True,
+    },
+}
+
+
+def _deep_merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = dict(base)
+    for key, value in override.items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_dict(existing, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _normalize_dossier_sections(dossier_sections: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    normalized: Dict[str, str] = {}
+    for name, value in (dossier_sections or {}).items():
+        text = str(value or "").strip()
+        if text:
+            normalized[str(name)] = text
+    return normalized
+
+
+def _load_small_model_optimizer_settings(llm_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if llm_config is None:
+        from src.infrastructure.config_loader import load_settings_section
+
+        llm_config = load_settings_section("models.llm", default={})
+
+    payload = llm_config.get("small_model_optimizer") if isinstance(llm_config, dict) else {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return _deep_merge_dict(_DEFAULT_SMALL_MODEL_OPTIMIZER_SETTINGS, payload)
+
+
+@dataclass
+class PlannedLLMCall:
+    """统一的小模型规划调用上下文。"""
+
+    phase: str
+    task_type: str
+    purpose: str
+    llm_service: Any
+    enabled: bool = False
+    policy_source: str = ""
+    cache_hit_likelihood: float = 0.0
+    plan: Optional["CallPlan"] = None
+    fallback_path: Optional[str] = None
+    prompt_application: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def should_call_llm(self) -> bool:
+        if self.llm_service is None or not hasattr(self.llm_service, "generate"):
+            return False
+        if self.plan is None:
+            return True
+        return self.plan.should_call_llm
+
+    def build_prompt(self, prompt: str, system_prompt: str = "") -> tuple[str, str]:
+        if self.plan is None:
+            return str(prompt or ""), str(system_prompt or "")
+
+        prompt_sections = []
+        if self.plan.context_text.strip():
+            prompt_sections.append(f"【规划上下文】\n{self.plan.context_text}")
+        prompt_sections.append(str(prompt or ""))
+        if self.plan.output_scaffold.strip():
+            prompt_sections.append(f"【输出结构约束】\n{self.plan.output_scaffold}")
+
+        merged_prompt = "\n\n".join(section for section in prompt_sections if section.strip())
+        merged_system_prompt = "\n\n".join(
+            section
+            for section in (str(system_prompt or ""), self.plan.reasoning_directive)
+            if section.strip()
+        )
+        return merged_prompt, merged_system_prompt
+
+    def to_metadata(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "phase": self.phase,
+            "task_type": self.task_type,
+            "purpose": self.purpose,
+            "optimizer_enabled": self.enabled,
+            "policy_source": self.policy_source,
+            "cache_hit_likelihood": round(float(self.cache_hit_likelihood), 4),
+            "should_call_llm": self.should_call_llm,
+        }
+        if self.plan is not None:
+            payload.update(
+                {
+                    "action": self.plan.action,
+                    "framework_name": self.plan.framework_name,
+                    "layer_used": self.plan.layer_used,
+                    "estimated_tokens": self.plan.estimated_tokens,
+                    "decision_reason": self.plan.decision_reason,
+                    "degradation_hints": dict(self.plan.degradation_hints),
+                    "sub_context_count": len(self.plan.sub_contexts),
+                }
+            )
+        if self.fallback_path:
+            payload["fallback_path"] = self.fallback_path
+        if self.prompt_application:
+            payload["prompt_application"] = dict(self.prompt_application)
+        return payload
+
+    def get_cost_report(self) -> Optional[Dict[str, Any]]:
+        if not self.enabled:
+            return None
+        try:
+            return get_small_model_optimizer().get_cost_report()
+        except Exception:
+            return None
+
+    def create_proxy(self) -> Any:
+        if self.llm_service is None:
+            return None
+        if isinstance(self.llm_service, PlannedLLMService):
+            return self.llm_service
+        return PlannedLLMService(self.llm_service, self)
+
+
+class PlannedLLMService:
+    """在实际 generate 之前注入 planner 产出的上下文、框架与预算。"""
+
+    def __init__(self, engine: Any, planned_call: PlannedLLMCall):
+        self._engine = engine
+        self.planned_call = planned_call
+
+    def generate(self, prompt: str, system_prompt: str = "") -> str:
+        if not self.planned_call.should_call_llm:
+            return ""
+
+        merged_prompt, merged_system_prompt = self.planned_call.build_prompt(prompt, system_prompt)
+        budgeted = apply_token_budget_to_prompt(
+            merged_prompt,
+            system_prompt=merged_system_prompt,
+            task=self.planned_call.task_type,
+            purpose=self.planned_call.purpose,
+            context_window_tokens=getattr(self._engine, "n_ctx", None),
+            max_output_tokens=getattr(self._engine, "max_tokens", None),
+        )
+        self.planned_call.prompt_application = {
+            "trimmed": bool(budgeted.trimmed),
+            "input_budget_tokens": int(budgeted.input_budget_tokens),
+            "total_input_tokens_before": int(budgeted.total_input_tokens_before),
+            "total_input_tokens_after": int(budgeted.total_input_tokens_after),
+            "resolution_source": budgeted.resolution_source,
+            "task": budgeted.task,
+            "purpose": budgeted.purpose,
+        }
+
+        response = self._engine.generate(budgeted.user_prompt, budgeted.system_prompt)
+        if self.planned_call.enabled:
+            try:
+                get_small_model_optimizer().invocation_strategy.record_completion(
+                    estimate_text_tokens(str(response or ""))
+                )
+            except Exception:
+                logger.debug("记录 planner output tokens 失败", exc_info=True)
+        return response
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._engine, name)
+
+
+def prepare_planned_llm_call(
+    *,
+    phase: str,
+    task_type: str,
+    dossier_sections: Optional[Dict[str, Any]] = None,
+    llm_engine: Any = None,
+    purpose: Optional[str] = None,
+    template_preferences: Optional[Dict[str, float]] = None,
+    cache_hit_likelihood: float = 0.0,
+    retry_count: int = 0,
+    llm_config: Optional[Dict[str, Any]] = None,
+) -> PlannedLLMCall:
+    """为一次业务侧 LLM 调用准备统一 planner 上下文。"""
+
+    if llm_config is None:
+        from src.infrastructure.config_loader import load_settings_section
+
+        llm_config = load_settings_section("models.llm", default={})
+
+    optimizer_settings = _load_small_model_optimizer_settings(llm_config)
+    requested_phase = str(phase or "default")
+    requested_purpose = (
+        str(purpose or "").strip()
+        or str((optimizer_settings.get("purpose_overrides") or {}).get(requested_phase) or "").strip()
+        or requested_phase
+        or "default"
+    )
+    planner_enabled = bool(optimizer_settings.get("enabled", True))
+    phase_overrides = optimizer_settings.get("phase_overrides") or {}
+    if requested_phase in phase_overrides:
+        planner_enabled = bool(phase_overrides.get(requested_phase))
+
+    resolved_engine = llm_engine or get_llm_service(requested_purpose, llm_config=llm_config)
+    if resolved_engine is None or not hasattr(resolved_engine, "generate"):
+        return PlannedLLMCall(
+            phase=requested_phase,
+            task_type=str(task_type or ""),
+            purpose=requested_purpose,
+            llm_service=resolved_engine,
+            enabled=False,
+            policy_source="missing_llm_engine",
+            cache_hit_likelihood=cache_hit_likelihood,
+            fallback_path="rules_engine",
+        )
+
+    normalized_sections = _normalize_dossier_sections(dossier_sections)
+    if not planner_enabled or not normalized_sections:
+        return PlannedLLMCall(
+            phase=requested_phase,
+            task_type=str(task_type or ""),
+            purpose=requested_purpose,
+            llm_service=resolved_engine,
+            enabled=False,
+            policy_source="models.llm.small_model_optimizer.disabled" if not planner_enabled else "empty_dossier",
+            cache_hit_likelihood=cache_hit_likelihood,
+        )
+
+    plan = get_small_model_optimizer().prepare_call(
+        phase=requested_phase,
+        task_type=str(task_type or ""),
+        dossier_sections=normalized_sections,
+        template_preferences=template_preferences,
+        cache_hit_likelihood=cache_hit_likelihood,
+        retry_count=retry_count,
+    )
+    fallback_path = None
+    if plan.action == "skip":
+        fallback_path = str(plan.degradation_hints.get("fallback") or "rules_engine")
+    elif plan.action == "retry_simplified":
+        fallback_path = str(plan.degradation_hints.get("step") or "retry_simplified")
+    elif plan.action == "decompose":
+        fallback_path = "planner_decompose"
+
+    return PlannedLLMCall(
+        phase=requested_phase,
+        task_type=str(task_type or ""),
+        purpose=requested_purpose,
+        llm_service=resolved_engine,
+        enabled=True,
+        policy_source="models.llm.small_model_optimizer",
+        cache_hit_likelihood=cache_hit_likelihood,
+        plan=plan,
+        fallback_path=fallback_path,
+    )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 抽象接口

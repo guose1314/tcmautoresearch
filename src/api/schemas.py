@@ -136,6 +136,7 @@ class ResearchPhilologyWorkbenchReviewRequest(BaseModel):
     reviewer: Optional[str] = Field(default=None, description="审核人")
     decision_basis: Optional[str] = Field(default=None, description="审核依据")
     review_reasons: List[str] = Field(default_factory=list, description="审核原因")
+    needs_manual_review: Optional[bool] = Field(default=None, description="是否仍需人工复核")
     candidate_kind: Optional[str] = Field(default=None, description="候选类型，如 fragment_candidates")
     document_id: Optional[str] = Field(default=None, description="文档 ID")
     document_title: Optional[str] = Field(default=None, description="文档标题")
@@ -154,6 +155,10 @@ class ResearchPhilologyWorkbenchReviewRequest(BaseModel):
     target_entity: Optional[str] = Field(default=None, description="claim 目标实体")
     relation_type: Optional[str] = Field(default=None, description="claim 关系类型")
     fragment_candidate_id: Optional[str] = Field(default=None, description="fragment candidate 标识")
+    evidence_chain_id: Optional[str] = Field(default=None, description="evidence chain 标识")
+    claim_type: Optional[str] = Field(default=None, description="考据 claim 类型")
+    claim_statement: Optional[str] = Field(default=None, description="考据 claim 内容")
+    judgment_type: Optional[str] = Field(default=None, description="考据判断类型")
 
 
 class ResearchPhilologyWorkbenchReviewResponse(BaseModel):
@@ -165,6 +170,9 @@ class ResearchPhilologyWorkbenchReviewResponse(BaseModel):
 
 class ResearchBatchCatalogReviewRequest(BaseModel):
     decisions: List[ResearchCatalogReviewRequest] = Field(..., min_length=1, description="批量目录学 review 决策列表")
+    selection_snapshot: Dict[str, Any] = Field(default_factory=dict, description="批量选择快照")
+    shared_decision_basis: Optional[str] = Field(default=None, description="批处理共享审核依据")
+    shared_review_reasons: List[str] = Field(default_factory=list, description="批处理共享审核原因")
 
 
 class ResearchBatchCatalogReviewResponse(BaseModel):
@@ -177,6 +185,9 @@ class ResearchBatchCatalogReviewResponse(BaseModel):
 
 class ResearchBatchPhilologyReviewRequest(BaseModel):
     decisions: List[ResearchPhilologyWorkbenchReviewRequest] = Field(..., min_length=1, description="批量文献学 review 决策列表")
+    selection_snapshot: Dict[str, Any] = Field(default_factory=dict, description="批量选择快照")
+    shared_decision_basis: Optional[str] = Field(default=None, description="批处理共享审核依据")
+    shared_review_reasons: List[str] = Field(default_factory=list, description="批处理共享审核原因")
 
 
 class ResearchBatchPhilologyReviewResponse(BaseModel):

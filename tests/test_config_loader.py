@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import os
 import tempfile
 import unittest
@@ -155,7 +156,13 @@ class TestConfigLoader(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
-        self.tempdir.cleanup()
+        # Force GC to release SQLite connections held by app state (Windows lock issue)
+        gc.collect()
+        try:
+            self.tempdir.cleanup()
+        except (PermissionError, OSError):
+            # On Windows, SQLite files may stay locked briefly; ignore cleanup failure
+            pass
 
     def test_loader_merges_environment_and_env_var_overrides(self) -> None:
         original_env = os.environ.get("TCM__WEB_CONSOLE__JOB_STORAGE_DIR")

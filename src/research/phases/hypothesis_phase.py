@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
+from src.research.evidence_contract import build_phase_evidence_protocol
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
     resolve_learning_strategy,
@@ -65,6 +66,15 @@ class HypothesisPhaseMixin:
                 {"phase": "hypothesis", **self._hypothesis_tracker.to_metadata()}
             )
         phase_payload = dict(result)
+        evidence_protocol = build_phase_evidence_protocol(
+            "hypothesis",
+            claims=[
+                {"claim_text": h.get("description") or h.get("hypothesis_text") or "", "claim_type": "hypothesis"}
+                for h in hypotheses if isinstance(h, dict)
+            ],
+            evidence_grade="hypothesis",
+            evidence_summary={"phase": "hypothesis", "hypothesis_count": len(hypotheses)},
+        )
         return build_phase_result(
             "hypothesis",
             status=str(result.get("status") or ("completed" if hypotheses else "degraded")),
@@ -73,6 +83,7 @@ class HypothesisPhaseMixin:
                 "validation_iterations": result.get("validation_iterations") or [],
                 "domain": result.get("domain") or hypothesis_context.get("research_domain") or "integrative_research",
                 "selected_hypothesis_id": metadata.get("selected_hypothesis_id", ""),
+                "evidence_protocol": evidence_protocol,
             },
             artifacts=result.get("artifacts"),
             metadata=metadata,

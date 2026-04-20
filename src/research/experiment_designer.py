@@ -11,6 +11,7 @@ from statistics import NormalDist
 from typing import Any, Dict, List, Mapping, Optional
 
 from src.core.module_base import BaseModule
+from src.infra.llm_service import prepare_planned_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +233,7 @@ class StudyProtocol:
     risk_management: List[str] = field(default_factory=list)
     design_notes: List[str] = field(default_factory=list)
     protocol_source: str = "template"
+    optimizer_metadata: Dict[str, Any] = field(default_factory=dict)
 
     REQUIRED_FIELDS = (
         "study_type",
@@ -287,6 +289,7 @@ class StudyProtocol:
             "risk_management": list(self.risk_management),
             "design_notes": list(self.design_notes),
             "protocol_source": self.protocol_source,
+            "optimizer_metadata": dict(self.optimizer_metadata),
         }
 
 
@@ -632,6 +635,9 @@ class ExperimentDesigner(BaseModule):
         sample_size_override: int | None = None,
     ) -> StudyProtocol:
         """根据假设与研究类型生成结构化 StudyProtocol。"""
+        self._last_small_model_plan = None
+        self._last_llm_cost_report = None
+        self._last_fallback_path = None
         stype = self._resolve_study_type(study_type)
         template = _TEMPLATES.get(stype, {})
         protocol = self._build_template_protocol(
@@ -675,6 +681,11 @@ class ExperimentDesigner(BaseModule):
             sample_size_override=sample_size_override,
         )
         protocol = self._ensure_protocol_completeness(protocol, stype, hypothesis, template)
+        protocol.optimizer_metadata = {
+            "small_model_plan": self._last_small_model_plan,
+            "llm_cost_report": self._last_llm_cost_report,
+            "fallback_path": self._last_fallback_path,
+        }
 
         logger.info(
             "design_study: type=%s, protocol_source=%s, filled_required=%d, sample_size=%d",
@@ -789,8 +800,25 @@ class ExperimentDesigner(BaseModule):
             return {}
 
         prompt = self._build_llm_prompt(hypothesis, study_type, protocol, additional_context)
+        planned_call = prepare_planned_llm_call(
+            phase="experiment",
+            task_type="protocol_design",
+            purpose="default",
+            dossier_sections={
+                "hypothesis": hypothesis,
+                "study_type": study_type.value,
+                "protocol_template": json.dumps(protocol.to_dict(), ensure_ascii=False),
+                "additional_context": json.dumps(additional_context, ensure_ascii=False),
+            },
+            llm_engine=llm_engine,
+        )
+        self._last_small_model_plan = planned_call.to_metadata()
+        self._last_llm_cost_report = planned_call.get_cost_report()
+        self._last_fallback_path = planned_call.fallback_path
+        if not planned_call.should_call_llm:
+            return {}
         try:
-            raw = llm_engine.generate(prompt, system_prompt=self.PROTOCOL_SYSTEM_PROMPT)
+            raw = planned_call.create_proxy().generate(prompt, system_prompt=self.PROTOCOL_SYSTEM_PROMPT)
         except Exception as exc:
             logger.warning("ExperimentDesigner LLM 生成失败，回退模板: %s", exc)
             return {}

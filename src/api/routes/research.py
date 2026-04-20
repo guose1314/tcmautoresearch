@@ -74,13 +74,20 @@ def _resolve_cycle_id(job_snapshot: dict) -> str:
 def _resolve_review_reviewer(request: Request, explicit_reviewer: str) -> str:
     reviewer = str(explicit_reviewer or "").strip()
     if reviewer:
+        if reviewer == "管理 API Key":
+            return "管理 API"
         return reviewer
 
     auth_context = getattr(request.state, "auth_context", None)
     if isinstance(auth_context, dict):
+        auth_source = str(auth_context.get("auth_source") or "").strip()
+        if auth_source in {"management_api_key", "open"}:
+            return "管理 API"
         for field_name in ("principal", "display_name", "username", "user_id"):
             value = str(auth_context.get(field_name) or "").strip()
             if value:
+                if value in {"管理 API Key", "访客"}:
+                    return "管理 API"
                 return value
     return "管理 API"
 
@@ -189,6 +196,10 @@ def get_research_job_dashboard(
     work_title: str=Query(""),
     version_lineage_key: str=Query(""),
     witness_key: str=Query(""),
+    asset_type: str=Query(""),
+    review_status: str=Query(""),
+    priority_bucket: str=Query(""),
+    reviewer: str=Query(""),
     manager: ResearchJobManager=Depends(get_job_manager),
     repository: ResearchSessionRepository=Depends(get_research_session_repository),
     _: None=Depends(require_management_api_key),
@@ -200,6 +211,10 @@ def get_research_job_dashboard(
             "work_title": work_title,
             "version_lineage_key": version_lineage_key,
             "witness_key": witness_key,
+            "asset_type": asset_type,
+            "review_status": review_status,
+            "priority_bucket": priority_bucket,
+            "reviewer": reviewer,
         },
     )
 
@@ -378,12 +393,21 @@ def batch_catalog_review(
     for d in payload.decisions:
         item = d.model_dump()
         item["reviewer"] = _resolve_review_reviewer(request, str(item.get("reviewer") or "")) or reviewer
+        item["review_reasons"] = list(item.get("review_reasons") or payload.shared_review_reasons or [])
         if not str(item.get("decision_basis") or "").strip():
-            item["decision_basis"] = "管理 API 批量目录学 review 写回"
+            item["decision_basis"] = str(payload.shared_decision_basis or "").strip() or "管理 API 批量目录学 review 写回"
         raw_decisions.append(item)
 
+    batch_payload = {
+        "decisions": raw_decisions,
+        "selection_snapshot": payload.selection_snapshot,
+        "shared_decision_basis": payload.shared_decision_basis,
+        "shared_review_reasons": payload.shared_review_reasons,
+        "reviewer": reviewer,
+    }
+
     try:
-        review_artifact = repository.upsert_observe_catalog_review_batch(cycle_id, raw_decisions)
+        review_artifact = repository.upsert_observe_catalog_review_batch(cycle_id, batch_payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -427,12 +451,21 @@ def batch_philology_review(
     for d in payload.decisions:
         item = d.model_dump()
         item["reviewer"] = _resolve_review_reviewer(request, str(item.get("reviewer") or "")) or reviewer
+        item["review_reasons"] = list(item.get("review_reasons") or payload.shared_review_reasons or [])
         if not str(item.get("decision_basis") or "").strip():
-            item["decision_basis"] = "控制台批量文献学工作台审核"
+            item["decision_basis"] = str(payload.shared_decision_basis or "").strip() or "控制台批量文献学工作台审核"
         raw_decisions.append(item)
 
+    batch_payload = {
+        "decisions": raw_decisions,
+        "selection_snapshot": payload.selection_snapshot,
+        "shared_decision_basis": payload.shared_decision_basis,
+        "shared_review_reasons": payload.shared_review_reasons,
+        "reviewer": reviewer,
+    }
+
     try:
-        review_artifact = repository.upsert_observe_workbench_review_batch(cycle_id, raw_decisions)
+        review_artifact = repository.upsert_observe_workbench_review_batch(cycle_id, batch_payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -21,6 +21,9 @@ Guard #30: token budget policy 统一输入预算与主路径接线保护
 Guard #31: 存储治理组件强一致基础设施（DegradationGovernor / BackfillLedger / StorageObservability）
 Guard #32: 学习闭环策略调整与外部导入质量校验（PolicyAdjuster / ImportQualityValidator）
 Guard #33: 小模型优化基础设施（ReasoningTemplateSelector / DynamicInvocationStrategy / DossierLayerCompressor / SmallModelOptimizer）
+Guard #34: EvidenceEnvelope 跨阶段 phase_origin 统一协议（Phase F-1）
+Guard #35: Phase output 形状收口 — metadata 最小公约键（Phase F-3）
+Guard #36: Neo4j graph schema versioning 与标签注册表（Phase G-1）
 """
 
 import ast
@@ -2278,10 +2281,242 @@ class TestPhaseELLMOptimizationGuard(unittest.TestCase):
         self.assertIn("def get_small_model_optimizer(", source)
         self.assertIn("SmallModelOptimizer", source)
 
+    def test_llm_service_exposes_planned_call_helper(self):
+        """llm_service.py 必须暴露 planner helper。"""
+        source = (_SRC / "infra" / "llm_service.py").read_text(encoding="utf-8")
+        self.assertIn("class PlannedLLMCall", source)
+        self.assertIn("def prepare_planned_llm_call(", source)
+
     def test_call_plan_has_should_call_llm(self):
         """CallPlan 必须有 should_call_llm 属性。"""
         source = (_SRC / "infra" / "small_model_optimizer.py").read_text(encoding="utf-8")
         self.assertIn("should_call_llm", source)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Guard #39 — SmallModelOptimizer 默认执行路径接线
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestPhaseISmallModelPlannerWiringGuard(unittest.TestCase):
+    """Guard #39: hypothesis / quality / reflect / experiment 必须接入 planner helper。"""
+
+    def test_hypothesis_engine_uses_planner_helper(self):
+        source = (_SRC / "research" / "hypothesis_engine.py").read_text(encoding="utf-8")
+        self.assertIn("prepare_planned_llm_call", source)
+
+    def test_quality_assessor_uses_planner_helper(self):
+        source = (_SRC / "quality" / "quality_assessor.py").read_text(encoding="utf-8")
+        self.assertIn("prepare_planned_llm_call", source)
+
+    def test_reflect_phase_uses_planner_helper(self):
+        source = (_SRC / "research" / "phases" / "reflect_phase.py").read_text(encoding="utf-8")
+        self.assertIn("prepare_planned_llm_call", source)
+
+    def test_experiment_designer_uses_planner_helper(self):
+        source = (_SRC / "research" / "experiment_designer.py").read_text(encoding="utf-8")
+        self.assertIn("prepare_planned_llm_call", source)
+
+    def test_publish_phase_exposes_section_planner_preview(self):
+        source = (_SRC / "research" / "phases" / "publish_phase.py").read_text(encoding="utf-8")
+        self.assertIn("prepare_planned_llm_call", source)
+        self.assertIn("publish_section_plans", source)
+        self.assertIn("deterministic_paper_writer", source)
+
+    def test_phase_result_common_metadata_has_small_model_keys(self):
+        source = (_SRC / "research" / "phase_result.py").read_text(encoding="utf-8")
+        self.assertIn("small_model_plan", source)
+        self.assertIn("llm_cost_report", source)
+        self.assertIn("fallback_path", source)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Guard #34 — EvidenceEnvelope 跨阶段 phase_origin 统一协议 (Phase F-1)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestEvidenceEnvelopePhasOriginGuard(unittest.TestCase):
+    """Guard #34: 所有 7 阶段 phase mixin 产出的 evidence_protocol 必须遵循 evidence-claim-v2 信封。
+
+    保护不变式：
+    - EvidenceEnvelope 必须包含 phase_origin 字段
+    - build_phase_evidence_protocol 必须可导入
+    - get_evidence_protocol helper 必须存在于 phase_result.py
+    - 5 个非 publish/synthesize 的 phase mixin 必须 import evidence_contract
+    """
+
+    def test_evidence_envelope_has_phase_origin(self):
+        """EvidenceEnvelope 数据类必须包含 phase_origin 字段。"""
+        source = (_SRC / "research" / "evidence_contract.py").read_text(encoding="utf-8")
+        self.assertIn("phase_origin", source, "EvidenceEnvelope 缺少 phase_origin 字段")
+
+    def test_build_phase_evidence_protocol_exists(self):
+        """build_phase_evidence_protocol 函数必须存在。"""
+        source = (_SRC / "research" / "evidence_contract.py").read_text(encoding="utf-8")
+        self.assertIn("def build_phase_evidence_protocol(", source)
+
+    def test_phase_result_has_get_evidence_protocol(self):
+        """phase_result.py 必须暴露 get_evidence_protocol helper。"""
+        source = (_SRC / "research" / "phase_result.py").read_text(encoding="utf-8")
+        self.assertIn("def get_evidence_protocol(", source)
+
+    def test_observe_phase_imports_evidence(self):
+        """observe_phase.py 必须导入 evidence_contract。"""
+        source = (_SRC / "research" / "phases" / "observe_phase.py").read_text(encoding="utf-8")
+        self.assertIn("build_phase_evidence_protocol", source)
+
+    def test_hypothesis_phase_imports_evidence(self):
+        """hypothesis_phase.py 必须导入 evidence_contract。"""
+        source = (_SRC / "research" / "phases" / "hypothesis_phase.py").read_text(encoding="utf-8")
+        self.assertIn("build_phase_evidence_protocol", source)
+
+    def test_experiment_execution_phase_imports_evidence(self):
+        """experiment_execution_phase.py 必须导入 evidence_contract。"""
+        source = (_SRC / "research" / "phases" / "experiment_execution_phase.py").read_text(encoding="utf-8")
+        self.assertIn("build_phase_evidence_protocol", source)
+
+    def test_reflect_phase_imports_evidence(self):
+        """reflect_phase.py 必须导入 evidence_contract。"""
+        source = (_SRC / "research" / "phases" / "reflect_phase.py").read_text(encoding="utf-8")
+        self.assertIn("build_phase_evidence_protocol", source)
+
+    def test_analyze_phase_sets_phase_origin(self):
+        """analyze_phase.py 必须设置 phase_origin。"""
+        source = (_SRC / "research" / "phases" / "analyze_phase.py").read_text(encoding="utf-8")
+        self.assertIn("phase_origin", source)
+
+    def test_experiment_phase_imports_evidence(self):
+        """experiment_phase.py 必须导入 build_phase_evidence_protocol 并产出 evidence_protocol。"""
+        source = (_SRC / "research" / "phases" / "experiment_phase.py").read_text(encoding="utf-8")
+        self.assertIn("build_phase_evidence_protocol", source)
+        self.assertIn("evidence_protocol", source)
+
+    def test_publish_phase_imports_phase_evidence(self):
+        """publish_phase.py 必须导入 build_phase_evidence_protocol 并产出 evidence_protocol。"""
+        source = (_SRC / "research" / "phases" / "publish_phase.py").read_text(encoding="utf-8")
+        self.assertIn("build_phase_evidence_protocol", source)
+        self.assertIn('"evidence_protocol"', source)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Guard #35 — Phase output 形状收口 (Phase F-3)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestPhaseOutputShapeGuard(unittest.TestCase):
+    """Guard #35: phase_result.py 必须定义公约键常量，build_phase_result 自动注入。
+
+    保护不变式：
+    - PHASE_RESULT_COMMON_RESULT_KEYS / PHASE_RESULT_COMMON_METADATA_KEYS 必须可导入
+    - build_phase_result 输出的 results / metadata 包含公约键
+    - observe metadata 必须有 learning 和 learning_strategy_applied
+    - reflect extra_fields 不再包含与 results 完全重复的键
+    - experiment_execution results 包含 execution_boundary 子对象
+    """
+
+    def test_common_keys_importable(self):
+        """phase_result.py 必须导出公约键常量。"""
+        source = (_SRC / "research" / "phase_result.py").read_text(encoding="utf-8")
+        self.assertIn("PHASE_RESULT_COMMON_RESULT_KEYS", source)
+        self.assertIn("PHASE_RESULT_COMMON_METADATA_KEYS", source)
+
+    def test_build_phase_result_injects_common_result_keys(self):
+        """build_phase_result 输出 results 必须包含 evidence_protocol 和 summary。"""
+        source = (_SRC / "research" / "phase_result.py").read_text(encoding="utf-8")
+        self.assertIn("PHASE_RESULT_COMMON_RESULT_KEYS", source)
+        self.assertIn("setdefault", source)
+
+    def test_observe_phase_has_learning_metadata(self):
+        """observe_phase.py 必须在 metadata 中设置 learning。"""
+        source = (_SRC / "research" / "phases" / "observe_phase.py").read_text(encoding="utf-8")
+        self.assertIn('"learning"', source)
+        self.assertIn("learning_strategy_applied", source)
+
+    def test_reflect_phase_has_strategy_diff_in_extra_fields(self):
+        """reflect_phase.py extra_fields 应包含 strategy_diff（非 results 重复的扩展键）。"""
+        source = (_SRC / "research" / "phases" / "reflect_phase.py").read_text(encoding="utf-8")
+        import re
+        extra_block = re.search(r"extra_fields=\{([^}]+)\}", source, re.DOTALL)
+        self.assertIsNotNone(extra_block, "reflect_phase 缺少 extra_fields")
+        block_text = extra_block.group(1)
+        self.assertIn("strategy_diff", block_text)
+
+    def test_experiment_execution_has_execution_boundary(self):
+        """experiment_execution_phase.py results 必须包含 execution_boundary 子对象。"""
+        source = (_SRC / "research" / "phases" / "experiment_execution_phase.py").read_text(encoding="utf-8")
+        self.assertIn("execution_boundary", source)
+
+    def test_monitoring_has_storage_governance_gauges(self):
+        """monitoring.py 必须包含 storage_governance gauge 创建逻辑。"""
+        source = (_SRC / "infrastructure" / "monitoring.py").read_text(encoding="utf-8")
+        self.assertIn("tcm_storage_health_score", source)
+        self.assertIn("tcm_storage_is_degraded", source)
+        self.assertIn("tcm_storage_mode_info", source)
+        self.assertIn("storage_governance", source)
+        self.assertIn("bind_storage_factory", source)
+        self.assertIn("backfill_ledger", source)
+
+
+# Guard #36 — Neo4j graph schema versioning 与标签注册表 (Phase G-1)
+
+class TestGuard36_GraphSchemaVersioning(unittest.TestCase):
+    """Guard #36: Neo4j graph schema 注册表必须存在，且 driver/orchestrator/backfill 均引用之。"""
+
+    def test_graph_schema_module_exists(self):
+        """graph_schema.py 必须存在并可导入。"""
+        path = _SRC / "storage" / "graph_schema.py"
+        self.assertTrue(path.exists(), "src/storage/graph_schema.py 不存在")
+
+    def test_graph_schema_has_version_constant(self):
+        source = (_SRC / "storage" / "graph_schema.py").read_text(encoding="utf-8")
+        self.assertIn("GRAPH_SCHEMA_VERSION", source)
+
+    def test_graph_schema_has_node_label_enum(self):
+        source = (_SRC / "storage" / "graph_schema.py").read_text(encoding="utf-8")
+        self.assertIn("class NodeLabel", source)
+        self.assertIn("RESEARCH_SESSION", source)
+        self.assertIn("HYPOTHESIS", source)
+        self.assertIn("EVIDENCE", source)
+
+    def test_graph_schema_has_rel_type_enum(self):
+        source = (_SRC / "storage" / "graph_schema.py").read_text(encoding="utf-8")
+        self.assertIn("class RelType", source)
+        self.assertIn("HAS_PHASE", source)
+        self.assertIn("CAPTURED", source)
+
+    def test_neo4j_driver_imports_graph_schema(self):
+        """neo4j_driver.py 必须引用 graph_schema。"""
+        source = (_SRC / "storage" / "neo4j_driver.py").read_text(encoding="utf-8")
+        self.assertIn("graph_schema", source)
+        self.assertIn("_bootstrap_schema", source)
+        self.assertIn("get_schema_version", source)
+        self.assertIn("ensure_schema_version", source)
+
+    def test_orchestrator_imports_graph_schema(self):
+        """phase_orchestrator.py 的 _project_cycle_to_neo4j 必须使用 NodeLabel/RelType。"""
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        self.assertIn("from src.storage.graph_schema import", source)
+        self.assertIn("NodeLabel.", source)
+        self.assertIn("RelType.", source)
+
+    def test_backfill_imports_graph_schema(self):
+        """research_session_graph_backfill.py 必须引用 graph_schema。"""
+        source = (_SRC / "research" / "research_session_graph_backfill.py").read_text(encoding="utf-8")
+        self.assertIn("from src.storage.graph_schema import", source)
+        self.assertIn("NodeLabel.", source)
+        self.assertIn("RelType.", source)
+
+    def test_get_graph_statistics_includes_schema_fields(self):
+        """get_graph_statistics 返回值应包含 schema_version 字段。"""
+        source = (_SRC / "storage" / "neo4j_driver.py").read_text(encoding="utf-8")
+        self.assertIn("schema_version", source)
+        self.assertIn("schema_drift_detected", source)
+
+    def test_kg_stats_endpoint_includes_schema_info(self):
+        """kg/stats 端点必须返回 schema_version。"""
+        source = (_SRC / "web" / "routes" / "analysis.py").read_text(encoding="utf-8")
+        self.assertIn("_get_graph_schema_info", source)
+        self.assertIn("schema_version", source)
 
 
 if __name__ == "__main__":

@@ -174,7 +174,7 @@ def apply_philology_review(
 def apply_catalog_review_batch(
     app: Any,
     cycle_id: str,
-    decisions: List[Dict[str, Any]],
+    decisions: Any,
 ) -> Optional[Dict[str, Any]]:
     repository = _get_repository(app)
     saved = repository.upsert_observe_catalog_review_batch(cycle_id, decisions)
@@ -189,7 +189,7 @@ def apply_catalog_review_batch(
 def apply_philology_review_batch(
     app: Any,
     cycle_id: str,
-    decisions: List[Dict[str, Any]],
+    decisions: Any,
 ) -> Optional[Dict[str, Any]]:
     repository = _get_repository(app)
     saved = repository.upsert_observe_workbench_review_batch(cycle_id, decisions)

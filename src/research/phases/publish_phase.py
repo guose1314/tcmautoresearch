@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import json
+from collections import Counter
 from typing import TYPE_CHECKING, Any, Dict, List
 
 if TYPE_CHECKING:
@@ -43,9 +45,11 @@ try:
 except Exception:
     EvidenceGrader = None
 
+from src.infra.llm_service import prepare_planned_llm_call
 from src.research.evidence_contract import (
     build_citation_records_from_evidence_protocol,
     build_evidence_protocol,
+    build_phase_evidence_protocol,
 )
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
@@ -94,6 +98,14 @@ _REMOVED_PUBLISH_DATA_MINING_ALIAS_FIELDS: tuple[str, ...] = (
 )
 
 
+class _PublishPlannerPreviewLLM:
+    n_ctx: int | None = None
+    max_tokens: int | None = None
+
+    def generate(self, prompt: str, system_prompt: str = "") -> str:
+        return ""
+
+
 class PublishPhaseMixin:
     """Mixin: publish 阶段处理方法。
 
@@ -135,6 +147,10 @@ class PublishPhaseMixin:
             paper_result = self._execute_paper_writer(paper_writer, paper_context)
         else:
             paper_result = {}
+        publish_section_plan_summary = self._build_publish_section_plan_summary(
+            paper_context,
+            paper_result if isinstance(paper_result, dict) else {},
+        )
         paper_output_files = paper_result.get("output_files") if isinstance(paper_result, dict) else {}
         citation_output_files = citation_result.get("output_files")
         merged_output_files = self._merge_publish_output_files(
@@ -217,8 +233,22 @@ class PublishPhaseMixin:
             self.pipeline.register_phase_learning_manifest(
                 {"phase": "publish", **self._publish_tracker.to_metadata()}
             )
+        if publish_section_plan_summary:
+            metadata["small_model_plan"] = dict(publish_section_plan_summary.get("summary") or {})
+            metadata["publish_section_plans"] = publish_section_plan_summary
+            metadata["fallback_path"] = "deterministic_paper_writer"
         report_errors = report_generation_result.get("errors", []) if isinstance(report_generation_result, dict) else []
         status = "degraded" if report_errors else "completed"
+        evidence_protocol = build_phase_evidence_protocol(
+            "publish",
+            evidence_records=citation_records,
+            evidence_grade="published",
+            evidence_summary={
+                "publication_count": len(publications),
+                "deliverable_count": len(deliverables),
+                "citation_count": citation_result.get("citation_count", 0),
+            },
+        )
         return build_phase_result(
             "publish",
             status=status,
@@ -232,6 +262,7 @@ class PublishPhaseMixin:
                 "output_files": merged_output_files,
                 "analysis_results": paper_context.get("analysis_results", {}),
                 "research_artifact": paper_context.get("research_artifact", {}),
+                "evidence_protocol": evidence_protocol,
             },
             artifacts=merged_output_files,
             metadata=metadata,
@@ -1595,6 +1626,128 @@ class PublishPhaseMixin:
                 return paper_writer.execute(fallback_context)
         finally:
             paper_writer.cleanup()
+
+    def _build_publish_section_plan_summary(
+        self,
+        paper_context: Dict[str, Any],
+        paper_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        paper_draft = paper_result.get("paper_draft") or {}
+        sections = paper_draft.get("sections") if isinstance(paper_draft, dict) else []
+        if not isinstance(sections, list) or not sections:
+            return {}
+
+        section_plans: List[Dict[str, Any]] = []
+        preview_engine = _PublishPlannerPreviewLLM()
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            section_type = str(section.get("section_type") or "").strip() or "unknown"
+            dossier_sections = self._build_publish_section_planner_dossier(
+                section_type,
+                paper_context,
+                section,
+            )
+            planned_call = prepare_planned_llm_call(
+                phase="publish",
+                task_type="paper_section",
+                purpose="paper_plugin",
+                dossier_sections=dossier_sections,
+                llm_engine=preview_engine,
+            )
+            section_plan = planned_call.to_metadata()
+            section_plan.update(
+                {
+                    "section_type": section_type,
+                    "title": str(section.get("title") or "").strip(),
+                    "content_chars": len(str(section.get("content") or "").strip()),
+                    "plan_only": True,
+                    "writer_mode": "deterministic",
+                }
+            )
+            section_plans.append(section_plan)
+
+        if not section_plans:
+            return {}
+
+        action_distribution = Counter(
+            str(item.get("action") or "disabled")
+            for item in section_plans
+        )
+        framework_distribution = Counter(
+            str(item.get("framework_name") or "disabled")
+            for item in section_plans
+            if str(item.get("framework_name") or "").strip()
+        )
+        summary = {
+            "phase": "publish",
+            "task_type": "paper_section",
+            "purpose": "paper_plugin",
+            "plan_only": True,
+            "writer_mode": "deterministic",
+            "section_count": len(section_plans),
+            "planner_enabled": any(bool(item.get("optimizer_enabled")) for item in section_plans),
+            "should_call_llm_count": sum(1 for item in section_plans if item.get("should_call_llm")),
+            "action_distribution": dict(action_distribution),
+            "framework_distribution": dict(framework_distribution),
+        }
+        return {
+            "summary": summary,
+            "sections": section_plans,
+        }
+
+    def _build_publish_section_planner_dossier(
+        self,
+        section_type: str,
+        paper_context: Dict[str, Any],
+        section: Dict[str, Any],
+    ) -> Dict[str, str]:
+        analysis_results = paper_context.get("analysis_results")
+        analysis_payload = analysis_results if isinstance(analysis_results, dict) else {}
+        evidence_protocol = analysis_payload.get("evidence_protocol")
+        references_text = str(paper_context.get("formatted_references") or "").strip()
+        return {
+            "paper_title": str(paper_context.get("title") or "").strip(),
+            "section_type": section_type,
+            "objective": str(paper_context.get("objective") or "").strip(),
+            "section_focus": self._resolve_publish_section_focus(section_type, paper_context),
+            "draft_excerpt": str(section.get("content") or "").strip()[:1400],
+            "hypothesis_summary": self._stringify_publish_planner_value(paper_context.get("hypothesis"), limit=400),
+            "evidence_summary": self._stringify_publish_planner_value(evidence_protocol, limit=600),
+            "analysis_summary": self._stringify_publish_planner_value(analysis_payload.get("statistical_analysis"), limit=500),
+            "llm_analysis_context": self._stringify_publish_planner_value(paper_context.get("llm_analysis_context"), limit=500),
+            "reference_snapshot": "\n".join(line.strip() for line in references_text.splitlines()[:5] if line.strip()),
+        }
+
+    def _resolve_publish_section_focus(
+        self,
+        section_type: str,
+        paper_context: Dict[str, Any],
+    ) -> str:
+        section_focus_map = {
+            "introduction": paper_context.get("gap_analysis") or paper_context.get("research_domain"),
+            "methods": paper_context.get("literature_pipeline") or paper_context.get("citation_records"),
+            "results": (paper_context.get("analysis_results") or {}).get("statistical_analysis") if isinstance(paper_context.get("analysis_results"), dict) else {},
+            "discussion": paper_context.get("limitations") or paper_context.get("research_perspectives"),
+            "conclusion": paper_context.get("recommendations") or paper_context.get("quality_metrics"),
+        }
+        return self._stringify_publish_planner_value(section_focus_map.get(section_type), limit=500)
+
+    def _stringify_publish_planner_value(self, value: Any, *, limit: int = 400) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()[:limit]
+        if isinstance(value, (int, float, bool)):
+            return str(value)[:limit]
+        try:
+            if isinstance(value, list):
+                serialized = json.dumps(value[:5], ensure_ascii=False)
+            else:
+                serialized = json.dumps(value, ensure_ascii=False)
+        except TypeError:
+            serialized = str(value)
+        return serialized.strip()[:limit]
 
     def _extract_publish_entities(
         self,

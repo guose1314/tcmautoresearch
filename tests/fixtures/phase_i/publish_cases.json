@@ -1,0 +1,31 @@
+[
+  {
+    "case_id": "publish_section_draft",
+    "phase": "publish",
+    "task_type": "paper_section",
+    "purpose": "paper_plugin",
+    "expected_action": "proceed",
+    "expected_framework": "dialectical",
+    "max_input_tokens": 2200,
+    "dossier_sections": {
+      "objective": "撰写黄芪治疗气虚乏力研究的结果与讨论段落。",
+      "paper_digest": "结果部分需要交代疲劳量表、证候积分和安全性结果。",
+      "reference_digest": "纳入 4 篇随机对照试验和 1 篇系统综述。",
+      "artifact_digest": "已有森林图、证据分级摘要和研究协议。"
+    }
+  },
+  {
+    "case_id": "publish_cached_section",
+    "phase": "publish",
+    "task_type": "paper_section",
+    "purpose": "paper_plugin",
+    "expected_action": "skip",
+    "expected_framework": "dialectical",
+    "cache_hit_likelihood": 0.94,
+    "max_input_tokens": 2200,
+    "dossier_sections": {
+      "objective": "复用上一轮 discussion section 的缓存版本。",
+      "paper_digest": "同一段落仅做轻微排版更新。"
+    }
+  }
+]

@@ -235,6 +235,7 @@ class EvidenceEnvelope:
     """
 
     contract_version: str = CONTRACT_VERSION
+    phase_origin: str = ""
     records: List[EvidenceRecord] = field(default_factory=list)
     claims: List[EvidenceClaim] = field(default_factory=list)
     grade_summary: EvidenceGradeSummary = field(default_factory=EvidenceGradeSummary)
@@ -265,6 +266,7 @@ class EvidenceEnvelope:
         claims_list = [c.to_dict() for c in self.claims]
         return {
             "contract_version": self.contract_version,
+            "phase_origin": self.phase_origin,
             "evidence_records": records_list,
             "claims": claims_list,
             "evidence_summary": self.evidence_summary,
@@ -312,6 +314,7 @@ class EvidenceEnvelope:
         )
         return cls(
             contract_version=str(d.get("contract_version") or CONTRACT_VERSION),
+            phase_origin=str(d.get("phase_origin") or ""),
             records=records,
             claims=claims,
             grade_summary=grade_summary,
@@ -849,3 +852,54 @@ def _as_float(value: Any, default: Optional[float]) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Phase-level lightweight evidence protocol builder  (Phase F-1)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def build_phase_evidence_protocol(
+    phase: str,
+    *,
+    evidence_records: Optional[Iterable[Mapping[str, Any]]] = None,
+    claims: Optional[Iterable[Mapping[str, Any]]] = None,
+    evidence_grade: str = "preliminary",
+    evidence_summary: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """为非 analyze 阶段构建轻量 evidence_protocol。
+
+    与 ``build_evidence_protocol`` 不同，此函数不需要 reasoning_payload，
+    也不做缓存，适合 observe / hypothesis / experiment_execution / reflect
+    这类阶段把自己产出的线索归并到 evidence-claim-v2 信封里。
+
+    返回值与 ``build_evidence_protocol`` 形状兼容，可直接放入
+    ``PhaseResult.results["evidence_protocol"]``。
+    """
+    raw_records = [
+        normalize_evidence_record(r, default_evidence_grade=evidence_grade)
+        for r in (evidence_records or [])
+        if isinstance(r, Mapping)
+    ]
+    raw_claims = [
+        normalize_claim_record(c)
+        for c in (claims or [])
+        if isinstance(c, Mapping)
+    ]
+    citation_records = build_citation_records_from_evidence_records(raw_records)
+    grade_summary = normalize_evidence_grade_summary(
+        {"overall_grade": evidence_grade}
+    )
+    summary = _build_protocol_summary(raw_records, raw_claims, citation_records)
+
+    return {
+        "contract_version": CONTRACT_VERSION,
+        "phase_origin": str(phase),
+        "evidence_records": raw_records,
+        "claims": raw_claims,
+        "evidence_summary": dict(evidence_summary or {}),
+        "evidence_grade_summary": grade_summary,
+        "citation_records": citation_records,
+        "citation_count": len(citation_records),
+        "research_grade": {},
+        "summary": summary,
+    }

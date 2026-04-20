@@ -109,7 +109,7 @@ class Neo4jDriver:
         self.driver = None
     
     def connect(self):
-        """建立连接（启用连接池）"""
+        """建立连接（启用连接池）并引导 schema 元数据。"""
         try:
             GraphDatabase = _get_neo4j_graph_database()
             self.driver = GraphDatabase.driver(
@@ -127,9 +127,65 @@ class Neo4jDriver:
                 "Neo4j 连接成功: %s (pool_size=%d)",
                 self.uri, self._pool_config["max_connection_pool_size"],
             )
+            self._bootstrap_schema()
         except Exception as e:
             logger.error(f"Neo4j 连接失败: {e}")
             raise
+
+    # ── Schema bootstrap / version ────────────────────────────────────
+
+    def _bootstrap_schema(self) -> None:
+        """在 graph 中 MERGE 一个 GraphSchemaMeta 单例节点，记录 schema version。"""
+        from .graph_schema import (
+            _SCHEMA_META_LABEL,
+            _SCHEMA_META_NODE_ID,
+            GRAPH_SCHEMA_VERSION,
+            build_schema_meta_node_properties,
+        )
+        try:
+            query = (
+                f"MERGE (m:{_safe_cypher_label(_SCHEMA_META_LABEL)} {{id: $id}}) "
+                "ON CREATE SET m += $props "
+                "ON MATCH SET m.schema_version = $version, m.updated_at = $now "
+                "RETURN m.schema_version AS v"
+            )
+            from datetime import datetime
+            props = build_schema_meta_node_properties()
+            with self.driver.session(database=self.database) as session:
+                session.execute_write(
+                    lambda tx: tx.run(
+                        query,
+                        id=_SCHEMA_META_NODE_ID,
+                        props=props,
+                        version=GRAPH_SCHEMA_VERSION,
+                        now=datetime.now().isoformat(),
+                    ).consume()
+                )
+            logger.info("Schema bootstrap 完成: version=%s", GRAPH_SCHEMA_VERSION)
+        except Exception as exc:
+            logger.warning("Schema bootstrap 失败（非阻塞）: %s", exc)
+
+    def get_schema_version(self) -> Optional[str]:
+        """读取 graph 中 GraphSchemaMeta 节点记录的 schema_version。"""
+        from .graph_schema import _SCHEMA_META_LABEL, _SCHEMA_META_NODE_ID
+        try:
+            query = f"MATCH (m:{_safe_cypher_label(_SCHEMA_META_LABEL)} {{id: $id}}) RETURN m.schema_version AS v"
+            with self.driver.session(database=self.database) as session:
+                records = session.execute_read(
+                    lambda tx: list(tx.run(query, id=_SCHEMA_META_NODE_ID))
+                )
+            if records:
+                return records[0]["v"]
+            return None
+        except Exception as exc:
+            logger.warning("读取 schema version 失败: %s", exc)
+            return None
+
+    def ensure_schema_version(self) -> Dict[str, Any]:
+        """检测当前 graph 的 schema drift 状态。"""
+        from .graph_schema import detect_schema_drift
+        stored = self.get_schema_version()
+        return detect_schema_drift(stored)
     
     def close(self):
         """关闭连接"""
@@ -600,7 +656,7 @@ class Neo4jDriver:
     
     def get_graph_statistics(self) -> Dict[str, Any]:
         """
-        获取图数据库统计信息
+        获取图数据库统计信息（含 schema version 与 drift）
         
         Returns:
             统计数据
@@ -612,12 +668,17 @@ class Neo4jDriver:
             with self.driver.session(database=self.database) as session:
                 nodes = session.execute_read(lambda tx: list(tx.run(node_query)))
                 rels = session.execute_read(lambda tx: list(tx.run(rel_query)))
-            
+
+            drift = self.ensure_schema_version()
+
             return {
                 'nodes_by_type': {result['label']: result['count'] for result in nodes},
                 'relationships_by_type': {result['type']: result['count'] for result in rels},
                 'total_nodes': sum(result['count'] for result in nodes),
                 'total_relationships': sum(result['count'] for result in rels),
+                'schema_version': drift.get("expected_version"),
+                'schema_drift_detected': drift.get("drift_detected", False),
+                'schema_drift_detail': drift.get("detail", ""),
             }
         except Exception as e:
             logger.error(f"获取统计信息失败: {e}")
@@ -646,18 +707,21 @@ def entity_to_neo4j_node(entity: Entity, node_id: str | None = None) -> Neo4jNod
     Returns:
         Neo4j节点
     """
+    from .graph_schema import NodeLabel, resolve_node_label
+
     label_map = {
-        'formula': 'Formula',
-        'herb': 'Herb',
-        'syndrome': 'Syndrome',
-        'efficacy': 'Efficacy',
-        'property': 'Property',
-        'taste': 'Taste',
-        'meridian': 'Meridian',
+        'formula': NodeLabel.FORMULA.value,
+        'herb': NodeLabel.HERB.value,
+        'syndrome': NodeLabel.SYNDROME.value,
+        'efficacy': NodeLabel.EFFICACY.value,
+        'property': NodeLabel.PROPERTY.value,
+        'taste': NodeLabel.TASTE.value,
+        'meridian': NodeLabel.MERIDIAN.value,
     }
     
     node_id = node_id or str(entity.id)
-    label = label_map.get(entity.type.value, 'Entity')
+    label = label_map.get(entity.type.value, NodeLabel.ENTITY.value)
+    label = resolve_node_label(label)
     
     return Neo4jNode(
         id=node_id,
