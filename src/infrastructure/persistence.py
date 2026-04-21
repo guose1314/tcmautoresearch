@@ -29,6 +29,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     create_engine,
     event,
     or_,
@@ -579,6 +580,12 @@ class ResearchSession(Base):
         cascade="all, delete-orphan",
         order_by="ResearchLearningFeedback.created_at",
     )
+    review_assignments = relationship(
+        "ReviewAssignment",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="ReviewAssignment.created_at",
+    )
 
     __table_args__ = (
         Index("idx_rs_status", "status"),
@@ -694,6 +701,50 @@ class ResearchLearningFeedback(Base):
         Index("idx_rlf_cycle_scope", "cycle_id", "feedback_scope"),
         Index("idx_rlf_target_phase", "target_phase"),
         Index("idx_rlf_created", "created_at"),
+    )
+
+
+class ReviewAssignment(Base):
+    """Review assignment 事实面 — 谁在处理哪个 review item、何时认领、是否逾期。
+
+    解决“artifact 反推 assignee 不可查询”的问题，提供
+    `claim / release / reassign / list_queue / aggregate_workload` 的存储载体。
+    """
+
+    __tablename__ = "review_assignments"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(
+        GUID(), ForeignKey("research_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    cycle_id = Column(String(128), nullable=False)
+    asset_type = Column(String(64), nullable=False)
+    asset_key = Column(String(255), nullable=False)
+    assignee = Column(String(255), nullable=True)
+    queue_status = Column(String(32), nullable=False, default="unassigned")
+    priority_bucket = Column(String(16), nullable=False, default="medium")
+    notes = Column(Text, nullable=True)
+    metadata_json = Column(Text, nullable=False, default="{}")
+
+    claimed_at = Column(DateTime, nullable=True)
+    released_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    due_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    session = relationship("ResearchSession", back_populates="review_assignments")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "cycle_id", "asset_type", "asset_key", name="uq_review_assignment_target"
+        ),
+        Index("idx_rva_session_status", "session_id", "queue_status"),
+        Index("idx_rva_assignee_status", "assignee", "queue_status"),
+        Index("idx_rva_cycle_status", "cycle_id", "queue_status"),
+        Index("idx_rva_due_at", "due_at"),
     )
 
 

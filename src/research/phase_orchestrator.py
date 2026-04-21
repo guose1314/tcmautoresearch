@@ -11,6 +11,18 @@ from typing import Any, Dict, List, Optional
 from src.core.phase_tracker import PhaseTrackerMixin
 from src.research.audit_history import publish_audit_event
 from src.research.gap_analyzer import GapAnalyzer
+from src.research.graph_asset_contract import (
+    TRACEABILITY_KIND_EFFICACY,
+    TRACEABILITY_KIND_FORMULA_COMPONENT,
+    TRACEABILITY_KIND_FORMULA_PROVENANCE_EDGE,
+    TRACEABILITY_KIND_HERB_PROVENANCE_EDGE,
+    TRACEABILITY_KIND_PATHOGENESIS,
+    TRACEABILITY_KIND_SYMPTOM,
+    get_graph_edge_traceability_kind,
+    get_graph_traceability_kind,
+    has_complete_graph_edge_traceability,
+    has_complete_graph_traceability,
+)
 from src.research.phase_result import get_phase_artifact_map, get_phase_value
 from src.research.pipeline_events import publish_phase_lifecycle_event
 from src.research.study_session_manager import (
@@ -994,6 +1006,18 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 "hypothesis_edge_count": 0,
                 "evidence_node_count": 0,
                 "evidence_edge_count": 0,
+                "philology_node_count": 0,
+                "philology_edge_count": 0,
+                "philology_traceable_node_count": 0,
+                "philology_traceable_edge_count": 0,
+                "herb_provenance_edge_count": 0,
+                "formula_provenance_edge_count": 0,
+                "efficacy_traceable_node_count": 0,
+                "formula_component_traceable_node_count": 0,
+                "symptom_traceable_node_count": 0,
+                "pathogenesis_traceable_node_count": 0,
+                "exegesis_term_node_count": 0,
+                "textual_evidence_chain_node_count": 0,
                 "graph_asset_subgraph_count": 0,
             }
 
@@ -1197,17 +1221,37 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                             continue
                         node_id = str(node.get("id") or "").strip()
                         label = self._normalize_graph_label(node.get("label") or NodeLabel.ENTITY.value, NodeLabel.ENTITY.value)
+                        properties = dict(node.get("properties") or {})
                         if not node_id:
                             continue
-                        _add_node(label, node_id, dict(node.get("properties") or {}))
+                        _add_node(label, node_id, properties)
                         if asset_family == "hypothesis":
                             asset_counts["hypothesis_node_count"] += 1
                         elif asset_family == "evidence":
                             asset_counts["evidence_node_count"] += 1
+                        elif asset_family == "philology":
+                            asset_counts["philology_node_count"] += 1
+                            if label == NodeLabel.EXEGESIS_TERM.value:
+                                asset_counts["exegesis_term_node_count"] += 1
+                            elif label == NodeLabel.TEXTUAL_EVIDENCE_CHAIN.value:
+                                asset_counts["textual_evidence_chain_node_count"] += 1
+                            if has_complete_graph_traceability(label, properties):
+                                asset_counts["philology_traceable_node_count"] += 1
+                                traceability_kind = get_graph_traceability_kind(label, properties)
+                                if traceability_kind == TRACEABILITY_KIND_SYMPTOM:
+                                    asset_counts["symptom_traceable_node_count"] += 1
+                                elif traceability_kind == TRACEABILITY_KIND_PATHOGENESIS:
+                                    asset_counts["pathogenesis_traceable_node_count"] += 1
+                                elif traceability_kind == TRACEABILITY_KIND_EFFICACY:
+                                    asset_counts["efficacy_traceable_node_count"] += 1
+                                elif traceability_kind == TRACEABILITY_KIND_FORMULA_COMPONENT:
+                                    asset_counts["formula_component_traceable_node_count"] += 1
                         if label == NodeLabel.HYPOTHESIS.value:
                             phase_rel = RelType.HAS_HYPOTHESIS.value
                         elif label in {NodeLabel.EVIDENCE.value, NodeLabel.EVIDENCE_CLAIM.value}:
                             phase_rel = RelType.DERIVED_FROM_PHASE.value
+                        elif asset_family == "philology":
+                            phase_rel = RelType.CAPTURED.value
                         else:
                             phase_rel = ""
                         if phase_rel:
@@ -1247,6 +1291,21 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                             asset_counts["hypothesis_edge_count"] += 1
                         elif asset_family == "evidence":
                             asset_counts["evidence_edge_count"] += 1
+                        elif asset_family == "philology":
+                            asset_counts["philology_edge_count"] += 1
+                            properties = dict(edge.get("properties") or {})
+                            if has_complete_graph_edge_traceability(source_label, target_label, relationship_type, properties):
+                                asset_counts["philology_traceable_edge_count"] += 1
+                                edge_traceability_kind = get_graph_edge_traceability_kind(
+                                    source_label,
+                                    target_label,
+                                    relationship_type,
+                                    properties,
+                                )
+                                if edge_traceability_kind == TRACEABILITY_KIND_HERB_PROVENANCE_EDGE:
+                                    asset_counts["herb_provenance_edge_count"] += 1
+                                elif edge_traceability_kind == TRACEABILITY_KIND_FORMULA_PROVENANCE_EDGE:
+                                    asset_counts["formula_provenance_edge_count"] += 1
 
             nodes = list(node_map.values())
             edges = list(edge_map.values())
@@ -1421,6 +1480,18 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 "hypothesis_graph_edge_count": graph_report.get("hypothesis_edge_count", 0),
                 "evidence_graph_node_count": graph_report.get("evidence_node_count", 0),
                 "evidence_graph_edge_count": graph_report.get("evidence_edge_count", 0),
+                "philology_graph_node_count": graph_report.get("philology_node_count", 0),
+                "philology_graph_edge_count": graph_report.get("philology_edge_count", 0),
+                "philology_traceable_graph_node_count": graph_report.get("philology_traceable_node_count", 0),
+                "philology_traceable_graph_edge_count": graph_report.get("philology_traceable_edge_count", 0),
+                "herb_provenance_graph_edge_count": graph_report.get("herb_provenance_edge_count", 0),
+                "formula_provenance_graph_edge_count": graph_report.get("formula_provenance_edge_count", 0),
+                "efficacy_traceable_graph_node_count": graph_report.get("efficacy_traceable_node_count", 0),
+                "formula_component_traceable_graph_node_count": graph_report.get("formula_component_traceable_node_count", 0),
+                "symptom_traceable_graph_node_count": graph_report.get("symptom_traceable_node_count", 0),
+                "pathogenesis_traceable_graph_node_count": graph_report.get("pathogenesis_traceable_node_count", 0),
+                "exegesis_term_graph_node_count": graph_report.get("exegesis_term_node_count", 0),
+                "textual_evidence_chain_graph_node_count": graph_report.get("textual_evidence_chain_node_count", 0),
                 "eventual_consistency": self._classify_eventual_consistency(
                     consistency_state, graph_report,
                 ),

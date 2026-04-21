@@ -171,6 +171,45 @@ class TestBuildCatalogHierarchy(unittest.TestCase):
         self.assertEqual(result["work_count"], 0)
 
 
+class TestCatalogGraphProjection(unittest.TestCase):
+    def test_catalog_documents_project_has_version_edges(self):
+        from src.research.graph_assets import build_philology_subgraph
+
+        payload = build_philology_subgraph(
+            "cycle-catalog",
+            {
+                "catalog_summary": {
+                    "documents": [
+                        {
+                            "catalog_id": "cat-001",
+                            "document_title": "本草纲目",
+                            "work_title": "本草纲目",
+                            "document_urn": "urn:catalog:1",
+                            "version_lineage_key": "lin-001",
+                            "witness_key": "wit-001",
+                        }
+                    ],
+                    "version_lineages": [
+                        {
+                            "version_lineage_key": "lin-001",
+                            "work_title": "本草纲目",
+                            "fragment_title": "卷一",
+                            "witnesses": [
+                                {
+                                    "witness_key": "wit-001",
+                                    "catalog_id": "cat-001",
+                                    "title": "本草纲目",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+        )
+        edge_types = {edge["relationship_type"] for edge in payload["edges"]}
+        self.assertIn("HAS_VERSION", edge_types)
+
+
 class TestBuildBackfillSummary(unittest.TestCase):
     def test_all_complete_no_backfill(self):
         from src.research.catalog_contract import build_backfill_summary

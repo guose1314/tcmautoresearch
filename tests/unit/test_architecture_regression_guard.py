@@ -24,6 +24,7 @@ Guard #33: 小模型优化基础设施（ReasoningTemplateSelector / DynamicInvo
 Guard #34: EvidenceEnvelope 跨阶段 phase_origin 统一协议（Phase F-1）
 Guard #35: Phase output 形状收口 — metadata 最小公约键（Phase F-3）
 Guard #36: Neo4j graph schema versioning、标签注册表与 hypothesis/evidence graph assets（Phase G-1/G-2）
+Guard #37: 图回归守卫与历史资产 backfill—schema v2 dry-run 摘要 / force 重生 / philology 资产模板（Phase G-4）
 """
 
 import ast
@@ -2539,6 +2540,98 @@ class TestGuard36_GraphSchemaVersioning(unittest.TestCase):
         self.assertIn("HAS_HYPOTHESIS", source)
         self.assertIn("DERIVED_FROM_PHASE", source)
         self.assertIn("transaction.neo4j_batch_nodes", source)
+
+    def test_backfill_reprojects_phase_graph_assets(self):
+        source = (_SRC / "research" / "research_session_graph_backfill.py").read_text(encoding="utf-8")
+        self.assertIn("get_phase_graph_assets", source)
+        self.assertIn("graph_asset_subgraph_count", source)
+        self.assertIn("NodeLabel.EXEGESIS_TERM", source)
+        self.assertIn("NodeLabel.TEXTUAL_EVIDENCE_CHAIN", source)
+
+    def test_backfill_tool_supports_schema_version_and_dry_run(self):
+        source = (_WORKSPACE / "tools" / "backfill_research_session_nodes.py").read_text(encoding="utf-8")
+        self.assertIn("--dry-run", source)
+        self.assertIn("--expected-graph-schema-version", source)
+        self.assertIn("graph_schema", source)
+        self.assertIn("dry_run", source)
+
+    def test_pg_phase_graph_assets_writeback_is_wired(self):
+        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(encoding="utf-8")
+        self.assertIn("def backfill_phase_graph_assets", source)
+        self.assertIn("build_observe_philology_graph_assets", source)
+        self.assertIn("build_hypothesis_subgraph", source)
+        self.assertIn("build_evidence_subgraph", source)
+
+        tool_source = (_WORKSPACE / "tools" / "backfill_research_session_nodes.py").read_text(encoding="utf-8")
+        self.assertIn("--skip-pg-graph-assets-writeback", tool_source)
+        self.assertIn("phase_graph_assets_writeback", tool_source)
+        self.assertIn("backfill_phase_graph_assets", tool_source)
+
+    def test_production_local_backfill_preflight_uses_dry_run(self):
+        source = (_WORKSPACE / ".vscode" / "production-local-backfill.ps1").read_text(encoding="utf-8")
+        self.assertIn("ExpectedGraphSchemaVersion", source)
+        self.assertIn("--dry-run", source)
+        self.assertIn("--expected-graph-schema-version", source)
+
+
+# Guard #37 — 图回归守卫与历史资产 backfill（Phase G-4）
+
+class TestGuard37_GraphAssetRegression(unittest.TestCase):
+    """Guard #37: schema v2 资产回填、dry-run 摘要、force 重生与回归测试套。"""
+
+    def test_graph_asset_regression_test_module_exists(self):
+        path = _WORKSPACE / "tests" / "unit" / "test_graph_asset_regression.py"
+        self.assertTrue(path.exists(), "tests/unit/test_graph_asset_regression.py 不存在")
+
+    def test_backfill_dry_run_summary_carries_full_asset_counts(self):
+        """backfill_structured_research_graph dry-run 必须输出三类资产计数。"""
+        source = (_SRC / "research" / "research_session_graph_backfill.py").read_text(encoding="utf-8")
+        for token in (
+            "hypothesis_node_count", "hypothesis_edge_count",
+            "evidence_node_count", "evidence_edge_count",
+            "philology_node_count", "philology_edge_count",
+            "exegesis_term_node_count", "textual_evidence_chain_node_count",
+            "graph_asset_subgraph_count", "dry_run",
+        ):
+            self.assertIn(token, source, f"backfill summary 缺字段: {token}")
+
+    def test_pg_backfill_phase_graph_assets_exposes_force(self):
+        """PG 侧 backfill 入口必须支持 force 参数，用于重生旧 cycle 资产。"""
+        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(encoding="utf-8")
+        self.assertIn("def backfill_phase_graph_assets", source)
+        # 签名中必须出现 force 关键字
+        self.assertRegex(source, r"def backfill_phase_graph_assets\([^)]*force")
+
+    def test_cli_force_regen_flag_wired(self):
+        source = (_WORKSPACE / "tools" / "backfill_research_session_nodes.py").read_text(encoding="utf-8")
+        self.assertIn("--force-pg-graph-assets-regen", source)
+        self.assertIn("force=bool(getattr(args, \"force_pg_graph_assets_regen\"", source)
+
+    def test_ps1_emits_preflight_summary_block(self):
+        source = (_WORKSPACE / ".vscode" / "production-local-backfill.ps1").read_text(encoding="utf-8")
+        self.assertIn("PREFLIGHT SUMMARY", source)
+        self.assertIn("projected nodes", source)
+        self.assertIn("projected edges", source)
+        self.assertIn("projected assets", source)
+        self.assertIn("ForceGraphAssetsRegen", source)
+
+    def test_kg_e2e_asserts_three_asset_families(self):
+        """E2E 脚本必须同时覆盖 hypothesis / evidence / philology 资产。"""
+        source = (_WORKSPACE / "test_kg_e2e.py").read_text(encoding="utf-8")
+        for token in (
+            "hypothesis_node_count", "evidence_node_count",
+            "philology_asset_graph",
+        ):
+            self.assertIn(token, source, f"test_kg_e2e.py 未覆盖资产家族: {token}")
+
+    def test_philology_asset_graph_template_registered(self):
+        from tools.neo4j_query_templates import CANONICAL_READ_TEMPLATES
+
+        self.assertIn("philology_asset_graph", CANONICAL_READ_TEMPLATES)
+        cypher = CANONICAL_READ_TEMPLATES["philology_asset_graph"]["cypher"]
+        for token in ("VersionWitness", "ATTESTS_TO", "ExegesisTerm",
+                       "FragmentCandidate", "graph_source"):
+            self.assertIn(token, cypher)
 
 
 if __name__ == "__main__":

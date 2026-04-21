@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 
+from src.research.graph_assets import get_phase_graph_assets
 from src.storage.graph_schema import NodeLabel, RelType, resolve_node_label
 from src.storage.neo4j_driver import Neo4jEdge, Neo4jNode
 
@@ -555,6 +556,143 @@ def build_observe_version_graph_edges(
     return edges
 
 
+def _build_phase_graph_asset_nodes_and_edges(
+    cycle_id: str,
+    phase_records: Sequence[Mapping[str, Any]],
+) -> Tuple[List[Neo4jNode], List[Tuple[Neo4jEdge, str, str]], Dict[str, int]]:
+    nodes: List[Neo4jNode] = []
+    edges: List[Tuple[Neo4jEdge, str, str]] = []
+    node_seen: set[tuple[str, str]] = set()
+    edge_seen: set[tuple[str, str, str, str, str]] = set()
+    counts: Dict[str, int] = {
+        "hypothesis_node_count": 0,
+        "hypothesis_edge_count": 0,
+        "evidence_node_count": 0,
+        "evidence_edge_count": 0,
+        "philology_node_count": 0,
+        "philology_edge_count": 0,
+        "exegesis_term_node_count": 0,
+        "textual_evidence_chain_node_count": 0,
+        "graph_asset_subgraph_count": 0,
+    }
+
+    def _append_node(label: str, node_id: str, properties: Mapping[str, Any]) -> None:
+        key = (label, node_id)
+        if key in node_seen:
+            return
+        node_seen.add(key)
+        nodes.append(
+            Neo4jNode(
+                id=node_id,
+                label=label,
+                properties=_compact_graph_properties(dict(properties or {})),
+            )
+        )
+
+    def _append_edge(
+        edge: Neo4jEdge,
+        source_label: str,
+        target_label: str,
+    ) -> None:
+        key = (source_label, edge.source_id, edge.relationship_type, target_label, edge.target_id)
+        if key in edge_seen:
+            return
+        edge_seen.add(key)
+        edges.append((edge, source_label, target_label))
+
+    for phase_record in phase_records:
+        phase_name = str(phase_record.get("phase") or "").strip().lower()
+        phase_id = str(phase_record.get("id") or "").strip()
+        phase_output = phase_record.get("output") if isinstance(phase_record.get("output"), Mapping) else {}
+        graph_assets = get_phase_graph_assets(phase_output)
+        if not graph_assets:
+            continue
+        for subgraph_name, subgraph in graph_assets.items():
+            if subgraph_name == "summary" or not isinstance(subgraph, Mapping):
+                continue
+            counts["graph_asset_subgraph_count"] += 1
+            asset_family = str(subgraph.get("asset_family") or "").strip().lower()
+            for node in subgraph.get("nodes") or []:
+                if not isinstance(node, Mapping):
+                    continue
+                node_id = str(node.get("id") or "").strip()
+                label = resolve_node_label(str(node.get("label") or NodeLabel.ENTITY.value))
+                if not node_id:
+                    continue
+                properties = dict(node.get("properties") or {})
+                _append_node(label, node_id, properties)
+                if asset_family == "hypothesis":
+                    counts["hypothesis_node_count"] += 1
+                elif asset_family == "evidence":
+                    counts["evidence_node_count"] += 1
+                elif asset_family == "philology":
+                    counts["philology_node_count"] += 1
+                    if label == NodeLabel.EXEGESIS_TERM.value:
+                        counts["exegesis_term_node_count"] += 1
+                    elif label == NodeLabel.TEXTUAL_EVIDENCE_CHAIN.value:
+                        counts["textual_evidence_chain_node_count"] += 1
+
+                if not phase_id:
+                    continue
+                if label == NodeLabel.HYPOTHESIS.value:
+                    relationship_type = RelType.HAS_HYPOTHESIS.value
+                elif label in {NodeLabel.EVIDENCE.value, NodeLabel.EVIDENCE_CLAIM.value}:
+                    relationship_type = RelType.DERIVED_FROM_PHASE.value
+                elif asset_family == "philology":
+                    relationship_type = RelType.CAPTURED.value
+                else:
+                    relationship_type = ""
+                if not relationship_type:
+                    continue
+                _append_edge(
+                    Neo4jEdge(
+                        source_id=phase_id,
+                        target_id=node_id,
+                        relationship_type=relationship_type,
+                        properties=_compact_graph_properties(
+                            {
+                                "cycle_id": cycle_id,
+                                "phase": phase_name,
+                                "subgraph": subgraph_name,
+                            }
+                        ),
+                    ),
+                    NodeLabel.RESEARCH_PHASE_EXECUTION.value,
+                    label,
+                )
+
+            for edge in subgraph.get("edges") or []:
+                if not isinstance(edge, Mapping):
+                    continue
+                source_id = str(edge.get("source_id") or "").strip()
+                target_id = str(edge.get("target_id") or "").strip()
+                source_label = resolve_node_label(str(edge.get("source_label") or NodeLabel.ENTITY.value))
+                target_label = resolve_node_label(str(edge.get("target_label") or NodeLabel.ENTITY.value))
+                relationship_type = _normalize_graph_relationship_type(
+                    edge.get("relationship_type") or RelType.RELATED_TO.value
+                )
+                if not source_id or not target_id:
+                    continue
+                _append_edge(
+                    Neo4jEdge(
+                        source_id=source_id,
+                        target_id=target_id,
+                        relationship_type=relationship_type,
+                        properties=_compact_graph_properties(dict(edge.get("properties") or {})),
+                    ),
+                    source_label,
+                    target_label,
+                )
+                if asset_family == "hypothesis":
+                    counts["hypothesis_edge_count"] += 1
+                elif asset_family == "evidence":
+                    counts["evidence_edge_count"] += 1
+                elif asset_family == "philology":
+                    counts["philology_edge_count"] += 1
+
+    return nodes, edges, counts
+
+
 def _iter_session_batches(repository: Any, batch_size: int) -> Iterable[List[Dict[str, Any]]]:
     effective_batch_size = max(int(batch_size or 0), 1)
     offset = 0
@@ -623,6 +761,7 @@ def backfill_structured_research_graph(
     neo4j_driver: Any,
     *,
     batch_size: int = 200,
+    dry_run: bool = False,
 ) -> Dict[str, Any]:
     if neo4j_driver is None:
         return {
@@ -643,6 +782,16 @@ def backfill_structured_research_graph(
             "captured_edge_count": 0,
             "observed_witness_edge_count": 0,
             "belongs_to_lineage_edge_count": 0,
+            "hypothesis_node_count": 0,
+            "hypothesis_edge_count": 0,
+            "evidence_node_count": 0,
+            "evidence_edge_count": 0,
+            "philology_node_count": 0,
+            "philology_edge_count": 0,
+            "exegesis_term_node_count": 0,
+            "textual_evidence_chain_node_count": 0,
+            "graph_asset_subgraph_count": 0,
+            "dry_run": bool(dry_run),
         }
 
     batch_count = 0
@@ -659,6 +808,15 @@ def backfill_structured_research_graph(
     captured_edge_count = 0
     observed_witness_edge_count = 0
     belongs_to_lineage_edge_count = 0
+    hypothesis_node_count = 0
+    hypothesis_edge_count = 0
+    evidence_node_count = 0
+    evidence_edge_count = 0
+    philology_node_count = 0
+    philology_edge_count = 0
+    exegesis_term_node_count = 0
+    textual_evidence_chain_node_count = 0
+    graph_asset_subgraph_count = 0
 
     for snapshot_batch in _iter_session_snapshot_batches(repository, batch_size):
         nodes: List[Neo4jNode] = []
@@ -681,15 +839,21 @@ def backfill_structured_research_graph(
             observe_phase_id = str((next((record for record in phase_records if str(record.get("phase") or "").strip() == "observe"), {}) or {}).get("id") or "").strip()
             observe_edges = build_observe_graph_edges(cycle_id, observe_phase_id, observe_documents)
             observe_version_edges = build_observe_version_graph_edges(cycle_id, observe_phase_id, observe_documents)
+            graph_asset_nodes, graph_asset_edges, graph_asset_counts = _build_phase_graph_asset_nodes_and_edges(
+                cycle_id,
+                phase_records,
+            )
 
             nodes.extend(session_nodes)
             nodes.extend(phase_nodes)
             nodes.extend(artifact_nodes)
             nodes.extend(observe_entity_nodes)
             nodes.extend(observe_version_nodes)
+            nodes.extend(graph_asset_nodes)
             edges.extend(batch_edges)
             edges.extend(observe_edges)
             edges.extend(observe_version_edges)
+            edges.extend(graph_asset_edges)
 
             session_node_count += len(session_nodes)
             phase_node_count += len(phase_nodes)
@@ -704,13 +868,23 @@ def backfill_structured_research_graph(
             captured_edge_count += sum(1 for edge, _, _ in observe_edges if edge.relationship_type == "CAPTURED")
             observed_witness_edge_count += sum(1 for edge, _, _ in observe_version_edges if edge.relationship_type == "OBSERVED_WITNESS")
             belongs_to_lineage_edge_count += sum(1 for edge, _, _ in observe_version_edges if edge.relationship_type == "BELONGS_TO_LINEAGE")
+            hypothesis_node_count += graph_asset_counts["hypothesis_node_count"]
+            hypothesis_edge_count += graph_asset_counts["hypothesis_edge_count"]
+            evidence_node_count += graph_asset_counts["evidence_node_count"]
+            evidence_edge_count += graph_asset_counts["evidence_edge_count"]
+            philology_node_count += graph_asset_counts["philology_node_count"]
+            philology_edge_count += graph_asset_counts["philology_edge_count"]
+            exegesis_term_node_count += graph_asset_counts["exegesis_term_node_count"]
+            textual_evidence_chain_node_count += graph_asset_counts["textual_evidence_chain_node_count"]
+            graph_asset_subgraph_count += graph_asset_counts["graph_asset_subgraph_count"]
 
         if not nodes:
             continue
-        if neo4j_driver.batch_create_nodes(nodes) is False:
-            raise RuntimeError("Neo4j batch_create_nodes returned False while backfilling structured research graph nodes")
-        if edges and neo4j_driver.batch_create_relationships(edges) is False:
-            raise RuntimeError("Neo4j batch_create_relationships returned False while backfilling structured research graph edges")
+        if not dry_run:
+            if neo4j_driver.batch_create_nodes(nodes) is False:
+                raise RuntimeError("Neo4j batch_create_nodes returned False while backfilling structured research graph nodes")
+            if edges and neo4j_driver.batch_create_relationships(edges) is False:
+                raise RuntimeError("Neo4j batch_create_relationships returned False while backfilling structured research graph edges")
         batch_count += 1
 
     edge_count = (
@@ -721,9 +895,12 @@ def backfill_structured_research_graph(
         + captured_edge_count
         + observed_witness_edge_count
         + belongs_to_lineage_edge_count
+        + hypothesis_edge_count
+        + evidence_edge_count
+        + philology_edge_count
     )
     return {
-        "status": "active",
+        "status": "dry_run" if dry_run else "active",
         "batch_count": batch_count,
         "node_count": (
             session_node_count
@@ -732,6 +909,9 @@ def backfill_structured_research_graph(
             + observe_entity_node_count
             + version_lineage_node_count
             + version_witness_node_count
+            + hypothesis_node_count
+            + evidence_node_count
+            + philology_node_count
         ),
         "edge_count": edge_count,
         "session_node_count": session_node_count,
@@ -747,4 +927,14 @@ def backfill_structured_research_graph(
         "captured_edge_count": captured_edge_count,
         "observed_witness_edge_count": observed_witness_edge_count,
         "belongs_to_lineage_edge_count": belongs_to_lineage_edge_count,
+        "hypothesis_node_count": hypothesis_node_count,
+        "hypothesis_edge_count": hypothesis_edge_count,
+        "evidence_node_count": evidence_node_count,
+        "evidence_edge_count": evidence_edge_count,
+        "philology_node_count": philology_node_count,
+        "philology_edge_count": philology_edge_count,
+        "exegesis_term_node_count": exegesis_term_node_count,
+        "textual_evidence_chain_node_count": textual_evidence_chain_node_count,
+        "graph_asset_subgraph_count": graph_asset_subgraph_count,
+        "dry_run": bool(dry_run),
     }

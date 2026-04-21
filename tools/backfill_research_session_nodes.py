@@ -18,6 +18,7 @@ from src.research.research_session_graph_backfill import (
     backfill_structured_research_graph,
 )
 from src.storage import StorageBackendFactory
+from src.storage.graph_schema import GRAPH_SCHEMA_VERSION
 
 
 def parse_args() -> argparse.Namespace:
@@ -37,6 +38,26 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip writing inferred Observe philology ResearchArtifact rows back into PostgreSQL before graph backfill",
     )
+    parser.add_argument(
+        "--skip-pg-graph-assets-writeback",
+        action="store_true",
+        help="Skip writing inferred phase graph_assets back into PostgreSQL PhaseExecution.output before Neo4j graph backfill",
+    )
+    parser.add_argument(
+        "--force-pg-graph-assets-regen",
+        action="store_true",
+        help="Force regeneration of phase graph_assets even for phases that already have graph_assets written (re-derives from source data)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Compute projected graph backfill summary without writing PostgreSQL or Neo4j",
+    )
+    parser.add_argument(
+        "--expected-graph-schema-version",
+        default=GRAPH_SCHEMA_VERSION,
+        help="Expected graph schema version for preflight/backfill validation",
+    )
     return parser.parse_args()
 
 
@@ -54,8 +75,10 @@ def _build_backfill_report(
     settings,
     init_report,
     consistency_state,
+    schema_summary,
     writeback_summary,
     philology_artifact_writeback_summary,
+    phase_graph_assets_writeback_summary,
     graph_summary,
 ):
     """构建统一的 backfill 报告载荷。"""
@@ -67,6 +90,7 @@ def _build_backfill_report(
             **dict(init_report),
             "consistency_state": dict(consistency_state),
         },
+        "graph_schema": dict(schema_summary),
         "observe_version_metadata_writeback": _annotate_writeback(
             writeback_summary,
             fields_written=["version_metadata", "witness_key", "version_lineage_key"],
@@ -75,6 +99,15 @@ def _build_backfill_report(
             philology_artifact_writeback_summary,
             fields_written=["observe_philology_artifacts"],
         ),
+        "phase_graph_assets_writeback": _annotate_writeback(
+            phase_graph_assets_writeback_summary,
+            fields_written=[
+                "PhaseExecution.output.results.graph_assets",
+                "PhaseExecution.output.metadata.graph_asset_subgraphs",
+                "PhaseExecution.output.metadata.graph_asset_node_count",
+                "PhaseExecution.output.metadata.graph_asset_edge_count",
+            ],
+        ),
         "backfill": _annotate_writeback(
             graph_summary,
             fields_written=[
@@ -82,6 +115,9 @@ def _build_backfill_report(
                 "OBSERVED_WITNESS_edges", "BELONGS_TO_LINEAGE_edges",
                 "ResearchSession_nodes", "ResearchPhaseExecution_nodes",
                 "ResearchArtifact_nodes", "Entity_nodes",
+                "Hypothesis_nodes", "Evidence_nodes", "EvidenceClaim_nodes",
+                "Catalog_nodes", "ExegesisTerm_nodes", "FragmentCandidate_nodes",
+                "TextualEvidenceChain_nodes",
             ],
         ),
     }
@@ -105,20 +141,60 @@ def main() -> int:
         if factory.neo4j_driver is None:
             raise RuntimeError("Neo4j backend is not initialized")
 
+        stored_schema_version = factory.neo4j_driver.get_schema_version()
+        expected_schema_version = str(args.expected_graph_schema_version or GRAPH_SCHEMA_VERSION).strip() or GRAPH_SCHEMA_VERSION
+        schema_summary = {
+            "expected_version": expected_schema_version,
+            "stored_version": stored_schema_version,
+            "matches_expected": stored_schema_version == expected_schema_version,
+            "bootstrap_version": GRAPH_SCHEMA_VERSION,
+            "drift_report": factory.neo4j_driver.ensure_schema_version(),
+        }
+
         repository = ResearchSessionRepository(factory.db_manager)
         writeback_summary = None
         philology_artifact_writeback_summary = None
-        if not args.skip_pg_version_writeback:
+        phase_graph_assets_writeback_summary = None
+        if args.dry_run:
+            writeback_summary = {
+                "status": "skipped",
+                "reason": "dry_run",
+                "batch_size": args.batch_size,
+            }
+            philology_artifact_writeback_summary = {
+                "status": "skipped",
+                "reason": "dry_run",
+                "batch_size": args.batch_size,
+            }
+        if args.dry_run:
+            phase_graph_assets_writeback_summary = repository.backfill_phase_graph_assets(
+                batch_size=args.batch_size,
+                dry_run=True,
+            )
+        elif not args.skip_pg_version_writeback:
             writeback_summary = repository.backfill_observe_document_version_metadata(batch_size=args.batch_size)
-        if not args.skip_pg_philology_artifact_writeback:
+        if not args.dry_run and not args.skip_pg_philology_artifact_writeback:
             philology_artifact_writeback_summary = repository.backfill_observe_philology_artifacts(
                 batch_size=args.batch_size,
                 artifact_output=((runtime_config.get("philology_service") or {}).get("artifact_output") or {}),
             )
+        if not args.dry_run and not args.skip_pg_graph_assets_writeback:
+            phase_graph_assets_writeback_summary = repository.backfill_phase_graph_assets(
+                batch_size=args.batch_size,
+                dry_run=False,
+                force=bool(getattr(args, "force_pg_graph_assets_regen", False)),
+            )
+        elif not args.dry_run:
+            phase_graph_assets_writeback_summary = {
+                "status": "skipped",
+                "reason": "flag_disabled",
+                "batch_size": args.batch_size,
+            }
         summary = backfill_structured_research_graph(
             repository,
             factory.neo4j_driver,
             batch_size=args.batch_size,
+            dry_run=args.dry_run,
         )
         print(
             json.dumps(
@@ -126,8 +202,10 @@ def main() -> int:
                     settings=settings,
                     init_report=init_report,
                     consistency_state=consistency_state,
+                    schema_summary=schema_summary,
                     writeback_summary=writeback_summary,
                     philology_artifact_writeback_summary=philology_artifact_writeback_summary,
+                    phase_graph_assets_writeback_summary=phase_graph_assets_writeback_summary,
                     graph_summary=summary,
                 ),
                 ensure_ascii=False,

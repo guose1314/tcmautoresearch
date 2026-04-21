@@ -7,10 +7,22 @@ from types import SimpleNamespace
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
+from src.research.graph_asset_contract import (
+    MANIFESTATION_SOURCE_STRUCTURED,
+    PATHOGENESIS_PROPERTY_TYPE,
+    SYMPTOM_CATEGORY_TYPICAL_MANIFESTATION,
+    EfficacyNodeContract,
+    FormulaComponentNodeContract,
+    FormulaProvenanceEdgeContract,
+    HerbProvenanceEdgeContract,
+    PathogenesisNodeContract,
+    SymptomNodeContract,
+)
 from src.research.graph_assets import (
     build_evidence_subgraph,
     build_graph_assets_payload,
     build_hypothesis_subgraph,
+    build_philology_subgraph,
 )
 from src.research.phases.analyze_phase import AnalyzePhaseMixin
 from src.research.phases.hypothesis_phase import HypothesisPhaseMixin
@@ -152,6 +164,143 @@ def _sample_evidence_protocol() -> Dict[str, Any]:
     }
 
 
+def _sample_observe_philology() -> Dict[str, Any]:
+    return {
+        "catalog_summary": {
+            "summary": {
+                "catalog_document_count": 1,
+                "version_lineage_count": 1,
+                "witness_count": 1,
+            },
+            "documents": [
+                {
+                    "document_title": "补中益气汤宋本",
+                    "document_urn": "doc:1",
+                    "source_type": "local",
+                    "catalog_id": "local:catalog:1",
+                    "work_title": "补中益气汤",
+                    "fragment_title": "补中益气汤",
+                    "work_fragment_key": "补中益气汤|补中益气汤",
+                    "version_lineage_key": "补中益气汤|补中益气汤|明|李时珍|宋本",
+                    "witness_key": "local:doc:1",
+                    "dynasty": "明",
+                    "author": "李时珍",
+                    "edition": "宋本",
+                    "exegesis_entries": [
+                        {
+                            "canonical": "黄芪",
+                            "label": "本草药名",
+                            "definition": "补气固表",
+                            "definition_source": "structured_tcm_knowledge",
+                            "semantic_scope": "本草药名",
+                            "observed_forms": ["黃芪"],
+                            "configured_variants": ["黃耆"],
+                            "sources": ["structured_tcm_knowledge"],
+                            "source_refs": ["TCMRelationshipDefinitions.HERB_EFFICACY_MAP"],
+                            "notes": ["结构化释义"],
+                            "dynasty_usage": ["明"],
+                            "disambiguation_basis": ["structured_tcm_knowledge"],
+                            "review_status": "pending",
+                            "needs_manual_review": True,
+                            "exegesis_notes": "「黄芪」释义来源：结构化知识库",
+                        },
+                        {
+                            "canonical": "补中益气汤",
+                            "label": "方剂名",
+                            "definition": "补中益气汤为方剂名，常见组成包含黄芪、人参与白术",
+                            "definition_source": "structured_tcm_knowledge",
+                            "semantic_scope": "方剂名",
+                            "sources": ["structured_tcm_knowledge"],
+                            "source_refs": ["TCMRelationshipDefinitions.FORMULA_COMPOSITIONS"],
+                            "review_status": "pending",
+                            "needs_manual_review": True,
+                            "exegesis_notes": "「补中益气汤」释义来源：结构化知识库",
+                        },
+                        {
+                            "canonical": "气虚证",
+                            "label": "证候术语",
+                            "definition": "气虚证指元气不足，常见表现为少气懒言与神疲乏力",
+                            "definition_source": "structured_tcm_knowledge",
+                            "semantic_scope": "证候术语",
+                            "sources": ["structured_tcm_knowledge"],
+                            "source_refs": ["TCMRelationshipDefinitions.SYNDROME_DEFINITIONS"],
+                            "review_status": "pending",
+                            "needs_manual_review": True,
+                            "exegesis_notes": "「气虚证」释义来源：结构化知识库",
+                        },
+                    ],
+                }
+            ],
+            "version_lineages": [
+                {
+                    "version_lineage_key": "补中益气汤|补中益气汤|明|李时珍|宋本",
+                    "work_fragment_key": "补中益气汤|补中益气汤",
+                    "work_title": "补中益气汤",
+                    "fragment_title": "补中益气汤",
+                    "dynasty": "明",
+                    "author": "李时珍",
+                    "edition": "宋本",
+                    "witnesses": [
+                        {
+                            "title": "补中益气汤宋本",
+                            "urn": "doc:1",
+                            "source_type": "local",
+                            "catalog_id": "local:catalog:1",
+                            "witness_key": "local:doc:1",
+                        }
+                    ],
+                }
+            ],
+        },
+        "fragment_candidates": [
+            {
+                "fragment_candidate_id": "frag-1",
+                "candidate_kind": "fragment_candidates",
+                "fragment_title": "佚文甲",
+                "document_title": "补中益气汤宋本",
+                "document_urn": "doc:1",
+                "source_type": "local",
+                "work_title": "补中益气汤",
+                "version_lineage_key": "补中益气汤|补中益气汤|明|李时珍|宋本",
+                "witness_key": "local:doc:1",
+                "match_score": 0.86,
+                "review_status": "pending",
+                "needs_manual_review": True,
+                "reconstruction_basis": "与明本异文比对后推断为佚文",
+                "source_refs": ["collation:补中益气汤|补中益气汤|明|李时珍|宋本"],
+            }
+        ],
+        "lost_text_candidates": [],
+        "citation_source_candidates": [],
+        "evidence_chains": [
+            {
+                "evidence_chain_id": "chronology::补中益气汤|补中益气汤|明|李时珍|宋本::补中益气汤宋本::补中益气汤明本",
+                "claim_type": "version_chronology",
+                "claim_statement": "版本谱系中补中益气汤明本可能较补中益气汤宋本为增补本",
+                "confidence": 0.72,
+                "basis_summary": "校勘显示明本新增内容更多",
+                "review_status": "pending",
+                "needs_manual_review": True,
+                "version_lineage_key": "补中益气汤|补中益气汤|明|李时珍|宋本",
+                "witness_title": "补中益气汤宋本",
+                "source_refs": ["collation:补中益气汤|补中益气汤|明|李时珍|宋本"],
+            }
+        ],
+        "conflict_claims": [
+            {
+                "claim_id": "conflict-1",
+                "claim_statement": "补血汤作者归属存在分歧",
+                "confidence": 0.51,
+                "basis_summary": "目录学记录存在不同作者标注",
+                "review_status": "pending",
+                "needs_manual_review": True,
+                "work_title": "补血汤",
+                "source_refs": ["catalog:补血汤"],
+            }
+        ],
+    }
+
+
 class TestHypothesisGraphAssetBuilder(unittest.TestCase):
     def test_hypothesis_subgraph_has_nodes_and_edges(self):
         payload = build_hypothesis_subgraph(
@@ -250,6 +399,186 @@ class TestEvidenceGraphAssetBuilder(unittest.TestCase):
         self.assertGreater(graph_assets["evidence_subgraph"]["node_count"], 0)
 
 
+class TestPhilologyGraphAssetBuilder(unittest.TestCase):
+    def test_philology_subgraph_contains_catalog_lineage_witness_and_claim_nodes(self):
+        payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
+        labels = {node["label"] for node in payload["nodes"]}
+        self.assertIn("Catalog", labels)
+        self.assertIn("VersionLineage", labels)
+        self.assertIn("VersionWitness", labels)
+        self.assertIn("EvidenceClaim", labels)
+        self.assertIn("ExegesisEntry", labels)
+        self.assertIn("FragmentCandidate", labels)
+        self.assertIn("Herb", labels)
+        self.assertIn("Formula", labels)
+        self.assertIn("Syndrome", labels)
+        self.assertIn("Symptom", labels)
+        self.assertIn("Efficacy", labels)
+        self.assertIn("Property", labels)
+
+    def test_philology_subgraph_contains_witness_and_claim_edges(self):
+        payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
+        relation_types = {edge["relationship_type"] for edge in payload["edges"]}
+        self.assertIn("CATALOGED_IN", relation_types)
+        self.assertIn("WITNESSED_BY", relation_types)
+        self.assertIn("BELONGS_TO_LINEAGE", relation_types)
+        self.assertIn("EVIDENCED_BY", relation_types)
+        self.assertIn("HAS_EXEGESIS", relation_types)
+        self.assertIn("HAS_FRAGMENT_CANDIDATE", relation_types)
+        self.assertIn("EXPLAINS_HERB", relation_types)
+        self.assertIn("EXPLAINS_FORMULA", relation_types)
+        self.assertIn("EXPLAINS_SYNDROME", relation_types)
+        self.assertIn("EXPLAINS_EFFICACY", relation_types)
+        self.assertIn("EXPLAINS_FORMULA_COMPONENT", relation_types)
+        self.assertIn("EXPLAINS_PATHOGENESIS", relation_types)
+        self.assertIn("EXPLAINS_SYMPTOM", relation_types)
+        self.assertIn("HAS_EFFICACY", relation_types)
+        self.assertIn("SYMPTOM_OF", relation_types)
+        self.assertIn("SOVEREIGN", relation_types)
+
+    def test_philology_subgraph_summary_tracks_claims(self):
+        payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
+        self.assertEqual(payload["summary"]["catalog_count"], 1)
+        self.assertEqual(payload["summary"]["version_lineage_count"], 1)
+        self.assertEqual(payload["summary"]["exegesis_entry_count"], 3)
+        self.assertEqual(payload["summary"]["fragment_candidate_count"], 1)
+        self.assertEqual(payload["summary"]["evidence_chain_count"], 1)
+        self.assertEqual(payload["summary"]["conflict_claim_count"], 1)
+
+    def test_exegesis_node_links_to_domain_terms_with_explicit_semantic_edges(self):
+        payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
+        exegesis_nodes = [node for node in payload["nodes"] if node["label"] == "ExegesisEntry"]
+        self.assertEqual(len(exegesis_nodes), 3)
+        semantic_edges = [
+            edge for edge in payload["edges"]
+            if edge["source_label"] == "ExegesisEntry"
+            and edge["relationship_type"] in {"EXPLAINS_HERB", "EXPLAINS_FORMULA", "EXPLAINS_SYNDROME"}
+        ]
+        relation_types = {edge["relationship_type"] for edge in semantic_edges}
+        self.assertEqual(relation_types, {"EXPLAINS_HERB", "EXPLAINS_FORMULA", "EXPLAINS_SYNDROME"})
+        herb_edge = next(edge for edge in semantic_edges if edge["relationship_type"] == "EXPLAINS_HERB")
+        formula_edge = next(edge for edge in semantic_edges if edge["relationship_type"] == "EXPLAINS_FORMULA")
+        self.assertEqual(
+            set(herb_edge["properties"]).intersection(HerbProvenanceEdgeContract.required_fields),
+            HerbProvenanceEdgeContract.required_fields,
+        )
+        self.assertEqual(herb_edge["properties"]["herb_canonical"], "黄芪")
+        self.assertEqual(herb_edge["properties"]["source_herb"], "黄芪")
+        self.assertTrue(herb_edge["properties"]["source_exegesis_id"])
+        self.assertEqual(
+            set(formula_edge["properties"]).intersection(FormulaProvenanceEdgeContract.required_fields),
+            FormulaProvenanceEdgeContract.required_fields,
+        )
+        self.assertEqual(formula_edge["properties"]["formula_canonical"], "补中益气汤")
+        self.assertEqual(formula_edge["properties"]["source_formula"], "补中益气汤")
+        self.assertTrue(formula_edge["properties"]["source_exegesis_id"])
+
+    def test_herb_exegesis_projects_efficacy_nodes(self):
+        payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
+        efficacy_edges = [
+            edge for edge in payload["edges"]
+            if edge["source_label"] == "ExegesisEntry" and edge["relationship_type"] == "EXPLAINS_EFFICACY"
+        ]
+        herb_edges = [
+            edge for edge in payload["edges"]
+            if edge["source_label"] == "Herb" and edge["relationship_type"] == "HAS_EFFICACY"
+        ]
+        self.assertGreaterEqual(len(efficacy_edges), 1)
+        self.assertGreaterEqual(len(herb_edges), 1)
+        efficacy_nodes = [
+            node for node in payload["nodes"]
+            if node["label"] == "Efficacy" and node["properties"].get("type") == EfficacyNodeContract.node_type
+        ]
+        self.assertGreaterEqual(len(efficacy_nodes), 1)
+        self.assertEqual(
+            set(efficacy_nodes[0]["properties"]).intersection(EfficacyNodeContract.required_fields),
+            EfficacyNodeContract.required_fields,
+        )
+        self.assertEqual(efficacy_nodes[0]["properties"]["herb_canonical"], "黄芪")
+        self.assertEqual(efficacy_nodes[0]["properties"]["source_herb"], "黄芪")
+        self.assertTrue(efficacy_nodes[0]["properties"]["source_exegesis_id"])
+
+    def test_formula_exegesis_projects_component_herbs(self):
+        payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
+        composition_edges = [
+            edge for edge in payload["edges"]
+            if edge["source_label"] == "ExegesisEntry" and edge["relationship_type"] == "EXPLAINS_FORMULA_COMPONENT"
+        ]
+        role_edges = [
+            edge for edge in payload["edges"]
+            if edge["source_label"] == "Formula" and edge["relationship_type"] in {"SOVEREIGN", "MINISTER", "ASSISTANT", "ENVOY"}
+        ]
+        self.assertGreaterEqual(len(composition_edges), 1)
+        self.assertGreaterEqual(len(role_edges), 1)
+        component_nodes = [
+            node for node in payload["nodes"]
+            if node["label"] == "Herb" and node["properties"].get("type") == FormulaComponentNodeContract.node_type
+        ]
+        self.assertGreaterEqual(len(component_nodes), 1)
+        self.assertEqual(
+            set(component_nodes[0]["properties"]).intersection(FormulaComponentNodeContract.required_fields),
+            FormulaComponentNodeContract.required_fields,
+        )
+        self.assertEqual(component_nodes[0]["properties"]["formula_canonical"], "补中益气汤")
+        self.assertEqual(component_nodes[0]["properties"]["source_formula"], "补中益气汤")
+        self.assertTrue(component_nodes[0]["properties"]["source_exegesis_id"])
+
+    def test_syndrome_exegesis_projects_pathogenesis_node(self):
+        payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
+        pathogenesis_edges = [
+            edge for edge in payload["edges"]
+            if edge["source_label"] == "ExegesisEntry" and edge["relationship_type"] == "EXPLAINS_PATHOGENESIS"
+        ]
+        pathogenesis_nodes = [
+            node for node in payload["nodes"]
+            if node["label"] == "Property" and node["properties"].get("type") == PATHOGENESIS_PROPERTY_TYPE
+        ]
+        self.assertEqual(len(pathogenesis_edges), 1)
+        self.assertEqual(len(pathogenesis_nodes), 1)
+        self.assertTrue(pathogenesis_nodes[0]["properties"]["source_exegesis_id"])
+        self.assertEqual(pathogenesis_nodes[0]["properties"]["syndrome_canonical"], "气虚证")
+        self.assertEqual(pathogenesis_nodes[0]["properties"]["source_syndrome"], "气虚证")
+        self.assertEqual(
+            set(pathogenesis_nodes[0]["properties"]).intersection(PathogenesisNodeContract.required_fields),
+            PathogenesisNodeContract.required_fields,
+        )
+
+    def test_syndrome_exegesis_projects_symptom_nodes(self):
+        payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
+        symptom_edges = [
+            edge for edge in payload["edges"]
+            if edge["source_label"] == "ExegesisEntry" and edge["relationship_type"] == "EXPLAINS_SYMPTOM"
+        ]
+        symptom_of_edges = [
+            edge for edge in payload["edges"]
+            if edge["source_label"] == "Symptom" and edge["relationship_type"] == "SYMPTOM_OF"
+        ]
+        symptom_nodes = [
+            node for node in payload["nodes"]
+            if node["label"] == "Symptom"
+        ]
+        self.assertGreaterEqual(len(symptom_edges), 1)
+        self.assertGreaterEqual(len(symptom_of_edges), 1)
+        self.assertGreaterEqual(len(symptom_nodes), 1)
+        self.assertEqual(symptom_nodes[0]["properties"]["symptom_category"], SYMPTOM_CATEGORY_TYPICAL_MANIFESTATION)
+        self.assertEqual(symptom_nodes[0]["properties"]["manifestation_source"], MANIFESTATION_SOURCE_STRUCTURED)
+        self.assertEqual(symptom_nodes[0]["properties"]["syndrome_canonical"], "气虚证")
+        self.assertEqual(symptom_nodes[0]["properties"]["source_syndrome"], "气虚证")
+        self.assertTrue(symptom_nodes[0]["properties"]["source_exegesis_id"])
+        self.assertEqual(
+            set(symptom_nodes[0]["properties"]).intersection(SymptomNodeContract.required_fields),
+            SymptomNodeContract.required_fields,
+        )
+
+    def test_fragment_candidate_links_to_witness(self):
+        payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
+        derived_edges = [
+            edge for edge in payload["edges"]
+            if edge["source_label"] == "FragmentCandidate" and edge["relationship_type"] == "DERIVED_FROM"
+        ]
+        self.assertGreaterEqual(len(derived_edges), 1)
+
+
 class TestGraphAssetProjection(unittest.TestCase):
     def _make_orchestrator(self):
         from src.research.phase_orchestrator import PhaseOrchestrator
@@ -264,6 +593,7 @@ class TestGraphAssetProjection(unittest.TestCase):
             phase_executions={
                 _Phase.HYPOTHESIS: {"result": {"phase": "hypothesis", "results": {"graph_assets": build_graph_assets_payload(hypothesis_subgraph=build_hypothesis_subgraph("cycle-001", [{"hypothesis_id": "hyp-1", "title": "A", "statement": "A", "source_entities": ["黄芪"]}]))}}},
                 _Phase.ANALYZE: {"result": {"phase": "analyze", "results": {"graph_assets": build_graph_assets_payload(evidence_subgraph=build_evidence_subgraph("cycle-001", _sample_evidence_protocol()))}}},
+                _Phase.OBSERVE: {"result": {"phase": "observe", "results": {"graph_assets": build_graph_assets_payload(philology_subgraph=build_philology_subgraph("cycle-001", _sample_observe_philology()))}}},
             }
         )
 
@@ -292,6 +622,18 @@ class TestGraphAssetProjection(unittest.TestCase):
         self.assertGreater(report["evidence_node_count"], 0)
         self.assertGreater(report["hypothesis_edge_count"], 0)
         self.assertGreater(report["evidence_edge_count"], 0)
+        self.assertGreater(report["philology_node_count"], 0)
+        self.assertGreater(report["philology_edge_count"], 0)
+        self.assertGreater(report["philology_traceable_node_count"], 0)
+        self.assertGreater(report["philology_traceable_edge_count"], 0)
+        self.assertGreater(report["herb_provenance_edge_count"], 0)
+        self.assertGreater(report["formula_provenance_edge_count"], 0)
+        self.assertGreater(report["efficacy_traceable_node_count"], 0)
+        self.assertGreater(report["formula_component_traceable_node_count"], 0)
+        self.assertGreater(report["symptom_traceable_node_count"], 0)
+        self.assertGreater(report["pathogenesis_traceable_node_count"], 0)
+        self.assertGreater(report["exegesis_term_node_count"], 0)
+        self.assertGreater(report["textual_evidence_chain_node_count"], 0)
 
     def test_project_cycle_to_neo4j_raises_when_transaction_graph_write_fails(self):
         orchestrator = self._make_orchestrator()

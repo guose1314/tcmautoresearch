@@ -27,6 +27,10 @@ from src.research.fragment_contract import (
     CANDIDATE_KINDS,
     build_fragment_summary,
 )
+from src.research.graph_assets import (
+    build_graph_assets_payload,
+    build_philology_subgraph,
+)
 from src.research.review_workbench import (
     OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT,
     REVIEW_WORKBENCH_ASSET_KIND,
@@ -3028,3 +3032,16 @@ def resolve_observe_philology_assets(
         ("observe_documents", extract_observe_philology_assets_from_documents(observe_documents)),
     ]
     return _merge_philology_candidates(source_candidates, include_sources=True)
+
+
+def build_observe_philology_graph_assets(
+    cycle_id: str,
+    observe_philology: Mapping[str, Any] | None,
+    *,
+    phase: str = "observe",
+) -> Dict[str, Any]:
+    normalized_assets = normalize_observe_philology_assets(observe_philology)
+    philology_subgraph = build_philology_subgraph(cycle_id, normalized_assets, phase=phase)
+    if not philology_subgraph.get("node_count") and not philology_subgraph.get("edge_count"):
+        return {}
+    return build_graph_assets_payload(philology_subgraph=philology_subgraph)

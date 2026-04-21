@@ -36,9 +36,16 @@ from src.infrastructure.persistence import (
     ResearchArtifact,
     ResearchLearningFeedback,
     ResearchSession,
+    ReviewAssignment,
     SessionStatusEnum,
     _json_dumps,
     _json_loads,
+)
+from src.research.graph_assets import (
+    build_evidence_subgraph,
+    build_graph_assets_payload,
+    build_hypothesis_subgraph,
+    get_phase_graph_assets,
 )
 from src.research.learning_feedback_contract import (
     CONTRACT_VERSION as LEARNING_FEEDBACK_CONTRACT_VERSION,
@@ -49,6 +56,7 @@ from src.research.learning_feedback_contract import (
 from src.research.observe_philology import (
     OBSERVE_PHILOLOGY_CATALOG_REVIEW_ARTIFACT,
     build_observe_philology_artifact_payloads,
+    build_observe_philology_graph_assets,
     normalize_observe_catalog_review_decision,
     resolve_observe_philology_assets,
     upsert_observe_catalog_review_artifact_content,
@@ -117,6 +125,129 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
         return datetime.fromisoformat(str(value))
     except (ValueError, TypeError):
         return None
+
+
+def _graph_asset_subgraphs(graph_assets: Mapping[str, Any] | None) -> List[str]:
+    if not isinstance(graph_assets, Mapping):
+        return []
+    return sorted(
+        key for key, value in graph_assets.items()
+        if key != "summary" and isinstance(value, Mapping)
+    )
+
+
+def _graph_asset_counts(graph_assets: Mapping[str, Any] | None) -> Dict[str, Any]:
+    subgraphs = _graph_asset_subgraphs(graph_assets)
+    node_count = 0
+    edge_count = 0
+    for subgraph_name in subgraphs:
+        subgraph = graph_assets.get(subgraph_name) if isinstance(graph_assets, Mapping) else {}
+        if not isinstance(subgraph, Mapping):
+            continue
+        node_count += int(subgraph.get("node_count") or 0)
+        edge_count += int(subgraph.get("edge_count") or 0)
+    return {
+        "subgraphs": subgraphs,
+        "node_count": node_count,
+        "edge_count": edge_count,
+    }
+
+
+def _normalize_phase_output_for_graph_assets(output: Mapping[str, Any] | None, phase_name: str, phase_status: Any) -> Dict[str, Any]:
+    payload = dict(output or {})
+    payload.setdefault("phase", str(phase_name or "").strip())
+    payload.setdefault("status", getattr(phase_status, "value", phase_status) or "completed")
+    payload["results"] = dict(payload.get("results") or {})
+    payload["metadata"] = dict(payload.get("metadata") or {})
+    payload["artifacts"] = list(payload.get("artifacts") or [])
+    payload.setdefault("error", payload.get("error"))
+    return payload
+
+
+def _build_inferred_phase_graph_assets(
+    phase_name: str,
+    cycle_id: str,
+    phase_output: Mapping[str, Any],
+    *,
+    phase_artifacts: Sequence[Mapping[str, Any]] | None = None,
+    observe_documents: Sequence[Mapping[str, Any]] | None = None,
+) -> Dict[str, Any]:
+    normalized_phase = str(phase_name or "").strip().lower()
+    results = dict(phase_output.get("results") or {}) if isinstance(phase_output.get("results"), Mapping) else {}
+
+    if normalized_phase == "observe":
+        observe_philology = resolve_observe_philology_assets(
+            artifacts=phase_artifacts,
+            observe_phase_result=phase_output,
+            observe_documents=observe_documents,
+        )
+        # If resolve produced no terminology (legacy entity-extraction format), derive
+        # terminology_standard_table from Entity table rows stored in observe_documents.
+        # Each observe document has an `entities` list with {"name": ..., "entity_type": ...}.
+        existing_terms: List[Mapping[str, Any]] = list(
+            (observe_philology or {}).get("terminology_standard_table") or []
+        )
+        if not existing_terms and observe_documents:
+            seen_term_keys: set[tuple[str, str, str]] = set()
+            legacy_terms: List[Dict[str, Any]] = []
+            for doc in observe_documents:
+                if not isinstance(doc, Mapping):
+                    continue
+                doc_urn = str(doc.get("urn") or doc.get("document_urn") or "").strip()
+                doc_title = str(
+                    doc.get("title") or doc.get("document_title") or doc.get("work_title") or ""
+                ).strip()
+                for entity in (doc.get("entities") or []):
+                    if not isinstance(entity, Mapping):
+                        continue
+                    canonical = str(entity.get("name") or entity.get("canonical") or "").strip()
+                    semantic_scope = str(
+                        entity.get("entity_type") or entity.get("semantic_scope") or "common"
+                    ).strip()
+                    if not canonical:
+                        continue
+                    term_key = (doc_urn or doc_title, canonical, semantic_scope)
+                    if term_key in seen_term_keys:
+                        continue
+                    seen_term_keys.add(term_key)
+                    legacy_terms.append({
+                        "canonical": canonical,
+                        "semantic_scope": semantic_scope,
+                        "label": semantic_scope,
+                        "document_urn": doc_urn,
+                        "document_title": doc_title,
+                        "review_status": "inferred",
+                        "needs_manual_review": True,
+                        "decision_basis": "legacy_entity_extraction",
+                    })
+            if legacy_terms:
+                observe_philology = dict(observe_philology or {})
+                observe_philology["terminology_standard_table"] = legacy_terms
+        return build_observe_philology_graph_assets(cycle_id, observe_philology, phase="observe")
+
+    if normalized_phase == "hypothesis":
+        hypotheses = results.get("hypotheses")
+        if not isinstance(hypotheses, list) or not hypotheses:
+            hypotheses = phase_output.get("hypotheses") if isinstance(phase_output.get("hypotheses"), list) else []
+        if not hypotheses:
+            return {}
+        hypothesis_subgraph = build_hypothesis_subgraph(cycle_id, hypotheses)
+        if not hypothesis_subgraph.get("node_count") and not hypothesis_subgraph.get("edge_count"):
+            return {}
+        return build_graph_assets_payload(hypothesis_subgraph=hypothesis_subgraph)
+
+    if normalized_phase == "analyze":
+        evidence_protocol = results.get("evidence_protocol")
+        if not isinstance(evidence_protocol, Mapping):
+            evidence_protocol = phase_output.get("evidence_protocol") if isinstance(phase_output.get("evidence_protocol"), Mapping) else {}
+        if not evidence_protocol:
+            return {}
+        evidence_subgraph = build_evidence_subgraph(cycle_id, evidence_protocol, phase="analyze")
+        if not evidence_subgraph.get("node_count") and not evidence_subgraph.get("edge_count"):
+            return {}
+        return build_graph_assets_payload(evidence_subgraph=evidence_subgraph)
+
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -546,6 +677,372 @@ class ResearchSessionRepository:
                 "limit": limit,
                 "offset": offset,
             }
+
+    # ---- Phase H / H-2: Review assignments ------------------------------
+
+    _REVIEW_ASSIGNMENT_QUEUE_STATUSES = (
+        "unassigned",
+        "claimed",
+        "in_progress",
+        "completed",
+        "expired",
+    )
+    _REVIEW_ASSIGNMENT_PRIORITY_BUCKETS = ("high", "medium", "low")
+
+    def claim_review_assignment(
+        self,
+        cycle_id: str,
+        asset_type: str,
+        asset_key: str,
+        assignee: str,
+        *,
+        priority_bucket: Optional[str] = None,
+        due_at: Any = None,
+        notes: Optional[str] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Upsert an assignment row marking ``assignee`` as claimer.
+
+        Returns the persisted assignment dict, or ``None`` when ``cycle_id``
+        does not resolve to a session.
+        """
+
+        normalized_assignee = (assignee or "").strip()
+        if not normalized_assignee:
+            raise ValueError("assignee is required to claim a review assignment")
+        return self._upsert_review_assignment(
+            cycle_id=cycle_id,
+            asset_type=asset_type,
+            asset_key=asset_key,
+            assignee=normalized_assignee,
+            queue_status="claimed",
+            priority_bucket=priority_bucket,
+            due_at=due_at,
+            notes=notes,
+            metadata=metadata,
+            mark_claimed_at=True,
+            session=session,
+        )
+
+    def release_review_assignment(
+        self,
+        cycle_id: str,
+        asset_type: str,
+        asset_key: str,
+        *,
+        notes: Optional[str] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Release the current assignee, returning the row to ``unassigned``.
+
+        Returns ``None`` when no assignment exists for the target.
+        """
+
+        with self._session_scope(session) as db_session:
+            row = (
+                db_session.query(ReviewAssignment)
+                .filter_by(
+                    cycle_id=cycle_id,
+                    asset_type=str(asset_type or "").strip(),
+                    asset_key=str(asset_key or "").strip(),
+                )
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            row.assignee = None
+            row.queue_status = "unassigned"
+            row.released_at = datetime.utcnow()
+            if notes is not None:
+                row.notes = str(notes)
+            if metadata is not None:
+                row.metadata_json = _json_dumps(dict(metadata), "{}")
+            db_session.flush()
+            return self._review_assignment_to_dict(row)
+
+    def reassign_review_assignment(
+        self,
+        cycle_id: str,
+        asset_type: str,
+        asset_key: str,
+        new_assignee: str,
+        *,
+        priority_bucket: Optional[str] = None,
+        due_at: Any = None,
+        notes: Optional[str] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Reassign an existing review assignment to ``new_assignee``."""
+
+        normalized_assignee = (new_assignee or "").strip()
+        if not normalized_assignee:
+            raise ValueError("new_assignee is required to reassign a review assignment")
+        return self._upsert_review_assignment(
+            cycle_id=cycle_id,
+            asset_type=asset_type,
+            asset_key=asset_key,
+            assignee=normalized_assignee,
+            queue_status="claimed",
+            priority_bucket=priority_bucket,
+            due_at=due_at,
+            notes=notes,
+            metadata=metadata,
+            mark_claimed_at=True,
+            session=session,
+        )
+
+    def complete_review_assignment(
+        self,
+        cycle_id: str,
+        asset_type: str,
+        asset_key: str,
+        *,
+        notes: Optional[str] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Mark an assignment as completed (used after review write-back)."""
+
+        with self._session_scope(session) as db_session:
+            row = (
+                db_session.query(ReviewAssignment)
+                .filter_by(
+                    cycle_id=cycle_id,
+                    asset_type=str(asset_type or "").strip(),
+                    asset_key=str(asset_key or "").strip(),
+                )
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            row.queue_status = "completed"
+            row.completed_at = datetime.utcnow()
+            if notes is not None:
+                row.notes = str(notes)
+            if metadata is not None:
+                row.metadata_json = _json_dumps(dict(metadata), "{}")
+            db_session.flush()
+            return self._review_assignment_to_dict(row)
+
+    def list_review_queue(
+        self,
+        *,
+        cycle_id: Optional[str] = None,
+        assignee: Optional[str] = None,
+        queue_status: Optional[str] = None,
+        priority_bucket: Optional[str] = None,
+        asset_type: Optional[str] = None,
+        only_overdue: bool = False,
+        unassigned_only: bool = False,
+        now: Optional[datetime] = None,
+        limit: Optional[int] = None,
+        session: Optional[Session] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return the review queue with the requested filters applied."""
+
+        reference_now = now or datetime.utcnow()
+        with self._session_scope(session) as db_session:
+            query = db_session.query(ReviewAssignment)
+            if cycle_id:
+                query = query.filter(ReviewAssignment.cycle_id == cycle_id)
+            if assignee:
+                query = query.filter(ReviewAssignment.assignee == assignee)
+            if unassigned_only:
+                query = query.filter(ReviewAssignment.assignee.is_(None))
+            if queue_status:
+                query = query.filter(
+                    ReviewAssignment.queue_status == str(queue_status).strip().lower()
+                )
+            if priority_bucket:
+                query = query.filter(
+                    ReviewAssignment.priority_bucket == str(priority_bucket).strip().lower()
+                )
+            if asset_type:
+                query = query.filter(
+                    ReviewAssignment.asset_type == str(asset_type).strip().lower()
+                )
+            if only_overdue:
+                query = query.filter(
+                    ReviewAssignment.due_at.isnot(None),
+                    ReviewAssignment.due_at < reference_now,
+                    ReviewAssignment.queue_status != "completed",
+                )
+            query = query.order_by(
+                ReviewAssignment.priority_bucket.asc(),
+                ReviewAssignment.created_at.asc(),
+            )
+            if limit is not None and int(limit) > 0:
+                query = query.limit(int(limit))
+            return [
+                self._review_assignment_to_dict(row, now=reference_now)
+                for row in query.all()
+            ]
+
+    def aggregate_reviewer_workload(
+        self,
+        *,
+        cycle_id: Optional[str] = None,
+        now: Optional[datetime] = None,
+        session: Optional[Session] = None,
+    ) -> List[Dict[str, Any]]:
+        """Aggregate workload per reviewer (including the unassigned bucket)."""
+
+        reference_now = now or datetime.utcnow()
+        rows = self.list_review_queue(cycle_id=cycle_id, now=reference_now, session=session)
+        buckets: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            reviewer_label = row.get("reviewer_label") or "未认领"
+            bucket = buckets.setdefault(
+                reviewer_label,
+                {
+                    "reviewer": "" if reviewer_label == "未认领" else reviewer_label,
+                    "reviewer_label": reviewer_label,
+                    "total": 0,
+                    "unassigned": 0,
+                    "claimed": 0,
+                    "in_progress": 0,
+                    "completed": 0,
+                    "expired": 0,
+                    "overdue": 0,
+                    "high_priority": 0,
+                    "medium_priority": 0,
+                    "low_priority": 0,
+                },
+            )
+            bucket["total"] += 1
+            queue_status = row.get("queue_status") or "unassigned"
+            if queue_status in bucket:
+                bucket[queue_status] += 1
+            priority = row.get("priority_bucket") or "medium"
+            priority_key = f"{priority}_priority"
+            if priority_key in bucket:
+                bucket[priority_key] += 1
+            if row.get("is_overdue"):
+                bucket["overdue"] += 1
+        ordered_keys = sorted(
+            buckets.keys(),
+            key=lambda label: (label == "未认领", label),
+        )
+        return [buckets[label] for label in ordered_keys]
+
+    def _upsert_review_assignment(
+        self,
+        *,
+        cycle_id: str,
+        asset_type: str,
+        asset_key: str,
+        assignee: Optional[str],
+        queue_status: str,
+        priority_bucket: Optional[str],
+        due_at: Any,
+        notes: Optional[str],
+        metadata: Optional[Mapping[str, Any]],
+        mark_claimed_at: bool,
+        session: Optional[Session],
+    ) -> Optional[Dict[str, Any]]:
+        with self._session_scope(session) as db_session:
+            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            if rs is None:
+                return None
+
+            normalized_asset_type = str(asset_type or "").strip()
+            normalized_asset_key = str(asset_key or "").strip()
+            if not normalized_asset_type or not normalized_asset_key:
+                raise ValueError("asset_type and asset_key are required")
+
+            normalized_status = (queue_status or "unassigned").strip().lower()
+            if normalized_status not in self._REVIEW_ASSIGNMENT_QUEUE_STATUSES:
+                normalized_status = "unassigned"
+
+            normalized_priority = (priority_bucket or "").strip().lower() or None
+            if normalized_priority and normalized_priority not in self._REVIEW_ASSIGNMENT_PRIORITY_BUCKETS:
+                normalized_priority = None
+
+            row = (
+                db_session.query(ReviewAssignment)
+                .filter_by(
+                    cycle_id=cycle_id,
+                    asset_type=normalized_asset_type,
+                    asset_key=normalized_asset_key,
+                )
+                .one_or_none()
+            )
+            if row is None:
+                row = ReviewAssignment(
+                    session_id=rs.id,
+                    cycle_id=cycle_id,
+                    asset_type=normalized_asset_type,
+                    asset_key=normalized_asset_key,
+                    assignee=assignee,
+                    queue_status=normalized_status,
+                    priority_bucket=normalized_priority or "medium",
+                    notes=notes,
+                    metadata_json=_json_dumps(dict(metadata or {}), "{}"),
+                    due_at=_parse_datetime(due_at) if due_at is not None else None,
+                )
+                if mark_claimed_at:
+                    row.claimed_at = datetime.utcnow()
+                db_session.add(row)
+            else:
+                row.assignee = assignee
+                row.queue_status = normalized_status
+                if normalized_priority is not None:
+                    row.priority_bucket = normalized_priority
+                if due_at is not None:
+                    row.due_at = _parse_datetime(due_at)
+                if notes is not None:
+                    row.notes = str(notes)
+                if metadata is not None:
+                    row.metadata_json = _json_dumps(dict(metadata), "{}")
+                if mark_claimed_at:
+                    row.claimed_at = datetime.utcnow()
+                    row.released_at = None
+            db_session.flush()
+            return self._review_assignment_to_dict(row)
+
+    @staticmethod
+    def _review_assignment_to_dict(
+        row: ReviewAssignment,
+        *,
+        now: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        reference_now = now or datetime.utcnow()
+        claimed_at = row.claimed_at
+        backlog_age_seconds = None
+        if claimed_at is not None:
+            backlog_age_seconds = max(0.0, (reference_now - claimed_at).total_seconds())
+        elif row.created_at is not None:
+            backlog_age_seconds = max(0.0, (reference_now - row.created_at).total_seconds())
+        is_overdue = bool(
+            row.due_at is not None
+            and row.queue_status != "completed"
+            and row.due_at < reference_now
+        )
+        reviewer_label = row.assignee or "未认领"
+        return {
+            "id": str(row.id),
+            "session_id": str(row.session_id),
+            "cycle_id": row.cycle_id,
+            "asset_type": row.asset_type,
+            "asset_key": row.asset_key,
+            "assignee": row.assignee,
+            "reviewer_label": reviewer_label,
+            "queue_status": row.queue_status,
+            "priority_bucket": row.priority_bucket,
+            "notes": row.notes,
+            "metadata": _json_loads(row.metadata_json, {}),
+            "claimed_at": row.claimed_at.isoformat() if row.claimed_at else None,
+            "released_at": row.released_at.isoformat() if row.released_at else None,
+            "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+            "due_at": row.due_at.isoformat() if row.due_at else None,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            "backlog_age_seconds": backlog_age_seconds,
+            "is_overdue": is_overdue,
+        }
 
     def upsert_observe_catalog_review(
         self,
@@ -1078,6 +1575,142 @@ class ResearchSessionRepository:
                 "scanned_phase_count": scanned_phase_count,
                 "updated_phase_count": updated_phase_count,
                 "created_artifact_count": created_artifact_count,
+                "skipped_phase_count": scanned_phase_count - updated_phase_count,
+            }
+
+    def backfill_phase_graph_assets(
+        self,
+        cycle_id: Optional[str] = None,
+        *,
+        batch_size: int = 200,
+        dry_run: bool = False,
+        force: bool = False,
+        session: Optional[Session] = None,
+    ) -> Dict[str, Any]:
+        with self._session_scope(session) as db_session:
+            query = (
+                db_session.query(PhaseExecution, ResearchSession.cycle_id)
+                .join(ResearchSession, PhaseExecution.session_id == ResearchSession.id)
+                .filter(PhaseExecution.phase.in_(("observe", "hypothesis", "analyze")))
+                .order_by(PhaseExecution.created_at.asc())
+            )
+            if cycle_id:
+                query = query.filter(ResearchSession.cycle_id == cycle_id)
+
+            effective_batch_size = max(int(batch_size or 0), 1)
+            scanned_phase_count = 0
+            updated_phase_count = 0
+            graph_assets_written_phase_count = 0
+            metadata_updated_phase_count = 0
+            graph_asset_subgraph_count = 0
+            phase_counts = {
+                "observe": 0,
+                "hypothesis": 0,
+                "analyze": 0,
+            }
+            observe_documents_cache: Dict[str, List[Dict[str, Any]]] = {}
+
+            for phase_execution, phase_cycle_id in query.yield_per(effective_batch_size):
+                scanned_phase_count += 1
+                normalized_cycle_id = str(phase_cycle_id or "").strip()
+                normalized_phase = str(getattr(phase_execution.phase, "value", phase_execution.phase) or "").strip().lower()
+                if not normalized_cycle_id or normalized_phase not in phase_counts:
+                    continue
+
+                output = _normalize_phase_output_for_graph_assets(
+                    _json_loads(phase_execution.output_json, {}),
+                    normalized_phase,
+                    phase_execution.status,
+                )
+                results = dict(output.get("results") or {})
+                metadata = dict(output.get("metadata") or {})
+                existing_graph_assets = get_phase_graph_assets(output)
+                existing_counts = _graph_asset_counts(existing_graph_assets)
+
+                inferred_graph_assets = existing_graph_assets
+                wrote_graph_assets = False
+                if not existing_counts["subgraphs"] or force:
+                    phase_artifacts = [
+                        self._artifact_to_dict(artifact)
+                        for artifact in (
+                            db_session.query(ResearchArtifact)
+                            .filter(ResearchArtifact.phase_execution_id == phase_execution.id)
+                            .order_by(ResearchArtifact.created_at.asc())
+                            .all()
+                        )
+                    ]
+                    if normalized_phase == "observe":
+                        if normalized_cycle_id not in observe_documents_cache:
+                            observe_documents_cache[normalized_cycle_id] = self._list_observe_document_graphs(
+                                db_session,
+                                normalized_cycle_id,
+                            )
+                        inferred_graph_assets = _build_inferred_phase_graph_assets(
+                            normalized_phase,
+                            normalized_cycle_id,
+                            output,
+                            phase_artifacts=phase_artifacts,
+                            observe_documents=observe_documents_cache[normalized_cycle_id],
+                        )
+                    else:
+                        inferred_graph_assets = _build_inferred_phase_graph_assets(
+                            normalized_phase,
+                            normalized_cycle_id,
+                            output,
+                            phase_artifacts=phase_artifacts,
+                        )
+                    inferred_counts = _graph_asset_counts(inferred_graph_assets)
+                    if inferred_counts["subgraphs"]:
+                        results["graph_assets"] = inferred_graph_assets
+                        wrote_graph_assets = True
+                        graph_assets_written_phase_count += 1
+                        graph_asset_subgraph_count += len(inferred_counts["subgraphs"])
+                        active_counts = inferred_counts
+                    else:
+                        active_counts = existing_counts
+                else:
+                    graph_asset_subgraph_count += len(existing_counts["subgraphs"])
+                    active_counts = existing_counts
+
+                metadata_changed = False
+                if active_counts["subgraphs"] and metadata.get("graph_asset_subgraphs") != active_counts["subgraphs"]:
+                    metadata["graph_asset_subgraphs"] = list(active_counts["subgraphs"])
+                    metadata_changed = True
+                if int(metadata.get("graph_asset_node_count") or 0) != int(active_counts["node_count"] or 0):
+                    metadata["graph_asset_node_count"] = int(active_counts["node_count"] or 0)
+                    metadata_changed = True
+                if int(metadata.get("graph_asset_edge_count") or 0) != int(active_counts["edge_count"] or 0):
+                    metadata["graph_asset_edge_count"] = int(active_counts["edge_count"] or 0)
+                    metadata_changed = True
+
+                if not wrote_graph_assets and not metadata_changed:
+                    continue
+
+                output["results"] = results
+                output["metadata"] = metadata
+                updated_phase_count += 1
+                phase_counts[normalized_phase] += 1
+                if metadata_changed:
+                    metadata_updated_phase_count += 1
+                if not dry_run:
+                    phase_execution.output_json = _json_dumps(output, "{}")
+
+            if not dry_run:
+                db_session.flush()
+
+            return {
+                "cycle_id": cycle_id,
+                "batch_size": effective_batch_size,
+                "status": "dry_run" if dry_run else "active",
+                "dry_run": bool(dry_run),
+                "scanned_phase_count": scanned_phase_count,
+                "updated_phase_count": updated_phase_count,
+                "graph_assets_written_phase_count": graph_assets_written_phase_count,
+                "metadata_updated_phase_count": metadata_updated_phase_count,
+                "graph_asset_subgraph_count": graph_asset_subgraph_count,
+                "updated_observe_phase_count": phase_counts["observe"],
+                "updated_hypothesis_phase_count": phase_counts["hypothesis"],
+                "updated_analyze_phase_count": phase_counts["analyze"],
                 "skipped_phase_count": scanned_phase_count - updated_phase_count,
             }
 

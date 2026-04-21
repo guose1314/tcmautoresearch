@@ -13,17 +13,16 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from src.storage.graph_schema import (
-    _SCHEMA_META_LABEL,
-    _SCHEMA_META_NODE_ID,
     GRAPH_SCHEMA_VERSION,
     NodeLabel,
     RelType,
     build_schema_meta_node_properties,
     detect_schema_drift,
     get_allowed_properties,
+    get_allowed_rel_properties,
     get_registered_labels,
     get_registered_rel_types,
     get_schema_summary,
@@ -52,6 +51,13 @@ class TestNodeLabelEnum(unittest.TestCase):
         self.assertIn(NodeLabel.EVIDENCE, NodeLabel)
         self.assertIn(NodeLabel.EVIDENCE_CLAIM, NodeLabel)
 
+    def test_philology_detail_labels_present(self):
+        self.assertIn(NodeLabel.EXEGESIS_ENTRY, NodeLabel)
+        self.assertIn(NodeLabel.EXEGESIS_TERM, NodeLabel)
+        self.assertIn(NodeLabel.FRAGMENT_CANDIDATE, NodeLabel)
+        self.assertIn(NodeLabel.TEXTUAL_EVIDENCE_CHAIN, NodeLabel)
+        self.assertIn(NodeLabel.SYMPTOM, NodeLabel)
+
 
 class TestRelTypeEnum(unittest.TestCase):
     """RelType 枚举完整性。"""
@@ -70,6 +76,23 @@ class TestRelTypeEnum(unittest.TestCase):
         self.assertIn(RelType.CLAIMS, RelType)
         self.assertIn(RelType.EVIDENCED_BY, RelType)
 
+    def test_philology_detail_rel_types(self):
+        self.assertIn(RelType.HAS_VERSION, RelType)
+        self.assertIn(RelType.HAS_EXEGESIS, RelType)
+        self.assertIn(RelType.HAS_FRAGMENT_CANDIDATE, RelType)
+        self.assertIn(RelType.ATTESTS_TO, RelType)
+        self.assertIn(RelType.INTERPRETS, RelType)
+        self.assertIn(RelType.RECONSTRUCTS, RelType)
+        self.assertIn(RelType.CITES_FRAGMENT, RelType)
+        self.assertIn(RelType.EXPLAINS_HERB, RelType)
+        self.assertIn(RelType.EXPLAINS_FORMULA, RelType)
+        self.assertIn(RelType.EXPLAINS_SYNDROME, RelType)
+        self.assertIn(RelType.EXPLAINS_EFFICACY, RelType)
+        self.assertIn(RelType.EXPLAINS_FORMULA_COMPONENT, RelType)
+        self.assertIn(RelType.EXPLAINS_PATHOGENESIS, RelType)
+        self.assertIn(RelType.EXPLAINS_SYMPTOM, RelType)
+        self.assertIn(RelType.SYMPTOM_OF, RelType)
+
 
 class TestAllowedProperties(unittest.TestCase):
     """Property whitelist 查询。"""
@@ -87,6 +110,53 @@ class TestAllowedProperties(unittest.TestCase):
         props = get_allowed_properties("GraphSchemaMeta")
         self.assertIn("schema_version", props)
         self.assertIn("bootstrapped_at", props)
+
+    def test_philology_detail_properties(self):
+        exegesis_props = get_allowed_properties("ExegesisEntry")
+        self.assertIn("canonical", exegesis_props)
+        self.assertIn("definition", exegesis_props)
+        self.assertIn("decision_basis", exegesis_props)
+        exegesis_term_props = get_allowed_properties("ExegesisTerm")
+        self.assertIn("canonical", exegesis_term_props)
+        self.assertIn("decision_basis", exegesis_term_props)
+        fragment_props = get_allowed_properties("FragmentCandidate")
+        self.assertIn("candidate_kind", fragment_props)
+        self.assertIn("reconstruction_basis", fragment_props)
+        self.assertIn("decision_basis", fragment_props)
+        textual_chain_props = get_allowed_properties("TextualEvidenceChain")
+        self.assertIn("claim_id", textual_chain_props)
+        self.assertIn("claim_type", textual_chain_props)
+        self.assertIn("decision_basis", textual_chain_props)
+        symptom_props = get_allowed_properties("Symptom")
+        self.assertIn("name", symptom_props)
+        self.assertIn("description", symptom_props)
+        self.assertIn("symptom_category", symptom_props)
+        self.assertIn("manifestation_source", symptom_props)
+        self.assertIn("syndrome_canonical", symptom_props)
+        self.assertIn("source_syndrome", symptom_props)
+        self.assertIn("source_exegesis_id", symptom_props)
+        property_props = get_allowed_properties("Property")
+        self.assertIn("source_exegesis_id", property_props)
+        self.assertIn("syndrome_canonical", property_props)
+        self.assertIn("source_syndrome", property_props)
+        herb_props = get_allowed_properties("Herb")
+        self.assertIn("formula_canonical", herb_props)
+        self.assertIn("source_formula", herb_props)
+        self.assertIn("formula_role", herb_props)
+        efficacy_props = get_allowed_properties("Efficacy")
+        self.assertIn("herb_canonical", efficacy_props)
+        self.assertIn("source_herb", efficacy_props)
+        self.assertIn("source_exegesis_id", efficacy_props)
+        herb_rel_props = get_allowed_rel_properties("EXPLAINS_HERB")
+        self.assertIn("herb_canonical", herb_rel_props)
+        self.assertIn("source_herb", herb_rel_props)
+        self.assertIn("source_exegesis_id", herb_rel_props)
+        self.assertIn("provenance_kind", herb_rel_props)
+        formula_rel_props = get_allowed_rel_properties("EXPLAINS_FORMULA")
+        self.assertIn("formula_canonical", formula_rel_props)
+        self.assertIn("source_formula", formula_rel_props)
+        self.assertIn("source_exegesis_id", formula_rel_props)
+        self.assertIn("provenance_kind", formula_rel_props)
 
 
 class TestRegistryHelpers(unittest.TestCase):
@@ -347,6 +417,54 @@ class TestKgStatsEndpoint(unittest.TestCase):
         self.assertIn("rel_type_count", data)
         # Without live Neo4j, drift should be None
         self.assertIsNone(data.get("schema_drift_detected"))
+
+
+class TestKgSubgraphEndpoint(unittest.TestCase):
+    """GET /analysis/kg/subgraph 端点。"""
+
+    def test_returns_template_without_cycle_id(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from src.api.routes.analysis import router
+
+        app = FastAPI()
+        app.include_router(router, prefix="/analysis")
+        client = TestClient(app)
+
+        response = client.get(
+            "/analysis/kg/subgraph",
+            params={
+                "graph_type": "philology_asset_graph",
+                "work_title": "本草纲目",
+                "version_lineage_key": "lin-001",
+                "witness_key": "wit-001",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["graph_type"], "philology_asset_graph")
+        self.assertIn("template", data)
+        self.assertIn("cypher", data["template"])
+        self.assertEqual(data["record_count"], 0)
+        self.assertEqual(data["params"]["work_title"], "本草纲目")
+        self.assertEqual(data["params"]["version_lineage_key"], "lin-001")
+        self.assertEqual(data["params"]["witness_key"], "wit-001")
+
+    def test_rejects_unknown_graph_type(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from src.api.routes.analysis import router
+
+        app = FastAPI()
+        app.include_router(router, prefix="/analysis")
+        client = TestClient(app)
+
+        response = client.get("/analysis/kg/subgraph", params={"graph_type": "unknown_graph"})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["error"], "unsupported_graph_type")
 
 
 if __name__ == "__main__":

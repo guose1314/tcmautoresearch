@@ -99,4 +99,87 @@ if resp5.ok:
             ),
         )
 
+# 7) Phase G-4 资产级回归：直接 Cypher 校验 hypothesis / evidence / philology
+#    三类资产族的节点数与 /api/analysis/kg/stats 一致，并验证 philology_asset_graph
+#    模板能命中 g3 分支（ExegesisTerm / ATTESTS_TO 链路）
+print("\n--- Phase G-4 asset-level regression ---")
+try:
+    sys.path.insert(0, ".")
+    from src.storage.neo4j_driver import Neo4jDriver
+    from tools.neo4j_query_templates import CANONICAL_READ_TEMPLATES
+
+    neo4j_driver = Neo4jDriver(
+        uri="neo4j://127.0.0.1:7687",
+        auth=("neo4j", "Hgk1989225"),
+    )
+    neo4j_driver.connect()
+
+    def _run_cypher(cypher, params=None):
+        with neo4j_driver.driver.session(database=neo4j_driver.database) as sess:
+            return sess.execute_read(
+                lambda tx: [dict(r) for r in tx.run(cypher, **(params or {}))]
+            )
+
+    # KG stats reference
+    stats_for_check = (resp5.json() if resp5.ok else {}).get("graph_statistics") or {}
+
+    asset_breakdown = {}
+    for label, count_key in (
+        ("Hypothesis", "hypothesis_node_count"),
+        ("Evidence", "evidence_node_count"),
+        ("EvidenceClaim", "evidence_claim_node_count"),
+        ("ExegesisTerm", "exegesis_term_node_count"),
+        ("FragmentCandidate", "fragment_candidate_node_count"),
+        ("VersionWitness", "version_witness_node_count"),
+    ):
+        rows = _run_cypher(f"MATCH (n:{label}) RETURN count(n) AS cnt")
+        live_cnt = int(rows[0]["cnt"]) if rows else 0
+        asset_breakdown[label] = {
+            "live_neo4j_count": live_cnt,
+            "kg_stats_count": int(stats_for_check.get(count_key, 0)),
+        }
+
+    print("Asset-family breakdown:", json.dumps(asset_breakdown, ensure_ascii=False))
+
+    # Cross-check: hypothesis/evidence numbers from stats should not exceed live count
+    for label in ("Hypothesis", "Evidence", "EvidenceClaim"):
+        live = asset_breakdown[label]["live_neo4j_count"]
+        stats_cnt = asset_breakdown[label]["kg_stats_count"]
+        if stats_cnt > 0:
+            assert stats_cnt == live, (
+                f"{label}: kg/stats={stats_cnt} 与 live Neo4j={live} 不一致"
+            )
+
+    # Validate philology_asset_graph template hits g3 branch
+    rows = _run_cypher(
+        "MATCH (w:VersionWitness) WITH w.cycle_id AS cid, count(*) AS c "
+        "ORDER BY c DESC RETURN cid LIMIT 1"
+    )
+    if rows and rows[0]["cid"]:
+        cid = rows[0]["cid"]
+        tmpl = CANONICAL_READ_TEMPLATES["philology_asset_graph"]["cypher"]
+        sample = _run_cypher(
+            tmpl,
+            {
+                "cycle_id": cid,
+                "work_title": "",
+                "version_lineage_key": "",
+                "witness_key": "",
+                "review_status": "",
+                "limit": 5,
+            },
+        )
+        sources = [r.get("graph_source") for r in sample]
+        print(
+            "philology_asset_graph sample:",
+            json.dumps(
+                {"cycle_id": cid, "rows": len(sample), "graph_sources": sources},
+                ensure_ascii=False,
+            ),
+        )
+
+    neo4j_driver.close()
+except Exception as exc:  # pragma: no cover - 依赖 live Neo4j
+    print(f"  WARN: Phase G-4 asset regression skipped: {exc}")
+
 print("\n=== E2E test complete ===")

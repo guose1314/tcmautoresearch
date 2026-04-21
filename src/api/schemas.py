@@ -198,6 +198,86 @@ class ResearchBatchPhilologyReviewResponse(BaseModel):
     review_artifact: Dict[str, Any] = Field(default_factory=dict, description="写回后的 review artifact")
 
 
+# ---- Phase H / H-2: Review assignment / workload ----------------------------
+
+
+class ReviewAssignmentClaimRequest(BaseModel):
+    asset_type: str = Field(..., description="审核条目类型，如 terminology_row / claim 等")
+    asset_key: str = Field(..., description="审核条目唯一键")
+    reviewer: str = Field(default="", description="认领人，空字符串使用 management API key 默认值")
+    priority_bucket: Optional[str] = Field(default=None, description="优先级 high/medium/low")
+    due_at: Optional[str] = Field(default=None, description="截止时间 ISO8601")
+    notes: Optional[str] = Field(default=None, description="备注")
+
+
+class ReviewAssignmentReleaseRequest(BaseModel):
+    asset_type: str = Field(..., description="审核条目类型")
+    asset_key: str = Field(..., description="审核条目唯一键")
+    notes: Optional[str] = Field(default=None, description="备注")
+
+
+class ReviewAssignmentReassignRequest(BaseModel):
+    asset_type: str = Field(..., description="审核条目类型")
+    asset_key: str = Field(..., description="审核条目唯一键")
+    new_reviewer: str = Field(..., description="新的认领人")
+    priority_bucket: Optional[str] = Field(default=None, description="优先级 high/medium/low")
+    due_at: Optional[str] = Field(default=None, description="截止时间 ISO8601")
+    notes: Optional[str] = Field(default=None, description="备注")
+
+
+class ReviewAssignmentRecord(BaseModel):
+    id: str = Field(..., description="assignment 主键")
+    cycle_id: str = Field(..., description="周期 ID")
+    asset_type: str = Field(..., description="资产类型")
+    asset_key: str = Field(..., description="资产键")
+    assignee: Optional[str] = Field(default=None, description="当前认领人")
+    reviewer_label: str = Field(default="未认领", description="认领人显示名")
+    queue_status: str = Field(..., description="队列状态")
+    priority_bucket: str = Field(..., description="优先级")
+    notes: Optional[str] = Field(default=None, description="备注")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="附加元数据")
+    claimed_at: Optional[str] = Field(default=None, description="认领时间")
+    released_at: Optional[str] = Field(default=None, description="释放时间")
+    completed_at: Optional[str] = Field(default=None, description="完成时间")
+    due_at: Optional[str] = Field(default=None, description="截止时间")
+    created_at: Optional[str] = Field(default=None, description="创建时间")
+    updated_at: Optional[str] = Field(default=None, description="更新时间")
+    backlog_age_seconds: Optional[float] = Field(default=None, description="积压时长（秒）")
+    is_overdue: bool = Field(default=False, description="是否逾期")
+
+
+class ReviewAssignmentResponse(BaseModel):
+    cycle_id: str = Field(..., description="周期 ID")
+    assignment: ReviewAssignmentRecord = Field(..., description="assignment 记录")
+
+
+class ReviewAssignmentListResponse(BaseModel):
+    cycle_id: str = Field(..., description="周期 ID")
+    items: List[ReviewAssignmentRecord] = Field(default_factory=list, description="assignment 记录列表")
+    count: int = Field(default=0, description="返回条目数")
+
+
+class ReviewerWorkloadBucket(BaseModel):
+    reviewer: str = Field(default="", description="reviewer 唯一名，空表示未认领")
+    reviewer_label: str = Field(default="未认领", description="显示名")
+    total: int = Field(default=0, description="总条目数")
+    unassigned: int = Field(default=0, description="未认领数")
+    claimed: int = Field(default=0, description="已认领数")
+    in_progress: int = Field(default=0, description="处理中数")
+    completed: int = Field(default=0, description="已完成数")
+    expired: int = Field(default=0, description="已过期数")
+    overdue: int = Field(default=0, description="逾期未完成数")
+    high_priority: int = Field(default=0, description="高优先项数")
+    medium_priority: int = Field(default=0, description="常规优先项数")
+    low_priority: int = Field(default=0, description="低优先项数")
+
+
+class ReviewerWorkloadResponse(BaseModel):
+    cycle_id: str = Field(..., description="周期 ID")
+    items: List[ReviewerWorkloadBucket] = Field(default_factory=list, description="按 reviewer 聚合的负载")
+    count: int = Field(default=0, description="返回条目数")
+
+
 class ResearchJobListItem(BaseModel):
     job_id: str = Field(..., description="任务 ID")
     topic: str = Field(..., description="研究主题")

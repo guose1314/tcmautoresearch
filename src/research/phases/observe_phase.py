@@ -23,6 +23,7 @@ from src.research.learning_strategy import (
 from src.research.module_pipeline import execute_real_module_pipeline
 from src.research.observe_philology import (
     build_observe_philology_artifact_payloads,
+    build_observe_philology_graph_assets,
     extract_observe_philology_assets_from_phase_result,
 )
 from src.research.phase_result import build_phase_result
@@ -60,6 +61,12 @@ class ObservePhaseMixin:
             literature_result,
         )
         artifacts = self._build_observe_philology_artifacts(ingestion_result)
+        graph_assets = self._build_observe_graph_assets(cycle.cycle_id, ingestion_result)
+        if graph_assets:
+            metadata.setdefault(
+                "graph_asset_subgraphs",
+                sorted(key for key in graph_assets.keys() if key != "summary"),
+            )
         status = "degraded" if any(
             isinstance(item, dict) and item.get("error")
             for item in (corpus_result, ingestion_result, literature_result)
@@ -83,6 +90,7 @@ class ObservePhaseMixin:
                 "ingestion_pipeline": ingestion_result,
                 "literature_pipeline": literature_result,
                 "evidence_protocol": evidence_protocol,
+                "graph_assets": graph_assets,
             },
             artifacts=artifacts,
             metadata=metadata,
@@ -1010,6 +1018,22 @@ class ObservePhaseMixin:
             }
         )
         return build_observe_philology_artifact_payloads(philology_assets, artifact_config)
+
+    def _build_observe_graph_assets(self, cycle_id: str, ingestion_result: Dict[str, Any] | None) -> Dict[str, Any]:
+        if not ingestion_result or ingestion_result.get("error"):
+            return {}
+
+        philology_assets = extract_observe_philology_assets_from_phase_result(
+            {
+                "results": {
+                    "ingestion_pipeline": ingestion_result,
+                }
+            }
+        )
+        if not philology_assets:
+            return {}
+
+        return build_observe_philology_graph_assets(cycle_id, philology_assets, phase="observe")
 
     def _aggregate_observe_terminology_standard_table(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []

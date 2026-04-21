@@ -391,6 +391,194 @@ def test_backfill_structured_research_graph_upserts_observe_entity_nodes_and_edg
     db_manager.close()
 
 
+def test_backfill_structured_research_graph_reprojects_phase_graph_assets():
+    db_manager = DatabaseManager("sqlite:///:memory:")
+    db_manager.init_db()
+    repository = ResearchSessionRepository(db_manager)
+
+    repository.create_session(
+        {
+            "cycle_id": "cycle-asset-001",
+            "cycle_name": "资产图回填",
+            "status": "completed",
+            "created_at": datetime.utcnow().isoformat(),
+        }
+    )
+    phase = repository.add_phase_execution(
+        "cycle-asset-001",
+        {
+            "phase": "analyze",
+            "status": "completed",
+            "duration": 3.2,
+            "output": {
+                "results": {
+                    "graph_assets": {
+                        "evidence_subgraph": {
+                            "graph_type": "evidence_subgraph",
+                            "asset_family": "evidence",
+                            "nodes": [
+                                {
+                                    "id": "evidence::cycle-asset-001::ev-1",
+                                    "label": "Evidence",
+                                    "properties": {
+                                        "cycle_id": "cycle-asset-001",
+                                        "phase": "analyze",
+                                        "evidence_id": "ev-1",
+                                        "title": "证据一",
+                                        "document_title": "文献甲",
+                                        "work_title": "伤寒论",
+                                    },
+                                },
+                                {
+                                    "id": "claim::cycle-asset-001::cl-1",
+                                    "label": "EvidenceClaim",
+                                    "properties": {
+                                        "cycle_id": "cycle-asset-001",
+                                        "phase": "analyze",
+                                        "claim_id": "cl-1",
+                                        "claim_text": "桂枝汤可解表",
+                                    },
+                                },
+                            ],
+                            "edges": [
+                                {
+                                    "source_id": "claim::cycle-asset-001::cl-1",
+                                    "target_id": "evidence::cycle-asset-001::ev-1",
+                                    "relationship_type": "EVIDENCED_BY",
+                                    "source_label": "EvidenceClaim",
+                                    "target_label": "Evidence",
+                                    "properties": {"cycle_id": "cycle-asset-001"},
+                                }
+                            ],
+                        },
+                        "philology_subgraph": {
+                            "graph_type": "philology_subgraph",
+                            "asset_family": "philology",
+                            "nodes": [
+                                {
+                                    "id": "exegesis::1",
+                                    "label": "ExegesisTerm",
+                                    "properties": {
+                                        "cycle_id": "cycle-asset-001",
+                                        "phase": "observe",
+                                        "exegesis_id": "ex-1",
+                                        "canonical": "营卫",
+                                    },
+                                },
+                                {
+                                    "id": "chain::1",
+                                    "label": "TextualEvidenceChain",
+                                    "properties": {
+                                        "cycle_id": "cycle-asset-001",
+                                        "phase": "observe",
+                                        "claim_id": "claim-1",
+                                    },
+                                },
+                            ],
+                            "edges": [
+                                {
+                                    "source_id": "chain::1",
+                                    "target_id": "exegesis::1",
+                                    "relationship_type": "ATTESTS_TO",
+                                    "source_label": "TextualEvidenceChain",
+                                    "target_label": "ExegesisTerm",
+                                    "properties": {"cycle_id": "cycle-asset-001"},
+                                }
+                            ],
+                        },
+                    }
+                }
+            },
+        },
+    )
+    assert phase is not None
+
+    fake_neo4j = _FakeNeo4jDriver()
+    summary = backfill_structured_research_graph(repository, fake_neo4j, batch_size=1)
+
+    assert summary["status"] == "active"
+    assert summary["graph_asset_subgraph_count"] == 2
+    assert summary["evidence_node_count"] == 2
+    assert summary["evidence_edge_count"] == 1
+    assert summary["philology_node_count"] == 2
+    assert summary["philology_edge_count"] == 1
+    assert summary["exegesis_term_node_count"] == 1
+    assert summary["textual_evidence_chain_node_count"] == 1
+
+    flattened_nodes = [node for batch in fake_neo4j.batches for node in batch]
+    labels = {node.label for node in flattened_nodes}
+    assert "Evidence" in labels
+    assert "EvidenceClaim" in labels
+    assert "ExegesisTerm" in labels
+    assert "TextualEvidenceChain" in labels
+
+    flattened_edges = [edge for batch in fake_neo4j.relationship_batches for edge in batch]
+    relationship_types = {edge.relationship_type for edge, _, _ in flattened_edges}
+    assert "DERIVED_FROM_PHASE" in relationship_types
+    assert "CAPTURED" in relationship_types
+    assert "EVIDENCED_BY" in relationship_types
+    assert "ATTESTS_TO" in relationship_types
+
+    db_manager.close()
+
+
+def test_backfill_structured_research_graph_dry_run_reports_projection_without_writing():
+    db_manager = DatabaseManager("sqlite:///:memory:")
+    db_manager.init_db()
+    repository = ResearchSessionRepository(db_manager)
+
+    repository.create_session(
+        {
+            "cycle_id": "cycle-dry-run-001",
+            "cycle_name": "Dry Run 图回填",
+            "status": "completed",
+            "created_at": datetime.utcnow().isoformat(),
+        }
+    )
+    repository.add_phase_execution(
+        "cycle-dry-run-001",
+        {
+            "phase": "hypothesis",
+            "status": "completed",
+            "output": {
+                "results": {
+                    "graph_assets": {
+                        "hypothesis_subgraph": {
+                            "graph_type": "hypothesis_subgraph",
+                            "asset_family": "hypothesis",
+                            "nodes": [
+                                {
+                                    "id": "hypothesis::cycle-dry-run-001::h1",
+                                    "label": "Hypothesis",
+                                    "properties": {
+                                        "cycle_id": "cycle-dry-run-001",
+                                        "phase": "hypothesis",
+                                        "hypothesis_id": "h1",
+                                        "title": "假说一",
+                                    },
+                                }
+                            ],
+                            "edges": [],
+                        }
+                    }
+                }
+            },
+        },
+    )
+
+    fake_neo4j = _FakeNeo4jDriver()
+    summary = backfill_structured_research_graph(repository, fake_neo4j, batch_size=1, dry_run=True)
+
+    assert summary["status"] == "dry_run"
+    assert summary["dry_run"] is True
+    assert summary["hypothesis_node_count"] == 1
+    assert summary["node_count"] > 0
+    assert fake_neo4j.batches == []
+    assert fake_neo4j.relationship_batches == []
+
+    db_manager.close()
+
+
 def test_backfill_structured_research_graph_skips_when_neo4j_missing():
     db_manager = DatabaseManager("sqlite:///:memory:")
     db_manager.init_db()
@@ -416,6 +604,16 @@ def test_backfill_structured_research_graph_skips_when_neo4j_missing():
         "captured_edge_count": 0,
         "observed_witness_edge_count": 0,
         "belongs_to_lineage_edge_count": 0,
+        "hypothesis_node_count": 0,
+        "hypothesis_edge_count": 0,
+        "evidence_node_count": 0,
+        "evidence_edge_count": 0,
+        "philology_node_count": 0,
+        "philology_edge_count": 0,
+        "exegesis_term_node_count": 0,
+        "textual_evidence_chain_node_count": 0,
+        "graph_asset_subgraph_count": 0,
+        "dry_run": False,
     }
 
     db_manager.close()

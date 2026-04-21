@@ -30,6 +30,20 @@ class TestCanonicalTemplatesStructure(unittest.TestCase):
         from tools.neo4j_query_templates import CANONICAL_WRITE_TEMPLATES
         self.assertGreaterEqual(len(CANONICAL_WRITE_TEMPLATES), 2)
 
+    def test_philology_asset_graph_template_present(self):
+        from tools.neo4j_query_templates import CANONICAL_READ_TEMPLATES
+
+        self.assertIn("philology_asset_graph", CANONICAL_READ_TEMPLATES)
+        template = CANONICAL_READ_TEMPLATES["philology_asset_graph"]
+        self.assertIn("ATTESTS_TO", template["cypher"])
+        self.assertIn("HAS_FRAGMENT_CANDIDATE", template["cypher"])
+        self.assertIn("CAPTURED", template["cypher"])
+        self.assertIn("legacy_unreviewed", template["cypher"])
+        self.assertIn("review_status", template["cypher"])
+        self.assertIn("work_title", template["cypher"])
+        self.assertIn("version_lineage_key", template["cypher"])
+        self.assertIn("witness_key", template["cypher"])
+
     def test_every_template_has_required_fields(self):
         from tools.neo4j_query_templates import (
             CANONICAL_READ_TEMPLATES,

@@ -740,6 +740,10 @@ class TestResearchPipelineObserve(unittest.TestCase):
 
         self.assertEqual(result["status"], "completed")
         self.assertEqual(len(result["artifacts"]), 4)
+        self.assertIn("graph_assets", result["results"])
+        self.assertIn("philology_subgraph", result["results"]["graph_assets"])
+        self.assertGreater(result["results"]["graph_assets"]["philology_subgraph"]["node_count"], 0)
+        self.assertIn("philology_subgraph", result["metadata"]["graph_asset_subgraphs"])
         artifact_names = {item["name"] for item in result["artifacts"]}
         self.assertEqual(
             artifact_names,

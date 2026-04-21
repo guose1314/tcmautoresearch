@@ -453,8 +453,10 @@ class TestAnomalyVocabularyVerification(unittest.TestCase):
                 "neo4j_enabled": True,
             },
             consistency_state=consistency_state.to_dict(),
+            schema_summary={"expected_version": "1.1.0"},
             writeback_summary={"status": "active", "updated_document_count": 1},
             philology_artifact_writeback_summary={"status": "active", "created_artifact_count": 1},
+            phase_graph_assets_writeback_summary={"status": "active", "updated_phase_count": 1},
             graph_summary={"status": "skipped", "node_count": 0, "edge_count": 0},
         )
 

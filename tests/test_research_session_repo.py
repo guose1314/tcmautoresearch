@@ -1170,6 +1170,198 @@ class TestObserveDocumentGraph:
         assert summary["created_artifact_count"] == 0
         assert artifacts == []
 
+    def test_backfill_phase_graph_assets_persists_from_historical_phase_outputs(self, repo):
+        session_payload = _make_payload(cycle_id="phase-graph-assets-backfill")
+        repo.create_session(session_payload)
+
+        repo.add_phase_execution(
+            session_payload["cycle_id"],
+            {
+                "phase": "observe",
+                "status": "completed",
+                "output": {
+                    "phase": "observe",
+                    "status": "completed",
+                    "results": {
+                        "ingestion_pipeline": {
+                            "documents": [
+                                {
+                                    "urn": "doc:graph-assets:observe:1",
+                                    "title": "伤寒论宋本",
+                                    "metadata": {
+                                        "version_metadata": {
+                                            "catalog_id": "catalog:observe:1",
+                                            "work_title": "伤寒论",
+                                            "fragment_title": "辨太阳病脉证并治",
+                                            "work_fragment_key": "伤寒论|辨太阳病脉证并治",
+                                            "version_lineage_key": "伤寒论|辨太阳病脉证并治|汉|张仲景|宋本",
+                                            "witness_key": "witness:observe:1",
+                                            "dynasty": "汉",
+                                            "author": "张仲景",
+                                            "edition": "宋本",
+                                        }
+                                    },
+                                }
+                            ],
+                            "aggregate": {
+                                "philology_assets": {
+                                    "terminology_standard_table": [
+                                        {
+                                            "document_title": "伤寒论宋本",
+                                            "document_urn": "doc:graph-assets:observe:1",
+                                            "canonical": "桂枝",
+                                            "label": "本草药名",
+                                            "status": "standardized",
+                                            "observed_forms": ["桂支"],
+                                        }
+                                    ],
+                                    "evidence_chains": [
+                                        {
+                                            "claim_id": "claim-observe-1",
+                                            "claim_text": "桂枝用于解肌发表",
+                                            "source_entity": "桂枝",
+                                            "target_entity": "解肌发表",
+                                            "relation_type": "treats",
+                                            "evidence_ids": ["ev-observe-1"],
+                                            "document_title": "伤寒论宋本",
+                                            "work_title": "伤寒论",
+                                            "version_lineage_key": "伤寒论|辨太阳病脉证并治|汉|张仲景|宋本",
+                                            "witness_key": "witness:observe:1",
+                                        }
+                                    ],
+                                }
+                            },
+                        }
+                    },
+                    "metadata": {},
+                    "artifacts": [],
+                    "error": None,
+                },
+            },
+        )
+        repo.add_phase_execution(
+            session_payload["cycle_id"],
+            {
+                "phase": "hypothesis",
+                "status": "completed",
+                "output": {
+                    "phase": "hypothesis",
+                    "status": "completed",
+                    "results": {
+                        "hypotheses": [
+                            {
+                                "hypothesis_id": "hyp-1",
+                                "statement": "桂枝与营卫失和存在相关性",
+                                "source_entities": ["桂枝", "营卫失和"],
+                                "supporting_signals": ["太阳中风"],
+                            }
+                        ]
+                    },
+                    "metadata": {},
+                    "artifacts": [],
+                    "error": None,
+                },
+            },
+        )
+        repo.add_phase_execution(
+            session_payload["cycle_id"],
+            {
+                "phase": "analyze",
+                "status": "completed",
+                "output": {
+                    "phase": "analyze",
+                    "status": "completed",
+                    "results": {
+                        "evidence_protocol": {
+                            "evidence_records": [
+                                {
+                                    "evidence_id": "ev-1",
+                                    "title": "桂枝汤条文",
+                                    "source_type": "classical_text",
+                                    "source_ref": "doc:analyze:1",
+                                    "source_entity": "桂枝",
+                                    "target_entity": "太阳中风",
+                                    "relation_type": "treats",
+                                    "document_title": "伤寒论",
+                                }
+                            ],
+                            "claims": [
+                                {
+                                    "claim_id": "claim-1",
+                                    "claim_text": "桂枝治疗太阳中风",
+                                    "source_entity": "桂枝",
+                                    "target_entity": "太阳中风",
+                                    "relation_type": "treats",
+                                    "evidence_ids": ["ev-1"],
+                                }
+                            ],
+                            "evidence_grade_summary": {"overall_grade": "B"},
+                        }
+                    },
+                    "metadata": {},
+                    "artifacts": [],
+                    "error": None,
+                },
+            },
+        )
+
+        summary = repo.backfill_phase_graph_assets(session_payload["cycle_id"])
+        phase_outputs = {
+            phase["phase"]: phase["output"]
+            for phase in repo.list_phase_executions(session_payload["cycle_id"])
+        }
+
+        assert summary["status"] == "active"
+        assert summary["updated_phase_count"] == 3
+        assert summary["graph_assets_written_phase_count"] == 3
+        assert summary["metadata_updated_phase_count"] == 3
+        assert summary["graph_asset_subgraph_count"] == 3
+        assert summary["updated_observe_phase_count"] == 1
+        assert summary["updated_hypothesis_phase_count"] == 1
+        assert summary["updated_analyze_phase_count"] == 1
+        assert "philology_subgraph" in phase_outputs["observe"]["results"]["graph_assets"]
+        assert phase_outputs["observe"]["metadata"]["graph_asset_subgraphs"] == ["philology_subgraph"]
+        assert phase_outputs["hypothesis"]["metadata"]["graph_asset_subgraphs"] == ["hypothesis_subgraph"]
+        assert phase_outputs["analyze"]["metadata"]["graph_asset_subgraphs"] == ["evidence_subgraph"]
+        assert phase_outputs["analyze"]["metadata"]["graph_asset_node_count"] > 0
+
+    def test_backfill_phase_graph_assets_dry_run_does_not_persist(self, repo):
+        session_payload = _make_payload(cycle_id="phase-graph-assets-backfill-dry-run")
+        repo.create_session(session_payload)
+        repo.add_phase_execution(
+            session_payload["cycle_id"],
+            {
+                "phase": "hypothesis",
+                "status": "completed",
+                "output": {
+                    "phase": "hypothesis",
+                    "status": "completed",
+                    "results": {
+                        "hypotheses": [
+                            {
+                                "hypothesis_id": "dry-run-h1",
+                                "statement": "干运行不落库",
+                                "source_entities": ["黄芪"],
+                            }
+                        ]
+                    },
+                    "metadata": {},
+                    "artifacts": [],
+                    "error": None,
+                },
+            },
+        )
+
+        summary = repo.backfill_phase_graph_assets(session_payload["cycle_id"], dry_run=True)
+        phase_output = repo.list_phase_executions(session_payload["cycle_id"])[0]["output"]
+
+        assert summary["status"] == "dry_run"
+        assert summary["dry_run"] is True
+        assert summary["updated_phase_count"] == 1
+        assert summary["graph_assets_written_phase_count"] == 1
+        assert phase_output["results"].get("graph_assets") in (None, {})
+        assert phase_output["metadata"].get("graph_asset_subgraphs") in (None, [])
+
     def test_external_transaction_rolls_back_observe_graph_on_neo4j_failure(self, db_manager, repo):
         session_payload = _make_payload(cycle_id="observe-txn-rollback")
         neo4j_driver = _RecordingNeo4jDriver(fail_on_queries={"CREATE second"})
@@ -1443,3 +1635,155 @@ class TestJsonFields:
         assert fetched["researchers"] == []
         assert fetched["resources"] == {}
         assert fetched["tags"] == []
+
+
+# ---------------------------------------------------------------------------
+# Phase H / H-2: Reviewer assignment surface
+# ---------------------------------------------------------------------------
+
+
+class TestReviewAssignments:
+    """claim / release / reassign / complete / list / aggregate workflows."""
+
+    def _seed_session(self, repo) -> str:
+        payload = _make_payload()
+        repo.create_session(payload)
+        return payload["cycle_id"]
+
+    def test_claim_persists_row_with_claimed_status(self, repo):
+        cycle_id = self._seed_session(repo)
+        result = repo.claim_review_assignment(
+            cycle_id, "catalog", "k-1", "李研究员",
+            priority_bucket="high", notes="紧急",
+        )
+        assert result is not None
+        assert result["assignee"] == "李研究员"
+        assert result["queue_status"] == "claimed"
+        assert result["priority_bucket"] == "high"
+        assert result["claimed_at"] is not None
+        assert result["reviewer_label"] == "李研究员"
+
+    def test_claim_blank_assignee_raises(self, repo):
+        cycle_id = self._seed_session(repo)
+        with pytest.raises(ValueError):
+            repo.claim_review_assignment(cycle_id, "catalog", "k-1", "  ")
+
+    def test_claim_returns_none_when_session_missing(self, repo):
+        result = repo.claim_review_assignment(
+            "cycle-does-not-exist", "catalog", "k-1", "李研究员",
+        )
+        assert result is None
+
+    def test_release_clears_assignee_and_marks_unassigned(self, repo):
+        cycle_id = self._seed_session(repo)
+        repo.claim_review_assignment(cycle_id, "catalog", "k-1", "李研究员")
+        released = repo.release_review_assignment(cycle_id, "catalog", "k-1", notes="退回")
+        assert released is not None
+        assert released["assignee"] is None
+        assert released["queue_status"] == "unassigned"
+        assert released["released_at"] is not None
+        assert released["reviewer_label"] == "未认领"
+
+    def test_release_returns_none_for_missing_target(self, repo):
+        cycle_id = self._seed_session(repo)
+        assert repo.release_review_assignment(cycle_id, "catalog", "missing") is None
+
+    def test_reassign_updates_assignee_and_refreshes_claimed_at(self, repo):
+        cycle_id = self._seed_session(repo)
+        first = repo.claim_review_assignment(cycle_id, "catalog", "k-1", "李研究员")
+        reassigned = repo.reassign_review_assignment(
+            cycle_id, "catalog", "k-1", "张研究员", priority_bucket="low",
+        )
+        assert reassigned is not None
+        assert reassigned["assignee"] == "张研究员"
+        assert reassigned["priority_bucket"] == "low"
+        assert reassigned["queue_status"] == "claimed"
+        assert reassigned["claimed_at"] is not None
+        assert reassigned["id"] == first["id"]
+
+    def test_complete_marks_completed_at(self, repo):
+        cycle_id = self._seed_session(repo)
+        repo.claim_review_assignment(cycle_id, "catalog", "k-1", "李研究员")
+        completed = repo.complete_review_assignment(cycle_id, "catalog", "k-1")
+        assert completed is not None
+        assert completed["queue_status"] == "completed"
+        assert completed["completed_at"] is not None
+
+    def test_unique_constraint_on_target(self, repo, db_manager):
+        cycle_id = self._seed_session(repo)
+        first = repo.claim_review_assignment(cycle_id, "catalog", "k-1", "李研究员")
+        again = repo.claim_review_assignment(cycle_id, "catalog", "k-1", "张研究员")
+        assert again["id"] == first["id"]
+        assert again["assignee"] == "张研究员"
+        # Only a single physical row exists for (cycle_id, asset_type, asset_key).
+        items = repo.list_review_queue(cycle_id=cycle_id, asset_type="catalog")
+        assert len(items) == 1
+
+    def test_list_review_queue_filters(self, repo):
+        cycle_id = self._seed_session(repo)
+        repo.claim_review_assignment(cycle_id, "catalog", "k-1", "李研究员", priority_bucket="high")
+        repo.claim_review_assignment(cycle_id, "catalog", "k-2", "张研究员", priority_bucket="low")
+        repo.claim_review_assignment(cycle_id, "workbench", "k-3", "李研究员", priority_bucket="medium")
+
+        all_items = repo.list_review_queue(cycle_id=cycle_id)
+        assert len(all_items) == 3
+
+        only_li = repo.list_review_queue(cycle_id=cycle_id, assignee="李研究员")
+        assert {row["asset_key"] for row in only_li} == {"k-1", "k-3"}
+
+        only_high = repo.list_review_queue(cycle_id=cycle_id, priority_bucket="high")
+        assert [row["asset_key"] for row in only_high] == ["k-1"]
+
+        only_workbench = repo.list_review_queue(cycle_id=cycle_id, asset_type="workbench")
+        assert [row["asset_key"] for row in only_workbench] == ["k-3"]
+
+        repo.release_review_assignment(cycle_id, "catalog", "k-2")
+        unassigned = repo.list_review_queue(cycle_id=cycle_id, unassigned_only=True)
+        assert [row["asset_key"] for row in unassigned] == ["k-2"]
+
+    def test_list_review_queue_only_overdue(self, repo):
+        cycle_id = self._seed_session(repo)
+        past_due = datetime(2020, 1, 1, 12, 0, 0)
+        repo.claim_review_assignment(
+            cycle_id, "catalog", "k-1", "李研究员", due_at=past_due,
+        )
+        repo.claim_review_assignment(cycle_id, "catalog", "k-2", "李研究员")
+
+        overdue = repo.list_review_queue(cycle_id=cycle_id, only_overdue=True)
+        assert [row["asset_key"] for row in overdue] == ["k-1"]
+        assert overdue[0]["is_overdue"] is True
+
+    def test_aggregate_reviewer_workload_groups_and_orders(self, repo):
+        cycle_id = self._seed_session(repo)
+        repo.claim_review_assignment(cycle_id, "catalog", "k-1", "李研究员", priority_bucket="high")
+        repo.claim_review_assignment(cycle_id, "catalog", "k-2", "李研究员", priority_bucket="medium")
+        repo.claim_review_assignment(cycle_id, "catalog", "k-3", "张研究员", priority_bucket="low")
+        repo.claim_review_assignment(cycle_id, "catalog", "k-4", "张研究员")
+        repo.release_review_assignment(cycle_id, "catalog", "k-4")
+
+        buckets = repo.aggregate_reviewer_workload(cycle_id=cycle_id)
+        labels = [b["reviewer_label"] for b in buckets]
+        # 未认领 always sorted last.
+        assert labels[-1] == "未认领"
+        assert set(labels) == {"李研究员", "张研究员", "未认领"}
+
+        by_label = {b["reviewer_label"]: b for b in buckets}
+        assert by_label["李研究员"]["total"] == 2
+        assert by_label["李研究员"]["claimed"] == 2
+        assert by_label["李研究员"]["high_priority"] == 1
+        assert by_label["李研究员"]["medium_priority"] == 1
+        assert by_label["张研究员"]["total"] == 1
+        assert by_label["张研究员"]["low_priority"] == 1
+        assert by_label["未认领"]["total"] == 1
+        assert by_label["未认领"]["unassigned"] == 1
+        assert by_label["未认领"]["reviewer"] == ""
+
+    def test_aggregate_reviewer_workload_includes_overdue(self, repo):
+        cycle_id = self._seed_session(repo)
+        past_due = datetime(2020, 1, 1, 12, 0, 0)
+        repo.claim_review_assignment(
+            cycle_id, "catalog", "k-1", "李研究员", due_at=past_due,
+        )
+        buckets = repo.aggregate_reviewer_workload(cycle_id=cycle_id)
+        assert buckets[0]["overdue"] == 1
+

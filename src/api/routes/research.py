@@ -47,6 +47,12 @@ from src.api.schemas import (
     ResearchPhilologyWorkbenchReviewResponse,
     ResearchResult,
     ResearchRunRequest,
+    ReviewAssignmentClaimRequest,
+    ReviewAssignmentListResponse,
+    ReviewAssignmentReassignRequest,
+    ReviewAssignmentReleaseRequest,
+    ReviewAssignmentResponse,
+    ReviewerWorkloadResponse,
 )
 from src.infrastructure.research_session_repo import ResearchSessionRepository
 from web_console.job_manager import ResearchJobManager, format_sse
@@ -192,6 +198,7 @@ def get_research_job(
 @router.get("/jobs/{job_id}/dashboard")
 def get_research_job_dashboard(
     job_id: str,
+    request: Request,
     document_title: str=Query(""),
     work_title: str=Query(""),
     version_lineage_key: str=Query(""),
@@ -204,8 +211,19 @@ def get_research_job_dashboard(
     repository: ResearchSessionRepository=Depends(get_research_session_repository),
     _: None=Depends(require_management_api_key),
 ) -> ResearchDashboardResponse:
+    snapshot = _hydrate_dashboard_snapshot_learning_feedback(
+        _resolve_job_snapshot(manager, job_id), repository
+    )
+    cycle_id = _resolve_cycle_id(snapshot)
+    review_assignments: list = []
+    if cycle_id:
+        try:
+            review_assignments = repository.list_review_queue(cycle_id=cycle_id)
+        except Exception:
+            review_assignments = []
+    current_reviewer = _resolve_review_reviewer(request, "")
     return build_research_dashboard_payload(
-        _hydrate_dashboard_snapshot_learning_feedback(_resolve_job_snapshot(manager, job_id), repository),
+        snapshot,
         philology_filters={
             "document_title": document_title,
             "work_title": work_title,
@@ -216,6 +234,8 @@ def get_research_job_dashboard(
             "priority_bucket": priority_bucket,
             "reviewer": reviewer,
         },
+        review_assignments=review_assignments,
+        current_reviewer=current_reviewer,
     )
 
 
@@ -484,6 +504,115 @@ def batch_philology_review(
         "observe_philology": observe_philology if isinstance(observe_philology, dict) else {},
         "review_artifact": review_artifact,
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase H / H-2: Review assignment / workload endpoints
+# ---------------------------------------------------------------------------
+
+
+def _assignment_or_404(value, *, action: str):
+    if value is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"无法 {action}: cycle 或 assignment 不存在",
+        )
+    return value
+
+
+@router.post("/sessions/{cycle_id}/review-assignments/claim")
+def claim_research_review_assignment(
+    cycle_id: str,
+    payload: ReviewAssignmentClaimRequest,
+    request: Request,
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ReviewAssignmentResponse:
+    reviewer = _resolve_review_reviewer(request, payload.reviewer)
+    record = repository.claim_review_assignment(
+        cycle_id,
+        payload.asset_type,
+        payload.asset_key,
+        reviewer,
+        priority_bucket=payload.priority_bucket,
+        due_at=payload.due_at,
+        notes=payload.notes,
+    )
+    record = _assignment_or_404(record, action="claim")
+    return ReviewAssignmentResponse(cycle_id=cycle_id, assignment=record)
+
+
+@router.post("/sessions/{cycle_id}/review-assignments/release")
+def release_research_review_assignment(
+    cycle_id: str,
+    payload: ReviewAssignmentReleaseRequest,
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ReviewAssignmentResponse:
+    record = repository.release_review_assignment(
+        cycle_id,
+        payload.asset_type,
+        payload.asset_key,
+        notes=payload.notes,
+    )
+    record = _assignment_or_404(record, action="release")
+    return ReviewAssignmentResponse(cycle_id=cycle_id, assignment=record)
+
+
+@router.post("/sessions/{cycle_id}/review-assignments/reassign")
+def reassign_research_review_assignment(
+    cycle_id: str,
+    payload: ReviewAssignmentReassignRequest,
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ReviewAssignmentResponse:
+    record = repository.reassign_review_assignment(
+        cycle_id,
+        payload.asset_type,
+        payload.asset_key,
+        payload.new_reviewer,
+        priority_bucket=payload.priority_bucket,
+        due_at=payload.due_at,
+        notes=payload.notes,
+    )
+    record = _assignment_or_404(record, action="reassign")
+    return ReviewAssignmentResponse(cycle_id=cycle_id, assignment=record)
+
+
+@router.get("/sessions/{cycle_id}/review-assignments")
+def list_research_review_assignments(
+    cycle_id: str,
+    assignee: str=Query(""),
+    queue_status: str=Query(""),
+    priority_bucket: str=Query(""),
+    asset_type: str=Query(""),
+    only_overdue: bool=Query(False),
+    unassigned_only: bool=Query(False),
+    limit: int=Query(0),
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ReviewAssignmentListResponse:
+    items = repository.list_review_queue(
+        cycle_id=cycle_id,
+        assignee=assignee or None,
+        queue_status=queue_status or None,
+        priority_bucket=priority_bucket or None,
+        asset_type=asset_type or None,
+        only_overdue=only_overdue,
+        unassigned_only=unassigned_only,
+        limit=limit if limit > 0 else None,
+    )
+    return ReviewAssignmentListResponse(cycle_id=cycle_id, items=items, count=len(items))
+
+
+@router.get("/sessions/{cycle_id}/reviewer-workload")
+def get_research_reviewer_workload(
+    cycle_id: str,
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ReviewerWorkloadResponse:
+    items = repository.aggregate_reviewer_workload(cycle_id=cycle_id)
+    return ReviewerWorkloadResponse(cycle_id=cycle_id, items=items, count=len(items))
 
 
 @router.delete("/jobs/{job_id}")

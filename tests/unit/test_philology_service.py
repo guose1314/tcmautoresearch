@@ -106,5 +106,7 @@ class TestPhilologyService(unittest.TestCase):
         self.assertEqual(len(assets["collation_entries"]), version_collation["collation_entry_count"])
         self.assertEqual(len(assets["fragment_candidates"]), fragment_reconstruction["fragment_candidate_count"])
         self.assertEqual(assets["annotation_report"]["fragment_candidate_count"], fragment_reconstruction["fragment_candidate_count"])
+        self.assertIn("graph_assets", result)
+        self.assertIn("philology_subgraph", result["graph_assets"])
         self.assertTrue(any("版本对勘" in note for note in result["philology_notes"]))
         self.assertTrue(any("辑佚候选" in note for note in result["philology_notes"]))

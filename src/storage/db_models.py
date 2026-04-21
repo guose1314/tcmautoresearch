@@ -30,6 +30,9 @@ ResearchArtifact = _persistence.ResearchArtifact
 ResearchSession = _persistence.ResearchSession
 SessionStatusEnum = _persistence.SessionStatusEnum
 
+# Phase H / H-2 新增
+ReviewAssignment = _persistence.ReviewAssignment
+
 __all__ = [
     "ArtifactTypeEnum",
     "Base",
@@ -51,5 +54,6 @@ __all__ = [
     "ResearchArtifact",
     "ResearchRecord",
     "ResearchSession",
+    "ReviewAssignment",
     "SessionStatusEnum",
 ]

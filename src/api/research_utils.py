@@ -136,6 +136,8 @@ REVIEW_QUEUE_FILTER_FIELDS = (
     "reviewer",
 )
 
+_PHILOLOGY_GRAPH_QUERY_LIMIT = 50
+
 
 def _normalize_optional_text(value: Any) -> Optional[str]:
     text = str(value or "").strip()
@@ -710,6 +712,128 @@ def _build_reviewer_workload(items: list[Dict[str, Any]]) -> list[Dict[str, Any]
     )
 
 
+# ---------------------------------------------------------------------------
+# Phase H / H-2: Reviewer assignment board
+# ---------------------------------------------------------------------------
+
+
+def _normalize_review_assignments(
+    review_assignments: Any,
+) -> list[Dict[str, Any]]:
+    if not isinstance(review_assignments, (list, tuple)):
+        return []
+    normalized: list[Dict[str, Any]] = []
+    for entry in review_assignments:
+        if not isinstance(entry, dict):
+            continue
+        normalized.append(dict(entry))
+    return normalized
+
+
+def _index_review_assignments(
+    review_assignments: list[Dict[str, Any]],
+) -> Dict[tuple[str, str], Dict[str, Any]]:
+    index: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for entry in review_assignments:
+        asset_type = _as_text(entry.get("asset_type")).lower()
+        asset_key = _as_text(entry.get("asset_key"))
+        if not asset_type or not asset_key:
+            continue
+        index[(asset_type, asset_key)] = entry
+    return index
+
+
+def _enrich_item_with_assignment(
+    item: Dict[str, Any],
+    assignment: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if not assignment:
+        return item
+    enriched = dict(item)
+    assignee = _as_text(assignment.get("assignee"))
+    if assignee:
+        enriched["reviewer"] = assignee
+        enriched["reviewer_label"] = assignee
+    elif not enriched.get("reviewer"):
+        enriched["reviewer_label"] = enriched.get("reviewer_label") or "未认领"
+    enriched["assignment_id"] = assignment.get("id")
+    enriched["assignment_queue_status"] = assignment.get("queue_status")
+    enriched["assignment_priority_bucket"] = assignment.get("priority_bucket")
+    enriched["backlog_age_seconds"] = assignment.get("backlog_age_seconds")
+    enriched["due_at"] = assignment.get("due_at")
+    enriched["is_overdue"] = bool(assignment.get("is_overdue"))
+    if assignment.get("priority_bucket") and not enriched.get("priority_bucket"):
+        enriched["priority_bucket"] = assignment["priority_bucket"]
+    return enriched
+
+
+def build_reviewer_workload_board(
+    review_assignments: Any,
+    *,
+    current_reviewer: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build the H-2 reviewer workload board (我负责 / 无人认领 / 超期项).
+
+    The structure is consumed by the dashboard payload and the web console UI.
+    Returns ``{"supported": False}`` when no PG assignment data is provided so
+    that legacy snapshots without persistence keep degrading gracefully.
+    """
+
+    normalized = _normalize_review_assignments(review_assignments)
+    if not isinstance(review_assignments, (list, tuple)):
+        return {
+            "supported": False,
+            "summary": {},
+            "views": {},
+            "assignments": [],
+            "current_reviewer": _as_text(current_reviewer) or "",
+        }
+
+    current = _as_text(current_reviewer)
+    unassigned: list[Dict[str, Any]] = []
+    overdue: list[Dict[str, Any]] = []
+    mine: list[Dict[str, Any]] = []
+    by_reviewer: Dict[str, list[Dict[str, Any]]] = {}
+    completed = 0
+    high_priority = 0
+    for entry in normalized:
+        assignee = _as_text(entry.get("assignee"))
+        queue_status = _as_text(entry.get("queue_status")) or "unassigned"
+        priority_bucket = _as_text(entry.get("priority_bucket"))
+        if entry.get("is_overdue") and queue_status != "completed":
+            overdue.append(entry)
+        if not assignee:
+            unassigned.append(entry)
+        else:
+            by_reviewer.setdefault(assignee, []).append(entry)
+            if current and assignee == current and queue_status != "completed":
+                mine.append(entry)
+        if queue_status == "completed":
+            completed += 1
+        if priority_bucket == "high":
+            high_priority += 1
+    summary = {
+        "total": len(normalized),
+        "unassigned": len(unassigned),
+        "overdue": len(overdue),
+        "completed": completed,
+        "mine": len(mine),
+        "high_priority": high_priority,
+    }
+    return {
+        "supported": True,
+        "summary": summary,
+        "views": {
+            "mine": mine,
+            "unassigned": unassigned,
+            "overdue": overdue,
+        },
+        "by_reviewer": by_reviewer,
+        "assignments": normalized,
+        "current_reviewer": current,
+    }
+
+
 def _build_recent_batch_operations(observe_philology: Dict[str, Any]) -> list[Dict[str, Any]]:
     operations: list[Dict[str, Any]] = []
     for source_name, field_name in (
@@ -1097,6 +1221,9 @@ def _build_review_workbench(
     observe_philology: Dict[str, Any],
     active_filters: Dict[str, Any],
     review_queue_filters: Dict[str, Any],
+    *,
+    review_assignments: Optional[list[Dict[str, Any]]] = None,
+    current_reviewer: Optional[str] = None,
 ) -> Dict[str, Any]:
     decision_lookup = _build_review_workbench_decision_lookup(observe_philology)
     section_payloads = [
@@ -1107,10 +1234,21 @@ def _build_review_workbench(
         ("claim", _build_claim_review_items(evidence_protocol, decision_lookup, active_filters)),
         ("evidence_chain", _build_evidence_chain_review_items(observe_philology, decision_lookup, active_filters)),
     ]
+    assignment_index = _index_review_assignments(review_assignments or [])
     filter_source_items: list[Dict[str, Any]] = []
     sections = []
     for asset_type, items in section_payloads:
-        enriched_items = [_enrich_review_workbench_item(item) for item in items]
+        enriched_items = []
+        for item in items:
+            enriched = _enrich_review_workbench_item(item)
+            assignment = assignment_index.get(
+                (
+                    _as_text(enriched.get("asset_type")).lower(),
+                    _as_text(enriched.get("asset_key")),
+                )
+            )
+            enriched = _enrich_item_with_assignment(enriched, assignment)
+            enriched_items.append(enriched)
         filter_source_items.extend(enriched_items)
         filtered_items = [item for item in enriched_items if _item_matches_review_queue_filters(item, review_queue_filters)]
         sections.append(_build_review_workbench_section(asset_type, filtered_items))
@@ -1144,6 +1282,10 @@ def _build_review_workbench(
         "options": _build_review_queue_filter_options(filter_source_items),
     }
     recent_batch_operations = _build_recent_batch_operations(observe_philology)
+    workload_board = build_reviewer_workload_board(
+        review_assignments,
+        current_reviewer=current_reviewer,
+    )
     return {
         "sections": sections,
         "section_count": len(sections),
@@ -1158,7 +1300,9 @@ def _build_review_workbench(
             "reviewer_workload": _build_reviewer_workload(queue_items),
             "recent_batch_operations": recent_batch_operations,
             "last_batch_summary": recent_batch_operations[0] if recent_batch_operations else {},
+            "workload_board": workload_board,
         },
+        "reviewer_workload_board": workload_board,
         "selection_supported": True,
         "batch_audit_supported": True,
     }
@@ -1580,6 +1724,7 @@ def _build_dashboard_phase_board(
 
 
 def _build_dashboard_evidence_board(
+    cycle_id: str,
     evidence_protocol: Dict[str, Any],
     primary_association: Dict[str, Any],
     data_mining_summary: Dict[str, Any],
@@ -1587,6 +1732,9 @@ def _build_dashboard_evidence_board(
     observe_philology: Dict[str, Any],
     philology_filter_contract: Dict[str, Any],
     review_queue_filters: Dict[str, Any],
+    *,
+    review_assignments: Optional[list[Dict[str, Any]]] = None,
+    current_reviewer: Optional[str] = None,
 ) -> Dict[str, Any]:
     evidence_records = _as_list(evidence_protocol.get("evidence_records"))
     claims = _as_list(evidence_protocol.get("claims"))
@@ -1602,6 +1750,13 @@ def _build_dashboard_evidence_board(
     review_workbench = _build_review_workbench(
         evidence_protocol,
         observe_philology,
+        active_catalog_filters,
+        review_queue_filters,
+        review_assignments=review_assignments,
+        current_reviewer=current_reviewer,
+    )
+    philology_graph_view = _build_dashboard_philology_graph_view(
+        cycle_id,
         active_catalog_filters,
         review_queue_filters,
     )
@@ -1638,11 +1793,79 @@ def _build_dashboard_evidence_board(
         ),
         "active_catalog_filters": active_catalog_filters,
         "catalog_filter_options": _as_dict(philology_filter_contract.get("options")),
+        "philology_graph_view": philology_graph_view,
         "queue_summary": _as_dict(review_workbench.get("queue_summary")),
         "queue_filters": _as_dict(review_workbench.get("queue_filters")),
         "review_queue": _as_dict(review_workbench.get("review_queue")),
+        "reviewer_workload_board": _as_dict(review_workbench.get("reviewer_workload_board")),
         "review_workbench": review_workbench,
     }
+
+
+def _build_dashboard_philology_graph_view(
+    cycle_id: str,
+    active_catalog_filters: Dict[str, Any],
+    review_queue_filters: Dict[str, Any],
+) -> Dict[str, Any]:
+    normalized_cycle_id = str(cycle_id or "").strip()
+    payload: Dict[str, Any] = {
+        "graph_type": "philology_asset_graph",
+        "params": {
+            "cycle_id": normalized_cycle_id,
+            "work_title": str(active_catalog_filters.get("work_title") or "").strip(),
+            "version_lineage_key": str(active_catalog_filters.get("version_lineage_key") or "").strip(),
+            "witness_key": str(active_catalog_filters.get("witness_key") or "").strip(),
+            "review_status": str(review_queue_filters.get("review_status") or "").strip(),
+            "limit": _PHILOLOGY_GRAPH_QUERY_LIMIT,
+        },
+        "records": [],
+        "record_count": 0,
+        "path_count": 0,
+        "fragment_count": 0,
+        "exegesis_term_count": 0,
+        "graph_source_counts": {},
+    }
+    if not normalized_cycle_id:
+        payload["note"] = "cycle_id unavailable"
+        return payload
+
+    try:
+        from src.storage.backend_factory import StorageBackendFactory
+        from tools.neo4j_query_templates import CANONICAL_READ_TEMPLATES
+
+        template = CANONICAL_READ_TEMPLATES.get("philology_asset_graph") or {}
+        payload["template"] = template
+        cypher = str(template.get("cypher") or "")
+        if not cypher:
+            payload["note"] = "template unavailable"
+            return payload
+
+        factory = StorageBackendFactory.get_instance()
+        neo4j_driver = getattr(factory, "_neo4j_driver", None)
+        if neo4j_driver is None or not getattr(neo4j_driver, "driver", None):
+            payload["note"] = "Neo4j driver not initialized"
+            return payload
+
+        params = dict(payload["params"])
+        with neo4j_driver.driver.session(database=neo4j_driver.database) as session:
+            records = session.execute_read(
+                lambda tx: [dict(record) for record in tx.run(cypher, **params)]
+            )
+        payload["records"] = records
+        payload["record_count"] = len(records)
+        payload["path_count"] = len(records)
+        payload["fragment_count"] = sum(len(record.get("fragments") or []) for record in records if isinstance(record, dict))
+        payload["exegesis_term_count"] = sum(len(record.get("exegesis_terms") or []) for record in records if isinstance(record, dict))
+        source_counts: Dict[str, int] = {}
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            graph_source = str(record.get("graph_source") or "unknown").strip() or "unknown"
+            source_counts[graph_source] = source_counts.get(graph_source, 0) + 1
+        payload["graph_source_counts"] = source_counts
+    except Exception as exc:
+        payload["note"] = f"Neo4j unavailable: {exc}"
+    return payload
 
 
 def _dashboard_string_list(value: Any) -> list[str]:
@@ -1818,6 +2041,8 @@ def build_research_dashboard_payload(
     snapshot: Dict[str, Any],
     *,
     philology_filters: Optional[Dict[str, Any]] = None,
+    review_assignments: Optional[list[Dict[str, Any]]] = None,
+    current_reviewer: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build a visualization-friendly dashboard payload from a job snapshot."""
 
@@ -1888,6 +2113,7 @@ def build_research_dashboard_payload(
             "quality_score": round(quality_score, 3),
         },
         "evidence_board": _build_dashboard_evidence_board(
+            str(result.get("cycle_id") or "").strip(),
             evidence_protocol,
             primary_association,
             data_mining_summary,
@@ -1895,6 +2121,8 @@ def build_research_dashboard_payload(
             observe_philology,
             philology_filter_contract,
             review_queue_filters,
+            review_assignments=review_assignments,
+            current_reviewer=current_reviewer,
         ),
         "learning_feedback_board": learning_feedback_board,
         "knowledge_graph_board": knowledge_graph_board,

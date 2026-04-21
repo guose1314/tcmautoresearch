@@ -17,13 +17,13 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, FrozenSet, Mapping, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Mapping, Optional
 
 # ═══════════════════════════════════════════════════════════════════════
 # Schema version — bump on every breaking label/relationship/property change
 # ═══════════════════════════════════════════════════════════════════════
 
-GRAPH_SCHEMA_VERSION = "1.0.0"
+GRAPH_SCHEMA_VERSION = "1.1.0"
 
 _SCHEMA_META_LABEL = "GraphSchemaMeta"
 _SCHEMA_META_NODE_ID = "graph_schema_meta::singleton"
@@ -51,11 +51,16 @@ class NodeLabel(str, Enum):
     CATALOG = "Catalog"
     VERSION_LINEAGE = "VersionLineage"
     VERSION_WITNESS = "VersionWitness"
+    EXEGESIS_ENTRY = "ExegesisEntry"
+    EXEGESIS_TERM = "ExegesisTerm"
+    FRAGMENT_CANDIDATE = "FragmentCandidate"
+    TEXTUAL_EVIDENCE_CHAIN = "TextualEvidenceChain"
 
     # ── TCM 领域 ──
     FORMULA = "Formula"
     HERB = "Herb"
     SYNDROME = "Syndrome"
+    SYMPTOM = "Symptom"
     EFFICACY = "Efficacy"
     TARGET = "Target"
     PATHWAY = "Pathway"
@@ -101,6 +106,20 @@ class RelType(str, Enum):
     CATALOGED_IN = "CATALOGED_IN"
     OBSERVED_WITNESS = "OBSERVED_WITNESS"
     BELONGS_TO_LINEAGE = "BELONGS_TO_LINEAGE"
+    HAS_VERSION = "HAS_VERSION"
+    HAS_EXEGESIS = "HAS_EXEGESIS"
+    HAS_FRAGMENT_CANDIDATE = "HAS_FRAGMENT_CANDIDATE"
+    ATTESTS_TO = "ATTESTS_TO"
+    INTERPRETS = "INTERPRETS"
+    RECONSTRUCTS = "RECONSTRUCTS"
+    CITES_FRAGMENT = "CITES_FRAGMENT"
+    EXPLAINS_HERB = "EXPLAINS_HERB"
+    EXPLAINS_FORMULA = "EXPLAINS_FORMULA"
+    EXPLAINS_SYNDROME = "EXPLAINS_SYNDROME"
+    EXPLAINS_EFFICACY = "EXPLAINS_EFFICACY"
+    EXPLAINS_FORMULA_COMPONENT = "EXPLAINS_FORMULA_COMPONENT"
+    EXPLAINS_PATHOGENESIS = "EXPLAINS_PATHOGENESIS"
+    EXPLAINS_SYMPTOM = "EXPLAINS_SYMPTOM"
 
     # ── TCM 领域 ──
     SOVEREIGN = "SOVEREIGN"
@@ -109,6 +128,7 @@ class RelType(str, Enum):
     ENVOY = "ENVOY"
     TREATS = "TREATS"
     HAS_EFFICACY = "HAS_EFFICACY"
+    SYMPTOM_OF = "SYMPTOM_OF"
     SIMILAR_TO = "SIMILAR_TO"
     ASSOCIATED_TARGET = "ASSOCIATED_TARGET"
     PARTICIPATES_IN = "PARTICIPATES_IN"
@@ -164,18 +184,54 @@ _ALLOWED_PROPERTIES: Dict[NodeLabel, FrozenSet[str]] = {
     }),
     NodeLabel.CATALOG: frozenset({
         "catalog_id", "title", "source", "classification",
+        "review_status", "needs_manual_review", "reviewer",
+        "reviewed_at", "decision_basis",
     }),
     NodeLabel.VERSION_LINEAGE: frozenset({
         "version_lineage_key", "work_fragment_key", "work_title",
         "fragment_title", "dynasty", "author", "edition",
-        "lineage_id_source",
+        "lineage_id_source", "review_status", "needs_manual_review",
+        "reviewer", "reviewed_at", "decision_basis",
     }),
     NodeLabel.VERSION_WITNESS: _COMMON_TEMPORAL_PROPS | frozenset({
         "witness_key", "version_lineage_key", "work_fragment_key",
         "catalog_id", "work_title", "fragment_title",
         "dynasty", "author", "edition", "source_type", "source_ref",
         "document_id", "document_urn", "document_title",
-        "cycle_id", "phase_execution_id",
+        "cycle_id", "phase_execution_id", "review_status",
+        "needs_manual_review", "reviewer", "reviewed_at", "decision_basis",
+    }),
+    NodeLabel.EXEGESIS_ENTRY: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
+        "exegesis_id", "canonical", "label", "definition", "definition_source",
+        "semantic_scope", "observed_forms", "configured_variants", "sources",
+        "source_refs", "notes", "dynasty_usage", "disambiguation_basis",
+        "review_status", "needs_manual_review", "reviewer", "reviewed_at",
+        "decision_basis",
+        "exegesis_notes", "document_urn", "document_title", "work_title",
+        "version_lineage_key", "witness_key",
+    }),
+    NodeLabel.EXEGESIS_TERM: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
+        "exegesis_id", "canonical", "label", "definition", "definition_source",
+        "semantic_scope", "observed_forms", "configured_variants", "sources",
+        "source_refs", "notes", "dynasty_usage", "disambiguation_basis",
+        "review_status", "needs_manual_review", "reviewer", "reviewed_at",
+        "decision_basis", "exegesis_notes", "document_urn", "document_title",
+        "work_title", "version_lineage_key", "witness_key",
+    }),
+    NodeLabel.FRAGMENT_CANDIDATE: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
+        "candidate_id", "candidate_kind", "fragment_title", "document_title",
+        "document_urn", "source_type", "witness_title", "witness_urn",
+        "work_title", "version_lineage_key", "witness_key", "match_score",
+        "confidence", "review_status", "needs_manual_review", "reviewer",
+        "reviewed_at", "decision_basis", "reconstruction_basis", "source_refs", "asset_key",
+        "text_preview",
+    }),
+    NodeLabel.TEXTUAL_EVIDENCE_CHAIN: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
+        "claim_id", "claim_text", "claim_type", "confidence", "evidence_grade",
+        "evidence_ids", "source_entity", "target_entity", "relation_type",
+        "support_count", "review_status", "needs_manual_review", "reviewer",
+        "reviewed_at", "decision_basis", "work_title", "document_title",
+        "version_lineage_key", "witness_key",
     }),
     NodeLabel.FORMULA: frozenset({
         "name", "type", "confidence", "alternative_names",
@@ -183,15 +239,23 @@ _ALLOWED_PROPERTIES: Dict[NodeLabel, FrozenSet[str]] = {
     }),
     NodeLabel.HERB: frozenset({
         "name", "type", "confidence", "alternative_names",
-        "description", "entity_metadata_json",
+        "description", "entity_metadata_json", "formula_canonical",
+        "source_formula", "source_exegesis_id", "formula_role",
     }),
     NodeLabel.SYNDROME: frozenset({
         "name", "type", "confidence", "alternative_names",
         "description", "entity_metadata_json",
     }),
+    NodeLabel.SYMPTOM: frozenset({
+        "name", "type", "confidence", "alternative_names",
+        "description", "entity_metadata_json", "symptom_category",
+        "manifestation_source", "syndrome_canonical", "source_syndrome",
+        "source_exegesis_id",
+    }),
     NodeLabel.EFFICACY: frozenset({
         "name", "type", "confidence", "alternative_names",
-        "description", "entity_metadata_json",
+        "description", "entity_metadata_json", "herb_canonical",
+        "source_herb", "source_exegesis_id",
     }),
     NodeLabel.TARGET: frozenset({
         "name", "type", "confidence", "description",
@@ -201,6 +265,7 @@ _ALLOWED_PROPERTIES: Dict[NodeLabel, FrozenSet[str]] = {
     }),
     NodeLabel.PROPERTY: frozenset({
         "name", "type", "confidence", "description", "entity_metadata_json",
+        "source_exegesis_id", "syndrome_canonical", "source_syndrome",
     }),
     NodeLabel.TASTE: frozenset({
         "name", "type", "confidence", "description", "entity_metadata_json",
@@ -221,6 +286,19 @@ _ALLOWED_PROPERTIES: Dict[NodeLabel, FrozenSet[str]] = {
     }),
 }
 
+_COMMON_REL_PROPS: FrozenSet[str] = frozenset({
+    "cycle_id", "phase",
+})
+
+_ALLOWED_REL_PROPERTIES: Dict[RelType, FrozenSet[str]] = {
+    RelType.EXPLAINS_HERB: _COMMON_REL_PROPS | frozenset({
+        "herb_canonical", "source_herb", "source_exegesis_id", "semantic_scope", "provenance_kind",
+    }),
+    RelType.EXPLAINS_FORMULA: _COMMON_REL_PROPS | frozenset({
+        "formula_canonical", "source_formula", "source_exegesis_id", "semantic_scope", "provenance_kind",
+    }),
+}
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Public helpers
@@ -234,6 +312,15 @@ def get_allowed_properties(label: str) -> FrozenSet[str]:
     except ValueError:
         return frozenset()
     return _ALLOWED_PROPERTIES.get(node_label, frozenset())
+
+
+def get_allowed_rel_properties(rel_type: str) -> FrozenSet[str]:
+    """返回给定关系类型的允许属性集合。"""
+    try:
+        rel_enum = RelType(rel_type)
+    except ValueError:
+        return frozenset()
+    return _ALLOWED_REL_PROPERTIES.get(rel_enum, frozenset())
 
 
 def get_registered_labels() -> FrozenSet[str]:
@@ -336,6 +423,7 @@ ENTITY_TYPE_TO_LABEL: Mapping[str, str] = {
     "formula": NodeLabel.FORMULA.value,
     "herb": NodeLabel.HERB.value,
     "syndrome": NodeLabel.SYNDROME.value,
+    "symptom": NodeLabel.SYMPTOM.value,
     "target": NodeLabel.TARGET.value,
     "pathway": NodeLabel.PATHWAY.value,
     "efficacy": NodeLabel.EFFICACY.value,

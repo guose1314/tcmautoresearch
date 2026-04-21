@@ -125,5 +125,66 @@ class TestHelperFunctions(unittest.TestCase):
         self.assertEqual(_safe_float("abc"), 0.0)
 
 
+class TestTextualEvidenceGraphProjection(unittest.TestCase):
+    def test_evidence_chain_projects_textual_chain_and_cites_fragment(self):
+        from src.research.graph_assets import build_philology_subgraph
+
+        payload = build_philology_subgraph(
+            "cycle-evidence",
+            {
+                "catalog_summary": {
+                    "documents": [
+                        {
+                            "catalog_id": "cat-001",
+                            "document_title": "本草纲目",
+                            "work_title": "本草纲目",
+                            "document_urn": "urn:doc:1",
+                            "version_lineage_key": "lin-001",
+                            "witness_key": "wit-001",
+                        }
+                    ],
+                    "version_lineages": [
+                        {
+                            "version_lineage_key": "lin-001",
+                            "work_title": "本草纲目",
+                            "fragment_title": "卷一",
+                            "witnesses": [
+                                {
+                                    "witness_key": "wit-001",
+                                    "catalog_id": "cat-001",
+                                    "title": "本草纲目",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                "fragment_candidates": [
+                    {
+                        "fragment_candidate_id": "frag-001",
+                        "document_title": "本草纲目",
+                        "document_urn": "urn:doc:1",
+                        "witness_key": "wit-001",
+                        "source_refs": ["ref:frag-001"],
+                    }
+                ],
+                "evidence_chains": [
+                    {
+                        "evidence_chain_id": "chain-001",
+                        "claim_type": "citation_source",
+                        "claim_statement": "本草纲目引神农本草经残句",
+                        "document_title": "本草纲目",
+                        "version_lineage_key": "lin-001",
+                        "witness_key": "wit-001",
+                        "source_refs": ["ref:frag-001"],
+                    }
+                ],
+            },
+        )
+        labels = {node["label"] for node in payload["nodes"]}
+        edge_types = {edge["relationship_type"] for edge in payload["edges"]}
+        self.assertIn("TextualEvidenceChain", labels)
+        self.assertIn("CITES_FRAGMENT", edge_types)
+
+
 if __name__ == "__main__":
     unittest.main()

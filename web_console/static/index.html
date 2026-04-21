@@ -4192,6 +4192,94 @@
             return wrapper;
         }
 
+        // ---- Phase H / H-2: Reviewer workload board (我负责 / 无人认领 / 超期项) ----
+        function buildReviewerWorkloadBoard(reviewWorkbench) {
+            const board = reviewWorkbench?.review_queue?.workload_board
+                && typeof reviewWorkbench.review_queue.workload_board === "object"
+                ? reviewWorkbench.review_queue.workload_board
+                : null;
+            if (!board || board.supported !== true) {
+                return null;
+            }
+            const summary = board.summary && typeof board.summary === "object" ? board.summary : {};
+            const views = board.views && typeof board.views === "object" ? board.views : {};
+            const currentReviewer = String(board.current_reviewer || "").trim();
+
+            const wrapper = document.createElement("div");
+            wrapper.className = "dashboard-review-meta";
+            wrapper.style.display = "flex";
+            wrapper.style.flexDirection = "column";
+            wrapper.style.gap = "6px";
+
+            const heading = document.createElement("div");
+            heading.style.fontWeight = "600";
+            heading.textContent = `审核负载看板（当前：${currentReviewer || "未识别"}）`;
+            wrapper.appendChild(heading);
+
+            const tabsRow = document.createElement("div");
+            tabsRow.style.display = "flex";
+            tabsRow.style.gap = "12px";
+            tabsRow.style.flexWrap = "wrap";
+
+            const detail = document.createElement("div");
+            detail.style.fontSize = "12px";
+            detail.style.lineHeight = "1.4";
+            detail.style.whiteSpace = "pre-wrap";
+
+            const tabDefs = [
+                { key: "mine", label: "我负责" },
+                { key: "unassigned", label: "无人认领" },
+                { key: "overdue", label: "超期项" },
+            ];
+
+            function renderDetail(key, items) {
+                const safeItems = Array.isArray(items) ? items : [];
+                if (safeItems.length === 0) {
+                    detail.textContent = "（无）";
+                    return;
+                }
+                detail.textContent = safeItems
+                    .slice(0, 8)
+                    .map((entry) => {
+                        const assetType = entry?.asset_type || "";
+                        const assetKey = entry?.asset_key || "";
+                        const reviewer = entry?.reviewer_label || entry?.assignee || "未认领";
+                        const priority = entry?.priority_bucket ? `[${entry.priority_bucket}]` : "";
+                        const overdue = entry?.is_overdue ? " ⏰超期" : "";
+                        return `${priority}${assetType}/${assetKey} · ${reviewer}${overdue}`;
+                    })
+                    .join("\n");
+            }
+
+            const tabButtons = [];
+            tabDefs.forEach((def, idx) => {
+                const count = safeNumber(summary[def.key], 0);
+                const button = document.createElement("button");
+                button.type = "button";
+                button.textContent = `${def.label}（${count}）`;
+                button.style.padding = "4px 10px";
+                button.style.borderRadius = "999px";
+                button.style.border = "1px solid #cbd5f5";
+                button.style.background = idx === 0 ? "#eef2ff" : "#fff";
+                button.style.cursor = "pointer";
+                button.dataset.viewKey = def.key;
+                button.addEventListener("click", function() {
+                    tabButtons.forEach((other) => {
+                        other.style.background = "#fff";
+                    });
+                    button.style.background = "#eef2ff";
+                    renderDetail(def.key, views[def.key]);
+                });
+                tabButtons.push(button);
+                tabsRow.appendChild(button);
+            });
+
+            wrapper.appendChild(tabsRow);
+            wrapper.appendChild(detail);
+            renderDetail("mine", views.mine);
+            return wrapper;
+        }
+
         function buildReviewWorkbenchFilterControl(jobId, fieldName, labelText, options, activeValue) {
             const wrapper = document.createElement("div");
             wrapper.className = "dashboard-review-filter";
@@ -4259,6 +4347,9 @@
                 ...(evidenceBoard?.active_catalog_filters || {}),
                 ...(reviewWorkbench?.queue_filters?.active_filters || {}),
             });
+            const philologyGraphView = evidenceBoard?.philology_graph_view && typeof evidenceBoard.philology_graph_view === "object"
+                ? evidenceBoard.philology_graph_view
+                : {};
 
             filters.appendChild(buildReviewWorkbenchFilterControl(payload.job_id, "work_title", "作品", options.work_title, activeFilters.work_title));
             filters.appendChild(buildReviewWorkbenchFilterControl(payload.job_id, "version_lineage_key", "谱系", options.version_lineage_key, activeFilters.version_lineage_key));
@@ -4280,7 +4371,7 @@
 
             const summary = document.createElement("div");
             summary.className = "dashboard-review-meta";
-            summary.textContent = `当前筛选：${buildReviewWorkbenchFilterSummary(activeFilters)}\n可见卡片：${safeNumber(reviewWorkbench?.total_item_count, 0)} / 总量：${safeNumber(reviewWorkbench?.all_item_count, safeNumber(reviewWorkbench?.total_item_count, 0))}\n待处理：${safeNumber(reviewWorkbench?.review_queue?.total_pending, 0)}`;
+            summary.textContent = `当前筛选：${buildReviewWorkbenchFilterSummary(activeFilters)}\n可见卡片：${safeNumber(reviewWorkbench?.total_item_count, 0)} / 总量：${safeNumber(reviewWorkbench?.all_item_count, safeNumber(reviewWorkbench?.total_item_count, 0))}\n待处理：${safeNumber(reviewWorkbench?.review_queue?.total_pending, 0)}\n子图路径：${safeNumber(philologyGraphView?.path_count, 0)}`;
 
             const batchPanel = document.createElement("div");
             batchPanel.className = "dashboard-review-section";
@@ -4383,14 +4474,113 @@
             batchPanel.appendChild(feedback);
 
             const workloadSummary = buildReviewerWorkloadSummary(reviewWorkbench);
+            const workloadBoard = buildReviewerWorkloadBoard(reviewWorkbench);
 
             toolbar.appendChild(filters);
             toolbar.appendChild(summary);
             if (workloadSummary) {
                 toolbar.appendChild(workloadSummary);
             }
+            if (workloadBoard) {
+                toolbar.appendChild(workloadBoard);
+            }
             toolbar.appendChild(batchPanel);
             return toolbar;
+        }
+
+        function buildPhilologyGraphBoard(evidenceBoard) {
+            const graphView = evidenceBoard?.philology_graph_view && typeof evidenceBoard.philology_graph_view === "object"
+                ? evidenceBoard.philology_graph_view
+                : { records: [], path_count: 0, fragment_count: 0, exegesis_term_count: 0 };
+            const records = Array.isArray(graphView.records)
+                ? graphView.records.filter((item) => item && typeof item === "object")
+                : [];
+
+            const section = document.createElement("section");
+            section.className = "dashboard-review-board";
+
+            const head = document.createElement("div");
+            head.className = "dashboard-review-board-head";
+
+            const headingWrap = document.createElement("div");
+            const heading = document.createElement("h4");
+            heading.textContent = "文献学子图视图";
+            const subtitle = document.createElement("p");
+            subtitle.textContent = "直接读取 analysis 子图查询结果；筛选条件复用下方工作台的作品、谱系、见证本与复核状态。";
+            headingWrap.appendChild(heading);
+            headingWrap.appendChild(subtitle);
+
+            const summary = document.createElement("span");
+            summary.className = "dashboard-review-meta";
+            summary.textContent = `路径 ${safeNumber(graphView.path_count, 0)}\n片段 ${safeNumber(graphView.fragment_count, 0)}\n义项 ${safeNumber(graphView.exegesis_term_count, 0)}`;
+
+            head.appendChild(headingWrap);
+            head.appendChild(summary);
+            section.appendChild(head);
+
+            if (graphView.note) {
+                const note = document.createElement("div");
+                note.className = "dashboard-review-meta";
+                note.textContent = String(graphView.note);
+                section.appendChild(note);
+            }
+
+            if (records.length === 0) {
+                const empty = document.createElement("div");
+                empty.className = "dashboard-review-empty";
+                empty.textContent = "当前筛选结果下没有可展示的文献学子图路径。";
+                section.appendChild(empty);
+                return section;
+            }
+
+            const grid = document.createElement("div");
+            grid.className = "dashboard-review-grid";
+            records.forEach((record) => {
+                const card = document.createElement("article");
+                card.className = "dashboard-review-card";
+
+                const headRow = document.createElement("div");
+                headRow.className = "dashboard-review-head";
+
+                const titleWrap = document.createElement("div");
+                const title = document.createElement("strong");
+                title.textContent = record.catalog_title || record.work_title || record.witness_title || "未命名目录路径";
+                const meta = document.createElement("span");
+                meta.textContent = `${record.work_title || "-"} · ${record.version_lineage_key || "-"} · ${record.witness_title || record.witness_key || "-"}`;
+                titleWrap.appendChild(title);
+                titleWrap.appendChild(meta);
+
+                const badge = document.createElement("span");
+                badge.className = `dashboard-review-badge ${String(record.witness_review_status || "pending").trim().toLowerCase() || "pending"}`.trim();
+                badge.textContent = formatCatalogReviewStatus(record.witness_review_status || "pending");
+
+                headRow.appendChild(titleWrap);
+                headRow.appendChild(badge);
+                card.appendChild(headRow);
+
+                const summaryNode = document.createElement("div");
+                summaryNode.className = "dashboard-review-meta";
+                const fragments = Array.isArray(record.fragments) ? record.fragments : [];
+                const exegesisTerms = Array.isArray(record.exegesis_terms) ? record.exegesis_terms : [];
+                summaryNode.textContent = [
+                    `Catalog: ${record.catalog_title || record.catalog_id || "-"}`,
+                    `Witness: ${record.witness_title || record.witness_key || "-"}`,
+                    `Fragments: ${fragments.length}`,
+                    `ExegesisTerms: ${exegesisTerms.length}`,
+                ].join("\n");
+                card.appendChild(summaryNode);
+
+                const detailNode = document.createElement("div");
+                detailNode.className = "dashboard-review-meta";
+                const fragmentPreview = fragments.slice(0, 3).map((item) => `${item.fragment_title || item.candidate_id || "-"}(${formatCatalogReviewStatus(item.review_status || "pending")})`).join("；");
+                const exegesisPreview = exegesisTerms.slice(0, 4).map((item) => `${item.canonical || item.exegesis_id || "-"}/${item.semantic_scope || "common"}`).join("；");
+                detailNode.textContent = `片段: ${fragmentPreview || "-"}\n义项: ${exegesisPreview || "-"}`;
+                card.appendChild(detailNode);
+
+                grid.appendChild(card);
+            });
+            section.appendChild(grid);
+            return section;
         }
 
         function buildPhilologyReviewPayload(item, reviewStatus, decisionBasis) {
@@ -4942,6 +5132,8 @@
             shell.appendChild(phaseTrack);
 
             shell.appendChild(buildKnowledgeGraphBoardSection(knowledgeGraphBoard, title.textContent));
+
+            shell.appendChild(buildPhilologyGraphBoard(evidenceBoard));
 
             shell.appendChild(buildPhilologyReviewWorkbench(payload, evidenceBoard));
 

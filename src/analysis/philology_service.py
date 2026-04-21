@@ -22,6 +22,7 @@ from src.research.exegesis_contract import (
     disambiguate_polysemy,
     resolve_polysemy_category,
 )
+from src.research.observe_philology import build_observe_philology_graph_assets
 from src.semantic_modeling.tcm_relationships import TCMRelationshipDefinitions
 
 _MULTI_SPACE_RE = re.compile(r"\s+")
@@ -186,6 +187,17 @@ class PhilologyService(BaseModule):
             },
             "philology_notes": philology_notes,
         }
+        graph_cycle_id = str(
+            input_metadata.get("cycle_id")
+            or input_metadata.get("research_session_id")
+            or input_metadata.get("document_id")
+            or "standalone"
+        ).strip()
+        philology_graph_assets = build_observe_philology_graph_assets(
+            graph_cycle_id,
+            philology_assets,
+            phase="observe",
+        )
 
         merged_metadata = {
             **input_metadata,
@@ -214,6 +226,7 @@ class PhilologyService(BaseModule):
             "philology": philology_summary,
             "philology_notes": philology_notes,
             "philology_assets": philology_assets,
+            "graph_assets": philology_graph_assets,
         }
 
     def _do_cleanup(self) -> bool:

@@ -126,6 +126,82 @@ CANONICAL_READ_TEMPLATES: Dict[str, Dict[str, Any]] = {
         ),
         "rules": ["无关系操作，直接聚合"],
     },
+    "philology_asset_graph": {
+        "description": "文献学资产子图查询 — catalog -> witness -> fragment / exegesis，复用 dashboard/workbench 过滤字段",
+        "cypher": (
+            "MATCH (w:VersionWitness {cycle_id: $cycle_id})\n"
+            "OPTIONAL MATCH (w)-[:BELONGS_TO_LINEAGE]->(l:VersionLineage)\n"
+            "OPTIONAL MATCH (w)-[catalog_rel]->(catalog_node)\n"
+            "WHERE type(catalog_rel) = 'CATALOGED_IN' AND 'Catalog' IN labels(catalog_node)\n"
+            "OPTIONAL MATCH (phase:ResearchPhaseExecution {id: w.phase_execution_id})\n"
+            "WHERE coalesce(phase.cycle_id, '') = $cycle_id\n"
+            "WITH catalog_node, phase, w, l\n"
+            "WHERE ($work_title = '' OR coalesce(w.work_title, l.work_title, '') = $work_title)\n"
+            "  AND ($version_lineage_key = '' OR coalesce(l.version_lineage_key, w.version_lineage_key, '') = $version_lineage_key)\n"
+            "  AND ($witness_key = '' OR w.witness_key = $witness_key)\n"
+            "OPTIONAL MATCH (w)-[asset_rel]->(asset_node)\n"
+            "WHERE type(asset_rel) IN ['HAS_FRAGMENT_CANDIDATE', 'ATTESTS_TO']\n"
+            "WITH catalog_node, phase, w, l, collect(DISTINCT asset_node) AS primary_assets\n"
+            "OPTIONAL MATCH (phase)-[:CAPTURED]->(legacy_entity)\n"
+            "WHERE coalesce(legacy_entity.document_id, '') = coalesce(w.document_id, '')\n"
+            "WITH catalog_node, w, l, primary_assets, collect(DISTINCT legacy_entity) AS legacy_entities\n"
+            "WITH catalog_node, w, l,\n"
+            "     [fragment IN primary_assets WHERE fragment IS NOT NULL AND 'FragmentCandidate' IN labels(fragment) AND ($review_status = '' OR coalesce(fragment.review_status, '') = $review_status) | {\n"
+            "         id: fragment.id,\n"
+            "         candidate_id: coalesce(fragment.candidate_id, fragment.id, ''),\n"
+            "         fragment_title: coalesce(fragment.fragment_title, fragment.title, w.fragment_title, w.document_title, ''),\n"
+            "         version_lineage_key: coalesce(fragment.version_lineage_key, w.version_lineage_key, ''),\n"
+            "         witness_key: coalesce(fragment.witness_key, w.witness_key, ''),\n"
+            "         review_status: coalesce(fragment.review_status, ''),\n"
+            "         needs_manual_review: coalesce(fragment.needs_manual_review, false)\n"
+            "     }] AS fragments,\n"
+            "     [term IN primary_assets WHERE term IS NOT NULL AND 'ExegesisTerm' IN labels(term) AND ($review_status = '' OR coalesce(term.review_status, '') = $review_status) | {\n"
+            "         id: term.id,\n"
+            "         exegesis_id: coalesce(term.exegesis_id, term.id, ''),\n"
+            "         canonical: coalesce(term.canonical, term.name, ''),\n"
+            "         semantic_scope: coalesce(term.semantic_scope, term.entity_type, ''),\n"
+            "         version_lineage_key: coalesce(term.version_lineage_key, w.version_lineage_key, ''),\n"
+            "         witness_key: coalesce(term.witness_key, w.witness_key, ''),\n"
+            "         review_status: coalesce(term.review_status, ''),\n"
+            "         needs_manual_review: coalesce(term.needs_manual_review, false),\n"
+            "         source: 'g3'\n"
+            "     }] +\n"
+            "     [legacy IN legacy_entities WHERE legacy IS NOT NULL AND $review_status = '' | {\n"
+            "         id: legacy.id,\n"
+            "         exegesis_id: coalesce(legacy.entity_id, legacy.id, ''),\n"
+            "         canonical: coalesce(legacy.name, ''),\n"
+            "         semantic_scope: coalesce(legacy.entity_type, labels(legacy)[0], ''),\n"
+            "         version_lineage_key: coalesce(w.version_lineage_key, ''),\n"
+            "         witness_key: coalesce(w.witness_key, ''),\n"
+            "         review_status: 'legacy_unreviewed',\n"
+            "         needs_manual_review: true,\n"
+            "         source: 'legacy_captured'\n"
+            "     }] AS exegesis_terms\n"
+            "WHERE size(fragments) > 0 OR size(exegesis_terms) > 0\n"
+            "RETURN coalesce(catalog_node.catalog_id, w.catalog_id, w.document_urn, w.document_id, '') AS catalog_id,\n"
+            "       coalesce(catalog_node.title, w.fragment_title, w.work_title, w.document_title, '') AS catalog_title,\n"
+            "       coalesce(catalog_node.review_status, '') AS catalog_review_status,\n"
+            "       coalesce(w.work_title, l.work_title, '') AS work_title,\n"
+            "       coalesce(l.version_lineage_key, w.version_lineage_key, '') AS version_lineage_key,\n"
+            "       w.witness_key AS witness_key,\n"
+            "       w.document_title AS witness_title,\n"
+            "       coalesce(w.review_status, '') AS witness_review_status,\n"
+            "       CASE\n"
+            "           WHEN size([fragment IN fragments | 1]) > 0 OR size([term IN exegesis_terms WHERE coalesce(term.source, '') = 'g3' | 1]) > 0 THEN 'g3'\n"
+            "           ELSE 'legacy'\n"
+            "       END AS graph_source,\n"
+            "       fragments,\n"
+            "       exegesis_terms\n"
+            "ORDER BY work_title, version_lineage_key, witness_title\n"
+            "LIMIT $limit;"
+        ),
+        "rules": [
+            "从 VersionWitness 起手，避免 Catalog 无 cycle_id 时误扫全图",
+            "新图 fragment / exegesis 资产优先读取；历史图通过 phase_execution_id + document_id 回退到 CAPTURED 语义节点",
+            "复用 work_title/version_lineage_key/witness_key/review_status 四类 dashboard 过滤字段",
+            "review_status 过滤仅作用于下游 G-3 philology 资产节点；legacy 回退仅在不过滤 review_status 时启用",
+        ],
+    },
 }
 
 

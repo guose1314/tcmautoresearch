@@ -1491,5 +1491,160 @@ class TestWebConsoleApi(unittest.TestCase):
         self.assertEqual(restored_job.events[-1]["event"], "job_failed")
 
 
+class TestReviewAssignmentEndpoints(unittest.TestCase):
+    """Phase H / H-2: claim / release / reassign / list / workload endpoints."""
+
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory(dir=os.getcwd())
+        self.artifact_markdown_path = os.path.join(self.tempdir.name, "final-report.md")
+        self.job_storage_dir = os.path.join(self.tempdir.name, "jobs")
+        with open(self.artifact_markdown_path, "w", encoding="utf-8") as handle:
+            handle.write("# H-2 测试产物\n")
+
+        self.manager = ResearchJobManager(
+            runner_factory=lambda config: FakeRunner(
+                {**config, "artifact_markdown_path": self.artifact_markdown_path}
+            ),
+            storage_dir=self.job_storage_dir,
+            default_orchestrator_config={"runtime_profile": "web_research"},
+        )
+        app = create_app(job_manager=self.manager)
+        app.state.settings.secrets.pop("security", None)
+        self.client = TestClient(app)
+
+        repo = ResearchSessionRepository(self.client.app.state.db_manager)
+        self.cycle_id = "cycle-h2-endpoints"
+        if repo.get_session(self.cycle_id) is not None:
+            repo.delete_session(self.cycle_id)
+        repo.create_session(
+            {
+                "cycle_id": self.cycle_id,
+                "cycle_name": "H-2 review assignments",
+                "description": "endpoint smoke",
+                "research_objective": "review assignments REST API",
+                "status": "running",
+                "current_phase": "observe",
+            }
+        )
+
+    def tearDown(self):
+        self.manager.close()
+        self.tempdir.cleanup()
+
+    def _claim(self, asset_key: str, reviewer: str, **extra):
+        body = {
+            "asset_type": "catalog",
+            "asset_key": asset_key,
+            "reviewer": reviewer,
+        }
+        body.update(extra)
+        return self.client.post(
+            f"/api/research/sessions/{self.cycle_id}/review-assignments/claim",
+            json=body,
+        )
+
+    def test_claim_endpoint_creates_assignment(self):
+        response = self._claim("k-1", "李研究员", priority_bucket="high", notes="紧急")
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["cycle_id"], self.cycle_id)
+        assignment = payload["assignment"]
+        self.assertEqual(assignment["assignee"], "李研究员")
+        self.assertEqual(assignment["queue_status"], "claimed")
+        self.assertEqual(assignment["priority_bucket"], "high")
+        self.assertEqual(assignment["reviewer_label"], "李研究员")
+
+    def test_claim_endpoint_404_when_session_missing(self):
+        response = self.client.post(
+            "/api/research/sessions/missing-cycle/review-assignments/claim",
+            json={"asset_type": "catalog", "asset_key": "k-1", "reviewer": "李研究员"},
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_release_endpoint_clears_assignee(self):
+        self._claim("k-1", "李研究员")
+        response = self.client.post(
+            f"/api/research/sessions/{self.cycle_id}/review-assignments/release",
+            json={"asset_type": "catalog", "asset_key": "k-1", "notes": "退回"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        assignment = response.json()["assignment"]
+        self.assertIsNone(assignment["assignee"])
+        self.assertEqual(assignment["queue_status"], "unassigned")
+        self.assertEqual(assignment["reviewer_label"], "未认领")
+
+    def test_release_endpoint_404_for_unknown_target(self):
+        response = self.client.post(
+            f"/api/research/sessions/{self.cycle_id}/review-assignments/release",
+            json={"asset_type": "catalog", "asset_key": "missing"},
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_reassign_endpoint_updates_assignee(self):
+        self._claim("k-1", "李研究员")
+        response = self.client.post(
+            f"/api/research/sessions/{self.cycle_id}/review-assignments/reassign",
+            json={
+                "asset_type": "catalog",
+                "asset_key": "k-1",
+                "new_reviewer": "张研究员",
+                "priority_bucket": "low",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        assignment = response.json()["assignment"]
+        self.assertEqual(assignment["assignee"], "张研究员")
+        self.assertEqual(assignment["priority_bucket"], "low")
+
+    def test_list_endpoint_supports_filtering(self):
+        self._claim("k-1", "李研究员", priority_bucket="high")
+        self._claim("k-2", "李研究员", priority_bucket="medium")
+        self._claim("k-3", "张研究员", priority_bucket="low")
+
+        all_response = self.client.get(
+            f"/api/research/sessions/{self.cycle_id}/review-assignments"
+        )
+        self.assertEqual(all_response.status_code, 200)
+        payload = all_response.json()
+        self.assertEqual(payload["count"], 3)
+
+        only_li = self.client.get(
+            f"/api/research/sessions/{self.cycle_id}/review-assignments",
+            params={"assignee": "李研究员"},
+        )
+        keys = {item["asset_key"] for item in only_li.json()["items"]}
+        self.assertEqual(keys, {"k-1", "k-2"})
+
+        only_high = self.client.get(
+            f"/api/research/sessions/{self.cycle_id}/review-assignments",
+            params={"priority_bucket": "high"},
+        )
+        self.assertEqual(
+            [item["asset_key"] for item in only_high.json()["items"]],
+            ["k-1"],
+        )
+
+    def test_workload_endpoint_groups_by_reviewer(self):
+        self._claim("k-1", "李研究员", priority_bucket="high")
+        self._claim("k-2", "张研究员")
+        self.client.post(
+            f"/api/research/sessions/{self.cycle_id}/review-assignments/release",
+            json={"asset_type": "catalog", "asset_key": "k-2"},
+        )
+
+        response = self.client.get(
+            f"/api/research/sessions/{self.cycle_id}/reviewer-workload"
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        labels = [bucket["reviewer_label"] for bucket in payload["items"]]
+        self.assertIn("李研究员", labels)
+        self.assertIn("未认领", labels)
+        self.assertEqual(labels[-1], "未认领")
+        by_label = {bucket["reviewer_label"]: bucket for bucket in payload["items"]}
+        self.assertEqual(by_label["李研究员"]["high_priority"], 1)
+        self.assertEqual(by_label["未认领"]["unassigned"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
