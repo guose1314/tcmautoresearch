@@ -149,7 +149,7 @@ class ModuleRegistry:
             for dep in module_info.dependencies:
                 self.module_graph.add_edge(dep, module_id)
             
-            self.logger.info(f"模块 {module_info.module_name} 注册成功")
+            self.logger.info("模块 %s 注册成功", module_info.module_name)
             return True
             
         except Exception as e:
@@ -714,7 +714,7 @@ class SystemArchitecture(PhaseTrackerMixin):
         try:
             # 验证模块信息
             if not self._validate_module_info(module_info):
-                self.logger.error(f"模块信息验证失败: {module_info.module_name}")
+                self.logger.error("模块信息验证失败: %s", module_info.module_name)
                 self._fail_phase(
                     "register_module",
                     phase_started_at,
@@ -739,7 +739,7 @@ class SystemArchitecture(PhaseTrackerMixin):
                     phase_started_at,
                     {"module_id": module_info.module_id, "registered": True},
                 )
-                self.logger.info(f"模块 {module_info.module_name} 注册成功")
+                self.logger.info("模块 %s 注册成功", module_info.module_name)
             else:
                 self._fail_phase(
                     "register_module",
@@ -834,7 +834,7 @@ class SystemArchitecture(PhaseTrackerMixin):
                         "status": "success",
                         "timestamp": datetime.now().isoformat()
                     })
-                    self.logger.info(f"模块 {module_info.module_name} 初始化成功")
+                    self.logger.info("模块 %s 初始化成功", module_info.module_name)
                     
                 except Exception as e:
                     module_info.status = ModuleStatus.ERROR
@@ -850,7 +850,7 @@ class SystemArchitecture(PhaseTrackerMixin):
                         "error": str(e),
                         "timestamp": datetime.now().isoformat()
                     })
-                    self.logger.error(f"模块 {module_info.module_name} 初始化失败: {e}")
+                    self.logger.error("模块 %s 初始化失败: %s", module_info.module_name, e)
             
             # 更新系统状态
             self.system_status = "initialized"
@@ -894,7 +894,7 @@ class SystemArchitecture(PhaseTrackerMixin):
             # 验证模块兼容性
             compatibility = self.module_registry.validate_module_compatibility(module_id)
             if not compatibility.get("valid", False):
-                self.logger.error(f"模块 {module_id} 不兼容: {compatibility.get('error', '未知错误')}")
+                self.logger.error("模块 %s 不兼容: %s", module_id, compatibility.get("error", "未知错误"))
                 self._fail_phase(
                     "activate_module",
                     phase_started_at,
@@ -1030,7 +1030,7 @@ class SystemArchitecture(PhaseTrackerMixin):
                         "result": result,
                         "timestamp": datetime.now().isoformat()
                     })
-                    self.logger.info(f"模块 {module_info.module_name} 执行成功")
+                    self.logger.info("模块 %s 执行成功", module_info.module_name)
 
                 except Exception as e:
                     self._record_failed_operation(
@@ -1046,8 +1046,8 @@ class SystemArchitecture(PhaseTrackerMixin):
                         "error": str(e),
                         "timestamp": datetime.now().isoformat()
                     })
-                    self.logger.error(f"模块 {module_info.module_name} 执行失败: {e}")
-                    self.logger.error(f"模块 {module_info.module_name} 执行失败: {e}")
+                    self.logger.error("模块 %s 执行失败: %s", module_info.module_name, e)
+                    self.logger.error("模块 %s 执行失败: %s", module_info.module_name, e)
             
             # 更新性能指标
             self._update_performance_metrics()

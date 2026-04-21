@@ -106,7 +106,7 @@ class BaseModule(PhaseTrackerMixin, ABC):
         """
         start_time = time.time()
         phase_started_at = self._start_phase("initialize", {"config_keys": sorted((config or {}).keys())})
-        self.logger.info(f"开始初始化模块: {self.module_name}")
+        self.logger.info("开始初始化模块: %s", self.module_name)
         
         try:
             # 更新配置
@@ -125,7 +125,7 @@ class BaseModule(PhaseTrackerMixin, ABC):
                     {"initialized": True},
                     final_status="initialized",
                 )
-                self.logger.info(f"模块 {self.module_name} 初始化成功")
+                self.logger.info("模块 %s 初始化成功", self.module_name)
                 return True
             self._fail_phase(
                 "initialize",
@@ -191,7 +191,7 @@ class BaseModule(PhaseTrackerMixin, ABC):
             {"module_name": self.module_name, "context_keys": sorted(context.keys())},
         )
         self.module_start_time = start_time
-        self.logger.info(f"开始执行模块: {self.module_name}")
+        self.logger.info("开始执行模块: %s", self.module_name)
         
         try:
             # 执行具体执行逻辑
@@ -305,7 +305,7 @@ class BaseModule(PhaseTrackerMixin, ABC):
         """
         start_time = time.time()
         phase_started_at = self._start_phase("cleanup", {"module_name": self.module_name})
-        self.logger.info(f"开始清理模块资源: {self.module_name}")
+        self.logger.info("开始清理模块资源: %s", self.module_name)
         
         try:
             if self._do_cleanup():
@@ -721,7 +721,7 @@ class AsyncBaseModule(BaseModule):
             {"module_name": self.module_name, "context_keys": sorted(context.keys())},
         )
         self.module_start_time = start_time
-        self.logger.info(f"开始异步执行模块: {self.module_name}")
+        self.logger.info("开始异步执行模块: %s", self.module_name)
         
         try:
             # 异步执行具体逻辑
@@ -750,12 +750,12 @@ class AsyncBaseModule(BaseModule):
                 final_status="completed",
             )
             
-            self.logger.info(f"模块 {self.module_name} 异步执行成功，耗时: {execution_time:.2f}s")
+            self.logger.info("模块 %s 异步执行成功，耗时: %2.fs", self.module_name, execution_time)
             return result
             
         except Exception as e:
             execution_time = time.time() - start_time
-            self.logger.error(f"模块 {self.module_name} 异步执行失败: {e}")
+            self.logger.error("模块 %s 异步执行失败: %s", self.module_name, e)
             self.logger.error(traceback.format_exc())
             
             # 更新错误指标

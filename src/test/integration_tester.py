@@ -463,7 +463,7 @@ class IntegrationTester(PhaseTrackerMixin):
             test.status = IntegrationTestStatus.RUNNING
             test.start_time = datetime.now().isoformat()
             
-            self.logger.info(f"开始运行集成测试: {test.test_name}")
+            self.logger.info("开始运行集成测试: %s", test.test_name)
             
             # 执行测试
             test_result = self._execute_integration_test(test, environment, context)
@@ -498,7 +498,7 @@ class IntegrationTester(PhaseTrackerMixin):
                 },
             )
             
-            self.logger.info(f"集成测试 {test.test_name} 运行完成")
+            self.logger.info("集成测试 %s 运行完成", test.test_name)
             return test
             
         except Exception as e:
@@ -1042,7 +1042,7 @@ class IntegrationTester(PhaseTrackerMixin):
                     test_result = self.run_integration_test(test.test_id, environment_id, context)
                     results["test_results"][test.test_id] = self._serialize_integration_test(test_result)
                 except Exception as e:
-                    self.logger.error(f"集成测试 {test.test_name} 运行失败: {e}")
+                    self.logger.error("集成测试 %s 运行失败: %s", test.test_name, e)
                     # 创建失败测试结果
                     failed_result = IntegrationTest(
                         test_id=test.test_id,

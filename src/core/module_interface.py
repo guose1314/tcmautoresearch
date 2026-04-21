@@ -164,7 +164,7 @@ class ModuleInterface(BaseModule):
                 "module_name": getattr(context, "module_name", self.module_name),
             },
         )
-        self.logger.info(f"开始执行模块: {self.module_name}")
+        self.logger.info("开始执行模块: %s", self.module_name)
         
         try:
             # 验证上下文
@@ -205,7 +205,7 @@ class ModuleInterface(BaseModule):
             )
             output.metadata = self._attach_contract_metadata(output.metadata)
             
-            self.logger.info(f"模块 {self.module_name} 执行成功，耗时: {output.execution_time:.2f}s")
+            self.logger.info("模块 %s 执行成功，耗时: %2.fs", self.module_name, output.execution_time)
             return output
             
         except Exception as e:
@@ -231,7 +231,7 @@ class ModuleInterface(BaseModule):
                 tags=["error"]
             )
             
-            self.logger.error(f"模块 {self.module_name} 执行失败: {e}")
+            self.logger.error("模块 %s 执行失败: %s", self.module_name, e)
             self.logger.error(traceback.format_exc())
             
             # 更新错误指标
@@ -491,7 +491,7 @@ class ModuleInterface(BaseModule):
             return True
         except Exception as error:
             self._fail_phase("export_interface_data", phase_started_at, error, {"output_path": output_path})
-            self.logger.error(f"模块 {self.module_name} 接口数据导出失败: {error}")
+            self.logger.error("模块 %s 接口数据导出失败: %s", self.module_name, error)
             return False
 
 # 导出主要类和函数

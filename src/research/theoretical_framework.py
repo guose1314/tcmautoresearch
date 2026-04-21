@@ -604,7 +604,7 @@ class TheoreticalFramework(PhaseTrackerMixin):
             })
             self._complete_operation("generate_hypothesis", phase_entry, start_time)
             
-            self.logger.info(f"假设生成完成: {hypothesis.title}")
+            self.logger.info("假设生成完成: %s", hypothesis.title)
             return hypothesis
             
         except Exception as e:
@@ -727,7 +727,7 @@ class TheoreticalFramework(PhaseTrackerMixin):
             })
             self._complete_operation("design_experiment", phase_entry, start_time)
             
-            self.logger.info(f"实验设计完成: {experiment.title}")
+            self.logger.info("实验设计完成: %s", experiment.title)
             return experiment
             
         except Exception as e:
@@ -974,7 +974,7 @@ class TheoreticalFramework(PhaseTrackerMixin):
             })
             self._complete_operation("generate_insight", phase_entry, start_time)
             
-            self.logger.info(f"研究洞察生成完成: {insight.title}")
+            self.logger.info("研究洞察生成完成: %s", insight.title)
             return insight
             
         except Exception as e:
@@ -1030,12 +1030,12 @@ class TheoreticalFramework(PhaseTrackerMixin):
                 hypothesis.status = HypothesisStatus.VALIDATED
                 hypothesis.validated_at = datetime.now().isoformat()
                 hypothesis.confidence = 0.95
-                self.logger.info(f"假设 {hypothesis.title} 验证通过")
+                self.logger.info("假设 %s 验证通过", hypothesis.title)
             else:
                 hypothesis.status = HypothesisStatus.REJECTED
                 hypothesis.rejected_at = datetime.now().isoformat()
                 hypothesis.confidence = 0.2
-                self.logger.info(f"假设 {hypothesis.title} 验证失败")
+                self.logger.info("假设 %s 验证失败", hypothesis.title)
             
             # 添加专家反馈
             if feedback:

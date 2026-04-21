@@ -842,7 +842,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 conn.execute(upsert, row)
             finally:
                 conn.close()
-            self.pipeline.logger.info(f"研究结果已持久化: {cycle.cycle_id} → {db_path}")
+            self.pipeline.logger.info("研究结果已持久化: %s → %s", cycle.cycle_id, db_path)
             return True
         except Exception as exc:  # pragma: no cover
             self.pipeline.logger.warning("研究结果持久化失败，已跳过: %s", exc)

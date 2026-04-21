@@ -549,7 +549,7 @@ def run_pdf_full_text_translation(
             fragments_trans_final,
             char_count,
         )
-        logger.info(f"已生成报告: {artifacts.markdown_file}, {artifacts.html_file}")
+        logger.info("已生成报告: %s, %s", artifacts.markdown_file, artifacts.html_file)
     except Exception as exc:
         logger.error("输出文件生成失败: %s", exc)
 

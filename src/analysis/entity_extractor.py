@@ -239,7 +239,7 @@ class AdvancedEntityExtractor(BaseModule):
         """
         count = self.lexicon.load_from_file(filepath, word_type)
         if count > 0:
-            self.logger.info(f"已加载 {count} 个外部 {word_type} 词汇，词典总规模: {self.lexicon.get_vocab_size()}")
+            self.logger.info("已加载 %s 个外部 %s 词汇，词典总规模: %s", count, word_type, self.lexicon.get_vocab_size())
         return count
     
     def export_extracted_lexicon(self, filepath: str) -> None:

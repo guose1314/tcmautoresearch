@@ -594,7 +594,7 @@ class FixingStage(PhaseTrackerMixin):
             # 生成学术影响分析
             action.academic_impact = self._generate_academic_impact(action)
             
-            self.logger.info(f"修复行动 {action.action_id} 执行成功")
+            self.logger.info("修复行动 %s 执行成功", action.action_id)
             return action
             
         except Exception as e:
@@ -604,7 +604,7 @@ class FixingStage(PhaseTrackerMixin):
             action.success = False
             action.error_message = str(e)
             
-            self.logger.error(f"修复行动 {action.action_id} 执行失败: {e}")
+            self.logger.error("修复行动 %s 执行失败: %s", action.action_id, e)
             return action
     
     def _simulate_repair_process(self, action: RepairAction):

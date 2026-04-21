@@ -69,7 +69,7 @@ class Neo4jDriver:
             with self.driver.session(database=self.database) as session:
                 result = session.run("RETURN 1")
                 result.consume()
-            logger.info(f"Neo4j 连接成功: {self.uri}")
+            logger.info("Neo4j 连接成功: %s", self.uri)
         except Exception as e:
             logger.error("Neo4j 连接失败: %s", e)
             raise

@@ -143,7 +143,7 @@ class ResearchPipelineOrchestrator:
                 },
             )
             self.pipeline._complete_phase(self.pipeline._metadata, "start_research_cycle", phase_entry, start_time)
-            self.pipeline.logger.info(f"研究循环启动: {research_cycle.cycle_name}")
+            self.pipeline.logger.info("研究循环启动: %s", research_cycle.cycle_name)
             return True
         except Exception as exc:
             self.pipeline._fail_phase(
@@ -207,7 +207,7 @@ class ResearchPipelineOrchestrator:
             self.pipeline._apply_phase_result(research_cycle, phase, phase_result)
             research_cycle.metadata["analysis_summary"] = self.pipeline._build_cycle_analysis_summary(research_cycle)
             self.pipeline._record_phase_success(cycle_id, phase, start_time)
-            self.pipeline.logger.info(f"研究阶段执行完成: {phase.value}")
+            self.pipeline.logger.info("研究阶段执行完成: %s", phase.value)
             return phase_result
         except Exception as exc:
             return self.pipeline._handle_phase_execution_failure(cycle_id, phase, start_time, exc)
@@ -270,7 +270,7 @@ class ResearchPipelineOrchestrator:
             )
             self.pipeline._complete_phase(self.pipeline._metadata, "complete_research_cycle", phase_entry, start_time)
             self.pipeline._persist_result(research_cycle)
-            self.pipeline.logger.info(f"研究循环完成: {research_cycle.cycle_name}")
+            self.pipeline.logger.info("研究循环完成: %s", research_cycle.cycle_name)
             return True
         except Exception as exc:
             self.pipeline._fail_phase(
@@ -318,7 +318,7 @@ class ResearchPipelineOrchestrator:
                 {"cycle_id": cycle_id},
             )
             self.pipeline._complete_phase(self.pipeline._metadata, "suspend_research_cycle", phase_entry, start_time)
-            self.pipeline.logger.info(f"研究循环暂停: {research_cycle.cycle_name}")
+            self.pipeline.logger.info("研究循环暂停: %s", research_cycle.cycle_name)
             return True
         except Exception as exc:
             self.pipeline._fail_phase(
@@ -365,7 +365,7 @@ class ResearchPipelineOrchestrator:
                 {"cycle_id": cycle_id},
             )
             self.pipeline._complete_phase(self.pipeline._metadata, "resume_research_cycle", phase_entry, start_time)
-            self.pipeline.logger.info(f"研究循环恢复: {research_cycle.cycle_name}")
+            self.pipeline.logger.info("研究循环恢复: %s", research_cycle.cycle_name)
             return True
         except Exception as exc:
             self.pipeline._fail_phase(

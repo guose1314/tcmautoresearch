@@ -123,7 +123,7 @@ class UnifiedStorageDriver:
             self.session.add(doc)
             self.session.commit()
             
-            logger.info(f"文档已保存: {source_file} (ID: {doc.id})")
+            logger.info("文档已保存: %s (ID: %s)", source_file, doc.id)
             return doc.id
         except Exception as e:
             self.session.rollback()

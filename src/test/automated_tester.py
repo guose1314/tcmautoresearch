@@ -439,7 +439,7 @@ class AutomatedTester(PhaseTrackerMixin):
             # 重置测试结果
             test_suite.test_results.clear()
             
-            self.logger.info(f"开始运行测试套件: {test_suite.suite_name}")
+            self.logger.info("开始运行测试套件: %s", test_suite.suite_name)
             
             # 并行执行测试用例
             futures = []
@@ -500,7 +500,7 @@ class AutomatedTester(PhaseTrackerMixin):
                 },
             )
             
-            self.logger.info(f"测试套件 {test_suite.suite_name} 运行完成")
+            self.logger.info("测试套件 %s 运行完成", test_suite.suite_name)
             return test_report
             
         except Exception as e:

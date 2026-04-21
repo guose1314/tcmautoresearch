@@ -267,7 +267,7 @@ class IterationCycle(PhaseTrackerMixin):
     def generate_artifacts(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """生成研究产物（文档预处理 + 实体抽取）"""
         start_time = time.time()
-        self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代 - 生成阶段")
+        self.logger.info("开始第 %s 次迭代 - 生成阶段", self.current_iteration + 1)
         
         try:
             mock_mode = context.get("mock_mode", False)
@@ -322,7 +322,7 @@ class IterationCycle(PhaseTrackerMixin):
     def test_artifacts(self, artifacts: Dict[str, Any]) -> Dict[str, Any]:
         """测试生成的研究产物"""
         start_time = time.time()
-        self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代 - 测试阶段")
+        self.logger.info("开始第 %s 次迭代 - 测试阶段", self.current_iteration + 1)
         
         try:
             mock_mode = artifacts.get("generation_context", {}).get("mock_mode", False)
@@ -392,7 +392,7 @@ class IterationCycle(PhaseTrackerMixin):
                         test_results: Dict[str, Any]) -> List[Dict[str, Any]]:
         """修复发现的问题"""
         start_time = time.time()
-        self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代 - 修复阶段")
+        self.logger.info("开始第 %s 次迭代 - 修复阶段", self.current_iteration + 1)
         
         try:
             repair_actions = []
@@ -465,7 +465,7 @@ class IterationCycle(PhaseTrackerMixin):
                        repair_actions: List[Dict[str, Any]]) -> Dict[str, Any]:
         """分析迭代结果"""
         start_time = time.time()
-        self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代 - 分析阶段")
+        self.logger.info("开始第 %s 次迭代 - 分析阶段", self.current_iteration + 1)
         
         try:
             # 分析质量指标
@@ -507,7 +507,7 @@ class IterationCycle(PhaseTrackerMixin):
     def optimize_process(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
         """优化处理流程"""
         start_time = time.time()
-        self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代 - 优化阶段")
+        self.logger.info("开始第 %s 次迭代 - 优化阶段", self.current_iteration + 1)
         
         try:
             optimization_actions = self._build_optimization_actions(analysis_results)
@@ -633,7 +633,7 @@ class IterationCycle(PhaseTrackerMixin):
                         analysis_results: Dict[str, Any]) -> Dict[str, Any]:
         """验证结果有效性"""
         start_time = time.time()
-        self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代 - 验证阶段")
+        self.logger.info("开始第 %s 次迭代 - 验证阶段", self.current_iteration + 1)
         
         try:
             validation_results = self._create_validation_results()
@@ -850,7 +850,7 @@ class IterationCycle(PhaseTrackerMixin):
             self.results.append(iteration_result)
             self.current_iteration += 1
             
-            self.logger.info(f"第 {self.current_iteration} 次迭代完成")
+            self.logger.info("第 %s 次迭代完成", self.current_iteration)
             return iteration_result
             
         except Exception as e:
@@ -869,7 +869,7 @@ class IterationCycle(PhaseTrackerMixin):
                 },
             )
             self._sync_analysis_summary(iteration_result)
-            self.logger.error(f"第 {self.current_iteration} 次迭代失败: {e}")
+            self.logger.error("第 %s 次迭代失败: %s", self.current_iteration, e)
             self.logger.error(traceback.format_exc())
             
             self._update_performance_metrics(iteration_result)
@@ -930,7 +930,7 @@ class IterationCycle(PhaseTrackerMixin):
             # 执行迭代
             while self.current_iteration < self.config.max_iterations:
                 try:
-                    self.logger.info(f"开始第 {self.current_iteration + 1} 次迭代")
+                    self.logger.info("开始第 %s 次迭代", self.current_iteration + 1)
                     result = self.execute_iteration(initial_context)
                     results.append(result)
                     
@@ -940,7 +940,7 @@ class IterationCycle(PhaseTrackerMixin):
                         break
                         
                 except Exception as e:
-                    self.logger.error(f"迭代 {self.current_iteration + 1} 失败: {e}")
+                    self.logger.error("迭代 %s 失败: %s", self.current_iteration + 1, e)
                     if self.current_iteration < self.config.max_iterations - 1:
                         self.logger.info("继续下一次迭代...")
                         continue

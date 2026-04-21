@@ -51,6 +51,7 @@ class ResearchMethodRouter:
             "supramolecular": "SupramolecularPhysicochemicalAnalyzer",
             "integrated_research": "IntegratedResearchAnalyzer",
             "summary_analysis": "SummaryAnalysisEngine",
+            "meta_analysis": "MetaAnalysisEngine",  # I-05：新增 Meta 分析
         }
         try:
             from src.semantic_modeling.research_methods import (
@@ -63,6 +64,7 @@ class ResearchMethodRouter:
                 SummaryAnalysisEngine,
                 SupramolecularPhysicochemicalAnalyzer,
             )
+            from src.semantic_modeling.methods.meta_analysis import MetaAnalysisEngine  # I-05
 
             class_map = {
                 "FormulaStructureAnalyzer": FormulaStructureAnalyzer,
@@ -73,6 +75,7 @@ class ResearchMethodRouter:
                 "SupramolecularPhysicochemicalAnalyzer": SupramolecularPhysicochemicalAnalyzer,
                 "IntegratedResearchAnalyzer": IntegratedResearchAnalyzer,
                 "SummaryAnalysisEngine": SummaryAnalysisEngine,
+                "MetaAnalysisEngine": MetaAnalysisEngine,
             }
 
             for key, class_name in default_mapping.items():

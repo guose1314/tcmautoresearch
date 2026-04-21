@@ -30,6 +30,11 @@ from src.semantic_modeling.research_methods import (
     SummaryAnalysisEngine,
     SupramolecularPhysicochemicalAnalyzer,
 )
+from src.semantic_modeling.methods.meta_analysis import (  # noqa: F401  I-05
+    MetaAnalysisEngine,
+    MetaAnalysisResult,
+    StudyEffect,
+)
 
 __all__ = [
     "ClassicalLiteratureArchaeologyAnalyzer",
@@ -46,10 +51,13 @@ __all__ = [
     "HerbTemperature",
     "IntegratedResearchAnalyzer",
     "MeridianType",
+    "MetaAnalysisEngine",
+    "MetaAnalysisResult",
     "ModernPharmacologyDatabase",
     "NetworkPharmacologySystemBiologyAnalyzer",
     "PharmacologicalData",
     "ResearchScoringPanel",
+    "StudyEffect",
     "SummaryAnalysisEngine",
     "SupramolecularPhysicochemicalAnalyzer",
 ]
