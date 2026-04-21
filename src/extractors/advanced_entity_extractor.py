@@ -1,4 +1,4 @@
-﻿"""兼容层 — 已迁移至 src.analysis.entity_extractor
+"""兼容层 — 已迁移至 src.analysis.entity_extractor
 
 .. deprecated::
     请改用 ``from src.analysis.entity_extractor import ...``，本模块保留仅为向后兼容。
@@ -14,4 +14,4 @@ _warnings.warn(
 )
 
 from src.analysis.entity_extractor import *  # noqa: F401,F403
-from src.analysis.entity_extractor import AdvancedEntityExtractor
+from src.analysis.entity_extractor import AdvancedEntityExtractor  # noqa: F401

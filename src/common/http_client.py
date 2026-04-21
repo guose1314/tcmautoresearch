@@ -69,7 +69,6 @@ class HttpClient:
         连接错误（ConnectionError）和超时在最后一次失败时穿透原始异常；
         HTTP 错误（HTTPError）则包装为 TCMHTTPError。
         """
-        last_exc: Exception | None = None
         is_last = False
         for attempt in range(self._max_retries):
             is_last = attempt == self._max_retries - 1
@@ -78,13 +77,11 @@ class HttpClient:
                 resp.raise_for_status()
                 return resp
             except requests.exceptions.Timeout as exc:
-                last_exc = exc
                 if is_last:
                     raise TCMTimeoutError(f"请求超时: {url}") from exc
                 logger.warning("请求超时（第 %d 次），重试: %s", attempt + 1, url)
                 time.sleep(0.5 * (attempt + 1))
             except requests.exceptions.ConnectionError as exc:
-                last_exc = exc
                 if is_last:
                     raise  # 穿透原始 ConnectionError，便于测试和调用方处理
                 logger.warning("连接错误（第 %d 次），重试: %s — %s", attempt + 1, url, exc)
@@ -92,7 +89,6 @@ class HttpClient:
             except requests.exceptions.HTTPError as exc:
                 raise TCMHTTPError(f"HTTP 错误: {url} — {exc}") from exc
             except requests.exceptions.RequestException as exc:
-                last_exc = exc
                 if is_last:
                     raise TCMHTTPError(f"HTTP 请求失败: {url} — {exc}") from exc
                 logger.warning("请求失败（第 %d 次），重试: %s — %s", attempt + 1, url, exc)

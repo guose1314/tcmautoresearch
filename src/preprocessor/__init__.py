@@ -1,4 +1,4 @@
-﻿"""src/preprocessor — 兼容层（已迁移至 src/analysis/preprocessor）
+"""src/preprocessor — 兼容层（已迁移至 src/analysis/preprocessor）
 
 .. deprecated::
     请改用 ``from src.analysis.preprocessor import ...``，本包保留仅为向后兼容。

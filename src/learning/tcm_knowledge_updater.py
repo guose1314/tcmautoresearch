@@ -320,7 +320,6 @@ class TCMKnowledgeUpdater:
     ) -> List[KnowledgeRelation]:
         """根据实体在文本中的共现关系推断知识关系。"""
         relations: List[KnowledgeRelation] = []
-        entity_map: Dict[str, KnowledgeEntity] = {e.name: e for e in entities}
 
         formulas = [e for e in entities if e.entity_type == "Formula"]
         herbs = [e for e in entities if e.entity_type == "Herb"]

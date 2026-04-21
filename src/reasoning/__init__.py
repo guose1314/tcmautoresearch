@@ -1,4 +1,4 @@
-﻿"""src/reasoning — 兼容层（已迁移至 src/analysis/reasoning_engine）
+"""src/reasoning — 兼容层（已迁移至 src/analysis/reasoning_engine）
 
 .. deprecated::
     请改用 ``from src.analysis.reasoning_engine import ...``，本包保留仅为向后兼容。

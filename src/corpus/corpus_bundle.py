@@ -1,9 +1,9 @@
-﻿"""兼容层 — 已迁移至 src.collector.corpus_bundle
+"""兼容层 — 已迁移至 src.collector.corpus_bundle
 
 .. deprecated:: 使用 ``from src.collector.corpus_bundle import ...``
 """
 from src.collector.corpus_bundle import *  # noqa: F401,F403
-from src.collector.corpus_bundle import (
+from src.collector.corpus_bundle import (  # noqa: F401
     BUNDLE_SCHEMA_VERSION,
     CorpusBundle,
     CorpusDocument,
