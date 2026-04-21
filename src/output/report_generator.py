@@ -191,6 +191,30 @@ class ReportGenerator(BaseModule):
             "discussion": discussion,
         }
 
+    def _safe_output_path(self, base_dir: str, filename: str) -> str:
+        """构造并校验输出文件路径，确保路径不超出 base_dir 范围（防止路径穿越）。
+
+        Args:
+            base_dir: 已信任的输出根目录。
+            filename: 经过严格清理的纯文件名（不含目录分隔符）。
+
+        Returns:
+            在 base_dir 内的绝对路径。
+
+        Raises:
+            ValueError: 如果计算后路径超出 base_dir（理论上不会，作为防御性检查）。
+        """
+        # filename 已由调用方用 re.sub 限制为 [\w\u4e00-\u9fff] + 时间戳 + 扩展名
+        # 再次确保不含路径分隔符
+        clean_name = os.path.basename(filename)
+        candidate = os.path.realpath(os.path.join(base_dir, clean_name))
+        real_base = os.path.realpath(base_dir)
+        if not candidate.startswith(real_base + os.sep) and candidate != real_base:
+            raise ValueError(
+                f"输出路径安全校验失败：'{candidate}' 超出允许目录 '{real_base}'"
+            )
+        return candidate
+
     def _render_markdown(self, session_result: Dict[str, Any]) -> Report:
         meta = session_result.get("metadata", {})
         question = session_result.get("question", "")
@@ -254,7 +278,7 @@ class ReportGenerator(BaseModule):
             os.makedirs(self._output_dir, exist_ok=True)
             safe_name = re.sub(r"[^\w\u4e00-\u9fff]", "_", question or "report")[:40]
             filename = f"{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-            output_path = os.path.join(self._output_dir, filename)
+            output_path = self._safe_output_path(self._output_dir, filename)
             with open(output_path, "w", encoding="utf-8") as fh:
                 fh.write(content)
 
@@ -269,19 +293,18 @@ class ReportGenerator(BaseModule):
     def _render_docx(self, session_result: Dict[str, Any]) -> Report:
         """生成 DOCX 报告。若 python-docx 不可用则回退为 Markdown 文件保存为 .docx。"""
         md_report = self._render_markdown(session_result)
-        meta = session_result.get("metadata", {})
         question = session_result.get("question", "")
         safe_name = re.sub(r"[^\w\u4e00-\u9fff]", "_", question or "report")[:40]
         filename = f"{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
-        output_path = os.path.join(self._output_dir, filename)
         os.makedirs(self._output_dir, exist_ok=True)
+        output_path = self._safe_output_path(self._output_dir, filename)
 
         try:
             from docx import Document  # type: ignore
             from docx.shared import Pt  # type: ignore
 
             doc = Document()
-            title_str = meta.get("title", question)
+            title_str = md_report.metadata.get("title", question)
             doc.add_heading(title_str, level=0)
             for sec_key, heading in [
                 ("introduction", "Introduction"),
