@@ -305,5 +305,49 @@ class TestBackfillUsesRegistry(unittest.TestCase):
         self.assertIn(RelType.GENERATED.value, rel_types)
 
 
+class TestEntityTypeToLabelMapping(unittest.TestCase):
+    """ENTITY_TYPE_TO_LABEL 映射完整性与一致性。"""
+
+    def test_all_values_are_registered_labels(self):
+        from src.storage.graph_schema import ENTITY_TYPE_TO_LABEL
+        labels = get_registered_labels()
+        for etype, label in ENTITY_TYPE_TO_LABEL.items():
+            self.assertIn(label, labels, f"'{label}' for type '{etype}' not registered")
+
+    def test_covers_core_tcm_types(self):
+        from src.storage.graph_schema import ENTITY_TYPE_TO_LABEL
+        expected = {"formula", "herb", "syndrome", "efficacy", "target", "pathway"}
+        self.assertTrue(expected.issubset(set(ENTITY_TYPE_TO_LABEL.keys())))
+
+    def test_neo4j_driver_uses_same_mapping(self):
+        from src.storage.graph_schema import ENTITY_TYPE_TO_LABEL
+        from src.storage.neo4j_driver import _TYPE_TO_LABEL
+        self.assertIs(_TYPE_TO_LABEL, ENTITY_TYPE_TO_LABEL)
+
+
+class TestKgStatsEndpoint(unittest.TestCase):
+    """GET /analysis/kg/stats 端点。"""
+
+    def test_returns_schema_summary_without_neo4j(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from src.api.routes.analysis import router
+
+        app = FastAPI()
+        app.include_router(router, prefix="/analysis")
+        client = TestClient(app)
+
+        response = client.get("/analysis/kg/stats")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("schema_version", data)
+        self.assertEqual(data["schema_version"], GRAPH_SCHEMA_VERSION)
+        self.assertIn("node_label_count", data)
+        self.assertIn("rel_type_count", data)
+        # Without live Neo4j, drift should be None
+        self.assertIsNone(data.get("schema_drift_detected"))
+
+
 if __name__ == "__main__":
     unittest.main()

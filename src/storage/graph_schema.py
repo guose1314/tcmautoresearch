@@ -85,9 +85,13 @@ class RelType(str, Enum):
     CAPTURED = "CAPTURED"
 
     # ── 假说 / 证据 ──
+    HAS_HYPOTHESIS = "HAS_HYPOTHESIS"
+    EVIDENCE_FOR = "EVIDENCE_FOR"
+    DERIVED_FROM_PHASE = "DERIVED_FROM_PHASE"
     PROPOSED_BY = "PROPOSED_BY"
     SUPPORTED_BY = "SUPPORTED_BY"
     CONTRADICTED_BY = "CONTRADICTED_BY"
+    CONTRADICTS = "CONTRADICTS"
     CLAIMS = "CLAIMS"
     EVIDENCED_BY = "EVIDENCED_BY"
 
@@ -145,10 +149,18 @@ _ALLOWED_PROPERTIES: Dict[NodeLabel, FrozenSet[str]] = {
     NodeLabel.EVIDENCE: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
         "evidence_id", "title", "source", "evidence_grade",
         "confidence", "provenance_type", "document_id",
+        "source_type", "source_ref", "relation_type",
+        "source_entity", "target_entity", "excerpt",
+        "document_title", "work_title", "version_lineage_key",
+        "witness_key",
     }),
     NodeLabel.EVIDENCE_CLAIM: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
         "claim_id", "claim_text", "confidence", "evidence_grade",
-        "evidence_ids",
+        "evidence_ids", "source_entity", "target_entity",
+        "relation_type", "support_count", "review_status",
+        "needs_manual_review", "reviewer", "reviewed_at",
+        "decision_basis", "work_title", "document_title",
+        "version_lineage_key", "witness_key",
     }),
     NodeLabel.CATALOG: frozenset({
         "catalog_id", "title", "source", "classification",
@@ -316,3 +328,20 @@ def resolve_rel_type(raw_type: str, default: str = "RELATED_TO") -> str:
     if raw_type in _REL_TYPE_LOOKUP:
         return raw_type
     return default
+
+
+# ── Entity type → NodeLabel 映射 ──────────────────────────────────────
+
+ENTITY_TYPE_TO_LABEL: Mapping[str, str] = {
+    "formula": NodeLabel.FORMULA.value,
+    "herb": NodeLabel.HERB.value,
+    "syndrome": NodeLabel.SYNDROME.value,
+    "target": NodeLabel.TARGET.value,
+    "pathway": NodeLabel.PATHWAY.value,
+    "efficacy": NodeLabel.EFFICACY.value,
+    "property": NodeLabel.PROPERTY.value,
+    "taste": NodeLabel.TASTE.value,
+    "meridian": NodeLabel.MERIDIAN.value,
+    "generic": NodeLabel.ENTITY.value,
+}
+"""从实体 type 字符串到 Neo4j 标签的规范映射。"""

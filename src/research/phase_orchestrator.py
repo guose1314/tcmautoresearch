@@ -974,6 +974,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             return {"status": "skipped", "enabled": False, "node_count": 0, "edge_count": 0}
 
         try:
+            from src.research.graph_assets import get_phase_graph_assets
             from src.research.research_session_graph_backfill import (
                 build_observe_entity_graph_nodes,
                 build_observe_graph_edges,
@@ -988,6 +989,13 @@ class PhaseOrchestrator(PhaseTrackerMixin):
 
             node_map: Dict[tuple[str, str], Any] = {}
             edge_map: Dict[tuple[str, str, str, str, str], Any] = {}
+            asset_counts: Dict[str, int] = {
+                "hypothesis_node_count": 0,
+                "hypothesis_edge_count": 0,
+                "evidence_node_count": 0,
+                "evidence_edge_count": 0,
+                "graph_asset_subgraph_count": 0,
+            }
 
             def _add_node(label: str, node_id: str, properties: Dict[str, Any]) -> None:
                 key = (label, node_id)
@@ -1171,6 +1179,75 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                             {"cycle_id": cycle.cycle_id, "phase": "observe"},
                         )
 
+            for phase_enum, execution in cycle.phase_executions.items():
+                phase_name = str(getattr(phase_enum, "value", phase_enum) or "").strip().lower()
+                if not phase_name or not isinstance(execution, dict):
+                    continue
+                graph_assets = get_phase_graph_assets(execution.get("result") or {})
+                if not graph_assets:
+                    continue
+                phase_id = str((phase_records.get(phase_name) or {}).get("id") or f"{cycle.cycle_id}:{phase_name}")
+                for subgraph_name, subgraph in graph_assets.items():
+                    if subgraph_name == "summary" or not isinstance(subgraph, dict):
+                        continue
+                    asset_counts["graph_asset_subgraph_count"] += 1
+                    asset_family = str(subgraph.get("asset_family") or "")
+                    for node in subgraph.get("nodes") or []:
+                        if not isinstance(node, dict):
+                            continue
+                        node_id = str(node.get("id") or "").strip()
+                        label = self._normalize_graph_label(node.get("label") or NodeLabel.ENTITY.value, NodeLabel.ENTITY.value)
+                        if not node_id:
+                            continue
+                        _add_node(label, node_id, dict(node.get("properties") or {}))
+                        if asset_family == "hypothesis":
+                            asset_counts["hypothesis_node_count"] += 1
+                        elif asset_family == "evidence":
+                            asset_counts["evidence_node_count"] += 1
+                        if label == NodeLabel.HYPOTHESIS.value:
+                            phase_rel = RelType.HAS_HYPOTHESIS.value
+                        elif label in {NodeLabel.EVIDENCE.value, NodeLabel.EVIDENCE_CLAIM.value}:
+                            phase_rel = RelType.DERIVED_FROM_PHASE.value
+                        else:
+                            phase_rel = ""
+                        if phase_rel:
+                            _add_edge(
+                                phase_id,
+                                node_id,
+                                phase_rel,
+                                NodeLabel.RESEARCH_PHASE_EXECUTION.value,
+                                label,
+                                {
+                                    "cycle_id": cycle.cycle_id,
+                                    "phase": phase_name,
+                                    "subgraph": subgraph_name,
+                                },
+                            )
+                    for edge in subgraph.get("edges") or []:
+                        if not isinstance(edge, dict):
+                            continue
+                        source_id = str(edge.get("source_id") or "").strip()
+                        target_id = str(edge.get("target_id") or "").strip()
+                        relationship_type = self._normalize_graph_relationship_type(
+                            edge.get("relationship_type") or RelType.RELATED_TO.value
+                        )
+                        source_label = self._normalize_graph_label(edge.get("source_label") or NodeLabel.ENTITY.value, NodeLabel.ENTITY.value)
+                        target_label = self._normalize_graph_label(edge.get("target_label") or NodeLabel.ENTITY.value, NodeLabel.ENTITY.value)
+                        if not source_id or not target_id:
+                            continue
+                        _add_edge(
+                            source_id,
+                            target_id,
+                            relationship_type,
+                            source_label,
+                            target_label,
+                            dict(edge.get("properties") or {}),
+                        )
+                        if asset_family == "hypothesis":
+                            asset_counts["hypothesis_edge_count"] += 1
+                        elif asset_family == "evidence":
+                            asset_counts["evidence_edge_count"] += 1
+
             nodes = list(node_map.values())
             edges = list(edge_map.values())
             _scope = "current_cycle"
@@ -1185,6 +1262,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     "node_count": len(nodes),
                     "edge_count": len(edges),
                     "graph_projection_scope": _scope,
+                    **asset_counts,
                 }
             node_status = neo4j_driver.batch_create_nodes(nodes)
             edge_status = neo4j_driver.batch_create_relationships(edges)
@@ -1195,6 +1273,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     "node_count": len(nodes),
                     "edge_count": len(edges),
                     "graph_projection_scope": _scope,
+                    **asset_counts,
                 }
             return {
                 "status": "active",
@@ -1202,6 +1281,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 "node_count": len(nodes),
                 "edge_count": len(edges),
                 "graph_projection_scope": _scope,
+                **asset_counts,
             }
         except Exception as exc:
             if transaction is not None:
@@ -1213,6 +1293,10 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 "error": str(exc),
                 "node_count": 0,
                 "edge_count": 0,
+                "hypothesis_node_count": 0,
+                "hypothesis_edge_count": 0,
+                "evidence_node_count": 0,
+                "evidence_edge_count": 0,
             }
 
     # ── Storage factory 生命周期 ──────────────────────────────────────────
@@ -1333,6 +1417,10 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 "observe_relationship_count": sum(int(item.get("relationship_count") or 0) for item in observe_documents if isinstance(item, dict)),
                 "graph_node_count": graph_report.get("node_count", 0),
                 "graph_edge_count": graph_report.get("edge_count", 0),
+                "hypothesis_graph_node_count": graph_report.get("hypothesis_node_count", 0),
+                "hypothesis_graph_edge_count": graph_report.get("hypothesis_edge_count", 0),
+                "evidence_graph_node_count": graph_report.get("evidence_node_count", 0),
+                "evidence_graph_edge_count": graph_report.get("evidence_edge_count", 0),
                 "eventual_consistency": self._classify_eventual_consistency(
                     consistency_state, graph_report,
                 ),

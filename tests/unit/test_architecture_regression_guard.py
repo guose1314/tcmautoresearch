@@ -23,7 +23,7 @@ Guard #32: 学习闭环策略调整与外部导入质量校验（PolicyAdjuster 
 Guard #33: 小模型优化基础设施（ReasoningTemplateSelector / DynamicInvocationStrategy / DossierLayerCompressor / SmallModelOptimizer）
 Guard #34: EvidenceEnvelope 跨阶段 phase_origin 统一协议（Phase F-1）
 Guard #35: Phase output 形状收口 — metadata 最小公约键（Phase F-3）
-Guard #36: Neo4j graph schema versioning 与标签注册表（Phase G-1）
+Guard #36: Neo4j graph schema versioning、标签注册表与 hypothesis/evidence graph assets（Phase G-1/G-2）
 """
 
 import ast
@@ -2457,10 +2457,10 @@ class TestPhaseOutputShapeGuard(unittest.TestCase):
         self.assertIn("backfill_ledger", source)
 
 
-# Guard #36 — Neo4j graph schema versioning 与标签注册表 (Phase G-1)
+# Guard #36 — Neo4j graph schema versioning、标签注册表与 graph assets (Phase G-1/G-2)
 
 class TestGuard36_GraphSchemaVersioning(unittest.TestCase):
-    """Guard #36: Neo4j graph schema 注册表必须存在，且 driver/orchestrator/backfill 均引用之。"""
+    """Guard #36: Neo4j graph schema 与 hypothesis/evidence graph assets 契约。"""
 
     def test_graph_schema_module_exists(self):
         """graph_schema.py 必须存在并可导入。"""
@@ -2483,6 +2483,9 @@ class TestGuard36_GraphSchemaVersioning(unittest.TestCase):
         self.assertIn("class RelType", source)
         self.assertIn("HAS_PHASE", source)
         self.assertIn("CAPTURED", source)
+        self.assertIn("HAS_HYPOTHESIS", source)
+        self.assertIn("EVIDENCE_FOR", source)
+        self.assertIn("DERIVED_FROM_PHASE", source)
 
     def test_neo4j_driver_imports_graph_schema(self):
         """neo4j_driver.py 必须引用 graph_schema。"""
@@ -2517,6 +2520,25 @@ class TestGuard36_GraphSchemaVersioning(unittest.TestCase):
         source = (_SRC / "web" / "routes" / "analysis.py").read_text(encoding="utf-8")
         self.assertIn("_get_graph_schema_info", source)
         self.assertIn("schema_version", source)
+
+    def test_hypothesis_phase_emits_hypothesis_subgraph(self):
+        source = (_SRC / "research" / "phases" / "hypothesis_phase.py").read_text(encoding="utf-8")
+        self.assertIn('"graph_assets"', source)
+        self.assertIn("hypothesis_subgraph", source)
+        self.assertIn("build_hypothesis_subgraph", source)
+
+    def test_analyze_phase_emits_evidence_subgraph(self):
+        source = (_SRC / "research" / "phases" / "analyze_phase.py").read_text(encoding="utf-8")
+        self.assertIn('"graph_assets"', source)
+        self.assertIn("evidence_subgraph", source)
+        self.assertIn("build_evidence_subgraph", source)
+
+    def test_orchestrator_projects_graph_assets_via_transaction(self):
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        self.assertIn("get_phase_graph_assets", source)
+        self.assertIn("HAS_HYPOTHESIS", source)
+        self.assertIn("DERIVED_FROM_PHASE", source)
+        self.assertIn("transaction.neo4j_batch_nodes", source)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,10 @@ from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from src.research.data_miner import StatisticalDataMiner
 from src.research.evidence_contract import build_evidence_protocol
+from src.research.graph_assets import (
+    build_evidence_subgraph,
+    build_graph_assets_payload,
+)
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
     has_learning_strategy,
@@ -87,6 +91,15 @@ class AnalyzePhaseMixin:
         if textual_evidence_summary:
             analysis_results["textual_evidence_summary"] = textual_evidence_summary
 
+        cycle_id = str(getattr(cycle, "cycle_id", "") or "analyze-cycle")
+        evidence_subgraph = build_evidence_subgraph(
+            cycle_id,
+            evidence_protocol,
+            phase="analyze",
+        ) if evidence_protocol else {}
+        if evidence_subgraph:
+            analysis_results["graph_assets"] = build_graph_assets_payload(evidence_subgraph=evidence_subgraph)
+
         metadata = {
             "analysis_type": "statistical_analysis",
             "significance_level": significance_level,
@@ -104,6 +117,9 @@ class AnalyzePhaseMixin:
             "evidence_claim_count": int(((evidence_protocol.get("summary") or {}).get("claim_count") or 0)) if evidence_protocol else 0,
             "textual_evidence_chain_consumed": bool(textual_evidence_summary),
             "textual_evidence_chain_count": int(textual_evidence_summary.get("evidence_chain_count") or 0) if textual_evidence_summary else 0,
+            "graph_asset_subgraphs": ["evidence_subgraph"] if evidence_subgraph else [],
+            "graph_asset_node_count": int(evidence_subgraph.get("node_count") or 0) if evidence_subgraph else 0,
+            "graph_asset_edge_count": int(evidence_subgraph.get("edge_count") or 0) if evidence_subgraph else 0,
             "learning_strategy_applied": has_learning_strategy(context, self.pipeline.config),
             "reasoning_framework": reasoning_framework.to_dict(),
         }

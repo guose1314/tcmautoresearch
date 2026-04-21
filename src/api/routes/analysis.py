@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends
@@ -15,6 +16,8 @@ from src.api.dependencies import (
 )
 from src.api.schemas import AnalyzeDocumentRequest, AnalyzeDocumentResponse
 from src.extraction.relation_extractor import RelationExtractor
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["analysis"])
 
@@ -58,3 +61,40 @@ def preview_document_analysis(
             "relation_count": len(relations),
         },
     }
+
+
+# ── Knowledge Graph stats ─────────────────────────────────────────────
+
+
+@router.get("/kg/stats")
+def kg_stats() -> Dict[str, Any]:
+    """返回知识图谱统计信息、schema 版本与 drift 状态。"""
+    from src.storage.graph_schema import get_schema_summary
+
+    result: Dict[str, Any] = get_schema_summary()
+
+    # 尝试从已有 StorageBackendFactory 读取 live drift 状态
+    try:
+        from src.storage.backend_factory import StorageBackendFactory
+
+        factory = StorageBackendFactory.get_instance()
+        neo4j_driver = getattr(factory, "_neo4j_driver", None)
+        if neo4j_driver is not None:
+            drift_report = neo4j_driver.ensure_schema_version()
+            result["schema_drift_detected"] = drift_report.get("drift_detected", False)
+            result["drift_report"] = drift_report
+            stats = neo4j_driver.get_graph_statistics()
+            result["graph_statistics"] = stats
+        else:
+            result["schema_drift_detected"] = None
+            result["drift_report"] = None
+            result["graph_statistics"] = None
+            result["note"] = "Neo4j driver not initialized"
+    except Exception as exc:
+        logger.debug("kg/stats 获取 live 数据失败: %s", exc)
+        result["schema_drift_detected"] = None
+        result["drift_report"] = None
+        result["graph_statistics"] = None
+        result["note"] = f"Neo4j unavailable: {exc}"
+
+    return result

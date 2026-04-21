@@ -41,6 +41,22 @@ resp3 = requests.get(f"{BASE}/api/analysis/kg/stats", headers=headers)
 if resp3.ok:
     stats = resp3.json()
     print("KG stats after:", json.dumps(stats, ensure_ascii=False))
+    graph_stats = stats.get("graph_statistics") or {}
+    if graph_stats:
+        print(
+            "Graph assets:",
+            json.dumps(
+                {
+                    "hypothesis_node_count": graph_stats.get("hypothesis_node_count", 0),
+                    "evidence_node_count": graph_stats.get("evidence_node_count", 0),
+                    "evidence_claim_node_count": graph_stats.get("evidence_claim_node_count", 0),
+                    "has_hypothesis_edge_count": graph_stats.get("has_hypothesis_edge_count", 0),
+                    "evidence_for_edge_count": graph_stats.get("evidence_for_edge_count", 0),
+                    "derived_from_phase_edge_count": graph_stats.get("derived_from_phase_edge_count", 0),
+                },
+                ensure_ascii=False,
+            ),
+        )
 
 # 4) Subgraph endpoints
 print("\n--- Subgraph queries ---")
@@ -67,6 +83,20 @@ if resp4.ok:
 # 6) Final stats
 resp5 = requests.get(f"{BASE}/api/analysis/kg/stats", headers=headers)
 if resp5.ok:
-    print("Final KG stats:", json.dumps(resp5.json(), ensure_ascii=False))
+    final_stats = resp5.json()
+    print("Final KG stats:", json.dumps(final_stats, ensure_ascii=False))
+    final_graph_stats = final_stats.get("graph_statistics") or {}
+    if final_graph_stats:
+        print(
+            "Final graph assets:",
+            json.dumps(
+                {
+                    "hypothesis_node_count": final_graph_stats.get("hypothesis_node_count", 0),
+                    "evidence_node_count": final_graph_stats.get("evidence_node_count", 0),
+                    "evidence_claim_node_count": final_graph_stats.get("evidence_claim_node_count", 0),
+                },
+                ensure_ascii=False,
+            ),
+        )
 
 print("\n=== E2E test complete ===")

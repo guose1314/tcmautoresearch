@@ -671,14 +671,23 @@ class Neo4jDriver:
 
             drift = self.ensure_schema_version()
 
+            nodes_by_type = {result['label']: result['count'] for result in nodes}
+            relationships_by_type = {result['type']: result['count'] for result in rels}
+
             return {
-                'nodes_by_type': {result['label']: result['count'] for result in nodes},
-                'relationships_by_type': {result['type']: result['count'] for result in rels},
+                'nodes_by_type': nodes_by_type,
+                'relationships_by_type': relationships_by_type,
                 'total_nodes': sum(result['count'] for result in nodes),
                 'total_relationships': sum(result['count'] for result in rels),
                 'schema_version': drift.get("expected_version"),
                 'schema_drift_detected': drift.get("drift_detected", False),
                 'schema_drift_detail': drift.get("detail", ""),
+                'hypothesis_node_count': int(nodes_by_type.get('Hypothesis', 0)),
+                'evidence_node_count': int(nodes_by_type.get('Evidence', 0)),
+                'evidence_claim_node_count': int(nodes_by_type.get('EvidenceClaim', 0)),
+                'has_hypothesis_edge_count': int(relationships_by_type.get('HAS_HYPOTHESIS', 0)),
+                'evidence_for_edge_count': int(relationships_by_type.get('EVIDENCE_FOR', 0)),
+                'derived_from_phase_edge_count': int(relationships_by_type.get('DERIVED_FROM_PHASE', 0)),
             }
         except Exception as e:
             logger.error(f"获取统计信息失败: {e}")
@@ -763,19 +772,10 @@ def relationship_to_neo4j_edge(rel: EntityRelationship, rel_type_name: str) -> N
 
 # ==================== 统一接口实现 ====================
 
-# 实体 type → Neo4j 标签映射
-_TYPE_TO_LABEL: Dict[str, str] = {
-    "formula": "Formula",
-    "herb": "Herb",
-    "syndrome": "Syndrome",
-    "target": "Target",
-    "pathway": "Pathway",
-    "efficacy": "Efficacy",
-    "property": "Property",
-    "taste": "Taste",
-    "meridian": "Meridian",
-    "generic": "Entity",
-}
+# 实体 type → Neo4j 标签映射（从 graph_schema 统一注册表获取）
+from .graph_schema import ENTITY_TYPE_TO_LABEL as _TYPE_TO_LABEL
+from .graph_schema import NodeLabel
+from .graph_schema import RelType as _RelType
 
 _COMPOSITION_ROLES: Set[str] = {"sovereign", "minister", "assistant", "envoy"}
 
@@ -806,7 +806,7 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
     def add_entity(self, entity: Dict[str, Any]) -> None:
         name = entity["name"]
         etype = entity.get("type", "generic")
-        label = _TYPE_TO_LABEL.get(etype, "Entity")
+        label = _TYPE_TO_LABEL.get(etype, NodeLabel.ENTITY.value)
         props = {k: v for k, v in entity.items() if k not in ("name", "type")}
         props["name"] = name
         props["entity_type"] = etype
@@ -913,7 +913,7 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
         return stats.get("total_relationships", 0)
 
     def entities_by_type(self, entity_type: str) -> List[str]:
-        label = _TYPE_TO_LABEL.get(entity_type, "Entity")
+        label = _TYPE_TO_LABEL.get(entity_type, NodeLabel.ENTITY.value)
         query = f"MATCH (n:{_safe_cypher_label(label)}) RETURN n.id AS id"
         try:
             with self._driver.driver.session(database=self._driver.database) as session:
@@ -949,7 +949,7 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
         for ent in entities:
             name = ent["name"]
             etype = ent.get("type", "generic")
-            label = _TYPE_TO_LABEL.get(etype, "Entity")
+            label = _TYPE_TO_LABEL.get(etype, NodeLabel.ENTITY.value)
             props = {k: v for k, v in ent.items() if k not in ("name", "type")}
             props["name"] = name
             props["entity_type"] = etype
@@ -995,7 +995,7 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
 
     def _ensure_node(self, name: str) -> None:
         """MERGE 节点，确保存在。"""
-        self._driver.create_node(Neo4jNode(id=name, label="Entity", properties={"name": name}))
+        self._driver.create_node(Neo4jNode(id=name, label=NodeLabel.ENTITY.value, properties={"name": name}))
 
     def _resolve_label(self, node_id: str) -> str:
         """尝试获取已有节点的标签，默认 Entity。"""
@@ -1003,7 +1003,7 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
             node = self._driver.get_node(node_id, label)
             if node is not None:
                 return label
-        return "Entity"
+        return NodeLabel.ENTITY.value
 
     def _preload_formula_compositions(self) -> None:
         """从 TCMRelationshipDefinitions 预加载方剂组成到 Neo4j。"""
@@ -1015,33 +1015,36 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
             logger.debug("TCMRelationshipDefinitions 不可用，跳过预加载")
             return
 
+        from .graph_schema import NodeLabel as _NL
+        from .graph_schema import RelType as _RT
+
         nodes: List[Neo4jNode] = []
         edge_tuples: List[Tuple[Neo4jEdge, str, str]] = []
 
         compositions = TCMRelationshipDefinitions.FORMULA_COMPOSITIONS
         for formula_name, roles in compositions.items():
-            nodes.append(Neo4jNode(id=formula_name, label="Formula",
+            nodes.append(Neo4jNode(id=formula_name, label=_NL.FORMULA.value,
                                     properties={"name": formula_name, "entity_type": "formula"}))
             for role, herbs in roles.items():
                 for herb in herbs:
-                    nodes.append(Neo4jNode(id=herb, label="Herb",
+                    nodes.append(Neo4jNode(id=herb, label=_NL.HERB.value,
                                             properties={"name": herb, "entity_type": "herb"}))
                     edge_tuples.append((
                         Neo4jEdge(source_id=formula_name, target_id=herb,
                                   relationship_type=role.upper(), properties={}),
-                        "Formula", "Herb",
+                        _NL.FORMULA.value, _NL.HERB.value,
                     ))
 
         for herb, effs in TCMRelationshipDefinitions.HERB_EFFICACY_MAP.items():
-            nodes.append(Neo4jNode(id=herb, label="Herb",
+            nodes.append(Neo4jNode(id=herb, label=_NL.HERB.value,
                                     properties={"name": herb, "entity_type": "herb"}))
             for eff in effs:
-                nodes.append(Neo4jNode(id=eff, label="Efficacy",
+                nodes.append(Neo4jNode(id=eff, label=_NL.EFFICACY.value,
                                         properties={"name": eff, "entity_type": "efficacy"}))
                 edge_tuples.append((
                     Neo4jEdge(source_id=herb, target_id=eff,
-                              relationship_type="EFFICACY", properties={}),
-                    "Herb", "Efficacy",
+                              relationship_type=_RT.HAS_EFFICACY.value, properties={}),
+                    _NL.HERB.value, _NL.EFFICACY.value,
                 ))
 
         if nodes:
@@ -1074,9 +1077,9 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
 
     def _find_missing_downstream_gaps_cypher(self, gaps: List[KnowledgeGap]) -> None:
         level_pairs = [
-            ("Formula", "Syndrome", "TREATS"),
-            ("Syndrome", "Target", "ASSOCIATED_TARGET"),
-            ("Target", "Pathway", "PARTICIPATES_IN"),
+            (NodeLabel.FORMULA.value, NodeLabel.SYNDROME.value, _RelType.TREATS.value),
+            (NodeLabel.SYNDROME.value, NodeLabel.TARGET.value, _RelType.ASSOCIATED_TARGET.value),
+            (NodeLabel.TARGET.value, NodeLabel.PATHWAY.value, _RelType.PARTICIPATES_IN.value),
         ]
         for src_label, dst_label, expected_rel in level_pairs:
             query = f"""
@@ -1102,9 +1105,9 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
                 logger.warning("downstream gap 查询失败 (%s): %s", src_label, exc)
 
     def _find_incomplete_composition_gaps_cypher(self, gaps: List[KnowledgeGap]) -> None:
-        query = """
-        MATCH (f:Formula)
-        OPTIONAL MATCH (f)-[r]->(h:Herb)
+        query = f"""
+        MATCH (f:{_safe_cypher_label(NodeLabel.FORMULA.value)})
+        OPTIONAL MATCH (f)-[r]->(h:{_safe_cypher_label(NodeLabel.HERB.value)})
         WHERE type(r) IN ['SOVEREIGN','MINISTER','ASSISTANT','ENVOY']
         WITH f, collect(DISTINCT type(r)) AS present_roles
         WHERE size(present_roles) < 4

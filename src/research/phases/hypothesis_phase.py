@@ -6,6 +6,10 @@ if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
 from src.research.evidence_contract import build_phase_evidence_protocol
+from src.research.graph_assets import (
+    build_graph_assets_payload,
+    build_hypothesis_subgraph,
+)
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
     resolve_learning_strategy,
@@ -66,10 +70,22 @@ class HypothesisPhaseMixin:
                 {"phase": "hypothesis", **self._hypothesis_tracker.to_metadata()}
             )
         phase_payload = dict(result)
+        hypothesis_subgraph = build_hypothesis_subgraph(cycle.cycle_id, hypotheses)
+        graph_assets = build_graph_assets_payload(hypothesis_subgraph=hypothesis_subgraph)
+        metadata.setdefault("graph_asset_subgraphs", sorted(key for key in graph_assets.keys() if key != "summary"))
+        metadata.setdefault("graph_asset_node_count", int(hypothesis_subgraph.get("node_count") or 0))
+        metadata.setdefault("graph_asset_edge_count", int(hypothesis_subgraph.get("edge_count") or 0))
         evidence_protocol = build_phase_evidence_protocol(
             "hypothesis",
             claims=[
-                {"claim_text": h.get("description") or h.get("hypothesis_text") or "", "claim_type": "hypothesis"}
+                {
+                    "claim_id": h.get("hypothesis_id") or "",
+                    "claim_text": h.get("statement") or h.get("description") or h.get("hypothesis_text") or "",
+                    "claim_type": "hypothesis",
+                    "source_entity": (h.get("source_entities") or [""])[0] if isinstance(h, dict) else "",
+                    "target_entity": h.get("title") or h.get("statement") or "",
+                    "relation_type": "proposes",
+                }
                 for h in hypotheses if isinstance(h, dict)
             ],
             evidence_grade="hypothesis",
@@ -84,6 +100,7 @@ class HypothesisPhaseMixin:
                 "domain": result.get("domain") or hypothesis_context.get("research_domain") or "integrative_research",
                 "selected_hypothesis_id": metadata.get("selected_hypothesis_id", ""),
                 "evidence_protocol": evidence_protocol,
+                "graph_assets": graph_assets,
             },
             artifacts=result.get("artifacts"),
             metadata=metadata,
