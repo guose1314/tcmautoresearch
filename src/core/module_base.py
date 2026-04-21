@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from src.core.phase_tracker import PhaseTrackerMixin
 from src.core.module_status import ModuleStatus, ModulePriority  # noqa: F401
@@ -157,16 +157,31 @@ class BaseModule(PhaseTrackerMixin, ABC):
         """
         pass
     
-    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(self, context: "Union[Dict[str, Any], Any]") -> "Union[Dict[str, Any], Any]":
         """
-        执行模块功能
-        
+        执行模块功能（I-10：同时接受 dict 和 ModuleContext 两种输入类型）。
+
+        当 context 为 ModuleContext（来自 ModuleInterface 子类）时，
+        自动从 context.input_data 提取 dict 并调用 _do_execute()，
+        返回值封装为 ModuleOutput。
+
         Args:
-            context (Dict[str, Any]): 执行上下文
-            
+            context: 执行上下文，可为 ``dict`` 或 ``ModuleContext``。
+
         Returns:
-            Dict[str, Any]: 执行结果
+            ``dict`` 或 ``ModuleOutput``，与 context 类型对应。
         """
+        # 判断是否为 ModuleContext（延迟导入避免循环）
+        try:
+            from src.core.module_interface import ModuleContext, ModuleOutput
+            is_module_context = isinstance(context, ModuleContext)
+        except ImportError:
+            is_module_context = False
+
+        if is_module_context:
+            return self._execute_with_module_context(context)
+
+        # ── 原始 dict 路径 ──────────────────────────────────────────────
         if not self.initialized:
             raise RuntimeError(f"模块 {self.module_name} 未初始化")
         
@@ -226,6 +241,48 @@ class BaseModule(PhaseTrackerMixin, ABC):
             
             raise
     
+    def _execute_with_module_context(self, context: Any) -> Any:
+        """处理 ModuleContext 输入，返回 ModuleOutput（I-10 兼容层）。"""
+        import time as _time
+        from datetime import datetime as _dt
+        try:
+            from src.core.module_interface import ModuleOutput
+        except ImportError:
+            return self._do_execute(getattr(context, "input_data", {}))
+
+        _start = _time.time()
+        input_dict: Dict[str, Any] = getattr(context, "input_data", {}) or {}
+        if not self.initialized:
+            return ModuleOutput(
+                output_id=f"error_{int(_start)}",
+                module_id=getattr(context, "module_id", ""),
+                module_name=self.module_name,
+                timestamp=_dt.now().isoformat(),
+                success=False,
+                error_message=f"模块 {self.module_name} 未初始化",
+            )
+        try:
+            raw = self._do_execute(input_dict)
+            return ModuleOutput(
+                output_id=f"output_{int(_time.time())}",
+                module_id=getattr(context, "module_id", ""),
+                module_name=self.module_name,
+                timestamp=_dt.now().isoformat(),
+                success=True,
+                output_data=raw,
+                execution_time=_time.time() - _start,
+            )
+        except Exception as exc:
+            return ModuleOutput(
+                output_id=f"error_{int(_time.time())}",
+                module_id=getattr(context, "module_id", ""),
+                module_name=self.module_name,
+                timestamp=_dt.now().isoformat(),
+                success=False,
+                error_message=str(exc),
+                execution_time=_time.time() - _start,
+            )
+
     @abstractmethod
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """

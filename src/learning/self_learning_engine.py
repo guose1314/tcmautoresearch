@@ -68,6 +68,8 @@ class SelfLearningEngine(BaseModule):
         self._adaptive_tuner = None
         # RAG 服务（可选，由外部注入或懒加载）
         self._rag_service: Optional[Any] = None
+        # StorageGateway（I-03：学习记录持久化到 PostgreSQL）
+        self._storage_gateway: Optional[Any] = None
 
     def _do_initialize(self) -> bool:
         try:
@@ -174,6 +176,8 @@ class SelfLearningEngine(BaseModule):
             self.performance_history.pop(0)
 
         self._save_learning_data()
+        # I-03：同步持久化到 PostgreSQL（若 StorageGateway 已注入）
+        self._persist_record_to_storage(record)
 
     def _generate_task_id(self, context: Dict[str, Any]) -> str:
         text_content = str(context.get("processed_text", ""))[:100]
@@ -275,6 +279,65 @@ class SelfLearningEngine(BaseModule):
         """注入 RAGService 实例（用于依赖注入或测试）。"""
         self._rag_service = rag_service
         self.logger.info("RAGService 已注入到 SelfLearningEngine")
+
+    # ------------------------------------------------------------------
+    # StorageGateway 集成（I-03）
+    # ------------------------------------------------------------------
+
+    def set_storage_gateway(self, gateway: Any) -> None:
+        """注入 StorageGateway，启用学习记录 PostgreSQL 持久化（指令 I-03）。
+
+        Args:
+            gateway: StorageGateway 实例。
+        """
+        self._storage_gateway = gateway
+        self.logger.info("StorageGateway 已注入到 SelfLearningEngine，学习记录将持久化到 PostgreSQL")
+
+    def load_history_from_storage(self) -> int:
+        """从 PostgreSQL 加载历史学习记录到内存（指令 I-03）。
+
+        应在 initialize() 之后、首次 execute() 之前调用，
+        确保重启后历史性能数据不丢失。
+
+        Returns:
+            成功加载的记录条数（0 表示无可用数据或 PG 未就绪）。
+        """
+        if self._storage_gateway is None:
+            return 0
+        try:
+            records_data = self._storage_gateway.load_learning_records(limit=200)
+            loaded = 0
+            for data in records_data:
+                try:
+                    rec = LearningRecord.from_dict(data)
+                    # 避免重复加载（以 task_id 去重）
+                    existing_ids = {r.task_id for r in self.learning_records}
+                    if rec.task_id not in existing_ids:
+                        self.learning_records.append(rec)
+                        self.performance_history.append(rec.performance)
+                        loaded += 1
+                except Exception:
+                    continue
+            if loaded:
+                # 用历史数据初始化 EWMA
+                if self.performance_history and self._ewma_score is None:
+                    self._ewma_score = self.performance_history[-1]
+                self.logger.info("从 PostgreSQL 加载了 %d 条历史学习记录", loaded)
+            return loaded
+        except Exception as exc:
+            self.logger.warning("从 PostgreSQL 加载历史记录失败: %s", exc)
+            return 0
+
+    def _persist_record_to_storage(self, record: "LearningRecord") -> None:
+        """将单条学习记录写入 PostgreSQL（非阻塞，失败不抛异常）。"""
+        if self._storage_gateway is None:
+            return
+        try:
+            data = record.to_dict()
+            data["ewma_score"] = round(self._ewma_score, 4) if self._ewma_score is not None else 0.0
+            self._storage_gateway.save_learning_record(data)
+        except Exception as exc:
+            self.logger.debug("学习记录持久化失败（跳过）: %s", exc)
 
     def _get_rag_service(self) -> Optional[Any]:
         """懒加载 RAGService，若已注入则直接使用。"""
