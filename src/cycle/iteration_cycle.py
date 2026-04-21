@@ -114,6 +114,9 @@ class IterationConfig:
     persist_failed_operations: bool = True
     minimum_stable_quality: float = 0.8
     export_contract_version: str = "d40.v1"
+    # 质量驱动迭代：停滞检测参数
+    stall_detection_window: int = 3    # 连续多少轮无改善则认为停滞
+    stall_threshold: float = 0.01      # 质量改善幅度低于此值则认为停滞
 
 class IterationCycle(PhaseTrackerMixin):
     """
@@ -985,21 +988,21 @@ class IterationCycle(PhaseTrackerMixin):
             self.logger.warning("已达最大迭代次数 %d，强制停止", self.config.max_iterations)
             return False
 
-        # 连续 3 轮质量无改善 → 停止（防止无效循环）
-        _STALL_WINDOW = 3
-        if len(self.results) >= _STALL_WINDOW:
+        # 连续 N 轮质量无改善 → 停止（防止无效循环）
+        _stall_window = self.config.stall_detection_window
+        if len(self.results) >= _stall_window:
             recent_scores = [
                 float(
                     r.quality_assessment.get("quality_score")
                     or r.quality_assessment.get("overall_quality")
                     or 0.0
                 )
-                for r in self.results[-_STALL_WINDOW:]
+                for r in self.results[-_stall_window:]
             ]
-            if max(recent_scores) - min(recent_scores) < 0.01:
+            if max(recent_scores) - min(recent_scores) < self.config.stall_threshold:
                 self.logger.warning(
                     "连续 %d 轮质量无改善 (min=%.3f, max=%.3f)，停止迭代",
-                    _STALL_WINDOW, min(recent_scores), max(recent_scores),
+                    _stall_window, min(recent_scores), max(recent_scores),
                 )
                 return False
 

@@ -18,8 +18,15 @@ from .arxiv_quick_helper import (
 )
 from .audit_history import AuditEntry, AuditHistory
 # CTextCorpusCollector 规范来源：src.collector.ctext_corpus_collector
-# 此处 re-export 仅保持向后兼容
+# 此处 re-export 仅保持向后兼容；请直接使用 from src.collector.ctext_corpus_collector import CTextCorpusCollector
+import warnings as _warnings
 from src.collector.ctext_corpus_collector import CTextCorpusCollector
+_warnings.warn(
+    "从 src.research 导入 CTextCorpusCollector 已废弃，请改用 src.collector.ctext_corpus_collector",
+    DeprecationWarning,
+    stacklevel=2,
+)
+del _warnings
 from .ctext_whitelist import build_batch_manifest, load_whitelist
 from .data_miner import DataMiner
 from .gap_analyzer import (
