@@ -86,7 +86,7 @@ class ModuleIterationCycle(PhaseTrackerMixin):
         self.knowledge_graph = nx.MultiDiGraph()
         self.logger = logging.getLogger(f"{__name__}.{module_name}")
 
-        self.logger.info(f"模块迭代循环初始化完成: {module_name}")
+        self.logger.info("模块迭代循环初始化完成: %s", module_name)
 
     def _initialize_phase_tracking(self, iteration_result: ModuleIterationResult) -> None:
         iteration_result.metadata["phase_history"] = []
@@ -321,7 +321,7 @@ class ModuleIterationCycle(PhaseTrackerMixin):
 
             self.iteration_history.append(iteration_result)
 
-            self.logger.info(f"模块迭代完成: {self.module_name}")
+            self.logger.info("模块迭代完成: %s", self.module_name)
             return iteration_result
 
         except Exception as error:
@@ -341,7 +341,7 @@ class ModuleIterationCycle(PhaseTrackerMixin):
                 },
             )
             self._sync_analysis_summary(iteration_result)
-            self.logger.error(f"模块迭代失败 {self.module_name}: {error}")
+            self.logger.error("模块迭代失败 %s: %s", self.module_name, error)
             self.logger.error(traceback.format_exc())
             self._update_performance_metrics(iteration_result)
             self.iteration_history.append(iteration_result)
@@ -365,7 +365,7 @@ class ModuleIterationCycle(PhaseTrackerMixin):
 
     def _generate_module_artifact(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """生成模块研究产物。"""
-        self.logger.info(f"生成模块 {self.module_name} 输出")
+        self.logger.info("生成模块 %s 输出", self.module_name)
         start_time = time.time()
 
         try:
@@ -416,16 +416,16 @@ class ModuleIterationCycle(PhaseTrackerMixin):
                     },
                 }
 
-            self.logger.info(f"模块 {self.module_name} 生成完成")
+            self.logger.info("模块 %s 生成完成", self.module_name)
             return artifact
 
         except Exception as error:
-            self.logger.error(f"模块 {self.module_name} 生成失败: {error}")
+            self.logger.error("模块 %s 生成失败: %s", self.module_name, error)
             raise
 
     def _test_module_artifact(self, artifact: Dict[str, Any]) -> Dict[str, Any]:
         """测试模块输出。"""
-        self.logger.info(f"测试模块 {self.module_name} 输出")
+        self.logger.info("测试模块 %s 输出", self.module_name)
 
         try:
             mock_mode = self.config.get("mock_mode", False)
@@ -492,11 +492,11 @@ class ModuleIterationCycle(PhaseTrackerMixin):
                     "raw_results": raw_results,
                 }
 
-            self.logger.info(f"模块 {self.module_name} 测试完成")
+            self.logger.info("模块 %s 测试完成", self.module_name)
             return test_results
 
         except Exception as error:
-            self.logger.error(f"模块 {self.module_name} 测试失败: {error}")
+            self.logger.error("模块 %s 测试失败: %s", self.module_name, error)
             raise
 
     def _repair_module_artifact(
@@ -505,7 +505,7 @@ class ModuleIterationCycle(PhaseTrackerMixin):
         test_results: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
         """修复模块问题。"""
-        self.logger.info(f"修复模块 {self.module_name} 问题")
+        self.logger.info("修复模块 %s 问题", self.module_name)
 
         try:
             repair_actions = []
@@ -525,7 +525,7 @@ class ModuleIterationCycle(PhaseTrackerMixin):
                             "priority": "high",
                         }
                         repair_actions.append(action)
-                        self.logger.info(f"自动修复问题: {failure}")
+                        self.logger.info("自动修复问题: %s", failure)
                 time.sleep(0.02)
             else:
                 if not test_results.get("passed", True):
@@ -564,11 +564,11 @@ class ModuleIterationCycle(PhaseTrackerMixin):
                                 "action_id": action.action_id,
                             })
 
-            self.logger.info(f"模块 {self.module_name} 修复完成")
+            self.logger.info("模块 %s 修复完成", self.module_name)
             return repair_actions
 
         except Exception as error:
-            self.logger.error(f"模块 {self.module_name} 修复失败: {error}")
+            self.logger.error("模块 %s 修复失败: %s", self.module_name, error)
             raise
 
     def _analyze_module_results(
@@ -578,7 +578,7 @@ class ModuleIterationCycle(PhaseTrackerMixin):
         repair_actions: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """分析模块结果。"""
-        self.logger.info(f"分析模块 {self.module_name} 结果")
+        self.logger.info("分析模块 %s 结果", self.module_name)
         start_time = time.time()
 
         try:
@@ -602,11 +602,11 @@ class ModuleIterationCycle(PhaseTrackerMixin):
                 "analysis_time": time.time() - start_time,
             }
 
-            self.logger.info(f"模块 {self.module_name} 分析完成")
+            self.logger.info("模块 %s 分析完成", self.module_name)
             return analysis_results
 
         except Exception as error:
-            self.logger.error(f"模块 {self.module_name} 分析失败: {error}")
+            self.logger.error("模块 %s 分析失败: %s", self.module_name, error)
             raise
 
     def _calculate_quality_metrics(
@@ -962,7 +962,7 @@ class ModuleIterationCycle(PhaseTrackerMixin):
             }
 
         except Exception as error:
-            self.logger.error(f"知识图谱构建失败: {error}")
+            self.logger.error("知识图谱构建失败: %s", error)
             return {"error": str(error)}
 
     def export_module_data(self, output_path: str) -> bool:
@@ -973,11 +973,11 @@ class ModuleIterationCycle(PhaseTrackerMixin):
             with open(output_path, "w", encoding="utf-8") as file_obj:
                 json.dump(module_data, file_obj, ensure_ascii=False, indent=2)
 
-            self.logger.info(f"模块数据已导出到: {output_path}")
+            self.logger.info("模块数据已导出到: %s", output_path)
             return True
 
         except Exception as error:
-            self.logger.error(f"模块数据导出失败: {error}")
+            self.logger.error("模块数据导出失败: %s", error)
             return False
 
     def cleanup(self) -> bool:
@@ -1005,9 +1005,9 @@ class ModuleIterationCycle(PhaseTrackerMixin):
                 "confidence_score": 0.0,
             }
 
-            self.logger.info(f"模块 {self.module_name} 资源清理完成")
+            self.logger.info("模块 %s 资源清理完成", self.module_name)
             return True
 
         except Exception as error:
-            self.logger.error(f"模块 {self.module_name} 资源清理失败: {error}")
+            self.logger.error("模块 %s 资源清理失败: %s", self.module_name, error)
             return False

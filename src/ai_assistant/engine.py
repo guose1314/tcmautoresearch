@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import logging
-import warnings
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)

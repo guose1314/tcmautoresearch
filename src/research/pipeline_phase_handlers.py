@@ -405,7 +405,7 @@ class ResearchPhaseHandlers:
                 offline_plan_only=offline_plan_only,
             )
         except Exception as e:
-            self.pipeline.logger.error(f"观察阶段文献检索失败: {e}")
+            self.pipeline.logger.error("观察阶段文献检索失败: %s", e)
             return {"error": str(e)}
         finally:
             retriever.close()
@@ -520,7 +520,7 @@ class ResearchPhaseHandlers:
                 }
             )
         except Exception as e:
-            self.pipeline.logger.error(f"观察阶段 ctext 采集失败: {e}")
+            self.pipeline.logger.error("观察阶段 ctext 采集失败: %s", e)
             return {"error": str(e)}
         finally:
             collector.cleanup()
@@ -644,7 +644,7 @@ class ResearchPhaseHandlers:
                 },
             }
         except Exception as e:
-            self.pipeline.logger.error(f"观察阶段预处理/抽取/建模链路失败: {e}")
+            self.pipeline.logger.error("观察阶段预处理/抽取/建模链路失败: %s", e)
             return {"error": str(e)}
         finally:
             reasoning_engine.cleanup()

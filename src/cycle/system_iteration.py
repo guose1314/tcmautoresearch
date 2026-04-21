@@ -323,7 +323,7 @@ class SystemIterationCycle(PhaseTrackerMixin):
             self._update_performance_metrics(iteration_result)
             self.system_iterations.append(iteration_result)
             self.failed_iterations.append(iteration_result)
-            self.logger.error(f"系统级迭代失败: {e}")
+            self.logger.error("系统级迭代失败: %s", e)
             self.logger.error(traceback.format_exc())
             raise
     
@@ -366,7 +366,7 @@ class SystemIterationCycle(PhaseTrackerMixin):
                     module_results[module_name] = result.__dict__
                     
                 except Exception as e:
-                    self.logger.error(f"模块 {module_name} 迭代失败: {e}")
+                    self.logger.error("模块 %s 迭代失败: %s", module_name, e)
                     module_results[module_name] = {
                         "error": str(e),
                         "status": "failed",
@@ -377,7 +377,7 @@ class SystemIterationCycle(PhaseTrackerMixin):
             return module_results
             
         except Exception as e:
-            self.logger.error(f"模块迭代执行失败: {e}")
+            self.logger.error("模块迭代执行失败: %s", e)
             raise
     
     def _test_system_level(self, context: Dict[str, Any], 
@@ -454,7 +454,7 @@ class SystemIterationCycle(PhaseTrackerMixin):
             return system_test_results
             
         except Exception as e:
-            self.logger.error(f"系统级测试失败: {e}")
+            self.logger.error("系统级测试失败: %s", e)
             raise
     
     def _analyze_system_results(self, context: Dict[str, Any], 
@@ -487,7 +487,7 @@ class SystemIterationCycle(PhaseTrackerMixin):
             return analysis_results
             
         except Exception as e:
-            self.logger.error(f"系统结果分析失败: {e}")
+            self.logger.error("系统结果分析失败: %s", e)
             raise
 
     def _build_analysis_results(
@@ -943,7 +943,7 @@ class SystemIterationCycle(PhaseTrackerMixin):
             return graph_data
             
         except Exception as e:
-            self.logger.error(f"系统知识图谱构建失败: {e}")
+            self.logger.error("系统知识图谱构建失败: %s", e)
             return {"error": str(e)}
     
     def export_system_data(self, output_path: str) -> bool:
@@ -957,12 +957,12 @@ class SystemIterationCycle(PhaseTrackerMixin):
                 json.dump(system_data, f, ensure_ascii=False, indent=2)
             self._complete_system_phase("export_system_data", phase_entry, start_time)
             
-            self.logger.info(f"系统数据已导出到: {output_path}")
+            self.logger.info("系统数据已导出到: %s", output_path)
             return True
             
         except Exception as e:
             self._fail_system_phase("export_system_data", phase_entry, start_time, str(e))
-            self.logger.error(f"系统数据导出失败: {e}")
+            self.logger.error("系统数据导出失败: %s", e)
             return False
     
     def cleanup(self) -> bool:
@@ -1000,5 +1000,5 @@ class SystemIterationCycle(PhaseTrackerMixin):
             return True
             
         except Exception as e:
-            self.logger.error(f"系统级迭代循环资源清理失败: {e}")
+            self.logger.error("系统级迭代循环资源清理失败: %s", e)
             return False

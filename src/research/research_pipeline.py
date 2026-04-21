@@ -4,7 +4,9 @@
 基于AI的科研闭环流程管理系统
 """
 
+import json
 import logging
+from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 

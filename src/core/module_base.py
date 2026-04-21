@@ -14,14 +14,15 @@ from abc import ABC, abstractmethod
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Union
 
 from src.core.phase_tracker import PhaseTrackerMixin
+from src.core.module_status import ModuleStatus, ModulePriority  # noqa: F401
 
 
 # Re-export deprecated helper types from module_interface (lazy to avoid circular import)
 def __getattr__(name):
-    _interface_types = ("ModuleContext", "ModuleOutput", "ModuleStatus", "ModulePriority")
+    _interface_types = ("ModuleContext", "ModuleOutput")
     if name in _interface_types:
         import importlib
         mod = importlib.import_module("src.core.module_interface")
@@ -73,7 +74,7 @@ class BaseModule(PhaseTrackerMixin, ABC):
         }
         self.logger = logging.getLogger(f"{__name__}.{module_name}")
         self.initialized = False
-        self.status = "created"
+        self.status: ModuleStatus = ModuleStatus.CREATED
         self.metrics = {
             "execution_count": 0,
             "total_execution_time": 0.0,
@@ -90,7 +91,15 @@ class BaseModule(PhaseTrackerMixin, ABC):
         self.performance_history: deque = deque(maxlen=100)
         self.academic_insights: deque = deque(maxlen=200)
         self.recommendations: deque = deque(maxlen=200)
-        
+        # PhaseTrackerMixin Pattern-A 必要属性
+        self.phase_history: list = []
+        self.phase_timings: dict = {}
+        self.completed_phases: list = []
+        self.failed_phase: object = None
+        self.final_status: object = None
+        self.last_completed_phase: object = None
+        self.failed_operations: list = []
+
         self.logger.info("模块 %s 基类初始化完成", module_name)
     
     def initialize(self, config: Dict[str, Any] | None = None) -> bool:
@@ -105,7 +114,7 @@ class BaseModule(PhaseTrackerMixin, ABC):
         """
         start_time = time.time()
         phase_started_at = self._start_phase("initialize", {"config_keys": sorted((config or {}).keys())})
-        self.logger.info(f"开始初始化模块: {self.module_name}")
+        self.logger.info("开始初始化模块: %s", self.module_name)
         
         try:
             # 更新配置
@@ -115,16 +124,16 @@ class BaseModule(PhaseTrackerMixin, ABC):
             # 执行具体初始化逻辑
             if self._do_initialize():
                 self.initialized = True
-                self.status = "initialized"
+                self.status = ModuleStatus.INITIALIZED
                 self.metrics["last_execution_time"] = time.time() - start_time
-                self.final_status = "initialized"
+                self.final_status = ModuleStatus.INITIALIZED.value
                 self._complete_phase(
                     "initialize",
                     phase_started_at,
                     {"initialized": True},
                     final_status="initialized",
                 )
-                self.logger.info(f"模块 {self.module_name} 初始化成功")
+                self.logger.info("模块 %s 初始化成功", self.module_name)
                 return True
             self._fail_phase(
                 "initialize",
@@ -134,14 +143,14 @@ class BaseModule(PhaseTrackerMixin, ABC):
             )
                 
         except Exception as e:
-            self.status = "error"
+            self.status = ModuleStatus.ERROR
             self._fail_phase(
                 "initialize",
                 phase_started_at,
                 e,
                 {"config_keys": sorted((config or {}).keys())},
             )
-            self.logger.error(f"模块 {self.module_name} 初始化失败: {e}")
+            self.logger.error("模块 %s 初始化失败: %s", self.module_name, e)
             self.logger.error(traceback.format_exc())
             
         return False
@@ -156,16 +165,31 @@ class BaseModule(PhaseTrackerMixin, ABC):
         """
         pass
     
-    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(self, context: "Union[Dict[str, Any], Any]") -> "Union[Dict[str, Any], Any]":
         """
-        执行模块功能
-        
+        执行模块功能（I-10：同时接受 dict 和 ModuleContext 两种输入类型）。
+
+        当 context 为 ModuleContext（来自 ModuleInterface 子类）时，
+        自动从 context.input_data 提取 dict 并调用 _do_execute()，
+        返回值封装为 ModuleOutput。
+
         Args:
-            context (Dict[str, Any]): 执行上下文
-            
+            context: 执行上下文，可为 ``dict`` 或 ``ModuleContext``。
+
         Returns:
-            Dict[str, Any]: 执行结果
+            ``dict`` 或 ``ModuleOutput``，与 context 类型对应。
         """
+        # 判断是否为 ModuleContext（延迟导入避免循环）
+        try:
+            from src.core.module_interface import ModuleContext, ModuleOutput
+            is_module_context = isinstance(context, ModuleContext)
+        except ImportError:
+            is_module_context = False
+
+        if is_module_context:
+            return self._execute_with_module_context(context)
+
+        # ── 原始 dict 路径 ──────────────────────────────────────────────
         if not self.initialized:
             raise RuntimeError(f"模块 {self.module_name} 未初始化")
         
@@ -175,7 +199,7 @@ class BaseModule(PhaseTrackerMixin, ABC):
             {"module_name": self.module_name, "context_keys": sorted(context.keys())},
         )
         self.module_start_time = start_time
-        self.logger.info(f"开始执行模块: {self.module_name}")
+        self.logger.info("开始执行模块: %s", self.module_name)
         
         try:
             # 执行具体执行逻辑
@@ -194,20 +218,20 @@ class BaseModule(PhaseTrackerMixin, ABC):
             
             # 生成改进建议
             self._generate_recommendations(result)
-            self.final_status = "completed"
+            self.final_status = ModuleStatus.COMPLETED.value
             self._complete_phase(
                 "execute",
                 phase_started_at,
                 {"context_keys": sorted(context.keys())},
-                final_status="completed",
+                final_status=ModuleStatus.COMPLETED.value,
             )
             
-            self.logger.info(f"模块 {self.module_name} 执行成功，耗时: {execution_time:.2f}s")
+            self.logger.info("模块 %s 执行成功，耗时: %.2fs", self.module_name, execution_time)
             return result
             
         except Exception as e:
             execution_time = time.time() - start_time
-            self.logger.error(f"模块 {self.module_name} 执行失败: {e}")
+            self.logger.error("模块 %s 执行失败: %s", self.module_name, e)
             self.logger.error(traceback.format_exc())
             
             # 更新错误指标
@@ -225,6 +249,48 @@ class BaseModule(PhaseTrackerMixin, ABC):
             
             raise
     
+    def _execute_with_module_context(self, context: Any) -> Any:
+        """处理 ModuleContext 输入，返回 ModuleOutput（I-10 兼容层）。"""
+        import time as _time
+        from datetime import datetime as _dt
+        try:
+            from src.core.module_interface import ModuleOutput
+        except ImportError:
+            return self._do_execute(getattr(context, "input_data", {}))
+
+        _start = _time.time()
+        input_dict: Dict[str, Any] = getattr(context, "input_data", {}) or {}
+        if not self.initialized:
+            return ModuleOutput(
+                output_id=f"error_{int(_start)}",
+                module_id=getattr(context, "module_id", ""),
+                module_name=self.module_name,
+                timestamp=_dt.now().isoformat(),
+                success=False,
+                error_message=f"模块 {self.module_name} 未初始化",
+            )
+        try:
+            raw = self._do_execute(input_dict)
+            return ModuleOutput(
+                output_id=f"output_{int(_time.time())}",
+                module_id=getattr(context, "module_id", ""),
+                module_name=self.module_name,
+                timestamp=_dt.now().isoformat(),
+                success=True,
+                output_data=raw,
+                execution_time=_time.time() - _start,
+            )
+        except Exception as exc:
+            return ModuleOutput(
+                output_id=f"error_{int(_time.time())}",
+                module_id=getattr(context, "module_id", ""),
+                module_name=self.module_name,
+                timestamp=_dt.now().isoformat(),
+                success=False,
+                error_message=str(exc),
+                execution_time=_time.time() - _start,
+            )
+
     @abstractmethod
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -247,12 +313,12 @@ class BaseModule(PhaseTrackerMixin, ABC):
         """
         start_time = time.time()
         phase_started_at = self._start_phase("cleanup", {"module_name": self.module_name})
-        self.logger.info(f"开始清理模块资源: {self.module_name}")
+        self.logger.info("开始清理模块资源: %s", self.module_name)
         
         try:
             if self._do_cleanup():
                 self.initialized = False
-                self.status = "cleaned"
+                self.status = ModuleStatus.CLEANED
                 self.metrics["last_execution_time"] = time.time() - start_time
                 self.metrics["execution_count"] = 0
                 self.metrics["total_execution_time"] = 0.0
@@ -270,17 +336,17 @@ class BaseModule(PhaseTrackerMixin, ABC):
                 self.failed_operations.clear()
                 self.failed_phase = None
                 self.last_completed_phase = None
-                self.final_status = "cleaned"
-                self.logger.info(f"模块 {self.module_name} 资源清理完成")
+                self.final_status = ModuleStatus.CLEANED.value
+                self.logger.info("模块 %s 资源清理完成", self.module_name)
                 
                 # 不关闭全局线程池
                 # self.executor.shutdown(wait=True)
                 return True
                 
         except Exception as e:
-            self.status = "error"
+            self.status = ModuleStatus.ERROR
             self._fail_phase("cleanup", phase_started_at, e, {"module_name": self.module_name})
-            self.logger.error(f"模块 {self.module_name} 资源清理失败: {e}")
+            self.logger.error("模块 %s 资源清理失败: %s", self.module_name, e)
             self.logger.error(traceback.format_exc())
             
         return False
@@ -352,9 +418,9 @@ class BaseModule(PhaseTrackerMixin, ABC):
             "initialized": self.initialized,
             "config": self._serialize_value(self.config),
             "metrics": self._serialize_value(self.metrics),
-            "performance_history": self._serialize_value(self.performance_history[-10:]),  # 最近10次
-            "academic_insights": self._serialize_value(self.academic_insights[-5:]),  # 最近5个洞察
-            "recommendations": self._serialize_value(self.recommendations[-5:]),  # 最近5个建议
+            "performance_history": self._serialize_value(list(self.performance_history)[-10:]),  # 最近10次
+            "academic_insights": self._serialize_value(list(self.academic_insights)[-5:]),  # 最近5个洞察
+            "recommendations": self._serialize_value(list(self.recommendations)[-5:]),  # 最近5个建议
             "failed_operations": self._serialize_value(self.failed_operations),
             "metadata": self._build_runtime_metadata(),
             "last_execution": self.module_start_time
@@ -487,7 +553,64 @@ class BaseModule(PhaseTrackerMixin, ABC):
                     "tags": ["performance", "optimization", "recommendation"]
                 }
                 self.recommendations.append(recommendation)
-    
+
+    # ------------------------------------------------------------------
+    # 公共辅助方法（供子类重写以提供领域定制实现）
+    # ------------------------------------------------------------------
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        """构建运行时元数据快照。子类可重写以添加领域特定字段。"""
+        return self._build_runtime_metadata_from_dict(
+            {
+                "phase_history": self.phase_history,
+                "phase_timings": self.phase_timings,
+                "completed_phases": self.completed_phases,
+                "failed_phase": self.failed_phase,
+                "final_status": self.final_status,
+                "last_completed_phase": self.last_completed_phase,
+            }
+        )
+
+    def _build_analysis_summary(self) -> Dict[str, Any]:
+        """构建模块运行状态分析摘要。子类可重写以提供领域定制摘要。"""
+        total_execs = len(self.performance_history)
+        has_failures = bool(self.failed_phase or self.failed_operations)
+
+        if self.status in (ModuleStatus.CLEANED, "cleaned") or not self.initialized:
+            status = "idle"
+        elif has_failures:
+            status = "needs_followup"
+        elif total_execs == 0:
+            status = "idle"
+        else:
+            success_count = sum(1 for h in self.performance_history if h.get("success", False))
+            pass_rate = success_count / total_execs if total_execs > 0 else 0.0
+            min_rate = self.governance_config.get("minimum_stable_success_rate", 0.8)
+            status = "stable" if pass_rate >= min_rate else "needs_followup"
+
+        return {
+            "status": status,
+            "execution_count": total_execs,
+            "completed_phase_count": len(self.completed_phases),
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.failed_phase,
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
+
+    def _build_report_metadata(self) -> Dict[str, Any]:
+        """构建报告元数据。子类可重写以提供领域定制元数据。"""
+        return {
+            "contract_version": self.governance_config.get("export_contract_version", "d46.v1"),
+            "generated_at": datetime.now().isoformat(),
+            "result_schema": f"{self.module_name}_report",
+            "completed_phases": list(self.completed_phases),
+            "failed_phase": self.failed_phase,
+            "failed_operation_count": len(self.failed_operations),
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
+
     def get_performance_report(self) -> Dict[str, Any]:
         """
         获取性能报告
@@ -521,9 +644,9 @@ class BaseModule(PhaseTrackerMixin, ABC):
             "success_rate": success_rate,
             "average_execution_time": avg_execution_time,
             "metrics": self._serialize_value(self.metrics),
-            "performance_history": self._serialize_value(self.performance_history[-10:]),  # 最近10次
-            "academic_insights": self._serialize_value(self.academic_insights[-5:]),  # 最近5个洞察
-            "recommendations": self._serialize_value(self.recommendations[-5:]),  # 最近5个建议
+            "performance_history": self._serialize_value(list(self.performance_history)[-10:]),  # 最近10次
+            "academic_insights": self._serialize_value(list(self.academic_insights)[-5:]),  # 最近5个洞察
+            "recommendations": self._serialize_value(list(self.recommendations)[-5:]),  # 最近5个建议
             "analysis_summary": self._build_analysis_summary(),
             "failed_operations": self._serialize_value(self.failed_operations),
             "metadata": self._build_runtime_metadata(),
@@ -555,13 +678,22 @@ class BaseModule(PhaseTrackerMixin, ABC):
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(module_data, f, ensure_ascii=False, indent=2)
             
-            self.logger.info(f"模块数据已导出到: {output_path}")
+            self.logger.info("模块数据已导出到: %s", output_path)
             return True
             
         except Exception as e:
             self._fail_phase("export_module_data", phase_started_at, e, {"output_path": output_path})
-            self.logger.error(f"模块数据导出失败: {e}")
+            self.logger.error("模块数据导出失败: %s", e)
             return False
+
+    def _build_export_payload(self, output_path: str) -> Dict[str, Any]:
+        """构建导出数据负载。子类可重写以添加领域特定字段。"""
+        return {
+            "report_metadata": self._build_report_metadata(),
+            "module_info": self.get_module_info(),
+            "performance_report": self.get_performance_report(),
+            "output_path": output_path,
+        }
     
     def get_module_health(self) -> Dict[str, Any]:
         """
@@ -663,7 +795,7 @@ class AsyncBaseModule(BaseModule):
             {"module_name": self.module_name, "context_keys": sorted(context.keys())},
         )
         self.module_start_time = start_time
-        self.logger.info(f"开始异步执行模块: {self.module_name}")
+        self.logger.info("开始异步执行模块: %s", self.module_name)
         
         try:
             # 异步执行具体逻辑
@@ -692,12 +824,12 @@ class AsyncBaseModule(BaseModule):
                 final_status="completed",
             )
             
-            self.logger.info(f"模块 {self.module_name} 异步执行成功，耗时: {execution_time:.2f}s")
+            self.logger.info("模块 %s 异步执行成功，耗时: %.2fs", self.module_name, execution_time)
             return result
             
         except Exception as e:
             execution_time = time.time() - start_time
-            self.logger.error(f"模块 {self.module_name} 异步执行失败: {e}")
+            self.logger.error("模块 %s 异步执行失败: %s", self.module_name, e)
             self.logger.error(traceback.format_exc())
             
             # 更新错误指标

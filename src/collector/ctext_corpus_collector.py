@@ -9,8 +9,6 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
-import requests
-
 from src.collector.ctext_whitelist import build_batch_manifest, load_whitelist
 from src.common.http_client import HttpClient
 from src.core.module_base import BaseModule
@@ -45,7 +43,7 @@ class CTextCorpusCollector(BaseModule):
             self.logger.info("CText 采集器初始化完成")
             return True
         except Exception as e:
-            self.logger.error(f"CText 采集器初始化失败: {e}")
+            self.logger.error("CText 采集器初始化失败: %s", e)
             return False
 
     def _do_cleanup(self) -> bool:
@@ -55,7 +53,7 @@ class CTextCorpusCollector(BaseModule):
                 self._http = None
             return True
         except Exception as e:
-            self.logger.error(f"CText 采集器清理失败: {e}")
+            self.logger.error("CText 采集器清理失败: %s", e)
             return False
 
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -144,7 +142,7 @@ class CTextCorpusCollector(BaseModule):
             if urn:
                 urns.append(urn)
             else:
-                self.logger.warning(f"无法从 URL 解析 URN: {url}")
+                self.logger.warning("无法从 URL 解析 URN: %s", url)
         return urns
 
     def _collect_urn(

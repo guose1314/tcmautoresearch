@@ -78,7 +78,7 @@ class DocumentPreprocessor(BaseModule):
                 self.logger.info("jieba 分词引擎已加载")
                 if self.user_dict_path:
                     jieba.load_userdict(self.user_dict_path)
-                    self.logger.info(f"加载用户词典: {self.user_dict_path}")
+                    self.logger.info("加载用户词典: %s", self.user_dict_path)
             else:
                 self.logger.warning("jieba 未安装，分词功能将不可用")
             
@@ -86,9 +86,9 @@ class DocumentPreprocessor(BaseModule):
             if HAS_OPENCC and OpenCC is not None and self.convert_mode:
                 try:
                     self._opencc = OpenCC(self.convert_mode)
-                    self.logger.info(f"OpenCC 初始化完成 (mode={self.convert_mode})")
+                    self.logger.info("OpenCC 初始化完成 (mode=%s)", self.convert_mode)
                 except Exception as e:
-                    self.logger.warning(f"OpenCC 初始化失败: {e}，繁简转换将禁用")
+                    self.logger.warning("OpenCC 初始化失败: %s，繁简转换将禁用", e)
                     self._opencc = None
             else:
                 self.logger.info("OpenCC 未启用或未安装")
@@ -96,7 +96,7 @@ class DocumentPreprocessor(BaseModule):
             self.logger.info("文档预处理器初始化完成")
             return True
         except Exception as e:
-            self.logger.error(f"文档预处理器初始化失败: {e}")
+            self.logger.error("文档预处理器初始化失败: %s", e)
             return False
     
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -119,7 +119,7 @@ class DocumentPreprocessor(BaseModule):
             return output_data
             
         except Exception as e:
-            self.logger.error(f"文档预处理执行失败: {e}")
+            self.logger.error("文档预处理执行失败: %s", e)
             raise
 
     def _validate_raw_text(self, context: Dict[str, Any]) -> str:
@@ -184,7 +184,7 @@ class DocumentPreprocessor(BaseModule):
         try:
             return self._opencc.convert(text)
         except Exception as e:
-            self.logger.warning(f"繁简转换失败: {e}，返回原文本")
+            self.logger.warning("繁简转换失败: %s，返回原文本", e)
             return text
     
     def _clean_line_breaks(self, text: str) -> str:
@@ -229,7 +229,7 @@ class DocumentPreprocessor(BaseModule):
 
             return list(jieba.cut(text))
         except Exception as e:
-            self.logger.warning(f"分词失败: {e}，使用空格分割")
+            self.logger.warning("分词失败: %s，使用空格分割", e)
             return text.split()
     
     def segment_with_ancient_punctuation(self, text: str) -> List[List[Any]]:
@@ -298,5 +298,5 @@ class DocumentPreprocessor(BaseModule):
             self.logger.info("文档预处理器资源清理完成")
             return True
         except Exception as e:
-            self.logger.error(f"文档预处理器资源清理失败: {e}")
+            self.logger.error("文档预处理器资源清理失败: %s", e)
             return False

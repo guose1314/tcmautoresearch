@@ -394,11 +394,11 @@ class TestDrivenIterationManager(PhaseTrackerMixin):
                 "test_count": len(test_cases)
             }
             
-            self.logger.info(f"测试套件 {suite_name} 添加成功")
+            self.logger.info("测试套件 %s 添加成功", suite_name)
             return True
             
         except Exception as e:
-            self.logger.error(f"测试套件 {suite_name} 添加失败: {e}")
+            self.logger.error("测试套件 %s 添加失败: %s", suite_name, e)
             return False
     
     def run_test_driven_iteration(self, context: Dict[str, Any]) -> TestDrivenIteration:
@@ -487,7 +487,7 @@ class TestDrivenIterationManager(PhaseTrackerMixin):
                         test_results.append(test_result)
                         
                     except Exception as e:
-                        self.logger.error(f"测试用例执行失败: {e}")
+                        self.logger.error("测试用例执行失败: %s", e)
                         test_result = TestResult(
                             test_id=f"{suite_name}_case_{i}",
                             test_name=test_case.get("name", f"test_case_{i}"),
@@ -503,7 +503,7 @@ class TestDrivenIterationManager(PhaseTrackerMixin):
             return test_results
             
         except Exception as e:
-            self.logger.error(f"测试套件执行失败: {e}")
+            self.logger.error("测试套件执行失败: %s", e)
             raise
     
     def _execute_single_test(self, suite_name: str, test_case: Dict[str, Any], 
@@ -546,11 +546,11 @@ class TestDrivenIterationManager(PhaseTrackerMixin):
                 academic_relevance=self._calculate_academic_relevance(test_case)
             )
             
-            self.logger.info(f"测试用例 {test_name} 执行完成")
+            self.logger.info("测试用例 %s 执行完成", test_name)
             return result
             
         except Exception as e:
-            self.logger.error(f"测试用例执行失败: {e}")
+            self.logger.error("测试用例执行失败: %s", e)
             return TestResult(
                 test_id=f"{suite_name}_case_{index}",
                 test_name=test_case.get("name", f"test_case_{index}"),
@@ -599,7 +599,7 @@ class TestDrivenIterationManager(PhaseTrackerMixin):
             return validation_results
             
         except Exception as e:
-            self.logger.error(f"测试结果验证失败: {e}")
+            self.logger.error("测试结果验证失败: %s", e)
             raise
     
     def _analyze_test_results(
@@ -634,7 +634,7 @@ class TestDrivenIterationManager(PhaseTrackerMixin):
             return analysis_results
 
         except Exception as e:
-            self.logger.error(f"测试结果分析失败: {e}")
+            self.logger.error("测试结果分析失败: %s", e)
             raise
 
     def _generate_academic_insights(
@@ -775,7 +775,7 @@ class TestDrivenIterationManager(PhaseTrackerMixin):
         self._finalize_iteration(iteration, start_time, success=False)
         iteration.validation_results = {"error": str(exception)}
         self._sync_analysis_summary(iteration)
-        self.logger.error(f"测试驱动迭代失败: {exception}")
+        self.logger.error("测试驱动迭代失败: %s", exception)
         self.logger.error(traceback.format_exc())
         self._update_performance_metrics(iteration)
         self._save_iteration_results(iteration)
@@ -984,11 +984,11 @@ class TestDrivenIterationManager(PhaseTrackerMixin):
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(test_data, f, ensure_ascii=False, indent=2)
             
-            self.logger.info(f"测试数据已导出到: {output_path}")
+            self.logger.info("测试数据已导出到: %s", output_path)
             return True
             
         except Exception as e:
-            self.logger.error(f"测试数据导出失败: {e}")
+            self.logger.error("测试数据导出失败: %s", e)
             return False
     
     def cleanup(self) -> bool:
@@ -1021,5 +1021,5 @@ class TestDrivenIterationManager(PhaseTrackerMixin):
             return True
             
         except Exception as e:
-            self.logger.error(f"测试驱动迭代管理器资源清理失败: {e}")
+            self.logger.error("测试驱动迭代管理器资源清理失败: %s", e)
             return False

@@ -286,7 +286,10 @@ class KnowledgeGraphService:
                         relationship_type=rel.relation_type,
                         properties=rel.properties,
                     )
-                    self._neo4j_driver.create_relationship(edge)
+                    # 默认 label 为 "Entity"；调用方可通过 rel.properties 携带具体标签
+                    src_label = str(rel.properties.get("source_label", "Entity"))
+                    tgt_label = str(rel.properties.get("target_label", "Entity"))
+                    self._neo4j_driver.create_relationship(edge, src_label, tgt_label)
                 except Exception as exc:
                     logger.warning("Neo4j 添加关系失败 (%s): %s", desc, exc)
 
@@ -501,7 +504,6 @@ class KnowledgeGraphService:
         # 降级到 NetworkX
         if self._networkx_graph is not None and entity in self._networkx_graph:
             try:
-                import networkx as nx
                 # BFS 获取子图
                 bfs_nodes = set()
                 bfs_nodes.add(entity)

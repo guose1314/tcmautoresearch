@@ -198,7 +198,7 @@ class ResearchAdvisor:
             return ""
         try:
             return engine.generate(prompt, system_prompt=system_prompt)
-        except Exception as exc:
+        except Exception:
             logger.exception("LLM 生成失败")
             return ""
 

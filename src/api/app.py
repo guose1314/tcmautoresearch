@@ -84,8 +84,43 @@ def create_app(
     )
 
     @app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok", "environment": resolved_settings.environment}
+    def health() -> dict[str, Any]:
+        """
+        增强版健康检查（指令 I-06）。
+
+        检查各存储后端（PostgreSQL / Neo4j / ChromaDB）的连通状态，
+        并汇总 active_modules 数量，使 Kubernetes liveness 探针可精确判断服务健康状态。
+        """
+        storage_status: Dict[str, Any] = {}
+        try:
+            gateway = getattr(app.state, "storage_gateway", None)
+            if gateway is None:
+                from src.storage.storage_gateway import StorageGateway
+                gateway = StorageGateway.from_config(
+                    resolved_settings.materialize_runtime_config()
+                    if hasattr(resolved_settings, "materialize_runtime_config") else {}
+                )
+                app.state.storage_gateway = gateway
+            storage_status["postgresql"] = "ok" if getattr(gateway, "postgres_available", False) else "disabled"
+            storage_status["neo4j"] = "ok" if getattr(gateway, "_neo4j_driver", None) is not None else "disabled"
+            storage_status["chromadb"] = "ok" if getattr(gateway, "_rag_service", None) is not None else "disabled"
+        except Exception as exc:
+            storage_status["error"] = str(exc)
+
+        arch = getattr(app.state, "architecture", None)
+        active_modules = 0
+        if arch is not None:
+            try:
+                active_modules = len(getattr(arch, "active_modules", {}) or {})
+            except Exception:
+                pass
+
+        return {
+            "status": "ok",
+            "environment": resolved_settings.environment,
+            "storage": storage_status,
+            "active_modules": active_modules,
+        }
 
     @app.get("/liveness")
     def liveness(response: Response) -> Dict[str, Any]:

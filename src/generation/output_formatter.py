@@ -26,7 +26,7 @@ class OutputGenerator(BaseModule):
             self.logger.info("输出生成器初始化完成")
             return True
         except Exception as e:
-            self.logger.error(f"输出生成器初始化失败: {e}")
+            self.logger.error("输出生成器初始化失败: %s", e)
             return False
     
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -43,7 +43,7 @@ class OutputGenerator(BaseModule):
             }
             
         except Exception as e:
-            self.logger.error(f"输出生成执行失败: {e}")
+            self.logger.error("输出生成执行失败: %s", e)
             raise
     
     def _generate_output_format(self, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -502,7 +502,7 @@ class OutputGenerator(BaseModule):
             self.logger.info("输出生成器资源清理完成")
             return True
         except Exception as e:
-            self.logger.error(f"输出生成器资源清理失败: {e}")
+            self.logger.error("输出生成器资源清理失败: %s", e)
             return False
 
 

@@ -69,9 +69,9 @@ class Neo4jDriver:
             with self.driver.session(database=self.database) as session:
                 result = session.run("RETURN 1")
                 result.consume()
-            logger.info(f"Neo4j 连接成功: {self.uri}")
+            logger.info("Neo4j 连接成功: %s", self.uri)
         except Exception as e:
-            logger.error(f"Neo4j 连接失败: {e}")
+            logger.error("Neo4j 连接失败: %s", e)
             raise
     
     def close(self):
@@ -87,7 +87,7 @@ class Neo4jDriver:
                 session.execute_write(lambda tx: tx.run("MATCH (n) DETACH DELETE n"))
             logger.info("Neo4j 数据库已清空")
         except Exception as e:
-            logger.error(f"清空数据库失败: {e}")
+            logger.error("清空数据库失败: %s", e)
             raise
     
     # ==================== 节点操作 ====================
@@ -119,7 +119,7 @@ class Neo4jDriver:
                 )
             return True
         except Exception as e:
-            logger.error(f"创建节点失败: {e}")
+            logger.error("创建节点失败: %s", e)
             return False
     
     def batch_create_nodes(self, nodes: List[Neo4jNode]) -> bool:
@@ -146,10 +146,10 @@ class Neo4jDriver:
                     """
                     session.execute_write(lambda tx: tx.run(query, rows=rows))
 
-            logger.info(f"批量创建节点成功: {len(nodes)} 个节点")
+            logger.info("批量创建节点成功: %s 个节点", len(nodes))
             return True
         except Exception as e:
-            logger.error(f"批量创建节点失败: {e}")
+            logger.error("批量创建节点失败: %s", e)
             return False
     
     def get_node(self, node_id: str, label: str) -> Optional[Dict]:
@@ -175,7 +175,7 @@ class Neo4jDriver:
                 return dict(result['n'])
             return None
         except Exception as e:
-            logger.error(f"获取节点失败: {e}")
+            logger.error("获取节点失败: %s", e)
             return None
     
     def delete_node(self, node_id: str, label: str) -> bool:
@@ -187,7 +187,7 @@ class Neo4jDriver:
                 session.execute_write(lambda tx: tx.run(query, id=node_id))
             return True
         except Exception as e:
-            logger.error(f"删除节点失败: {e}")
+            logger.error("删除节点失败: %s", e)
             return False
     
     # ==================== 关系操作 ====================
@@ -224,7 +224,7 @@ class Neo4jDriver:
                 )
             return True
         except Exception as e:
-            logger.error(f"创建关系失败: {e}")
+            logger.error("创建关系失败: %s", e)
             return False
     
     def batch_create_relationships(self, edges: List[Tuple[Neo4jEdge, str, str]]) -> bool:
@@ -262,10 +262,10 @@ class Neo4jDriver:
                     """
                     session.execute_write(lambda tx: tx.run(query, rows=rows))
 
-            logger.info(f"批量创建关系成功: {len(edges)} 个关系")
+            logger.info("批量创建关系成功: %s 个关系", len(edges))
             return True
         except Exception as e:
-            logger.error(f"批量创建关系失败: {e}")
+            logger.error("批量创建关系失败: %s", e)
             return False
     
     def get_relationships(self, source_id: str, source_label: str, 
@@ -306,7 +306,7 @@ class Neo4jDriver:
                 for result in results
             ]
         except Exception as e:
-            logger.error(f"获取关系失败: {e}")
+            logger.error("获取关系失败: %s", e)
             return []
     
     def delete_relationship(self, source_id: str, target_id: str, 
@@ -328,7 +328,7 @@ class Neo4jDriver:
                 )
             return True
         except Exception as e:
-            logger.error(f"删除关系失败: {e}")
+            logger.error("删除关系失败: %s", e)
             return False
     
     # ==================== 查询操作 ====================
@@ -376,7 +376,7 @@ class Neo4jDriver:
                 }
             return {}
         except Exception as e:
-            logger.error(f"查询方剂组成失败: {e}")
+            logger.error("查询方剂组成失败: %s", e)
             return {}
     
     def find_formulas_treating_syndrome(self, syndrome_name: str) -> List[Dict]:
@@ -402,7 +402,7 @@ class Neo4jDriver:
             
             return [{'name': result['name'], 'properties': dict(result['properties'])} for result in results]
         except Exception as e:
-            logger.error(f"查询治疗方剂失败: {e}")
+            logger.error("查询治疗方剂失败: %s", e)
             return []
     
     def find_herb_efficacies(self, herb_name: str) -> List[str]:
@@ -428,7 +428,7 @@ class Neo4jDriver:
             
             return [result['efficacy'] for result in results]
         except Exception as e:
-            logger.error(f"查询功效失败: {e}")
+            logger.error("查询功效失败: %s", e)
             return []
     
     def find_similar_formulas(self, formula_name: str, limit: int = 10) -> List[Dict]:
@@ -456,7 +456,7 @@ class Neo4jDriver:
             
             return [{'name': result['name'], 'properties': dict(result['properties'])} for result in results]
         except Exception as e:
-            logger.error(f"查询类似方剂失败: {e}")
+            logger.error("查询类似方剂失败: %s", e)
             return []
 
     def collect_formula_similarity_evidence(self, formula_name: str, similar_formula_name: str) -> Dict[str, Any]:
@@ -535,7 +535,7 @@ class Neo4jDriver:
                 "evidence_score": evidence_score,
             }
         except Exception as e:
-            logger.error(f"查询方剂图谱证据失败: {e}")
+            logger.error("查询方剂图谱证据失败: %s", e)
             return {}
     
     def get_graph_statistics(self) -> Dict[str, Any]:
@@ -560,7 +560,7 @@ class Neo4jDriver:
                 'total_relationships': sum(result['count'] for result in rels),
             }
         except Exception as e:
-            logger.error(f"获取统计信息失败: {e}")
+            logger.error("获取统计信息失败: %s", e)
             return {}
 
 

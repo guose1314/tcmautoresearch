@@ -208,23 +208,45 @@ database:
   backup_retention_days: 30
 
   # PostgreSQL — structured business data, sessions, audit logs
+  # 覆盖方式（优先级从高到低）：
+  #   1. 环境变量 TCM_POSTGRES_URL
+  #   2. 本配置块 url 字段
+  #   3. 默认 SQLite 回退
   postgresql:
     enabled: false
-    url: "postgresql://tcm:tcm@localhost:5432/tcmautoresearch"
+    url: "${TCM_POSTGRES_URL:-postgresql://tcm:tcm@localhost:5432/tcmautoresearch}"
     pool_size: 10
     max_overflow: 20
     pool_timeout: 30
     echo: false
 
   # Neo4j — knowledge graph (formula → syndrome → target → pathway)
+  # 覆盖方式：
+  #   1. 环境变量 TCM_NEO4J_URI / TCM_NEO4J_USER / TCM_NEO4J_PASSWORD
+  #   2. 本配置块字段
   neo4j:
     enabled: false
-    uri: "bolt://localhost:7687"
-    username: "neo4j"
-    password: "neo4j"
+    uri: "${TCM_NEO4J_URI:-bolt://localhost:7687}"
+    username: "${TCM_NEO4J_USER:-neo4j}"
+    password: "${TCM_NEO4J_PASSWORD:-neo4j}"
     database: "neo4j"
     max_connection_pool_size: 50
     connection_timeout: 30
+
+# ChromaDB — RAG 向量检索（配合本地 Qwen1.5-7B 模型实现 Self-RAG）
+# 参考：Self-RAG (Asai et al., 2023), RAG Survey (Gao et al., 2023)
+rag:
+  # 覆盖方式：环境变量 TCM_RAG_PERSIST_DIR
+  persist_dir: "${TCM_RAG_PERSIST_DIR:-./data/chroma_db}"
+  collection_name: "tcm_research"
+  # 支持中文的多语言 sentence-transformers 模型
+  embedding_model: "paraphrase-multilingual-MiniLM-L12-v2"
+  # 每次 RAG 检索返回的文档数量
+  top_k: 5
+  # 是否在每次高质量研究结果后自动索引（连接 SelfLearningEngine）
+  auto_index_on_outcome: true
+  # 质量阈值：超过此分数才写入 RAG 向量库（与 SelfLearningEngine.learning_threshold 联动）
+  quality_threshold: 0.7
 
 # Input/output configuration
 input:

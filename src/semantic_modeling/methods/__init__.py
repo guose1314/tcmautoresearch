@@ -8,27 +8,53 @@ research_methods 子模块包 — 向后兼容 re-export shim。
     from src.semantic_modeling.research_methods import FormulaStructureAnalyzer
 """
 
-from src.semantic_modeling.research_methods import (
+# 直接从子模块导入，避免与 research_methods.py 形成循环依赖
+from src.semantic_modeling.methods.classical_literature import (
     ClassicalLiteratureArchaeologyAnalyzer,
+)
+from src.semantic_modeling.methods.complexity_science import (
     ComplexityNonlinearDynamicsAnalyzer,
+)
+from src.semantic_modeling.methods.formula_comparator import (
     FormulaComparator,
     FormulaComparison,
-    FormulaComposition,
+)
+from src.semantic_modeling.methods.formula_structure import (
     FormulaDosageForm,
+    FormulaComposition,
     FormulaStructure,
     FormulaStructureAnalyzer,
     HerbDosage,
     HerbProperty,
     HerbPropertyDatabase,
     HerbTemperature,
-    IntegratedResearchAnalyzer,
     MeridianType,
-    ModernPharmacologyDatabase,
+)
+from src.semantic_modeling.methods.herb_properties import (  # noqa: F811
+    HerbProperty,
+    HerbPropertyDatabase,
+    HerbTemperature,
+    MeridianType,
+)
+from src.semantic_modeling.methods.integrated_analyzer import (
+    IntegratedResearchAnalyzer,
+)
+from src.semantic_modeling.methods.network_pharmacology import (
     NetworkPharmacologySystemBiologyAnalyzer,
+)
+from src.semantic_modeling.methods.pharmacology import (
+    ModernPharmacologyDatabase,
     PharmacologicalData,
-    ResearchScoringPanel,
-    SummaryAnalysisEngine,
+)
+from src.semantic_modeling.methods.scoring_panel import ResearchScoringPanel  # noqa: F811
+from src.semantic_modeling.methods.summary_engine import SummaryAnalysisEngine
+from src.semantic_modeling.methods.supramolecular import (
     SupramolecularPhysicochemicalAnalyzer,
+)
+from src.semantic_modeling.methods.meta_analysis import (  # noqa: F401  I-05
+    MetaAnalysisEngine,
+    MetaAnalysisResult,
+    StudyEffect,
 )
 
 __all__ = [
@@ -46,10 +72,13 @@ __all__ = [
     "HerbTemperature",
     "IntegratedResearchAnalyzer",
     "MeridianType",
+    "MetaAnalysisEngine",
+    "MetaAnalysisResult",
     "ModernPharmacologyDatabase",
     "NetworkPharmacologySystemBiologyAnalyzer",
     "PharmacologicalData",
     "ResearchScoringPanel",
+    "StudyEffect",
     "SummaryAnalysisEngine",
     "SupramolecularPhysicochemicalAnalyzer",
 ]

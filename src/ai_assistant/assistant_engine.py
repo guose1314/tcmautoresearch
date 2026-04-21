@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import logging
 import re
-import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 

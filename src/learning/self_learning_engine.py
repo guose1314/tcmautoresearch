@@ -66,6 +66,10 @@ class SelfLearningEngine(BaseModule):
         self._ewma_score: Optional[float] = None
         self._pattern_recognizer = None
         self._adaptive_tuner = None
+        # RAG 服务（可选，由外部注入或懒加载）
+        self._rag_service: Optional[Any] = None
+        # StorageGateway（I-03：学习记录持久化到 PostgreSQL）
+        self._storage_gateway: Optional[Any] = None
 
     def _do_initialize(self) -> bool:
         try:
@@ -172,6 +176,8 @@ class SelfLearningEngine(BaseModule):
             self.performance_history.pop(0)
 
         self._save_learning_data()
+        # I-03：同步持久化到 PostgreSQL（若 StorageGateway 已注入）
+        self._persist_record_to_storage(record)
 
     def _generate_task_id(self, context: Dict[str, Any]) -> str:
         text_content = str(context.get("processed_text", ""))[:100]
@@ -264,6 +270,208 @@ class SelfLearningEngine(BaseModule):
                 self._save_learning_data()
                 return True
         return False
+
+    # ------------------------------------------------------------------
+    # RAG 闭环方法（指令08）
+    # ------------------------------------------------------------------
+
+    def set_rag_service(self, rag_service: Any) -> None:
+        """注入 RAGService 实例（用于依赖注入或测试）。"""
+        self._rag_service = rag_service
+        self.logger.info("RAGService 已注入到 SelfLearningEngine")
+
+    # ------------------------------------------------------------------
+    # StorageGateway 集成（I-03）
+    # ------------------------------------------------------------------
+
+    def set_storage_gateway(self, gateway: Any) -> None:
+        """注入 StorageGateway，启用学习记录 PostgreSQL 持久化（指令 I-03）。
+
+        Args:
+            gateway: StorageGateway 实例。
+        """
+        self._storage_gateway = gateway
+        self.logger.info("StorageGateway 已注入到 SelfLearningEngine，学习记录将持久化到 PostgreSQL")
+
+    def load_history_from_storage(self) -> int:
+        """从 PostgreSQL 加载历史学习记录到内存（指令 I-03）。
+
+        应在 initialize() 之后、首次 execute() 之前调用，
+        确保重启后历史性能数据不丢失。
+
+        Returns:
+            成功加载的记录条数（0 表示无可用数据或 PG 未就绪）。
+        """
+        if self._storage_gateway is None:
+            return 0
+        try:
+            records_data = self._storage_gateway.load_learning_records(limit=200)
+            loaded = 0
+            for data in records_data:
+                try:
+                    rec = LearningRecord.from_dict(data)
+                    # 避免重复加载（以 task_id 去重）
+                    existing_ids = {r.task_id for r in self.learning_records}
+                    if rec.task_id not in existing_ids:
+                        self.learning_records.append(rec)
+                        self.performance_history.append(rec.performance)
+                        loaded += 1
+                except Exception:
+                    continue
+            if loaded:
+                # 用历史数据初始化 EWMA
+                if self.performance_history and self._ewma_score is None:
+                    self._ewma_score = self.performance_history[-1]
+                self.logger.info("从 PostgreSQL 加载了 %d 条历史学习记录", loaded)
+            return loaded
+        except Exception as exc:
+            self.logger.warning("从 PostgreSQL 加载历史记录失败: %s", exc)
+            return 0
+
+    def _persist_record_to_storage(self, record: "LearningRecord") -> None:
+        """将单条学习记录写入 PostgreSQL（非阻塞，失败不抛异常）。"""
+        if self._storage_gateway is None:
+            return
+        try:
+            data = record.to_dict()
+            data["ewma_score"] = round(self._ewma_score, 4) if self._ewma_score is not None else 0.0
+            self._storage_gateway.save_learning_record(data)
+        except Exception as exc:
+            self.logger.debug("学习记录持久化失败（跳过）: %s", exc)
+
+    def _get_rag_service(self) -> Optional[Any]:
+        """懒加载 RAGService，若已注入则直接使用。"""
+        if self._rag_service is not None:
+            return self._rag_service
+        try:
+            from src.learning.rag_service import RAGService
+
+            persist_dir = self.config.get("rag_persist_dir", "./data/chroma_db")
+            svc = RAGService(persist_dir=persist_dir)
+            if svc.available:
+                self._rag_service = svc
+            return self._rag_service
+        except Exception as exc:
+            self.logger.debug("RAGService 不可用: %s", exc)
+            return None
+
+    def record_outcome(
+        self,
+        result: Dict[str, Any],
+        feedback: float = 0.5,
+    ) -> None:
+        """
+        记录研究阶段结果并在质量达标时写入 RAG 向量库。
+
+        当 ``feedback >= learning_threshold`` 时，将研究摘要与假设写入 ChromaDB，
+        供后续研究通过 RAG 检索增强。
+
+        Args:
+            result: 研究阶段输出字典（应含 ``summary`` 或 ``hypothesis`` 字段）。
+            feedback: 质量反馈分数（0-1），由 QualityAssessor 或人工评分提供。
+        """
+        score = max(0.0, min(1.0, float(feedback)))
+
+        # 1. 更新 EWMA 性能分数
+        if self._ewma_score is None:
+            self._ewma_score = score
+        else:
+            self._ewma_score = (
+                self._ewma_alpha * score + (1 - self._ewma_alpha) * self._ewma_score
+            )
+        self.performance_history.append(score)
+        if len(self.performance_history) > 2000:
+            self.performance_history.pop(0)
+
+        # 2. 将高质量结论写入 RAG 向量库
+        if score >= self.learning_threshold:
+            rag = self._get_rag_service()
+            if rag is not None:
+                self._index_result_to_rag(rag, result)
+
+        # 3. 记录改进日志
+        self.model_improvement_log.append(
+            {
+                "feedback": score,
+                "ewma_score": round(self._ewma_score, 4),
+                "timestamp": datetime.now().isoformat(),
+                "result_phase": result.get("phase", "unknown"),
+            }
+        )
+        self._save_learning_data()
+
+    def improve_prompt(
+        self,
+        task: str,
+        llm: Optional[Any] = None,
+    ) -> str:
+        """
+        利用 RAG 检索历史高质量结论，增强对当前任务的 prompt 上下文。
+
+        若 RAGService 不可用，直接返回原始任务文本。
+
+        Args:
+            task: 当前研究任务描述或查询文本。
+            llm: 可选的 LLMEngine 实例，若提供则触发 RAG 增强生成。
+
+        Returns:
+            增强后的 prompt 字符串或 LLM 生成结果。
+        """
+        rag = self._get_rag_service()
+        if rag is None:
+            return task
+
+        if llm is not None:
+            return rag.generate_with_rag(task, llm)
+
+        docs = rag.retrieve(task, k=3)
+        if not docs:
+            return task
+
+        context_lines = [f"[参考{i + 1}] {d['text']}" for i, d in enumerate(docs)]
+        return f"{task}\n\n相关历史研究参考：\n" + "\n".join(context_lines)
+
+    def _index_result_to_rag(
+        self,
+        rag: Any,
+        result: Dict[str, Any],
+    ) -> None:
+        """将研究结果的关键文本片段写入 RAG 向量库。"""
+        import hashlib
+
+        phase = result.get("phase", "unknown")
+        ts = datetime.now().strftime("%Y%m%d%H%M%S")
+
+        # 提取可索引文本
+        text_parts: List[str] = []
+        for key in ("summary", "hypothesis", "interpretation", "reflections"):
+            val = result.get(key)
+            if isinstance(val, str) and val.strip():
+                text_parts.append(val.strip()[:500])
+            elif isinstance(val, list):
+                for item in val[:3]:
+                    part = str(item.get("reflection") or item) if isinstance(item, dict) else str(item)
+                    if part.strip():
+                        text_parts.append(part.strip()[:200])
+
+        hypotheses = result.get("hypotheses") or (result.get("results") or {}).get("hypotheses") or []
+        for h in hypotheses[:3]:
+            if isinstance(h, dict) and h.get("title"):
+                text_parts.append(str(h["title"]))
+            if isinstance(h, dict) and h.get("statement"):
+                text_parts.append(str(h["statement"])[:300])
+
+        if not text_parts:
+            return
+
+        combined_text = "\n".join(text_parts)
+        doc_id = f"outcome_{phase}_{ts}_{hashlib.md5(combined_text.encode(), usedforsecurity=False).hexdigest()[:8]}"
+        rag.index_document(
+            doc_id=doc_id,
+            text=combined_text,
+            metadata={"phase": phase, "indexed_at": ts},
+        )
+        self.logger.debug("高质量结论已写入 RAG: %s", doc_id)
 
     def _save_learning_data(self) -> None:
         try:

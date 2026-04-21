@@ -11,33 +11,14 @@ import traceback
 import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from src.core.module_base import BaseModule
+# ModuleStatus/ModulePriority 的单一来源：module_status.py；此处 re-export 保持向后兼容
+from src.core.module_status import ModulePriority, ModuleStatus  # noqa: F401
 
 # 配置日志
 logger = logging.getLogger(__name__)
-
-class ModuleStatus(Enum):
-    """模块状态枚举"""
-    CREATED = "created"
-    INITIALIZING = "initializing"
-    INITIALIZED = "initialized"
-    ACTIVATING = "activating"
-    ACTIVE = "active"
-    DEACTIVATING = "deactivating"
-    INACTIVE = "inactive"
-    TERMINATING = "terminating"
-    TERMINATED = "terminated"
-    ERROR = "error"
-
-class ModulePriority(Enum):
-    """模块优先级枚举"""
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
 
 @dataclass
 class ModuleContext:
@@ -183,7 +164,7 @@ class ModuleInterface(BaseModule):
                 "module_name": getattr(context, "module_name", self.module_name),
             },
         )
-        self.logger.info(f"开始执行模块: {self.module_name}")
+        self.logger.info("开始执行模块: %s", self.module_name)
         
         try:
             # 验证上下文
@@ -224,7 +205,7 @@ class ModuleInterface(BaseModule):
             )
             output.metadata = self._attach_contract_metadata(output.metadata)
             
-            self.logger.info(f"模块 {self.module_name} 执行成功，耗时: {output.execution_time:.2f}s")
+            self.logger.info("模块 %s 执行成功，耗时: %.2fs", self.module_name, output.execution_time)
             return output
             
         except Exception as e:
@@ -250,7 +231,7 @@ class ModuleInterface(BaseModule):
                 tags=["error"]
             )
             
-            self.logger.error(f"模块 {self.module_name} 执行失败: {e}")
+            self.logger.error("模块 %s 执行失败: %s", self.module_name, e)
             self.logger.error(traceback.format_exc())
             
             # 更新错误指标
@@ -510,7 +491,7 @@ class ModuleInterface(BaseModule):
             return True
         except Exception as error:
             self._fail_phase("export_interface_data", phase_started_at, error, {"output_path": output_path})
-            self.logger.error(f"模块 {self.module_name} 接口数据导出失败: {error}")
+            self.logger.error("模块 %s 接口数据导出失败: %s", self.module_name, error)
             return False
 
 # 导出主要类和函数

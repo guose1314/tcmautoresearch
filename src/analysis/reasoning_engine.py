@@ -91,7 +91,7 @@ class ReasoningEngine(BaseModule):
             self.logger.info("推理引擎初始化完成（KG 路径模式）")
             return True
         except Exception as exc:
-            self.logger.error(f"推理引擎初始化失败: {exc}")
+            self.logger.error("推理引擎初始化失败: %s", exc)
             return False
 
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -128,7 +128,7 @@ class ReasoningEngine(BaseModule):
             }
 
         except Exception as exc:
-            self.logger.error(f"推理执行失败: {exc}")
+            self.logger.error("推理执行失败: %s", exc)
             raise
 
     def _do_cleanup(self) -> bool:
@@ -136,7 +136,7 @@ class ReasoningEngine(BaseModule):
             self.logger.info("推理引擎资源清理完成")
             return True
         except Exception as exc:
-            self.logger.error(f"推理引擎资源清理失败: {exc}")
+            self.logger.error("推理引擎资源清理失败: %s", exc)
             return False
 
     # ------------------------------------------------------------------

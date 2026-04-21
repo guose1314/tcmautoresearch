@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import threading
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -26,7 +25,7 @@ from src.common.retry_utils import retry
 PUBMED_EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 SEMANTIC_SCHOLAR_SEARCH = "https://api.semanticscholar.org/graph/v1/paper/search"
 PLOS_SEARCH_API = "https://api.plos.org/search"
-ARXIV_API = "http://export.arxiv.org/api/query"
+ARXIV_API = "https://export.arxiv.org/api/query"
 
 QUERY_PLAN_TEMPLATES: Dict[str, Dict[str, str]] = {
     "pubmed": {
@@ -538,10 +537,9 @@ class LiteratureRetriever:
         params: Dict[str, Any],
     ) -> Dict[str, Any]:
         @retry(
-            max_attempts=self.retry_count + 1,
-            backoff_strategy="linear",
+            max_retries=self.retry_count,
+            backoff="linear",
             base_delay=0.4,
-            max_delay=5.0,
             exceptions=(httpx.HTTPError, RuntimeError),
         )
         async def _do() -> Dict[str, Any]:
@@ -552,7 +550,10 @@ class LiteratureRetriever:
                 await asyncio.sleep(self.request_interval_sec)
             return data
 
-        return await _do()
+        try:
+            return await _do()
+        except (httpx.HTTPError, RuntimeError) as exc:
+            raise RuntimeError(f"request failed after retries: {url} — {exc}") from exc
 
     def _request_text(self, url: str, params: Dict[str, Any]) -> str:
         async def _runner() -> str:
@@ -568,10 +569,9 @@ class LiteratureRetriever:
         params: Dict[str, Any],
     ) -> str:
         @retry(
-            max_attempts=self.retry_count + 1,
-            backoff_strategy="linear",
+            max_retries=self.retry_count,
+            backoff="linear",
             base_delay=0.4,
-            max_delay=5.0,
             exceptions=(httpx.HTTPError, RuntimeError),
         )
         async def _do() -> str:
@@ -581,7 +581,10 @@ class LiteratureRetriever:
                 await asyncio.sleep(self.request_interval_sec)
             return response.text
 
-        return await _do()
+        try:
+            return await _do()
+        except (httpx.HTTPError, RuntimeError) as exc:
+            raise RuntimeError(f"request failed after retries: {url} — {exc}") from exc
 
     def _create_async_client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(headers=dict(self.headers), timeout=self.timeout_sec, follow_redirects=True)
