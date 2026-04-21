@@ -25,12 +25,8 @@ from src.semantic_modeling.methods.formula_structure import (
     FormulaStructure,
     FormulaStructureAnalyzer,
     HerbDosage,
-    HerbProperty,
-    HerbPropertyDatabase,
-    HerbTemperature,
-    MeridianType,
 )
-from src.semantic_modeling.methods.herb_properties import (  # noqa: F811
+from src.semantic_modeling.methods.herb_properties import (
     HerbProperty,
     HerbPropertyDatabase,
     HerbTemperature,

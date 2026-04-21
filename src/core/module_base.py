@@ -181,7 +181,7 @@ class BaseModule(PhaseTrackerMixin, ABC):
         """
         # 判断是否为 ModuleContext（延迟导入避免循环）
         try:
-            from src.core.module_interface import ModuleContext, ModuleOutput
+            from src.core.module_interface import ModuleContext
             is_module_context = isinstance(context, ModuleContext)
         except ImportError:
             is_module_context = False

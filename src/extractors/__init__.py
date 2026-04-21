@@ -1,4 +1,4 @@
-﻿"""src/extractors — 兼容层（已迁移至 src/analysis/entity_extractor）
+"""src/extractors — 兼容层（已迁移至 src/analysis/entity_extractor）
 
 .. deprecated::
     请改用 ``from src.analysis.entity_extractor import ...``，本包保留仅为向后兼容。

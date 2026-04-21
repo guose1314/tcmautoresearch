@@ -1,3 +1,3 @@
-﻿"""兼容层 — 已迁移至 src.analysis.multimodal_fusion"""
+"""兼容层 — 已迁移至 src.analysis.multimodal_fusion"""
 from src.analysis.multimodal_fusion import *  # noqa: F401,F403
-from src.analysis.multimodal_fusion import FusionStrategy, MultimodalFusionEngine
+from src.analysis.multimodal_fusion import FusionStrategy, MultimodalFusionEngine  # noqa: F401

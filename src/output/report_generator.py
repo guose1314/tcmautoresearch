@@ -7,7 +7,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -127,8 +126,6 @@ class ReportGenerator(BaseModule):
         """将 session_result 解析为 IMRD 四节内容。"""
         phase_results = session_result.get("phase_results", {})
         question = session_result.get("question", "")
-        meta = session_result.get("metadata", {})
-        title = meta.get("title", question)
 
         # Introduction
         obs = phase_results.get("observe", {})
@@ -301,10 +298,9 @@ class ReportGenerator(BaseModule):
 
         try:
             from docx import Document  # type: ignore
-            from docx.shared import Pt  # type: ignore
 
             doc = Document()
-            title_str = md_report.metadata.get("title", question)
+            title_str = md_report.metadata.get("title", session_result.get("question", ""))
             doc.add_heading(title_str, level=0)
             for sec_key, heading in [
                 ("introduction", "Introduction"),
