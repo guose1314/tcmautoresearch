@@ -205,7 +205,7 @@ class ModuleInterface(BaseModule):
             )
             output.metadata = self._attach_contract_metadata(output.metadata)
             
-            self.logger.info("模块 %s 执行成功，耗时: %2.fs", self.module_name, output.execution_time)
+            self.logger.info("模块 %s 执行成功，耗时: %.2fs", self.module_name, output.execution_time)
             return output
             
         except Exception as e:

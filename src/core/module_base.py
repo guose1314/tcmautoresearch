@@ -750,7 +750,7 @@ class AsyncBaseModule(BaseModule):
                 final_status="completed",
             )
             
-            self.logger.info("模块 %s 异步执行成功，耗时: %2.fs", self.module_name, execution_time)
+            self.logger.info("模块 %s 异步执行成功，耗时: %.2fs", self.module_name, execution_time)
             return result
             
         except Exception as e:
