@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -276,9 +277,9 @@ class ReportGenerator(BaseModule):
         output_path = ""
         if self._output_dir:
             os.makedirs(self._output_dir, exist_ok=True)
-            safe_name = re.sub(r"[^\w\u4e00-\u9fff]", "_", question or "report")[:40]
-            filename = f"{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-            output_path = self._safe_output_path(self._output_dir, filename)
+            # 文件名只使用时间戳和随机 ID，不含任何用户输入，防止路径穿越
+            filename = f"imrd_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.md"
+            output_path = os.path.join(self._output_dir, filename)
             with open(output_path, "w", encoding="utf-8") as fh:
                 fh.write(content)
 
@@ -293,11 +294,10 @@ class ReportGenerator(BaseModule):
     def _render_docx(self, session_result: Dict[str, Any]) -> Report:
         """生成 DOCX 报告。若 python-docx 不可用则回退为 Markdown 文件保存为 .docx。"""
         md_report = self._render_markdown(session_result)
-        question = session_result.get("question", "")
-        safe_name = re.sub(r"[^\w\u4e00-\u9fff]", "_", question or "report")[:40]
-        filename = f"{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
         os.makedirs(self._output_dir, exist_ok=True)
-        output_path = self._safe_output_path(self._output_dir, filename)
+        # 文件名只使用时间戳和随机 ID，不含任何用户输入，防止路径穿越
+        filename = f"imrd_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.docx"
+        output_path = os.path.join(self._output_dir, filename)
 
         try:
             from docx import Document  # type: ignore
