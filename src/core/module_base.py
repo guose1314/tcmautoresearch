@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Union
 
 from src.core.phase_tracker import PhaseTrackerMixin
 from src.core.module_status import ModuleStatus, ModulePriority  # noqa: F401
@@ -91,7 +91,15 @@ class BaseModule(PhaseTrackerMixin, ABC):
         self.performance_history: deque = deque(maxlen=100)
         self.academic_insights: deque = deque(maxlen=200)
         self.recommendations: deque = deque(maxlen=200)
-        
+        # PhaseTrackerMixin Pattern-A 必要属性
+        self.phase_history: list = []
+        self.phase_timings: dict = {}
+        self.completed_phases: list = []
+        self.failed_phase: object = None
+        self.final_status: object = None
+        self.last_completed_phase: object = None
+        self.failed_operations: list = []
+
         self.logger.info("模块 %s 基类初始化完成", module_name)
     
     def initialize(self, config: Dict[str, Any] | None = None) -> bool:
@@ -310,7 +318,7 @@ class BaseModule(PhaseTrackerMixin, ABC):
         try:
             if self._do_cleanup():
                 self.initialized = False
-                self.status = ModuleStatus.TERMINATED
+                self.status = ModuleStatus.CLEANED
                 self.metrics["last_execution_time"] = time.time() - start_time
                 self.metrics["execution_count"] = 0
                 self.metrics["total_execution_time"] = 0.0
@@ -410,9 +418,9 @@ class BaseModule(PhaseTrackerMixin, ABC):
             "initialized": self.initialized,
             "config": self._serialize_value(self.config),
             "metrics": self._serialize_value(self.metrics),
-            "performance_history": self._serialize_value(self.performance_history[-10:]),  # 最近10次
-            "academic_insights": self._serialize_value(self.academic_insights[-5:]),  # 最近5个洞察
-            "recommendations": self._serialize_value(self.recommendations[-5:]),  # 最近5个建议
+            "performance_history": self._serialize_value(list(self.performance_history)[-10:]),  # 最近10次
+            "academic_insights": self._serialize_value(list(self.academic_insights)[-5:]),  # 最近5个洞察
+            "recommendations": self._serialize_value(list(self.recommendations)[-5:]),  # 最近5个建议
             "failed_operations": self._serialize_value(self.failed_operations),
             "metadata": self._build_runtime_metadata(),
             "last_execution": self.module_start_time
@@ -545,7 +553,64 @@ class BaseModule(PhaseTrackerMixin, ABC):
                     "tags": ["performance", "optimization", "recommendation"]
                 }
                 self.recommendations.append(recommendation)
-    
+
+    # ------------------------------------------------------------------
+    # 公共辅助方法（供子类重写以提供领域定制实现）
+    # ------------------------------------------------------------------
+
+    def _build_runtime_metadata(self) -> Dict[str, Any]:
+        """构建运行时元数据快照。子类可重写以添加领域特定字段。"""
+        return self._build_runtime_metadata_from_dict(
+            {
+                "phase_history": self.phase_history,
+                "phase_timings": self.phase_timings,
+                "completed_phases": self.completed_phases,
+                "failed_phase": self.failed_phase,
+                "final_status": self.final_status,
+                "last_completed_phase": self.last_completed_phase,
+            }
+        )
+
+    def _build_analysis_summary(self) -> Dict[str, Any]:
+        """构建模块运行状态分析摘要。子类可重写以提供领域定制摘要。"""
+        total_execs = len(self.performance_history)
+        has_failures = bool(self.failed_phase or self.failed_operations)
+
+        if self.status in (ModuleStatus.CLEANED, "cleaned") or not self.initialized:
+            status = "idle"
+        elif has_failures:
+            status = "needs_followup"
+        elif total_execs == 0:
+            status = "idle"
+        else:
+            success_count = sum(1 for h in self.performance_history if h.get("success", False))
+            pass_rate = success_count / total_execs if total_execs > 0 else 0.0
+            min_rate = self.governance_config.get("minimum_stable_success_rate", 0.8)
+            status = "stable" if pass_rate >= min_rate else "needs_followup"
+
+        return {
+            "status": status,
+            "execution_count": total_execs,
+            "completed_phase_count": len(self.completed_phases),
+            "failed_operation_count": len(self.failed_operations),
+            "failed_phase": self.failed_phase,
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
+
+    def _build_report_metadata(self) -> Dict[str, Any]:
+        """构建报告元数据。子类可重写以提供领域定制元数据。"""
+        return {
+            "contract_version": self.governance_config.get("export_contract_version", "d46.v1"),
+            "generated_at": datetime.now().isoformat(),
+            "result_schema": f"{self.module_name}_report",
+            "completed_phases": list(self.completed_phases),
+            "failed_phase": self.failed_phase,
+            "failed_operation_count": len(self.failed_operations),
+            "final_status": self.final_status,
+            "last_completed_phase": self.last_completed_phase,
+        }
+
     def get_performance_report(self) -> Dict[str, Any]:
         """
         获取性能报告
@@ -579,9 +644,9 @@ class BaseModule(PhaseTrackerMixin, ABC):
             "success_rate": success_rate,
             "average_execution_time": avg_execution_time,
             "metrics": self._serialize_value(self.metrics),
-            "performance_history": self._serialize_value(self.performance_history[-10:]),  # 最近10次
-            "academic_insights": self._serialize_value(self.academic_insights[-5:]),  # 最近5个洞察
-            "recommendations": self._serialize_value(self.recommendations[-5:]),  # 最近5个建议
+            "performance_history": self._serialize_value(list(self.performance_history)[-10:]),  # 最近10次
+            "academic_insights": self._serialize_value(list(self.academic_insights)[-5:]),  # 最近5个洞察
+            "recommendations": self._serialize_value(list(self.recommendations)[-5:]),  # 最近5个建议
             "analysis_summary": self._build_analysis_summary(),
             "failed_operations": self._serialize_value(self.failed_operations),
             "metadata": self._build_runtime_metadata(),
@@ -620,6 +685,15 @@ class BaseModule(PhaseTrackerMixin, ABC):
             self._fail_phase("export_module_data", phase_started_at, e, {"output_path": output_path})
             self.logger.error("模块数据导出失败: %s", e)
             return False
+
+    def _build_export_payload(self, output_path: str) -> Dict[str, Any]:
+        """构建导出数据负载。子类可重写以添加领域特定字段。"""
+        return {
+            "report_metadata": self._build_report_metadata(),
+            "module_info": self.get_module_info(),
+            "performance_report": self.get_performance_report(),
+            "output_path": output_path,
+        }
     
     def get_module_health(self) -> Dict[str, Any]:
         """

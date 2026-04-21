@@ -338,7 +338,7 @@ class RaptorIndexer:
             ]
             similarities.sort(key=lambda x: -x[1])
 
-            for orig_idx, sim in similarities:
+            for _orig_idx, sim in similarities:
                 if len(cluster) >= self.MAX_CLUSTER_SIZE:
                     break
                 if sim < 0.05:  # 太低相似度的节点不合并

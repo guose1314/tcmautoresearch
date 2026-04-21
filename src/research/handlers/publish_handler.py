@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Dict
 from src.research.handlers.base_handler import BasePhaseHandler
 
 if TYPE_CHECKING:
-    from src.research.research_pipeline import ResearchCycle, ResearchPhase, ResearchPipeline
+    from src.research.research_pipeline import ResearchCycle, ResearchPhase
 
 
 class PublishPhaseHandler(BasePhaseHandler):

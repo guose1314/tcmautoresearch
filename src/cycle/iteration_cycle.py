@@ -311,7 +311,7 @@ class IterationCycle(PhaseTrackerMixin):
                 }
             
             duration = time.time() - start_time
-            self.logger.info("生成阶段完成，耗时: {duration:.2f}s")
+            self.logger.info("生成阶段完成，耗时: %.2fs", duration)
             
             return artifacts
             
@@ -380,7 +380,7 @@ class IterationCycle(PhaseTrackerMixin):
                 }
             
             duration = time.time() - start_time
-            self.logger.info("测试阶段完成，耗时: {duration:.2f}s")
+            self.logger.info("测试阶段完成，耗时: %.2fs", duration)
             
             return test_results
             
@@ -452,7 +452,7 @@ class IterationCycle(PhaseTrackerMixin):
                             })
             
             duration = time.time() - start_time
-            self.logger.info("修复阶段完成，耗时: {duration:.2f}s")
+            self.logger.info("修复阶段完成，耗时: %.2fs", duration)
             
             return repair_actions
             
@@ -496,7 +496,7 @@ class IterationCycle(PhaseTrackerMixin):
             }
             
             duration = time.time() - start_time
-            self.logger.info("分析阶段完成，耗时: {duration:.2f}s")
+            self.logger.info("分析阶段完成，耗时: %.2fs", duration)
             
             return analysis_results
             
@@ -519,7 +519,7 @@ class IterationCycle(PhaseTrackerMixin):
             self._simulate_optimization_process()
 
             duration = time.time() - start_time
-            self.logger.info("优化阶段完成，耗时: {duration:.2f}s")
+            self.logger.info("优化阶段完成，耗时: %.2fs", duration)
 
             return {
                 "optimization_status": optimization_summary["status"],
@@ -664,7 +664,7 @@ class IterationCycle(PhaseTrackerMixin):
     def _simulate_validation_process(self, start_time: float) -> None:
         time.sleep(0.01)  # 模拟验证时间
         duration = time.time() - start_time
-        self.logger.info("验证阶段完成，耗时: {duration:.2f}s")
+        self.logger.info("验证阶段完成，耗时: %.2fs", duration)
 
     def _initialize_phase_tracking(self, iteration_result: IterationResult) -> None:
         iteration_result.metadata["phase_history"] = []

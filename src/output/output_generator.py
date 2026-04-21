@@ -11,7 +11,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from src.core.module_base import BaseModule
 
@@ -54,6 +54,46 @@ class OutputGenerator(BaseModule):
         except Exception as exc:
             self.logger.error("OutputGenerator 清理失败: %s", exc)
             return False
+
+    # ------------------------------------------------------------------
+    # 常用便捷方法（测试契约）
+    # ------------------------------------------------------------------
+    def to_json(self, data: Any) -> str:
+        """将任意数据序列化为 JSON 字符串。"""
+        return json.dumps(self._make_json_safe(data), ensure_ascii=False, indent=2)
+
+    def to_markdown(self, data: Any) -> str:
+        """将字典数据渲染为简单 Markdown 报告。"""
+        lines: List[str] = [
+            "# 中医研究报告",
+            "",
+            f"> 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "",
+        ]
+        if isinstance(data, dict):
+            for key, val in data.items():
+                if isinstance(val, dict):
+                    lines.append(f"## {key}")
+                    for k2, v2 in val.items():
+                        lines.append(f"- **{k2}**: {v2}")
+                    lines.append("")
+                elif isinstance(val, list):
+                    lines.append(f"## {key}")
+                    for item in val:
+                        lines.append(f"- {item}")
+                    lines.append("")
+                else:
+                    lines.append(f"**{key}**: {val}")
+                    lines.append("")
+        return "\n".join(lines)
+
+    def to_dict(self, data: Any) -> Dict[str, Any]:
+        """将任意数据转换为字典（None → {}，非 dict → 包装为 {data: ...}）。"""
+        if data is None:
+            return {}
+        if isinstance(data, dict):
+            return data
+        return {"data": data}
 
     # ------------------------------------------------------------------
     # 核心生成逻辑

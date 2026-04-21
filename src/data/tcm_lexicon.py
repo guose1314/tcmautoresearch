@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +183,38 @@ class TCMLexicon:
 
     def add_word(self, word: str, word_type: str = "common") -> None:
         self._words[word] = word_type
+
+    def export_to_jieba_format(
+        self,
+        filepath: str,
+        word_type: Optional[str] = None,
+        freq: int = 100,
+    ) -> int:
+        """
+        将词典导出为 jieba 自定义词典格式（``词 频率 词性`` 每行）。
+
+        Args:
+            filepath: 输出文件路径。
+            word_type: 若指定，则仅导出该类型的词汇；为 None 时导出全部词汇。
+            freq: jieba 词频数值（默认 100）。
+
+        Returns:
+            成功写入的词汇数量。
+        """
+        count = 0
+        try:
+            p = Path(filepath)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with p.open("w", encoding="utf-8") as fh:
+                for word, wtype in self._words.items():
+                    if word_type is not None and wtype != word_type:
+                        continue
+                    fh.write(f"{word} {freq} {wtype}\n")
+                    count += 1
+            logger.info("jieba 词典已导出至 %s，共 %d 词", filepath, count)
+        except Exception as exc:
+            logger.error("jieba 词典导出失败 %s: %s", filepath, exc)
+        return count
 
     def load_from_file(self, path: str, word_type: str = "common") -> int:
         """

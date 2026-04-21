@@ -4,8 +4,7 @@
 from __future__ import annotations
 
 import logging
-from collections import deque
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import networkx as nx
 

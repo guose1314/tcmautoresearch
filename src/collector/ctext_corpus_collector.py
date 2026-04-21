@@ -9,8 +9,6 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
-import requests
-
 from src.collector.ctext_whitelist import build_batch_manifest, load_whitelist
 from src.common.http_client import HttpClient
 from src.core.module_base import BaseModule

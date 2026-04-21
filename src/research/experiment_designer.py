@@ -6,7 +6,7 @@ import logging
 import math
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from src.core.module_base import BaseModule
 
@@ -388,9 +388,9 @@ class ExperimentDesigner(BaseModule):
 
         pico = PICO(
             population=population or f"[待填写 — {stype.value} 研究人群]",
-            intervention=intervention or f"[待填写 — 干预措施]",
-            comparison=comparison or f"[待填写 — 对照措施]",
-            outcome=outcome or f"[待填写 — 主要结局指标]",
+            intervention=intervention or "[待填写 — 干预措施]",
+            comparison=comparison or "[待填写 — 对照措施]",
+            outcome=outcome or "[待填写 — 主要结局指标]",
         )
 
         es = effect_size if effect_size is not None else tmpl.get("default_effect_size", 0.5)
@@ -414,7 +414,7 @@ class ExperimentDesigner(BaseModule):
             pico=pico,
             sample_size=sample,
             eligibility=eligibility,
-            primary_outcome=outcome or f"[待填写 — 主要结局指标]",
+            primary_outcome=outcome or "[待填写 — 主要结局指标]",
             blinding=tmpl.get("blinding", ""),
             randomization=tmpl.get("randomization", ""),
             statistical_plan=tmpl.get("statistical_plan", ""),

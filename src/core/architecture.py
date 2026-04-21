@@ -1334,7 +1334,6 @@ class SystemArchitecture(PhaseTrackerMixin):
 # 导出主要类和函数
 __all__ = [
     'SystemArchitecture',
-    'ModuleInterface',
     'ModuleRegistry',
     'ModuleInfo',
     'ModuleStatus',

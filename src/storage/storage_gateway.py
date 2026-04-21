@@ -101,8 +101,10 @@ class StorageGateway:
 
             driver = Neo4jDriver(
                 uri=self._neo4j_config.get("uri", "bolt://localhost:7687"),
-                username=self._neo4j_config.get("username", "neo4j"),
-                password=self._neo4j_config.get("password", "neo4j"),
+                auth=(
+                    self._neo4j_config.get("username", "neo4j"),
+                    self._neo4j_config.get("password", "neo4j"),
+                ),
                 database=self._neo4j_config.get("database", "neo4j"),
             )
             driver.connect()

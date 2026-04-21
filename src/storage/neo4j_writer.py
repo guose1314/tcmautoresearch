@@ -9,7 +9,7 @@ Neo4j 研究结果写入适配器（TCMGraphWriter）。
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
