@@ -46,15 +46,15 @@ class AdvancedEntityExtractor(BaseModule):
                 if Path(dict_path).exists():
                     # 将路径作为词汇类型推断（可根据文件名）
                     self.lexicon.load_from_file(dict_path, word_type="common")
-                    self.logger.info(f"加载外部词典: {dict_path}")
+                    self.logger.info("加载外部词典: %s", dict_path)
                 else:
-                    self.logger.warning(f"外部词典不存在: {dict_path}")
+                    self.logger.warning("外部词典不存在: %s", dict_path)
             
             vocab_size = self.lexicon.get_vocab_size()
-            self.logger.info(f"实体抽取器初始化完成 (词汇总数: {vocab_size})")
+            self.logger.info("实体抽取器初始化完成 (词汇总数: %s)", vocab_size)
             return True
         except Exception as e:
-            self.logger.error(f"实体抽取器初始化失败: {e}")
+            self.logger.error("实体抽取器初始化失败: %s", e)
             return False
     
     def _load_dictionaries(self):
@@ -79,7 +79,7 @@ class AdvancedEntityExtractor(BaseModule):
             return output_data
             
         except Exception as e:
-            self.logger.error(f"实体抽取执行失败: {e}")
+            self.logger.error("实体抽取执行失败: %s", e)
             raise
 
     def _validate_processed_text(self, context: Dict[str, Any]) -> str:
@@ -250,7 +250,7 @@ class AdvancedEntityExtractor(BaseModule):
             filepath: 输出文件路径
         """
         self.lexicon.export_to_jieba_format(filepath, word_type="common")
-        self.logger.info(f"已导出词典到 {filepath}")
+        self.logger.info("已导出词典到 %s", filepath)
     
     def _do_cleanup(self) -> bool:
         """清理资源"""
@@ -258,5 +258,5 @@ class AdvancedEntityExtractor(BaseModule):
             self.logger.info("实体抽取器资源清理完成")
             return True
         except Exception as e:
-            self.logger.error(f"实体抽取器资源清理失败: {e}")
+            self.logger.error("实体抽取器资源清理失败: %s", e)
             return False

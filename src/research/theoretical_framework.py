@@ -608,7 +608,7 @@ class TheoreticalFramework(PhaseTrackerMixin):
             return hypothesis
             
         except Exception as e:
-            self.logger.error(f"假设生成失败: {e}")
+            self.logger.error("假设生成失败: %s", e)
             self._fail_operation("generate_hypothesis", phase_entry, start_time, str(e))
             raise
     
@@ -731,7 +731,7 @@ class TheoreticalFramework(PhaseTrackerMixin):
             return experiment
             
         except Exception as e:
-            self.logger.error(f"实验设计失败: {e}")
+            self.logger.error("实验设计失败: %s", e)
             self._fail_operation("design_experiment", phase_entry, start_time, str(e))
             raise
 
@@ -978,7 +978,7 @@ class TheoreticalFramework(PhaseTrackerMixin):
             return insight
             
         except Exception as e:
-            self.logger.error(f"研究洞察生成失败: {e}")
+            self.logger.error("研究洞察生成失败: %s", e)
             self._fail_operation("generate_insight", phase_entry, start_time, str(e))
             raise
     
@@ -1019,7 +1019,7 @@ class TheoreticalFramework(PhaseTrackerMixin):
         try:
             phase_entry = self._start_operation("validate_hypothesis", {"hypothesis_id": hypothesis_id, "validation_result": validation_result})
             if hypothesis_id not in self.hypotheses:
-                self.logger.warning(f"假设 {hypothesis_id} 不存在")
+                self.logger.warning("假设 %s 不存在", hypothesis_id)
                 self._fail_operation("validate_hypothesis", phase_entry, start_time, f"假设 {hypothesis_id} 不存在")
                 return False
             
@@ -1057,7 +1057,7 @@ class TheoreticalFramework(PhaseTrackerMixin):
             return True
             
         except Exception as e:
-            self.logger.error(f"假设验证失败: {e}")
+            self.logger.error("假设验证失败: %s", e)
             if 'phase_entry' in locals():
                 self._fail_operation("validate_hypothesis", phase_entry, start_time, str(e))
             return False
@@ -1259,7 +1259,7 @@ class TheoreticalFramework(PhaseTrackerMixin):
             return graph_data
             
         except Exception as e:
-            self.logger.error(f"知识图谱构建失败: {e}")
+            self.logger.error("知识图谱构建失败: %s", e)
             if 'phase_entry' in locals():
                 self._fail_operation("build_knowledge_graph", phase_entry, start_time, str(e))
             raise
@@ -1302,12 +1302,12 @@ class TheoreticalFramework(PhaseTrackerMixin):
                 json.dump(research_data, f, ensure_ascii=False, indent=2)
             self._complete_operation("export_research_data", phase_entry, start_time)
             
-            self.logger.info(f"研究数据已导出到: {output_path}")
+            self.logger.info("研究数据已导出到: %s", output_path)
             return True
             
         except Exception as e:
             self._fail_operation("export_research_data", phase_entry, start_time, str(e))
-            self.logger.error(f"研究数据导出失败: {e}")
+            self.logger.error("研究数据导出失败: %s", e)
             return False
 
     def cleanup(self) -> bool:
@@ -1338,7 +1338,7 @@ class TheoreticalFramework(PhaseTrackerMixin):
             self.logger.info("中医研究理论框架资源清理完成")
             return True
         except Exception as e:
-            self.logger.error(f"中医研究理论框架资源清理失败: {e}")
+            self.logger.error("中医研究理论框架资源清理失败: %s", e)
             return False
 
 # 导出主要类和函数

@@ -26,7 +26,7 @@ from src.common.retry_utils import retry
 PUBMED_EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 SEMANTIC_SCHOLAR_SEARCH = "https://api.semanticscholar.org/graph/v1/paper/search"
 PLOS_SEARCH_API = "https://api.plos.org/search"
-ARXIV_API = "http://export.arxiv.org/api/query"
+ARXIV_API = "https://export.arxiv.org/api/query"
 
 QUERY_PLAN_TEMPLATES: Dict[str, Dict[str, str]] = {
     "pubmed": {

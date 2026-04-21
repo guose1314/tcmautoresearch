@@ -84,7 +84,7 @@ class UnifiedStorageDriver:
             
             logger.info("统一存储驱动初始化成功")
         except Exception as e:
-            logger.error(f"存储驱动初始化失败: {e}")
+            logger.error("存储驱动初始化失败: %s", e)
             raise
     
     def close(self):
@@ -96,7 +96,7 @@ class UnifiedStorageDriver:
             self.neo4j.close()
             logger.info("所有数据库连接已关闭")
         except Exception as e:
-            logger.error(f"关闭连接失败: {e}")
+            logger.error("关闭连接失败: %s", e)
     
     # ==================== 文档管理 ====================
     
@@ -127,7 +127,7 @@ class UnifiedStorageDriver:
             return doc.id
         except Exception as e:
             self.session.rollback()
-            logger.error(f"保存文档失败: {e}")
+            logger.error("保存文档失败: %s", e)
             return None
     
     def update_document_status(self, document_id: UUID, status: str):
@@ -137,10 +137,10 @@ class UnifiedStorageDriver:
             if doc:
                 doc.process_status = ProcessStatusEnum(status)
                 self.session.commit()
-                logger.info(f"文档状态已更新: {document_id} -> {status}")
+                logger.info("文档状态已更新: %s -> %s", document_id, status)
         except Exception as e:
             self.session.rollback()
-            logger.error(f"更新文档状态失败: {e}")
+            logger.error("更新文档状态失败: %s", e)
     
     # ==================== 实体管理 ====================
     
@@ -182,18 +182,18 @@ class UnifiedStorageDriver:
             
             # 提交PostgreSQL事务
             self.session.commit()
-            logger.info(f"已保存 {len(entity_ids)} 个实体到PostgreSQL")
+            logger.info("已保存 %s 个实体到PostgreSQL", len(entity_ids))
             
             # 批量创建Neo4j节点
             if neo4j_nodes:
                 self.neo4j.batch_create_nodes(neo4j_nodes)
-                logger.info(f"已保存 {len(neo4j_nodes)} 个节点到Neo4j")
+                logger.info("已保存 %s 个节点到Neo4j", len(neo4j_nodes))
             
             return entity_ids
         
         except Exception as e:
             self.session.rollback()
-            logger.error(f"保存实体失败: {e}")
+            logger.error("保存实体失败: %s", e)
             return []
     
     def get_entities(self, document_id: UUID) -> List[Dict[str, Any]]:
@@ -202,7 +202,7 @@ class UnifiedStorageDriver:
             entities = self.session.query(Entity).filter_by(document_id=document_id).all()
             return [entity.to_dict() for entity in entities]
         except Exception as e:
-            logger.error(f"获取实体失败: {e}")
+            logger.error("获取实体失败: %s", e)
             return []
     
     # ==================== 关系管理 ====================
@@ -245,7 +245,7 @@ class UnifiedStorageDriver:
 
                     rel_type_id = rel_type_map.get(rel_type)
                     if not rel_type_id:
-                        logger.warning(f"未找到关系类型: {rel_type}")
+                        logger.warning("未找到关系类型: %s", rel_type)
                         continue
 
                     relationship = EntityRelationship(
@@ -285,14 +285,14 @@ class UnifiedStorageDriver:
                 if neo4j_edges:
                     self.neo4j.batch_create_relationships(neo4j_edges)
 
-            logger.info(f"已保存 {len(rel_ids)} 个关系到PostgreSQL")
-            logger.info(f"已保存 {len(rel_ids)} 个关系到Neo4j")
+            logger.info("已保存 %s 个关系到PostgreSQL", len(rel_ids))
+            logger.info("已保存 %s 个关系到Neo4j", len(rel_ids))
             
             return rel_ids
         
         except Exception as e:
             self.session.rollback()
-            logger.error(f"保存关系失败: {e}")
+            logger.error("保存关系失败: %s", e)
             return []
     
     def get_relationships(self, document_id: UUID) -> List[Dict[str, Any]]:
@@ -306,7 +306,7 @@ class UnifiedStorageDriver:
             )
             return [rel.to_dict() for rel in relationships]
         except Exception as e:
-            logger.error(f"获取关系失败: {e}")
+            logger.error("获取关系失败: %s", e)
             return []
     
     # ==================== 统计管理 ====================
@@ -340,11 +340,11 @@ class UnifiedStorageDriver:
             )
             self.session.add(stats)
             self.session.commit()
-            logger.info(f"统计信息已保存: {document_id}")
+            logger.info("统计信息已保存: %s", document_id)
             return True
         except Exception as e:
             self.session.rollback()
-            logger.error(f"保存统计信息失败: {e}")
+            logger.error("保存统计信息失败: %s", e)
             return False
     
     # ==================== 质量指标管理 ====================
@@ -365,11 +365,11 @@ class UnifiedStorageDriver:
             )
             self.session.add(metrics)
             self.session.commit()
-            logger.info(f"质量指标已保存: {document_id}")
+            logger.info("质量指标已保存: %s", document_id)
             return True
         except Exception as e:
             self.session.rollback()
-            logger.error(f"保存质量指标失败: {e}")
+            logger.error("保存质量指标失败: %s", e)
             return False
     
     # ==================== 研究分析管理 ====================
@@ -393,11 +393,11 @@ class UnifiedStorageDriver:
             )
             self.session.add(analysis)
             self.session.commit()
-            logger.info(f"研究分析已保存: {document_id}")
+            logger.info("研究分析已保存: %s", document_id)
             return True
         except Exception as e:
             self.session.rollback()
-            logger.error(f"保存研究分析失败: {e}")
+            logger.error("保存研究分析失败: %s", e)
             return False
     
     # ==================== 日志管理 ====================
@@ -434,7 +434,7 @@ class UnifiedStorageDriver:
             return True
         except Exception as e:
             self.session.rollback()
-            logger.error(f"记录日志失败: {e}")
+            logger.error("记录日志失败: %s", e)
             return False
     
     # ==================== 查询服务 ====================
@@ -484,5 +484,5 @@ class UnifiedStorageDriver:
                 'timestamp': datetime.utcnow().isoformat()
             }
         except Exception as e:
-            logger.error(f"获取统计信息失败: {e}")
+            logger.error("获取统计信息失败: %s", e)
             return {}

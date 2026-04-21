@@ -257,12 +257,12 @@ class PhaseOrchestrator(PhaseTrackerMixin):
 
     def _validate_research_phase_request(self, cycle_id: str) -> Optional[Dict[str, Any]]:
         if cycle_id not in self.pipeline.research_cycles:
-            self.pipeline.logger.warning(f"研究循环 {cycle_id} 不存在")
+            self.pipeline.logger.warning("研究循环 %s 不存在", cycle_id)
             return {"error": "循环不存在"}
 
         research_cycle = self.pipeline.research_cycles[cycle_id]
         if research_cycle.status != ResearchCycleStatus.ACTIVE:
-            self.pipeline.logger.warning(f"研究循环 {cycle_id} 不处于活跃状态")
+            self.pipeline.logger.warning("研究循环 %s 不处于活跃状态", cycle_id)
             return {"error": "循环未激活"}
         return None
 
@@ -338,7 +338,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         start_time: float,
         exc: Exception,
     ) -> Dict[str, Any]:
-        self.pipeline.logger.error(f"研究阶段执行失败: {exc}")
+        self.pipeline.logger.error("研究阶段执行失败: %s", exc)
         if cycle_id not in self.pipeline.research_cycles:
             return {"error": str(exc)}
 
@@ -573,7 +573,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             result.setdefault("metadata", {})["cache_stats"] = stats
             return result
         except Exception as e:
-            self.pipeline.logger.error(f"Qwen 临床 Gap Analysis 失败: {e}")
+            self.pipeline.logger.error("Qwen 临床 Gap Analysis 失败: %s", e)
             return {
                 "clinical_question": str(
                     context.get("clinical_question")
@@ -778,7 +778,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 json.dump(pipeline_data, f, ensure_ascii=False, indent=2)
             self._complete_phase(self.pipeline._metadata, "export_pipeline_data", phase_entry, start_time)
 
-            self.pipeline.logger.info(f"流程数据已导出到: {output_path}")
+            self.pipeline.logger.info("流程数据已导出到: %s", output_path)
             return True
 
         except Exception as e:
@@ -790,7 +790,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 start_time,
                 str(e),
             )
-            self.pipeline.logger.error(f"流程数据导出失败: {e}")
+            self.pipeline.logger.error("流程数据导出失败: %s", e)
             return False
 
     def _persist_result(self, cycle: ResearchCycle) -> bool:
@@ -845,5 +845,5 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             self.pipeline.logger.info(f"研究结果已持久化: {cycle.cycle_id} → {db_path}")
             return True
         except Exception as exc:  # pragma: no cover
-            self.pipeline.logger.warning(f"研究结果持久化失败，已跳过: {exc}")
+            self.pipeline.logger.warning("研究结果持久化失败，已跳过: %s", exc)
             return False

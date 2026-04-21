@@ -86,7 +86,7 @@ class ModuleIterationCycle(PhaseTrackerMixin):
         self.knowledge_graph = nx.MultiDiGraph()
         self.logger = logging.getLogger(f"{__name__}.{module_name}")
 
-        self.logger.info(f"模块迭代循环初始化完成: {module_name}")
+        self.logger.info("模块迭代循环初始化完成: %s", module_name)
 
     def _initialize_phase_tracking(self, iteration_result: ModuleIterationResult) -> None:
         iteration_result.metadata["phase_history"] = []
@@ -525,7 +525,7 @@ class ModuleIterationCycle(PhaseTrackerMixin):
                             "priority": "high",
                         }
                         repair_actions.append(action)
-                        self.logger.info(f"自动修复问题: {failure}")
+                        self.logger.info("自动修复问题: %s", failure)
                 time.sleep(0.02)
             else:
                 if not test_results.get("passed", True):
@@ -962,7 +962,7 @@ class ModuleIterationCycle(PhaseTrackerMixin):
             }
 
         except Exception as error:
-            self.logger.error(f"知识图谱构建失败: {error}")
+            self.logger.error("知识图谱构建失败: %s", error)
             return {"error": str(error)}
 
     def export_module_data(self, output_path: str) -> bool:
@@ -973,11 +973,11 @@ class ModuleIterationCycle(PhaseTrackerMixin):
             with open(output_path, "w", encoding="utf-8") as file_obj:
                 json.dump(module_data, file_obj, ensure_ascii=False, indent=2)
 
-            self.logger.info(f"模块数据已导出到: {output_path}")
+            self.logger.info("模块数据已导出到: %s", output_path)
             return True
 
         except Exception as error:
-            self.logger.error(f"模块数据导出失败: {error}")
+            self.logger.error("模块数据导出失败: %s", error)
             return False
 
     def cleanup(self) -> bool:

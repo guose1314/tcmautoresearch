@@ -11,33 +11,14 @@ import traceback
 import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from src.core.module_base import BaseModule
+# ModuleStatus/ModulePriority 的单一来源：module_status.py；此处 re-export 保持向后兼容
+from src.core.module_status import ModulePriority, ModuleStatus  # noqa: F401
 
 # 配置日志
 logger = logging.getLogger(__name__)
-
-class ModuleStatus(Enum):
-    """模块状态枚举"""
-    CREATED = "created"
-    INITIALIZING = "initializing"
-    INITIALIZED = "initialized"
-    ACTIVATING = "activating"
-    ACTIVE = "active"
-    DEACTIVATING = "deactivating"
-    INACTIVE = "inactive"
-    TERMINATING = "terminating"
-    TERMINATED = "terminated"
-    ERROR = "error"
-
-class ModulePriority(Enum):
-    """模块优先级枚举"""
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
 
 @dataclass
 class ModuleContext:

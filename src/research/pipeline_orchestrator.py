@@ -92,7 +92,7 @@ class ResearchPipelineOrchestrator:
                 },
             )
             self.pipeline._complete_phase(self.pipeline._metadata, "create_research_cycle", phase_entry, start_time)
-            self.pipeline.logger.info(f"研究循环创建完成: {cycle_name}")
+            self.pipeline.logger.info("研究循环创建完成: %s", cycle_name)
             return research_cycle
         except Exception as exc:
             self.pipeline._fail_phase(
@@ -103,7 +103,7 @@ class ResearchPipelineOrchestrator:
                 start_time,
                 str(exc),
             )
-            self.pipeline.logger.error(f"研究循环创建失败: {exc}")
+            self.pipeline.logger.error("研究循环创建失败: %s", exc)
             raise
 
     def start_research_cycle(self, cycle_id: str) -> bool:
@@ -117,7 +117,7 @@ class ResearchPipelineOrchestrator:
         start_time = time.perf_counter()
         try:
             if cycle_id not in self.pipeline.research_cycles:
-                self.pipeline.logger.warning(f"研究循环 {cycle_id} 不存在")
+                self.pipeline.logger.warning("研究循环 %s 不存在", cycle_id)
                 self.pipeline._fail_phase(
                     self.pipeline._metadata,
                     self.pipeline._failed_operations,
@@ -154,7 +154,7 @@ class ResearchPipelineOrchestrator:
                 start_time,
                 str(exc),
             )
-            self.pipeline.logger.error(f"研究循环启动失败: {exc}")
+            self.pipeline.logger.error("研究循环启动失败: %s", exc)
             return False
 
     def execute_research_phase(
@@ -223,7 +223,7 @@ class ResearchPipelineOrchestrator:
         start_time = time.perf_counter()
         try:
             if cycle_id not in self.pipeline.research_cycles:
-                self.pipeline.logger.warning(f"研究循环 {cycle_id} 不存在")
+                self.pipeline.logger.warning("研究循环 %s 不存在", cycle_id)
                 self.pipeline._fail_phase(
                     self.pipeline._metadata,
                     self.pipeline._failed_operations,
@@ -236,7 +236,7 @@ class ResearchPipelineOrchestrator:
 
             research_cycle = self.pipeline.research_cycles[cycle_id]
             if research_cycle.status != self.pipeline.ResearchCycleStatus.ACTIVE or not research_cycle.started_at:
-                self.pipeline.logger.warning(f"研究循环 {cycle_id} 尚未启动，无法完成")
+                self.pipeline.logger.warning("研究循环 %s 尚未启动，无法完成", cycle_id)
                 self.pipeline._fail_phase(
                     self.pipeline._metadata,
                     self.pipeline._failed_operations,
@@ -281,7 +281,7 @@ class ResearchPipelineOrchestrator:
                 start_time,
                 str(exc),
             )
-            self.pipeline.logger.error(f"研究循环完成失败: {exc}")
+            self.pipeline.logger.error("研究循环完成失败: %s", exc)
             return False
 
     def suspend_research_cycle(self, cycle_id: str) -> bool:
@@ -295,7 +295,7 @@ class ResearchPipelineOrchestrator:
         start_time = time.perf_counter()
         try:
             if cycle_id not in self.pipeline.research_cycles:
-                self.pipeline.logger.warning(f"研究循环 {cycle_id} 不存在")
+                self.pipeline.logger.warning("研究循环 %s 不存在", cycle_id)
                 self.pipeline._fail_phase(
                     self.pipeline._metadata,
                     self.pipeline._failed_operations,
@@ -329,7 +329,7 @@ class ResearchPipelineOrchestrator:
                 start_time,
                 str(exc),
             )
-            self.pipeline.logger.error(f"研究循环暂停失败: {exc}")
+            self.pipeline.logger.error("研究循环暂停失败: %s", exc)
             return False
 
     def resume_research_cycle(self, cycle_id: str) -> bool:
@@ -343,7 +343,7 @@ class ResearchPipelineOrchestrator:
         start_time = time.perf_counter()
         try:
             if cycle_id not in self.pipeline.research_cycles:
-                self.pipeline.logger.warning(f"研究循环 {cycle_id} 不存在")
+                self.pipeline.logger.warning("研究循环 %s 不存在", cycle_id)
                 self.pipeline._fail_phase(
                     self.pipeline._metadata,
                     self.pipeline._failed_operations,
@@ -376,5 +376,5 @@ class ResearchPipelineOrchestrator:
                 start_time,
                 str(exc),
             )
-            self.pipeline.logger.error(f"研究循环恢复失败: {exc}")
+            self.pipeline.logger.error("研究循环恢复失败: %s", exc)
             return False

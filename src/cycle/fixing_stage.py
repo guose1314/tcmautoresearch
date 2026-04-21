@@ -462,11 +462,11 @@ class FixingStage(PhaseTrackerMixin):
                 if repair_action:
                     repair_actions.append(repair_action)
             
-            self.logger.info(f"问题识别和修复行动生成完成，共生成 {len(repair_actions)} 个修复行动")
+            self.logger.info("问题识别和修复行动生成完成，共生成 %s 个修复行动", len(repair_actions))
             return repair_actions
             
         except Exception as e:
-            self.logger.error(f"问题识别和修复行动生成失败: {e}")
+            self.logger.error("问题识别和修复行动生成失败: %s", e)
             self.logger.error(traceback.format_exc())
             raise
     
@@ -504,7 +504,7 @@ class FixingStage(PhaseTrackerMixin):
             return repair_action
             
         except Exception as e:
-            self.logger.error(f"单个修复行动生成失败: {e}")
+            self.logger.error("单个修复行动生成失败: %s", e)
             return None
     
     def _identify_issue_type(self, issue: Dict[str, Any]) -> str:
@@ -548,7 +548,7 @@ class FixingStage(PhaseTrackerMixin):
             List[RepairAction]: 执行后的修复行动列表
         """
         start_time = time.time()
-        self.logger.info(f"开始执行 {len(repair_actions)} 个修复行动")
+        self.logger.info("开始执行 %s 个修复行动", len(repair_actions))
         
         try:
             executed_actions = []
@@ -561,11 +561,11 @@ class FixingStage(PhaseTrackerMixin):
             successful_repairs = sum(1 for a in executed_actions if a.success)
             self._update_performance_metrics(len(executed_actions), successful_repairs, time.time() - start_time)
             
-            self.logger.info(f"修复行动执行完成，成功 {successful_repairs} 个")
+            self.logger.info("修复行动执行完成，成功 %s 个", successful_repairs)
             return executed_actions
             
         except Exception as e:
-            self.logger.error(f"修复行动执行失败: {e}")
+            self.logger.error("修复行动执行失败: %s", e)
             self.logger.error(traceback.format_exc())
             raise
     
@@ -673,7 +673,7 @@ class FixingStage(PhaseTrackerMixin):
             return validation_results
             
         except Exception as e:
-            self.logger.error(f"修复效果验证失败: {e}")
+            self.logger.error("修复效果验证失败: %s", e)
             raise
 
     def run_fixing_stage(
@@ -769,7 +769,7 @@ class FixingStage(PhaseTrackerMixin):
             self._sync_analysis_summary(stage_result)
             self.repair_history.append(stage_result)
             self.failed_stages.append(stage_result)
-            self.logger.error(f"修复阶段执行失败: {exc}")
+            self.logger.error("修复阶段执行失败: %s", exc)
             self.logger.error(traceback.format_exc())
             raise
 
@@ -887,7 +887,7 @@ class FixingStage(PhaseTrackerMixin):
             return analysis_results
             
         except Exception as e:
-            self.logger.error(f"修复结果分析失败: {e}")
+            self.logger.error("修复结果分析失败: %s", e)
             raise
     
     def _generate_academic_insights(self, repair_actions: List[RepairAction]) -> List[Dict[str, Any]]:
@@ -1109,11 +1109,11 @@ class FixingStage(PhaseTrackerMixin):
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(repair_data, f, ensure_ascii=False, indent=2)
             
-            self.logger.info(f"修复数据已导出到: {output_path}")
+            self.logger.info("修复数据已导出到: %s", output_path)
             return True
             
         except Exception as e:
-            self.logger.error(f"修复数据导出失败: {e}")
+            self.logger.error("修复数据导出失败: %s", e)
             return False
     
     def cleanup(self) -> bool:
@@ -1147,5 +1147,5 @@ class FixingStage(PhaseTrackerMixin):
             return True
             
         except Exception as e:
-            self.logger.error(f"修复阶段管理器资源清理失败: {e}")
+            self.logger.error("修复阶段管理器资源清理失败: %s", e)
             return False

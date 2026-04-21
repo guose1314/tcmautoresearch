@@ -108,7 +108,7 @@ class ModuleRegistry:
             )
             return self.register_module(info)
         except Exception as e:
-            self.logger.warning(f"Auto-register BaseModule failed (non-fatal): {e}")
+            self.logger.warning("Auto-register BaseModule failed (non-fatal): %s", e)
             return False
 
     def list_modules(self) -> List[str]:
@@ -137,7 +137,7 @@ class ModuleRegistry:
             
             # 检查模块是否已存在
             if module_id in self.modules:
-                self.logger.warning(f"模块 {module_id} 已存在，将被替换")
+                self.logger.warning("模块 %s 已存在，将被替换", module_id)
             
             # 添加到模块字典
             self.modules[module_id] = module_info
@@ -153,7 +153,7 @@ class ModuleRegistry:
             return True
             
         except Exception as e:
-            self.logger.error(f"模块注册失败: {e}")
+            self.logger.error("模块注册失败: %s", e)
             return False
     
     def unregister_module(self, module_id: str) -> bool:
@@ -175,14 +175,14 @@ class ModuleRegistry:
                 if self.module_graph.has_node(module_id):
                     self.module_graph.remove_node(module_id)
                 
-                self.logger.info(f"模块 {module_id} 注销成功")
+                self.logger.info("模块 %s 注销成功", module_id)
                 return True
             else:
-                self.logger.warning(f"模块 {module_id} 不存在")
+                self.logger.warning("模块 %s 不存在", module_id)
                 return False
                 
         except Exception as e:
-            self.logger.error(f"模块注销失败: {e}")
+            self.logger.error("模块注销失败: %s", e)
             return False
     
     def get_module(self, module_id: str) -> Optional[ModuleInfo]:
@@ -238,14 +238,14 @@ class ModuleRegistry:
         try:
             if module_id in self.modules:
                 self.modules[module_id].status = ModuleStatus.ACTIVE
-                self.logger.info(f"模块 {module_id} 激活成功")
+                self.logger.info("模块 %s 激活成功", module_id)
                 return True
             else:
-                self.logger.warning(f"模块 {module_id} 不存在")
+                self.logger.warning("模块 %s 不存在", module_id)
                 return False
                 
         except Exception as e:
-            self.logger.error(f"模块激活失败: {e}")
+            self.logger.error("模块激活失败: %s", e)
             return False
     
     def deactivate_module(self, module_id: str) -> bool:
@@ -261,14 +261,14 @@ class ModuleRegistry:
         try:
             if module_id in self.modules:
                 self.modules[module_id].status = ModuleStatus.INACTIVE
-                self.logger.info(f"模块 {module_id} 停用成功")
+                self.logger.info("模块 %s 停用成功", module_id)
                 return True
             else:
-                self.logger.warning(f"模块 {module_id} 不存在")
+                self.logger.warning("模块 %s 不存在", module_id)
                 return False
                 
         except Exception as e:
-            self.logger.error(f"模块停用失败: {e}")
+            self.logger.error("模块停用失败: %s", e)
             return False
     
     def get_module_dependencies(self, module_id: str) -> List[str]:
@@ -757,7 +757,7 @@ class SystemArchitecture(PhaseTrackerMixin):
                 e,
                 {"module_id": module_info.module_id},
             )
-            self.logger.error(f"模块注册失败: {e}")
+            self.logger.error("模块注册失败: %s", e)
             return False
     
     def unregister_module(self, module_id: str) -> bool:
@@ -786,7 +786,7 @@ class SystemArchitecture(PhaseTrackerMixin):
                     phase_started_at,
                     {"module_id": module_id, "unregistered": True},
                 )
-                self.logger.info(f"模块 {module_id} 注销成功")
+                self.logger.info("模块 %s 注销成功", module_id)
             elif not success:
                 self._fail_phase(
                     "unregister_module",
@@ -804,7 +804,7 @@ class SystemArchitecture(PhaseTrackerMixin):
                 e,
                 {"module_id": module_id},
             )
-            self.logger.error(f"模块注销失败: {e}")
+            self.logger.error("模块注销失败: %s", e)
             return False
     
     def initialize_system(self) -> bool:
@@ -874,7 +874,7 @@ class SystemArchitecture(PhaseTrackerMixin):
         except Exception as e:
             self.system_status = "error"
             self._fail_phase("initialize_system", phase_started_at, e)
-            self.logger.error(f"系统初始化失败: {e}")
+            self.logger.error("系统初始化失败: %s", e)
             self.logger.error(traceback.format_exc())
             return False
     
@@ -916,7 +916,7 @@ class SystemArchitecture(PhaseTrackerMixin):
                     phase_started_at,
                     {"module_id": module_id, "activated": True},
                 )
-                self.logger.info(f"模块 {module_id} 激活成功")
+                self.logger.info("模块 %s 激活成功", module_id)
             else:
                 self._fail_phase(
                     "activate_module",
@@ -929,7 +929,7 @@ class SystemArchitecture(PhaseTrackerMixin):
             
         except Exception as e:
             self._fail_phase("activate_module", phase_started_at, e, {"module_id": module_id})
-            self.logger.error(f"模块激活失败: {e}")
+            self.logger.error("模块激活失败: %s", e)
             return False
     
     def deactivate_module(self, module_id: str) -> bool:
@@ -957,7 +957,7 @@ class SystemArchitecture(PhaseTrackerMixin):
                     phase_started_at,
                     {"module_id": module_id, "deactivated": True},
                 )
-                self.logger.info(f"模块 {module_id} 停用成功")
+                self.logger.info("模块 %s 停用成功", module_id)
             else:
                 self._fail_phase(
                     "deactivate_module",
@@ -970,7 +970,7 @@ class SystemArchitecture(PhaseTrackerMixin):
             
         except Exception as e:
             self._fail_phase("deactivate_module", phase_started_at, e, {"module_id": module_id})
-            self.logger.error(f"模块停用失败: {e}")
+            self.logger.error("模块停用失败: %s", e)
             return False
     
     def execute_pipeline(self, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -1011,7 +1011,7 @@ class SystemArchitecture(PhaseTrackerMixin):
                     if node in active_module_ids
                 ]
             except Exception as e:
-                self.logger.error(f"模块依赖拓扑排序失败: {e}")
+                self.logger.error("模块依赖拓扑排序失败: %s", e)
                 raise
 
             # 按拓扑顺序执行模块
@@ -1079,7 +1079,7 @@ class SystemArchitecture(PhaseTrackerMixin):
         except Exception as e:
             self.system_status = "error"
             self._fail_phase("execute_pipeline", phase_started_at, e)
-            self.logger.error(f"系统流水线执行失败: {e}")
+            self.logger.error("系统流水线执行失败: %s", e)
             self.logger.error(traceback.format_exc())
             raise
     
@@ -1287,12 +1287,12 @@ class SystemArchitecture(PhaseTrackerMixin):
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(system_info, f, ensure_ascii=False, indent=2)
 
-            self.logger.info(f"系统信息已导出到: {output_path}")
+            self.logger.info("系统信息已导出到: %s", output_path)
             return True
             
         except Exception as e:
             self._fail_phase("export_system_info", phase_started_at, e, {"output_path": output_path})
-            self.logger.error(f"系统信息导出失败: {e}")
+            self.logger.error("系统信息导出失败: %s", e)
             return False
     
     def cleanup(self) -> bool:
@@ -1328,7 +1328,7 @@ class SystemArchitecture(PhaseTrackerMixin):
             
         except Exception as e:
             self._fail_phase("cleanup", phase_started_at, e)
-            self.logger.error(f"系统资源清理失败: {e}")
+            self.logger.error("系统资源清理失败: %s", e)
             return False
 
 # 导出主要类和函数

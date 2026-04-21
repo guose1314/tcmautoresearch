@@ -363,12 +363,12 @@ class IntegrationTester(PhaseTrackerMixin):
                 {"environment_id": env_id},
             )
             
-            self.logger.info(f"测试环境 {env_name} 创建成功")
+            self.logger.info("测试环境 %s 创建成功", env_name)
             return test_environment
             
         except Exception as e:
             self._fail_phase("create_test_environment", phase_started_at, e, {"environment_name": env_name})
-            self.logger.error(f"测试环境 {env_name} 创建失败: {e}")
+            self.logger.error("测试环境 %s 创建失败: %s", env_name, e)
             raise
     
     def add_integration_test(self, test_name: str, 
@@ -422,12 +422,12 @@ class IntegrationTester(PhaseTrackerMixin):
                 {"test_id": test_id, "component_count": len(components_involved)},
             )
             
-            self.logger.info(f"集成测试 {test_name} 添加成功")
+            self.logger.info("集成测试 %s 添加成功", test_name)
             return integration_test
             
         except Exception as e:
             self._fail_phase("add_integration_test", phase_started_at, e, {"test_name": test_name})
-            self.logger.error(f"集成测试 {test_name} 添加失败: {e}")
+            self.logger.error("集成测试 %s 添加失败: %s", test_name, e)
             raise
     
     def run_integration_test(self, test_id: str, 
@@ -503,7 +503,7 @@ class IntegrationTester(PhaseTrackerMixin):
             
         except Exception as e:
             self._fail_phase("run_integration_test", phase_started_at, e, {"test_id": test_id, "environment_id": environment_id})
-            self.logger.error(f"集成测试运行失败: {e}")
+            self.logger.error("集成测试运行失败: %s", e)
             self.logger.error(traceback.format_exc())
             
             # 更新测试状态为错误
@@ -542,7 +542,7 @@ class IntegrationTester(PhaseTrackerMixin):
             return result
             
         except Exception as e:
-            self.logger.error(f"集成测试执行失败: {e}")
+            self.logger.error("集成测试执行失败: %s", e)
             return IntegrationTest(
                 test_id=test.test_id,
                 test_name=test.test_name,
@@ -1081,7 +1081,7 @@ class IntegrationTester(PhaseTrackerMixin):
             
         except Exception as e:
             self._fail_phase("run_all_integration_tests", phase_started_at, e, {"environment_id": environment_id})
-            self.logger.error(f"所有集成测试运行失败: {e}")
+            self.logger.error("所有集成测试运行失败: %s", e)
             self.logger.error(traceback.format_exc())
             raise
     
@@ -1285,12 +1285,12 @@ class IntegrationTester(PhaseTrackerMixin):
             self.failed_phase = None
             self.final_status = "completed"
             self._complete_phase("export_integration_results", phase_started_at, {"output_path": output_path})
-            self.logger.info(f"集成测试结果已导出到: {output_path}")
+            self.logger.info("集成测试结果已导出到: %s", output_path)
             return True
             
         except Exception as e:
             self._fail_phase("export_integration_results", phase_started_at, e, {"output_path": output_path})
-            self.logger.error(f"集成测试结果导出失败: {e}")
+            self.logger.error("集成测试结果导出失败: %s", e)
             return False
     
     def get_integration_performance_report(self) -> Dict[str, Any]:
@@ -1343,7 +1343,7 @@ class IntegrationTester(PhaseTrackerMixin):
             
         except Exception as e:
             self._fail_phase("cleanup", phase_started_at, e)
-            self.logger.error(f"资源清理失败: {e}")
+            self.logger.error("资源清理失败: %s", e)
             return False
 
 # 导出主要类和函数

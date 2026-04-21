@@ -63,7 +63,7 @@ class SemanticGraphBuilder(BaseModule):
             self.logger.info("语义图构建器初始化完成")
             return True
         except Exception as e:
-            self.logger.error(f"语义图构建器初始化失败: {e}")
+            self.logger.error("语义图构建器初始化失败: %s", e)
             return False
     
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -144,7 +144,7 @@ class SemanticGraphBuilder(BaseModule):
             return output_data
             
         except Exception as e:
-            self.logger.error(f"语义图构建执行失败: {e}")
+            self.logger.error("语义图构建执行失败: %s", e)
             raise
 
     def _validate_entities(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -643,5 +643,5 @@ class SemanticGraphBuilder(BaseModule):
             self.logger.info("语义图构建器资源清理完成")
             return True
         except Exception as e:
-            self.logger.error(f"语义图构建器资源清理失败: {e}")
+            self.logger.error("语义图构建器资源清理失败: %s", e)
             return False

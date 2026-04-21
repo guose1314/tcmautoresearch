@@ -408,12 +408,12 @@ class AutomatedTester(PhaseTrackerMixin):
                 {"suite_id": suite_id, "test_case_count": len(test_cases)},
             )
             
-            self.logger.info(f"测试套件 {suite_name} 添加成功")
+            self.logger.info("测试套件 %s 添加成功", suite_name)
             return True
             
         except Exception as e:
             self._fail_phase("add_test_suite", phase_started_at, e, {"suite_name": suite_name})
-            self.logger.error(f"测试套件 {suite_name} 添加失败: {e}")
+            self.logger.error("测试套件 %s 添加失败: %s", suite_name, e)
             return False
     
     def run_test_suite(self, suite_id: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -505,7 +505,7 @@ class AutomatedTester(PhaseTrackerMixin):
             
         except Exception as e:
             self._fail_phase("run_test_suite", phase_started_at, e, {"suite_id": suite_id})
-            self.logger.error(f"测试套件运行失败: {e}")
+            self.logger.error("测试套件运行失败: %s", e)
             self.logger.error(traceback.format_exc())
             raise
     
@@ -607,11 +607,11 @@ class AutomatedTester(PhaseTrackerMixin):
             # 保存测试结果
             self.test_results.append(test_result)
             
-            self.logger.debug(f"测试用例 {test_name} 执行完成")
+            self.logger.debug("测试用例 %s 执行完成", test_name)
             return test_result
             
         except Exception as e:
-            self.logger.error(f"测试用例执行失败: {e}")
+            self.logger.error("测试用例执行失败: %s", e)
             return TestResult(
                 test_id=f"error_{int(time.time())}",
                 test_name=f"error_test_{index}",
@@ -950,7 +950,7 @@ class AutomatedTester(PhaseTrackerMixin):
             
         except Exception as e:
             self._fail_phase("run_all_tests", phase_started_at, e)
-            self.logger.error(f"所有测试运行失败: {e}")
+            self.logger.error("所有测试运行失败: %s", e)
             self.logger.error(traceback.format_exc())
             raise
     
@@ -1031,12 +1031,12 @@ class AutomatedTester(PhaseTrackerMixin):
             self.failed_phase = None
             self.final_status = "completed"
             self._complete_phase("export_test_results", phase_started_at, {"output_path": output_path})
-            self.logger.info(f"测试结果已导出到: {output_path}")
+            self.logger.info("测试结果已导出到: %s", output_path)
             return True
             
         except Exception as e:
             self._fail_phase("export_test_results", phase_started_at, e, {"output_path": output_path})
-            self.logger.error(f"测试结果导出失败: {e}")
+            self.logger.error("测试结果导出失败: %s", e)
             return False
     
     def get_test_performance_report(self) -> Dict[str, Any]:
@@ -1087,7 +1087,7 @@ class AutomatedTester(PhaseTrackerMixin):
             
         except Exception as e:
             self._fail_phase("cleanup", phase_started_at, e)
-            self.logger.error(f"资源清理失败: {e}")
+            self.logger.error("资源清理失败: %s", e)
             return False
 
 # 导出主要类和函数

@@ -217,7 +217,7 @@ def _extract_pdf_metadata_with_llm(
             system_prompt = "You are an expert academic translator."
             translated_abstract = engine.generate(user_prompt, system_prompt)
         except Exception as exc:
-            logger.warning(f"摘要翻译失败: {exc}")
+            logger.warning("摘要翻译失败: %s", exc)
 
         try:
             # 翻译标题
@@ -227,7 +227,7 @@ def _extract_pdf_metadata_with_llm(
             system_prompt = "You are an expert academic translator."
             translated_title = engine.generate(user_prompt, system_prompt)
         except Exception as exc:
-            logger.warning(f"标题翻译失败: {exc}")
+            logger.warning("标题翻译失败: %s", exc)
 
     return translated_title, translated_abstract
 
@@ -255,7 +255,7 @@ def _load_pdf_engine(use_llm: bool):
         logger.info("LLM已加载，开始翻译。")
         return engine
     except Exception as exc:
-        logger.warning(f"LLM加载失败，将跳过翻译: {exc}")
+        logger.warning("LLM加载失败，将跳过翻译: %s", exc)
         return None
 
 
@@ -290,9 +290,9 @@ def _translate_pdf_fragments(
                 fragment_results[idx] = future.result()
                 fragment_ok += 1
                 if (idx + 1) % max(1, len(fragments) // 5) == 0:
-                    logger.info(f"翻译进度: {idx + 1}/{len(fragments)} 片段完成")
+                    logger.info("翻译进度: %s/%s 片段完成", idx + 1, len(fragments))
             except Exception as exc:
-                logger.error(f"片段 {idx} 翻译失败: {exc}")
+                logger.error("片段 %s 翻译失败: %s", idx, exc)
                 fragment_results[idx] = fragments[idx]
 
     return [item or fragments[i] for i, item in enumerate(fragment_results)], fragment_ok
@@ -521,7 +521,7 @@ def run_pdf_full_text_translation(
         return _build_failed_pdf_result(out_dir, ts, pdf_path, err)
 
     fragments = _split_pdf_content(full_text, max_tokens=max_tokens_per_fragment)
-    logger.info(f"PDF拆分成 {len(fragments)} 个翻译片段")
+    logger.info("PDF拆分成 %s 个翻译片段", len(fragments))
     engine = _load_pdf_engine(use_llm)
 
     try:
@@ -537,7 +537,7 @@ def run_pdf_full_text_translation(
     finally:
         _unload_pdf_engine(engine)
 
-    logger.info(f"翻译完成: {fragment_ok}/{len(fragments)} 片段成功")
+    logger.info("翻译完成: %s/%s 片段成功", fragment_ok, len(fragments))
 
     try:
         _write_pdf_artifacts(
@@ -551,7 +551,7 @@ def run_pdf_full_text_translation(
         )
         logger.info(f"已生成报告: {artifacts.markdown_file}, {artifacts.html_file}")
     except Exception as exc:
-        logger.error(f"输出文件生成失败: {exc}")
+        logger.error("输出文件生成失败: %s", exc)
 
     try:
         _write_pdf_json_output(
@@ -569,7 +569,7 @@ def run_pdf_full_text_translation(
             ),
         )
     except Exception as exc:
-        logger.error(f"JSON 输出失败: {exc}")
+        logger.error("JSON 输出失败: %s", exc)
 
     summary = f"PDF翻译完成: {fragment_ok}/{len(fragments)} 片段，{char_count} 字符"
 

@@ -17,11 +17,12 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from src.core.phase_tracker import PhaseTrackerMixin
+from src.core.module_status import ModuleStatus, ModulePriority  # noqa: F401
 
 
 # Re-export deprecated helper types from module_interface (lazy to avoid circular import)
 def __getattr__(name):
-    _interface_types = ("ModuleContext", "ModuleOutput", "ModuleStatus", "ModulePriority")
+    _interface_types = ("ModuleContext", "ModuleOutput")
     if name in _interface_types:
         import importlib
         mod = importlib.import_module("src.core.module_interface")
@@ -73,7 +74,7 @@ class BaseModule(PhaseTrackerMixin, ABC):
         }
         self.logger = logging.getLogger(f"{__name__}.{module_name}")
         self.initialized = False
-        self.status = "created"
+        self.status: ModuleStatus = ModuleStatus.CREATED
         self.metrics = {
             "execution_count": 0,
             "total_execution_time": 0.0,
@@ -115,9 +116,9 @@ class BaseModule(PhaseTrackerMixin, ABC):
             # 执行具体初始化逻辑
             if self._do_initialize():
                 self.initialized = True
-                self.status = "initialized"
+                self.status = ModuleStatus.INITIALIZED
                 self.metrics["last_execution_time"] = time.time() - start_time
-                self.final_status = "initialized"
+                self.final_status = ModuleStatus.INITIALIZED.value
                 self._complete_phase(
                     "initialize",
                     phase_started_at,
@@ -134,14 +135,14 @@ class BaseModule(PhaseTrackerMixin, ABC):
             )
                 
         except Exception as e:
-            self.status = "error"
+            self.status = ModuleStatus.ERROR
             self._fail_phase(
                 "initialize",
                 phase_started_at,
                 e,
                 {"config_keys": sorted((config or {}).keys())},
             )
-            self.logger.error(f"模块 {self.module_name} 初始化失败: {e}")
+            self.logger.error("模块 %s 初始化失败: %s", self.module_name, e)
             self.logger.error(traceback.format_exc())
             
         return False
@@ -194,20 +195,20 @@ class BaseModule(PhaseTrackerMixin, ABC):
             
             # 生成改进建议
             self._generate_recommendations(result)
-            self.final_status = "completed"
+            self.final_status = ModuleStatus.COMPLETED.value
             self._complete_phase(
                 "execute",
                 phase_started_at,
                 {"context_keys": sorted(context.keys())},
-                final_status="completed",
+                final_status=ModuleStatus.COMPLETED.value,
             )
             
-            self.logger.info(f"模块 {self.module_name} 执行成功，耗时: {execution_time:.2f}s")
+            self.logger.info("模块 %s 执行成功，耗时: %.2fs", self.module_name, execution_time)
             return result
             
         except Exception as e:
             execution_time = time.time() - start_time
-            self.logger.error(f"模块 {self.module_name} 执行失败: {e}")
+            self.logger.error("模块 %s 执行失败: %s", self.module_name, e)
             self.logger.error(traceback.format_exc())
             
             # 更新错误指标
@@ -252,7 +253,7 @@ class BaseModule(PhaseTrackerMixin, ABC):
         try:
             if self._do_cleanup():
                 self.initialized = False
-                self.status = "cleaned"
+                self.status = ModuleStatus.TERMINATED
                 self.metrics["last_execution_time"] = time.time() - start_time
                 self.metrics["execution_count"] = 0
                 self.metrics["total_execution_time"] = 0.0
@@ -270,17 +271,17 @@ class BaseModule(PhaseTrackerMixin, ABC):
                 self.failed_operations.clear()
                 self.failed_phase = None
                 self.last_completed_phase = None
-                self.final_status = "cleaned"
-                self.logger.info(f"模块 {self.module_name} 资源清理完成")
+                self.final_status = ModuleStatus.CLEANED.value
+                self.logger.info("模块 %s 资源清理完成", self.module_name)
                 
                 # 不关闭全局线程池
                 # self.executor.shutdown(wait=True)
                 return True
                 
         except Exception as e:
-            self.status = "error"
+            self.status = ModuleStatus.ERROR
             self._fail_phase("cleanup", phase_started_at, e, {"module_name": self.module_name})
-            self.logger.error(f"模块 {self.module_name} 资源清理失败: {e}")
+            self.logger.error("模块 %s 资源清理失败: %s", self.module_name, e)
             self.logger.error(traceback.format_exc())
             
         return False
@@ -555,12 +556,12 @@ class BaseModule(PhaseTrackerMixin, ABC):
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(module_data, f, ensure_ascii=False, indent=2)
             
-            self.logger.info(f"模块数据已导出到: {output_path}")
+            self.logger.info("模块数据已导出到: %s", output_path)
             return True
             
         except Exception as e:
             self._fail_phase("export_module_data", phase_started_at, e, {"output_path": output_path})
-            self.logger.error(f"模块数据导出失败: {e}")
+            self.logger.error("模块数据导出失败: %s", e)
             return False
     
     def get_module_health(self) -> Dict[str, Any]:

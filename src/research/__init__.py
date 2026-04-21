@@ -17,7 +17,9 @@ from .arxiv_quick_helper import (
     run_arxiv_quick_helper,
 )
 from .audit_history import AuditEntry, AuditHistory
-from .ctext_corpus_collector import CTextCorpusCollector
+# CTextCorpusCollector 规范来源：src.collector.ctext_corpus_collector
+# 此处 re-export 仅保持向后兼容
+from src.collector.ctext_corpus_collector import CTextCorpusCollector
 from .ctext_whitelist import build_batch_manifest, load_whitelist
 from .data_miner import DataMiner
 from .gap_analyzer import (
