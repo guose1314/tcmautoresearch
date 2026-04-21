@@ -1,15 +1,22 @@
 # src/analysis/preprocessor.py  (migrated from src/preprocessor/document_preprocessor.py)
 """
-文档预处理模块 - 升级版本，集成古文分词和繁简转换
+文档预处理模块 - 中医古文献专项版本
+
+功能：
 - jieba 分词（处理现代中文和古文）
 - opencc 繁简转换（繁体 → 简体 | 简体 → 繁体）
 - 智能换行处理、空白标准化
+- 中医古籍朝代/作者/书名元数据提取
+- 异体字规范化（异体字 → 规范简体）
+- 注疏识别（注文/疏文/按语检测）
+- 古籍文本类型分类（本草/医案/方剂/经典/医论）
+- TCM 专项分词接口（支持外部词典扩展）
 """
 import logging
 import re
 import warnings
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 try:
     with warnings.catch_warnings():
@@ -53,8 +60,87 @@ _MULTI_NEWLINE_RE = re.compile(r'\n{3,}')
 _MULTI_SPACE_RE = re.compile(r'\s+')
 _CONTROL_CHARS_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
 
+# ── 异体字规范化映射（繁/异体 → 规范简体） ────────────────────────────────────
+_VARIANT_CHAR_MAP: Dict[str, str] = {
+    "藥": "药", "醫": "医", "傳": "传", "証": "证", "癥": "症",
+    "術": "术", "氣": "气", "陽": "阳", "陰": "阴", "經": "经",
+    "絡": "络", "熱": "热", "虛": "虚", "實": "实", "臟": "脏",
+    "腑": "腑", "脈": "脉", "針": "针", "灸": "灸", "藏": "藏",
+}
+_VARIANT_TABLE = str.maketrans(_VARIANT_CHAR_MAP)
+
+# ── 古籍书名 → (朝代, 作者) 映射 ─────────────────────────────────────────────
+_CLASSIC_BOOK_META: Dict[str, Dict[str, str]] = {
+    "黄帝内经": {"dynasty": "先秦", "author": "佚名"},
+    "素问": {"dynasty": "先秦", "author": "佚名"},
+    "灵枢": {"dynasty": "先秦", "author": "佚名"},
+    "神农本草经": {"dynasty": "先秦", "author": "佚名"},
+    "伤寒论": {"dynasty": "汉", "author": "张仲景"},
+    "金匮要略": {"dynasty": "汉", "author": "张仲景"},
+    "伤寒杂病论": {"dynasty": "汉", "author": "张仲景"},
+    "难经": {"dynasty": "汉", "author": "扁鹊"},
+    "针灸甲乙经": {"dynasty": "魏晋", "author": "皇甫谧"},
+    "肘后备急方": {"dynasty": "魏晋", "author": "葛洪"},
+    "脉经": {"dynasty": "魏晋", "author": "王叔和"},
+    "诸病源候论": {"dynasty": "隋", "author": "巢元方"},
+    "备急千金要方": {"dynasty": "唐", "author": "孙思邈"},
+    "千金翼方": {"dynasty": "唐", "author": "孙思邈"},
+    "外台秘要": {"dynasty": "唐", "author": "王焘"},
+    "新修本草": {"dynasty": "唐", "author": "苏敬"},
+    "太平圣惠方": {"dynasty": "宋", "author": "王怀隐"},
+    "圣济总录": {"dynasty": "宋", "author": "佚名"},
+    "小儿药证直诀": {"dynasty": "宋", "author": "钱乙"},
+    "三因极一病证方论": {"dynasty": "宋", "author": "陈言"},
+    "本草衍义": {"dynasty": "宋", "author": "寇宗奭"},
+    "济生方": {"dynasty": "宋", "author": "严用和"},
+    "宣明论方": {"dynasty": "金", "author": "刘完素"},
+    "素问玄机原病式": {"dynasty": "金", "author": "刘完素"},
+    "脾胃论": {"dynasty": "金", "author": "李东垣"},
+    "内外伤辨惑论": {"dynasty": "金", "author": "李东垣"},
+    "儒门事亲": {"dynasty": "金", "author": "张从正"},
+    "丹溪心法": {"dynasty": "元", "author": "朱丹溪"},
+    "格致余论": {"dynasty": "元", "author": "朱丹溪"},
+    "世医得效方": {"dynasty": "元", "author": "危亦林"},
+    "本草纲目": {"dynasty": "明", "author": "李时珍"},
+    "景岳全书": {"dynasty": "明", "author": "张景岳"},
+    "温疫论": {"dynasty": "明", "author": "吴又可"},
+    "医学入门": {"dynasty": "明", "author": "李梃"},
+    "医宗金鉴": {"dynasty": "清", "author": "吴谦"},
+    "温病条辨": {"dynasty": "清", "author": "吴鞠通"},
+    "温热论": {"dynasty": "清", "author": "叶天士"},
+    "临证指南医案": {"dynasty": "清", "author": "叶天士"},
+    "医林改错": {"dynasty": "清", "author": "王清任"},
+    "血证论": {"dynasty": "清", "author": "唐宗海"},
+    "本草备要": {"dynasty": "清", "author": "汪昂"},
+    "本草从新": {"dynasty": "清", "author": "吴仪洛"},
+    "重订广温热论": {"dynasty": "清", "author": "何廉臣"},
+    "中医基础理论": {"dynasty": "现代", "author": "现代教材"},
+    "中药学": {"dynasty": "现代", "author": "现代教材"},
+    "方剂学": {"dynasty": "现代", "author": "现代教材"},
+}
+
+# ── 注疏类型识别正则 ──────────────────────────────────────────────────────────
+_ANNOTATION_PATTERNS: Dict[str, re.Pattern] = {
+    "注": re.compile(r'（注[：:]?.{5,100}）|【注[：:]?.{5,80}】'),
+    "疏": re.compile(r'（疏[：:]?.{5,100}）|【疏[：:]?.{5,80}】'),
+    "按": re.compile(r'按[：:].{5,150}[。\n]'),
+    "曰": re.compile(r'[^\u4e00-\u9fff][曰云][：:].{5,100}[。\n]'),
+}
+
+# ── 文本类型分类关键词 ────────────────────────────────────────────────────────
+_TEXT_TYPE_KEYWORDS: Dict[str, List[str]] = {
+    "本草": ["味辛", "性温", "归经", "功效", "主治", "用法用量", "毒性", "炮制"],
+    "方剂": ["君药", "臣药", "佐药", "使药", "组方", "配伍", "加减", "方解"],
+    "医案": ["患者", "病案", "初诊", "复诊", "症见", "脉象", "辨证", "处方"],
+    "经典": ["阴阳", "五行", "脏腑", "经络", "营卫", "气血", "病机", "治则"],
+    "医论": ["论曰", "余谓", "按语", "考证", "溯源", "发微", "议论"],
+}
+
 class DocumentPreprocessor(BaseModule):
-    """文档预处理模块 - 支持古文分词和繁简转换"""
+    """文档预处理模块 - 支持古文分词、繁简转换与中医古籍元数据提取。"""
+
+    # 最小段落长度：短于此值的段落视为过短，不单独分段
+    _MIN_PARAGRAPH_LENGTH: int = 10
     
     def __init__(self, config: Dict[str, Any] | None = None):
         super().__init__("document_preprocessor", config)
@@ -291,7 +377,150 @@ class DocumentPreprocessor(BaseModule):
             return "utf-8"
         except Exception:
             return "utf-8"
-    
+
+    # ── 中医古籍专项方法 ───────────────────────────────────────────────────────
+
+    def normalize_variant_chars(self, text: str) -> str:
+        """规范化异体字：将常见繁/异体字替换为规范简体字。
+
+        Args:
+            text: 输入文本（可含繁体/异体字）。
+
+        Returns:
+            规范化后的文本。
+        """
+        return text.translate(_VARIANT_TABLE)
+
+    def detect_book_metadata(self, title: str) -> Optional[Dict[str, str]]:
+        """根据古籍书名查找朝代与作者元数据。
+
+        Args:
+            title: 古籍书名（如"本草纲目"）。
+
+        Returns:
+            包含 ``dynasty`` 和 ``author`` 的字典，若书名未知则返回 ``None``。
+        """
+        # 精确匹配
+        meta = _CLASSIC_BOOK_META.get(title)
+        if meta:
+            return dict(meta)
+        # 模糊匹配：检查书名是否包含于已知书目
+        for known_title, known_meta in _CLASSIC_BOOK_META.items():
+            if known_title in title or title in known_title:
+                return dict(known_meta)
+        return None
+
+    def detect_annotations(self, text: str) -> List[Dict[str, str]]:
+        """检测文本中的注疏内容（注文/疏文/按语等）。
+
+        Args:
+            text: 输入文本。
+
+        Returns:
+            注疏片段列表，每条含 ``type``（注/疏/按/曰）和 ``content``。
+        """
+        found: List[Dict[str, str]] = []
+        for ann_type, pattern in _ANNOTATION_PATTERNS.items():
+            for m in pattern.finditer(text):
+                found.append({"type": ann_type, "content": m.group().strip()})
+        return found
+
+    def classify_text_type(self, text: str) -> str:
+        """对中医文本进行类型分类。
+
+        分类类别：``本草`` / ``方剂`` / ``医案`` / ``经典`` / ``医论`` / ``未分类``
+
+        Args:
+            text: 输入文本（建议取前500字）。
+
+        Returns:
+            文本类型标签字符串。
+        """
+        sample = text[:500]
+        scores: Dict[str, int] = {}
+        for text_type, keywords in _TEXT_TYPE_KEYWORDS.items():
+            scores[text_type] = sum(1 for kw in keywords if kw in sample)
+        max_score = max(scores.values(), default=0)
+        if max_score == 0:
+            return "未分类"
+        return max(scores.items(), key=lambda kv: kv[1])[0]
+
+    def extract_tcm_document_metadata(
+        self, text: str, source_file: str = "unknown"
+    ) -> Dict[str, Any]:
+        """提取中医文档的完整 TCM 专项元数据。
+
+        整合书名识别、朝代/作者推断、注疏检测、文本类型分类，
+        返回可直接写入知识图谱的结构化元数据。
+
+        Args:
+            text:        文档全文。
+            source_file: 来源文件名（用于书名识别提示）。
+
+        Returns:
+            包含以下键的元数据字典：
+              - ``source_file``, ``text_type``, ``dynasty``, ``author``
+              - ``annotation_count``, ``annotations``
+              - ``variant_chars_detected``, ``char_count``
+        """
+        # 检测异体字数量（规范化前后的字符差异）
+        normalized = self.normalize_variant_chars(text)
+        variant_count = sum(1 for a, b in zip(text, normalized) if a != b)
+
+        # 书名元数据（从文件名或文本首行推断）
+        book_meta: Optional[Dict[str, str]] = None
+        # 尝试从 source_file 和文本首行识别书名
+        first_line = text.strip().split('\n')[0][:30] if text.strip() else ""
+        for candidate in [source_file, first_line]:
+            book_meta = self.detect_book_metadata(candidate)
+            if book_meta:
+                break
+
+        # 注疏检测
+        annotations = self.detect_annotations(text[:2000])
+
+        # 文本类型分类
+        text_type = self.classify_text_type(text)
+
+        return {
+            "source_file": source_file,
+            "char_count": len(text),
+            "text_type": text_type,
+            "dynasty": (book_meta or {}).get("dynasty", "未知"),
+            "author": (book_meta or {}).get("author", "未知"),
+            "book_identified": bool(book_meta),
+            "annotation_count": len(annotations),
+            "annotations": annotations[:5],
+            "variant_chars_detected": variant_count,
+            "processing_timestamp": datetime.now().isoformat(),
+        }
+
+    def segment_tcm_text(self, text: str) -> List[str]:
+        """使用 TCM 专项分词对古文进行分词。
+
+        优先尝试 TCMLexicon（若已实现），降级至 jieba 普通分词。
+        TODO (TD-04): TCMLexicon 尚未实现；该方法为占位符，
+        待引入中医专业词典（src/analysis/tcm_lexicon.py）后替换。
+        当前实现已能正确降级，不影响主流程运行。
+
+        Args:
+            text: 输入文本（古文或现代中文）。
+
+        Returns:
+            分词结果词语字符串列表。
+        """
+        try:
+            from src.analysis.tcm_lexicon import TCMLexicon  # type: ignore[import]
+            lexicon = TCMLexicon()
+            return lexicon.segment(text)
+        except ImportError:
+            pass
+        except Exception as exc:
+            self.logger.warning("TCMLexicon 分词失败: %s，回退至 jieba", exc)
+
+        words = self.segment_text(text)
+        return [w if isinstance(w, str) else w.word for w in words]
+
     def _do_cleanup(self) -> bool:
         """清理资源"""
         try:

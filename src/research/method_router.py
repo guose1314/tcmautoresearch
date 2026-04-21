@@ -6,6 +6,7 @@
 "让11个研究方法 sub-module 真正参与科研流程"。
 
 支持的分析类型：
+  ── 原有语义建模方法 ──
   - formula_structure          → FormulaStructureAnalyzer
   - network_pharmacology       → NetworkPharmacologySystemBiologyAnalyzer
   - classical_literature       → ClassicalLiteratureArchaeologyAnalyzer
@@ -13,6 +14,14 @@
   - supramolecular             → SupramolecularPhysicochemicalAnalyzer
   - integrated_research        → IntegratedResearchAnalyzer
   - summary_analysis           → SummaryAnalysisEngine
+  - meta_analysis              → MetaAnalysisEngine
+  ── 中医文献研究方法（新增） ──
+  - tcm_literature_sorting     → LiteratureSortingMethod
+  - tcm_bibliometrics          → BibliometricsMethod
+  - tcm_textual_criticism      → TextualCriticismMethod
+  - tcm_exegesis               → ExegesisMethod
+  - tcm_version_collation      → VersionCollationMethod
+  - tcm_integrated_literature  → IntegratedLiteratureMethod
 """
 
 from __future__ import annotations
@@ -39,6 +48,7 @@ class ResearchMethodRouter:
     def __init__(self) -> None:
         self._methods: Dict[str, Any] = {}
         self._register_defaults()
+        self._register_tcm_literature_methods()
 
     def _register_defaults(self) -> None:
         """延迟注册所有默认研究方法分析器（按需实例化，失败则跳过）。"""
@@ -90,6 +100,52 @@ class ResearchMethodRouter:
 
         except ImportError as exc:
             logger.warning("无法导入研究方法模块，部分分析器将不可用: %s", exc)
+
+    def _register_tcm_literature_methods(self) -> None:
+        """注册六种中医文献研究法分析器（stage2 新增）。
+
+        注册的路由键均以 ``tcm_`` 为前缀，以区分原有语义建模方法。
+        导入失败时仅打印警告，不阻断其余分析器注册。
+        """
+        tcm_mapping = {
+            "tcm_literature_sorting": "LiteratureSortingMethod",
+            "tcm_bibliometrics": "BibliometricsMethod",
+            "tcm_textual_criticism": "TextualCriticismMethod",
+            "tcm_exegesis": "ExegesisMethod",
+            "tcm_version_collation": "VersionCollationMethod",
+            "tcm_integrated_literature": "IntegratedLiteratureMethod",
+        }
+        try:
+            from src.research.tcm_literature_methods import (
+                BibliometricsMethod,
+                ExegesisMethod,
+                IntegratedLiteratureMethod,
+                LiteratureSortingMethod,
+                TextualCriticismMethod,
+                VersionCollationMethod,
+            )
+
+            class_map = {
+                "LiteratureSortingMethod": LiteratureSortingMethod,
+                "BibliometricsMethod": BibliometricsMethod,
+                "TextualCriticismMethod": TextualCriticismMethod,
+                "ExegesisMethod": ExegesisMethod,
+                "VersionCollationMethod": VersionCollationMethod,
+                "IntegratedLiteratureMethod": IntegratedLiteratureMethod,
+            }
+
+            for key, class_name in tcm_mapping.items():
+                cls = class_map.get(class_name)
+                if cls is None:
+                    continue
+                try:
+                    self._methods[key] = cls()
+                    logger.debug("已注册 TCM 文献研究方法分析器: %s → %s", key, class_name)
+                except Exception as exc:
+                    logger.warning("TCM 文献方法分析器 %s 初始化失败，跳过: %s", class_name, exc)
+
+        except ImportError as exc:
+            logger.warning("无法导入 TCM 文献研究方法模块: %s", exc)
 
     def register(self, key: str, analyzer: Any) -> None:
         """
