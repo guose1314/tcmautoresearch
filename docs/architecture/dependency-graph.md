@@ -4,70 +4,113 @@ This document is generated from internal imports under src/.
 
 ## Summary
 
-- Module count: 81
-- Module edges: 119
-- Package count: 22
-- Package edges: 33
+- Module count: 203
+- Module edges: 403
+- Package count: 31
+- Package edges: 67
 
 ## Package Graph
 
 ```mermaid
 flowchart LR
     src["src"]
+    src_ai_assistant["ai_assistant"]
     src_analysis["analysis"]
     src_analytics["analytics"]
+    src_api["api"]
+    src_collector["collector"]
+    src_common["common"]
     src_core["core"]
     src_corpus["corpus"]
     src_cycle["cycle"]
     src_data["data"]
     src_extraction["extraction"]
     src_extractors["extractors"]
+    src_generation["generation"]
     src_hypothesis["hypothesis"]
     src_infra["infra"]
+    src_infrastructure["infrastructure"]
     src_knowledge["knowledge"]
     src_learning["learning"]
     src_llm["llm"]
     src_orchestration["orchestration"]
     src_output["output"]
     src_preprocessor["preprocessor"]
+    src_quality["quality"]
     src_reasoning["reasoning"]
     src_research["research"]
     src_semantic_modeling["semantic_modeling"]
     src_storage["storage"]
     src_test["test"]
+    src_visualization["visualization"]
+    src_web["web"]
+    src_ai_assistant --> src_infrastructure
+    src_ai_assistant --> src_llm
+    src_analysis --> src_core
+    src_analysis --> src_data
+    src_analysis --> src_extraction
+    src_analysis --> src_knowledge
     src_analysis --> src_research
-    src_corpus --> src_core
+    src_analysis --> src_semantic_modeling
+    src_api --> src_analysis
+    src_api --> src_collector
+    src_api --> src_core
+    src_api --> src_extraction
+    src_api --> src_infrastructure
+    src_api --> src_storage
+    src_collector --> src_common
+    src_collector --> src_core
+    src_collector --> src_knowledge
+    src_corpus --> src_collector
+    src_cycle --> src_analysis
     src_cycle --> src_core
-    src_data --> src_infra
+    src_cycle --> src_test
     src_extraction --> src_knowledge
     src_extraction --> src_semantic_modeling
-    src_extractors --> src_core
-    src_extractors --> src_data
+    src_extractors --> src_analysis
+    src_generation --> src_core
     src_hypothesis --> src_core
-    src_infra --> src_llm
+    src_infra --> src_infrastructure
+    src_infrastructure --> src_core
+    src_infrastructure --> src_llm
     src_knowledge --> src_semantic_modeling
+    src_knowledge --> src_storage
     src_learning --> src_core
-    src_llm --> src_infra
+    src_learning --> src_llm
+    src_learning --> src_storage
+    src_llm --> src_infrastructure
     src_llm --> src_research
     src_orchestration --> src_research
     src_output --> src_core
-    src_preprocessor --> src_core
-    src_reasoning --> src_core
-    src_reasoning --> src_semantic_modeling
+    src_output --> src_generation
+    src_preprocessor --> src_analysis
+    src_quality --> src_collector
+    src_quality --> src_core
+    src_quality --> src_research
+    src_reasoning --> src_analysis
+    src_research --> src_analysis
     src_research --> src_analytics
+    src_research --> src_collector
     src_research --> src_core
-    src_research --> src_corpus
-    src_research --> src_extractors
-    src_research --> src_hypothesis
+    src_research --> src_generation
+    src_research --> src_infrastructure
+    src_research --> src_knowledge
+    src_research --> src_learning
     src_research --> src_llm
     src_research --> src_output
-    src_research --> src_preprocessor
+    src_research --> src_quality
     src_research --> src_semantic_modeling
-    src_semantic_modeling --> src_core
-    src_semantic_modeling --> src_extraction
-    src_semantic_modeling --> src_knowledge
+    src_research --> src_storage
+    src_semantic_modeling --> src_analysis
+    src_semantic_modeling --> src_data
     src_semantic_modeling --> src_research
+    src_storage --> src_infrastructure
+    src_storage --> src_learning
     src_test --> src_core
+    src_web --> src_ai_assistant
+    src_web --> src_analysis
+    src_web --> src_infrastructure
+    src_web --> src_research
 ```
 
 ## Packages
@@ -75,24 +118,33 @@ flowchart LR
 | Package | In Degree | Out Degree |
 |---|---:|---:|
 | src | 0 | 0 |
-| src.analysis | 0 | 1 |
+| src.ai_assistant | 1 | 2 |
+| src.analysis | 8 | 6 |
 | src.analytics | 1 | 0 |
-| src.core | 11 | 0 |
-| src.corpus | 1 | 1 |
-| src.cycle | 0 | 1 |
-| src.data | 1 | 1 |
-| src.extraction | 1 | 2 |
-| src.extractors | 1 | 2 |
-| src.hypothesis | 1 | 1 |
-| src.infra | 2 | 1 |
-| src.knowledge | 2 | 1 |
-| src.learning | 0 | 1 |
-| src.llm | 2 | 2 |
+| src.api | 0 | 6 |
+| src.collector | 4 | 3 |
+| src.common | 1 | 0 |
+| src.core | 12 | 0 |
+| src.corpus | 0 | 1 |
+| src.cycle | 0 | 3 |
+| src.data | 2 | 0 |
+| src.extraction | 2 | 2 |
+| src.extractors | 0 | 1 |
+| src.generation | 2 | 1 |
+| src.hypothesis | 0 | 1 |
+| src.infra | 0 | 1 |
+| src.infrastructure | 7 | 2 |
+| src.knowledge | 4 | 2 |
+| src.learning | 2 | 3 |
+| src.llm | 4 | 2 |
 | src.orchestration | 0 | 1 |
-| src.output | 1 | 1 |
-| src.preprocessor | 1 | 1 |
-| src.reasoning | 0 | 2 |
-| src.research | 4 | 9 |
-| src.semantic_modeling | 4 | 4 |
-| src.storage | 0 | 0 |
-| src.test | 0 | 1 |
+| src.output | 1 | 2 |
+| src.preprocessor | 0 | 1 |
+| src.quality | 1 | 3 |
+| src.reasoning | 0 | 1 |
+| src.research | 6 | 13 |
+| src.semantic_modeling | 4 | 3 |
+| src.storage | 4 | 2 |
+| src.test | 1 | 1 |
+| src.visualization | 0 | 0 |
+| src.web | 0 | 4 |

@@ -1,56 +1,99 @@
 flowchart LR
     src["src"]
+    src_ai_assistant["ai_assistant"]
     src_analysis["analysis"]
     src_analytics["analytics"]
+    src_api["api"]
+    src_collector["collector"]
+    src_common["common"]
     src_core["core"]
     src_corpus["corpus"]
     src_cycle["cycle"]
     src_data["data"]
     src_extraction["extraction"]
     src_extractors["extractors"]
+    src_generation["generation"]
     src_hypothesis["hypothesis"]
     src_infra["infra"]
+    src_infrastructure["infrastructure"]
     src_knowledge["knowledge"]
     src_learning["learning"]
     src_llm["llm"]
     src_orchestration["orchestration"]
     src_output["output"]
     src_preprocessor["preprocessor"]
+    src_quality["quality"]
     src_reasoning["reasoning"]
     src_research["research"]
     src_semantic_modeling["semantic_modeling"]
     src_storage["storage"]
     src_test["test"]
+    src_visualization["visualization"]
+    src_web["web"]
+    src_ai_assistant --> src_infrastructure
+    src_ai_assistant --> src_llm
+    src_analysis --> src_core
+    src_analysis --> src_data
+    src_analysis --> src_extraction
+    src_analysis --> src_knowledge
     src_analysis --> src_research
-    src_corpus --> src_core
+    src_analysis --> src_semantic_modeling
+    src_api --> src_analysis
+    src_api --> src_collector
+    src_api --> src_core
+    src_api --> src_extraction
+    src_api --> src_infrastructure
+    src_api --> src_storage
+    src_collector --> src_common
+    src_collector --> src_core
+    src_collector --> src_knowledge
+    src_corpus --> src_collector
+    src_cycle --> src_analysis
     src_cycle --> src_core
-    src_data --> src_infra
+    src_cycle --> src_test
     src_extraction --> src_knowledge
     src_extraction --> src_semantic_modeling
-    src_extractors --> src_core
-    src_extractors --> src_data
+    src_extractors --> src_analysis
+    src_generation --> src_core
     src_hypothesis --> src_core
-    src_infra --> src_llm
+    src_infra --> src_infrastructure
+    src_infrastructure --> src_core
+    src_infrastructure --> src_llm
     src_knowledge --> src_semantic_modeling
+    src_knowledge --> src_storage
     src_learning --> src_core
-    src_llm --> src_infra
+    src_learning --> src_llm
+    src_learning --> src_storage
+    src_llm --> src_infrastructure
     src_llm --> src_research
     src_orchestration --> src_research
     src_output --> src_core
-    src_preprocessor --> src_core
-    src_reasoning --> src_core
-    src_reasoning --> src_semantic_modeling
+    src_output --> src_generation
+    src_preprocessor --> src_analysis
+    src_quality --> src_collector
+    src_quality --> src_core
+    src_quality --> src_research
+    src_reasoning --> src_analysis
+    src_research --> src_analysis
     src_research --> src_analytics
+    src_research --> src_collector
     src_research --> src_core
-    src_research --> src_corpus
-    src_research --> src_extractors
-    src_research --> src_hypothesis
+    src_research --> src_generation
+    src_research --> src_infrastructure
+    src_research --> src_knowledge
+    src_research --> src_learning
     src_research --> src_llm
     src_research --> src_output
-    src_research --> src_preprocessor
+    src_research --> src_quality
     src_research --> src_semantic_modeling
-    src_semantic_modeling --> src_core
-    src_semantic_modeling --> src_extraction
-    src_semantic_modeling --> src_knowledge
+    src_research --> src_storage
+    src_semantic_modeling --> src_analysis
+    src_semantic_modeling --> src_data
     src_semantic_modeling --> src_research
+    src_storage --> src_infrastructure
+    src_storage --> src_learning
     src_test --> src_core
+    src_web --> src_ai_assistant
+    src_web --> src_analysis
+    src_web --> src_infrastructure
+    src_web --> src_research
