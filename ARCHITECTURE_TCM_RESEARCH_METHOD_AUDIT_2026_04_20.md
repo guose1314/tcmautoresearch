@@ -1069,6 +1069,49 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [x] [tests/unit/test_llm_role_profile.py](tests/unit/test_llm_role_profile.py)（新建，15 通过：contract 7 + descriptor 2 + store 2 + prepare-injection 4）
 - 当前状态：2026-04-22 已完成；尚未在编排器中接入（与 J-2 一同推迟到 phase orchestrator wiring 卡片）；核心子集 1673 通过 / 0 失败 / 1 xfailed / 14 subtests 通过（基线 1641 + 17 J-2 + 15 J-3）。
 
+#### Card J-4
+
+- 建议标题：`Phase J / J-4 hypothesis + publish 接入 Self-Refine 自修订与 quality delta 元数据`
+- 建议标签：`research-method`、`self-refine`、`quality-delta`、`phase-j`、`p1`
+- 目标：在不破坏既有 fallback / planner 链路的前提下，为 hypothesis 与 publish 阶段补一层 deterministic 的『评分 → 修订 → 再评分』自修订循环，把 quality delta 作为可观测元数据沉淀，为后续接入真实 LLM critic 留口子。
+- 范围：
+  - [x] 新增 [src/research/self_refine.py](src/research/self_refine.py)：`SelfRefineRound` / `SelfRefineResult` / `SELF_REFINE_CONTRACT_VERSION = "self-refine-v1"`
+  - [x] 提供 `default_text_quality_scorer`（长度 + 结构关键词 + 句数加权）与 `default_structural_refiner`（按缺失维度幂等追加补充段）
+  - [x] 提供 `run_self_refine(initial_text, *, scorer=, refiner=, max_rounds=, min_delta=)` 与 `build_self_refine_metadata(result)`
+  - [x] 在 [src/research/phases/hypothesis_phase.py](src/research/phases/hypothesis_phase.py) 取 top hypothesis 文本运行 self-refine，写入 metadata
+  - [x] 在 [src/research/phases/publish_phase.py](src/research/phases/publish_phase.py) 拼接 paper_draft.title + abstract + summary 文本运行 self-refine，写入 metadata
+  - [x] 任何 scorer/refiner 异常都被 try/except 吞掉，不影响阶段交付物
+- 完成定义：
+  - [x] 默认 scorer 返回 0..1 区间值，长结构化文本分高于短文本（`test_score_in_unit_range` + `test_long_structured_text_scores_higher_than_short`）
+  - [x] 默认 refiner 在缺失结构维度时追加补充段，已完整时仅追加自修订标记（`test_appends_evidence_block_when_missing` + `test_idempotent_when_text_already_complete`）
+  - [x] 自修订能改进短文本得分且 quality_delta ≥ 0（`test_default_pipeline_improves_short_text`）
+  - [x] max_rounds=0 不调用 refiner（`test_max_rounds_zero_yields_no_extra_rounds`）
+  - [x] 自定义 scorer/refiner 被实际调用（`test_custom_scorer_and_refiner_invoked`）
+  - [x] refiner 抛异常时回退到当前最佳，不向上抛（`test_refiner_failure_does_not_raise`）
+  - [x] scorer 抛异常时返回 0 分结果与 `scorer_failed` reason（`test_scorer_failure_returns_zero_result`）
+  - [x] 平台期（无提升）立即停止迭代（`test_plateau_stops_iteration_early`）
+  - [x] `build_self_refine_metadata` 输出 8 个标准字段含 `self_refine_quality_delta` / `self_refine_round_count`
+- 测试：
+  - [x] [tests/unit/test_self_refine.py](tests/unit/test_self_refine.py)（新建，16 通过：scorer 3 + refiner 2 + run_self_refine 7 + metadata 4）
+- 当前状态：2026-04-22 已完成；hypothesis/publish 接入采用 try/except 包裹，phase orchestrator 与 LLM critic 均未触动。
+
+#### Card J-5
+
+- 建议标题：`Phase J / J-5 回归与锁线：Guard #41 锁定 Phase J 契约`
+- 建议标签：`regression`、`guard`、`phase-j`、`p0`
+- 目标：Phase J 四张卡片落地后，把 J-1..J-4 的核心契约（4 个新文件 + 1 个扩展接口 + 5 个默认角色 + 2 个 phase wiring）写进架构守门测试，防止后续重构静默回退。
+- 范围：
+  - [x] 在 [tests/unit/test_architecture_regression_guard.py](tests/unit/test_architecture_regression_guard.py) 末尾新增 `TestGuard41_PhaseJContracts`，紧随 Guard #40
+  - [x] 覆盖 7 个不变式：topic_discovery contract / textual_criticism contract / llm_role_profile 5 角色池 / `prepare_planned_llm_call(role=, kv_cache_descriptor=)` 接口 / self_refine 契约 / hypothesis_phase 自修订接入 / publish_phase 自修订接入
+  - [x] 全部走源码字符串扫描，避免引入运行期依赖
+- 完成定义：
+  - [x] Guard 7 个用例全部通过
+  - [x] 与 Guard #40 风格一致（class 名 `TestGuard41_PhaseJContracts`、`_SRC` 路径、字符串 `assertIn` 模式）
+  - [x] 核心子集回归 1696 通过 / 0 失败 / 1 xfailed / 14 subtests 通过（基线 1673 + 16 J-4 + 7 J-5）
+- 测试：
+  - [x] 7 通过（topic_discovery / textual_criticism / llm_role_profile / prepare_planned_llm_call / self_refine / hypothesis_phase / publish_phase）
+- 当前状态：2026-04-22 已完成；Phase J 全部 5 张卡片收口，可进入 Phase K（图谱深化与中医推理）。
+
 ---
 
 ## 附录 A：2026-04-21 代码质量治理推进摘要

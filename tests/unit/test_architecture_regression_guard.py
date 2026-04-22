@@ -2795,5 +2795,104 @@ class TestGuard40_FallbackQualityMatrix(unittest.TestCase):
         self.assertIn('protocol_source == "template"', source)
 
 
+class TestGuard41_PhaseJContracts(unittest.TestCase):
+    """Guard #41: Phase J（中医文献研究法 v1）核心契约不得回退。
+
+    保护不变式（J-1 / J-2 / J-3 / J-4）：
+      - topic_discovery 子包必须导出 TopicProposal + propose_topics + 契约版本
+      - textual_criticism 子包必须导出 AuthenticityVerdict + assess_catalog_authenticity + 契约版本
+      - llm_role_profile 必须导出 5 个默认角色 + KVCacheDescriptor + 契约版本
+      - prepare_planned_llm_call 必须接受 role / kv_cache_descriptor 关键字参数
+      - PlannedLLMCall.build_prompt 必须能前置注入角色 system_prompt
+      - self_refine 必须导出 run_self_refine + build_self_refine_metadata + 契约版本
+      - hypothesis_phase / publish_phase 必须接入 self-refine 元数据
+    """
+
+    def test_topic_discovery_contract_exports(self):
+        contract = (_SRC / "research" / "topic_discovery" / "contract.py").read_text(encoding="utf-8")
+        for token in (
+            "class TopicProposal",
+            "class TopicSourceCandidate",
+            "TOPIC_PROPOSAL_CONTRACT_VERSION",
+            "topic-proposal-v1",
+        ):
+            self.assertIn(token, contract, f"topic_discovery.contract 缺: {token}")
+        service = (_SRC / "research" / "topic_discovery" / "topic_discovery_service.py").read_text(encoding="utf-8")
+        for token in ("def propose_topics", "TopicDiscoveryService"):
+            self.assertIn(token, service, f"topic_discovery_service 缺: {token}")
+
+    def test_textual_criticism_contract_exports(self):
+        contract = (_SRC / "research" / "textual_criticism" / "verdict_contract.py").read_text(encoding="utf-8")
+        for token in (
+            "class AuthenticityVerdict",
+            "class VerdictEvidence",
+            "VERDICT_CONTRACT_VERSION",
+            "authenticity-verdict-v1",
+            "DATE_VERDICTS",
+            "AUTHOR_VERDICTS",
+            "AUTHENTICITY_LEVELS",
+        ):
+            self.assertIn(token, contract, f"textual_criticism.verdict_contract 缺: {token}")
+        service = (_SRC / "research" / "textual_criticism" / "textual_criticism_service.py").read_text(encoding="utf-8")
+        for token in (
+            "def assess_catalog_authenticity",
+            "def assess_catalog_batch",
+            "def build_textual_criticism_summary",
+            "TextualCriticismService",
+        ):
+            self.assertIn(token, service, f"textual_criticism_service 缺: {token}")
+
+    def test_llm_role_profile_default_pool(self):
+        source = (_SRC / "research" / "llm_role_profile.py").read_text(encoding="utf-8")
+        for token in (
+            "class LLMRoleProfile",
+            "class KVCacheDescriptor",
+            "class KVCacheStore",
+            "ROLE_PROFILE_CONTRACT_VERSION",
+            "llm-role-profile-v1",
+            "ROLE_YIJING",
+            "ROLE_JINGFANG",
+            "ROLE_WENBING",
+            "ROLE_JIAOKAN",
+            "ROLE_XUNGU",
+            "DEFAULT_ROLE_NAMES",
+            "def get_role_profile",
+        ):
+            self.assertIn(token, source, f"llm_role_profile 缺: {token}")
+
+    def test_prepare_planned_llm_call_accepts_role_and_kv_cache(self):
+        source = (_SRC / "infra" / "llm_service.py").read_text(encoding="utf-8")
+        self.assertIn("role: Optional[str] = None", source)
+        self.assertIn("kv_cache_descriptor", source)
+        self.assertIn("role_profile", source)
+        self.assertIn('payload["role_name"]', source)
+
+    def test_self_refine_contract_exports(self):
+        source = (_SRC / "research" / "self_refine.py").read_text(encoding="utf-8")
+        for token in (
+            "SELF_REFINE_CONTRACT_VERSION",
+            "self-refine-v1",
+            "class SelfRefineRound",
+            "class SelfRefineResult",
+            "def run_self_refine",
+            "def build_self_refine_metadata",
+            "def default_text_quality_scorer",
+            "def default_structural_refiner",
+        ):
+            self.assertIn(token, source, f"self_refine 缺: {token}")
+
+    def test_hypothesis_phase_wires_self_refine(self):
+        source = (_SRC / "research" / "phases" / "hypothesis_phase.py").read_text(encoding="utf-8")
+        self.assertIn("from src.research.self_refine import", source)
+        self.assertIn("run_self_refine", source)
+        self.assertIn("build_self_refine_metadata", source)
+
+    def test_publish_phase_wires_self_refine(self):
+        source = (_SRC / "research" / "phases" / "publish_phase.py").read_text(encoding="utf-8")
+        self.assertIn("from src.research.self_refine import", source)
+        self.assertIn("run_self_refine", source)
+        self.assertIn("build_self_refine_metadata", source)
+
+
 if __name__ == "__main__":
     unittest.main()

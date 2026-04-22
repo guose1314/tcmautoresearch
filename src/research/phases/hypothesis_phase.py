@@ -88,6 +88,32 @@ class HypothesisPhaseMixin:
         reasoning_fw = hypothesis_context.get("reasoning_framework")
         if reasoning_fw is not None:
             metadata["reasoning_framework"] = reasoning_fw.to_dict() if hasattr(reasoning_fw, "to_dict") else str(reasoning_fw)
+        # Phase J-4: 对 top hypothesis 文本执行 self-refine，写入 quality delta 元数据
+        try:
+            from src.research.self_refine import (
+                build_self_refine_metadata,
+                run_self_refine,
+            )
+
+            top = next(
+                (h for h in hypotheses if isinstance(h, dict)),
+                None,
+            )
+            top_text = ""
+            if top is not None:
+                top_text = str(
+                    top.get("statement")
+                    or top.get("description")
+                    or top.get("hypothesis_text")
+                    or top.get("title")
+                    or ""
+                ).strip()
+            if top_text:
+                refine_result = run_self_refine(top_text)
+                metadata.update(build_self_refine_metadata(refine_result))
+        except Exception:
+            # self-refine 任何故障都不能阻断 hypothesis 阶段
+            pass
         if hasattr(self, "_hypothesis_tracker"):
             metadata["learning"] = self._hypothesis_tracker.to_metadata()
             self.pipeline.register_phase_learning_manifest(

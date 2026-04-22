@@ -259,6 +259,37 @@ class PublishPhaseMixin:
             )
         report_errors = report_generation_result.get("errors", []) if isinstance(report_generation_result, dict) else []
         status = "degraded" if report_errors else "completed"
+        # Phase J-4: 对论文标题 + 摘要文本执行 self-refine，写入 quality delta 元数据
+        try:
+            from src.research.self_refine import (
+                build_self_refine_metadata,
+                run_self_refine,
+            )
+
+            paper_draft = paper_result.get("paper_draft", {}) if isinstance(paper_result, dict) else {}
+            if not isinstance(paper_draft, dict):
+                paper_draft = {}
+            seed_segments = []
+            for key in ("title", "abstract", "summary"):
+                value = paper_draft.get(key)
+                if isinstance(value, str) and value.strip():
+                    seed_segments.append(value.strip())
+            if not seed_segments:
+                fallback_title = str(
+                    paper_context.get("title")
+                    or cycle.research_objective
+                    or cycle.description
+                    or ""
+                ).strip()
+                if fallback_title:
+                    seed_segments.append(fallback_title)
+            seed_text = "\n\n".join(seed_segments)
+            if seed_text:
+                refine_result = run_self_refine(seed_text)
+                metadata.update(build_self_refine_metadata(refine_result))
+        except Exception:
+            # self-refine 故障不能影响 publish 阶段交付物
+            pass
         evidence_protocol = build_phase_evidence_protocol(
             "publish",
             evidence_records=citation_records,
