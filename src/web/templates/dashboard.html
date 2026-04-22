@@ -9,9 +9,9 @@
     <script src="/static/js/htmx.min.js"></script>
     <link
       rel="stylesheet"
-      href="https://unpkg.com/vis-network/styles/vis-network.min.css"
+      href="/static/css/vis-network.min.css"
     />
-    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <script src="/static/js/vis-network.min.js"></script>
     <style>
       :root {
         --font-display: "STSong", "Songti SC", "Noto Serif SC", serif;
@@ -3184,6 +3184,9 @@
               },
               {
                 autoResize: true,
+                layout: {
+                  improvedLayout: false,
+                },
                 interaction: {
                   hover: true,
                   tooltipDelay: 100,
