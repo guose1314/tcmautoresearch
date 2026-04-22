@@ -1186,6 +1186,79 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
 - 测试：Guard #42 7 通过；`tests/unit` 1471 通过 / 14 subtests；`tests`（除 performance/integration/manual）3413 通过 / 2 skipped / 4 xfailed。
 - 当前状态：2026-04-22 已完成；Phase K 全部 4 张卡片 + Guard 收口。
 
+### Card L-1：拆分 `PhaseOrchestrator` 为三个窄外观
+
+- 建议标题：`Phase L / L-1 拆分：PhaseRunner / PhasePersistence / PhaseGraphExporter`
+- 建议标签：`refactor`、`facade`、`phase-l`、`p1`
+- 目标：在不改 `PhaseOrchestrator` API 的前提下，按职责拆出三个窄外观（runner / persistence / graph-exporter），让上层服务只依赖各自需要的接口。
+- 范围：
+  - [x] 新增 [src/research/phase_orchestrator_facade.py](src/research/phase_orchestrator_facade.py)：`phase-orchestrator-facade-v1` 契约 + `PhaseRunner` / `PhasePersistence` / `PhaseGraphExporter` / `PhaseOrchestratorFacades` + `build_phase_orchestrator_facades`
+  - [x] 三个外观均为 `frozen=True` dataclass，仅 **委托** 既有 `PhaseOrchestrator` 方法，零行为变更
+- 完成定义：
+  - [x] `PhaseOrchestrator` 既有公共 API 全部保留
+  - [x] 外观实例可独立注入到测试，便于针对单一职责写单元测试
+- 测试：[tests/unit/test_phase_orchestrator_facade.py](tests/unit/test_phase_orchestrator_facade.py) 14 通过
+- 当前状态：2026-04-22 已完成。
+
+### Card L-2：双写 outbox 模式
+
+- 建议标题：`Phase L / L-2 Outbox：OutboxEvent + InMemoryOutboxStore + replay_pending_events`
+- 建议标签：`storage`、`outbox`、`phase-l`、`p0`
+- 目标：解决 PostgreSQL ↔ Neo4j 双写在 Neo4j 短暂不可用时的语义丢失问题，先落契约 + 内存版 store + at-least-once 重放器。
+- 范围：
+  - [x] 新增 [src/storage/outbox/](src/storage/outbox/)：`__init__.py` + `event_contract.py` + `outbox_store.py`
+  - [x] `outbox-event-v1` 契约：`OutboxEvent` + 三态常量（`pending` / `processed` / `failed`）+ `mark_processed` / `mark_failed` / `reset_for_retry` + `to_dict` / `from_dict`
+  - [x] `InMemoryOutboxStore`：append / upsert / get / list_pending / list_failed / mark_* / reset_failed_for_retry / purge_processed（线程安全）
+  - [x] `replay_pending_events(store, handler, *, max_events=None)` —— at-least-once 语义，处理器异常自动 `mark_failed` 并不向上抛错；返回 `OutboxReplaySummary`
+- 完成定义：
+  - [x] outbox 行为可独立单元测试（无 PG / Neo4j 依赖）
+  - [x] API 设计预留 PG-backed 替换路径（保持方法签名一致）
+- 测试：[tests/unit/test_outbox.py](tests/unit/test_outbox.py) 21 通过
+- 当前状态：2026-04-22 已完成；PG-backed 实现留待 Phase L 后续迭代。
+
+### Card L-3：LLM 工厂统一 + Llama 调用审计
+
+- 建议标题：`Phase L / L-3 LLMServiceFactory + Llama( 调用审计`
+- 建议标签：`llm`、`infrastructure`、`phase-l`、`p1`
+- 目标：把 LLM 实例化全部收口到统一工厂；同时通过仓库扫描确保再无业务层直接 `Llama(...)` 调用。
+- 范围：
+  - [x] 新增 [src/infra/llm_service_factory.py](src/infra/llm_service_factory.py)：`llm-service-factory-v1` 契约 + `LLMServiceFactory`（懒加载 `CachedLLMService`，包装四个 `from_*` 工厂方法）
+  - [x] `scan_llama_call_violations` / `assert_no_unexpected_llama_calls`：默认仅放行 `src/llm/llm_engine.py` 与工厂自身
+- 完成定义：
+  - [x] 仓库实测仅 `src/llm/llm_engine.py` 一处合法 `Llama(` 调用
+  - [x] Guard #43 锁定该不变式
+- 测试：[tests/unit/test_llm_service_factory.py](tests/unit/test_llm_service_factory.py) 16 通过（含一条对真实仓库的审计用例）
+- 当前状态：2026-04-22 已完成。
+
+### Card L-4：配置 schema fail-fast
+
+- 建议标题：`Phase L / L-4 AppConfigSchema + validate_app_config`
+- 建议标签：`config`、`pydantic`、`phase-l`、`p1`
+- 目标：在启动期就对 `config.yml` / `AppSettings.config` 做 schema 校验，避免坏配置到运行时才暴露。
+- 范围：
+  - [x] 新增 [src/infrastructure/config_schema.py](src/infrastructure/config_schema.py)：`app-config-schema-v1` 契约 + 七个子段 schema（Api/Database/Neo4j/Models/Output/Logging/WebConsole）+ `AppConfigSchema`
+  - [x] 子段全部 `extra="allow"`，向后兼容历史无 schema 字段
+  - [x] `DatabaseConfig`：`type` 仅允许 `sqlite` / `postgresql`，`port` 1-65535
+  - [x] `Neo4jConfig`：`uri` 必须以 `neo4j://` / `neo4j+s://` / `bolt://` / `bolt+s://` 开头
+  - [x] `LoggingConfig`：`level` 必须为 `DEBUG/INFO/WARNING/ERROR/CRITICAL`
+  - [x] `validate_app_config(config, *, strict=False)` 返回 `ConfigValidationReport`；`strict=True` 抛 `ConfigValidationError`
+- 完成定义：
+  - [x] 默认（非 strict）路径不破坏既有启动
+  - [x] strict 路径列出所有错误并抛 `ConfigValidationError`
+- 测试：[tests/unit/test_config_schema.py](tests/unit/test_config_schema.py) 16 通过
+- 当前状态：2026-04-22 已完成。
+
+### Card L-5（隐含）：Phase L 锁线 Guard #43
+
+- 建议标题：`Phase L 收口：Guard #43 锁定 L-1..L-4 契约`
+- 建议标签：`regression`、`guard`、`phase-l`、`p0`
+- 目标：把 L-1..L-4 关键源码符号写入架构守门测试，并对 ``Llama(`` 调用做实跑审计。
+- 范围：
+  - [x] [tests/unit/test_architecture_regression_guard.py](tests/unit/test_architecture_regression_guard.py) 新增 `TestGuard43_PhaseLContracts`，6 用例
+  - [x] 含一条 *实跑* 审计：扫描真实仓库以保证仅 `src/llm/llm_engine.py` 出现 `Llama(`
+- 测试：Guard #43 6 通过；`tests/unit` 1544 通过 / 14 subtests 通过（基线 1471 + 14 facade + 21 outbox + 16 factory + 16 schema + 6 guard）
+- 当前状态：2026-04-22 已完成；Phase L 全部 4 张卡片 + Guard 收口。
+
 ---
 
 ## 附录 A：2026-04-21 代码质量治理推进摘要

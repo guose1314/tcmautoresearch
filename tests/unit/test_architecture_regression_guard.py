@@ -2988,5 +2988,103 @@ class TestGuard42_PhaseKContracts(unittest.TestCase):
             self.assertIn(token, source, f"paper_writer TCM template 缺: {token}")
 
 
+class TestGuard43_PhaseLContracts(unittest.TestCase):
+    """Guard #43 — 锁定 Phase L（L-1..L-4）核心契约。
+
+    覆盖：
+      1. PhaseOrchestrator 拆分外观（PhaseRunner / PhasePersistence /
+         PhaseGraphExporter / build_phase_orchestrator_facades）
+      2. Outbox 模式契约（OutboxEvent / InMemoryOutboxStore /
+         replay_pending_events / 三个状态常量）
+      3. LLMServiceFactory 与 Llama( 调用审计入口
+      4. 配置 schema fail-fast（AppConfigSchema / validate_app_config /
+         ConfigValidationError）
+    """
+
+    def test_phase_orchestrator_facade_exports(self):
+        source = (_SRC / "research" / "phase_orchestrator_facade.py").read_text(encoding="utf-8")
+        for token in (
+            'CONTRACT_VERSION = "phase-orchestrator-facade-v1"',
+            "class PhaseRunner",
+            "class PhasePersistence",
+            "class PhaseGraphExporter",
+            "class PhaseOrchestratorFacades",
+            "def build_phase_orchestrator_facades",
+        ):
+            self.assertIn(token, source, f"phase_orchestrator_facade 缺: {token}")
+
+    def test_outbox_contract_exports(self):
+        path = _SRC / "storage" / "outbox"
+        self.assertTrue(path.is_dir(), "src/storage/outbox/ 不存在")
+        contract = (path / "event_contract.py").read_text(encoding="utf-8")
+        for token in (
+            'CONTRACT_VERSION = "outbox-event-v1"',
+            "class OutboxEvent",
+            'OUTBOX_STATUS_PENDING = "pending"',
+            'OUTBOX_STATUS_PROCESSED = "processed"',
+            'OUTBOX_STATUS_FAILED = "failed"',
+            "def mark_processed",
+            "def mark_failed",
+            "def reset_for_retry",
+        ):
+            self.assertIn(token, contract, f"outbox.event_contract 缺: {token}")
+
+    def test_outbox_store_exports(self):
+        source = (_SRC / "storage" / "outbox" / "outbox_store.py").read_text(encoding="utf-8")
+        for token in (
+            "class InMemoryOutboxStore",
+            "class OutboxReplaySummary",
+            "def replay_pending_events",
+            "def list_pending",
+            "def reset_failed_for_retry",
+            "def purge_processed",
+        ):
+            self.assertIn(token, source, f"outbox.outbox_store 缺: {token}")
+
+    def test_llm_service_factory_exports(self):
+        source = (_SRC / "infra" / "llm_service_factory.py").read_text(encoding="utf-8")
+        for token in (
+            'CONTRACT_VERSION = "llm-service-factory-v1"',
+            "class LLMServiceFactory",
+            "DEFAULT_LLAMA_CALL_ALLOWLIST",
+            "def scan_llama_call_violations",
+            "def assert_no_unexpected_llama_calls",
+            "def create_from_engine_config",
+            "def create_from_gap_config",
+        ):
+            self.assertIn(token, source, f"llm_service_factory 缺: {token}")
+
+    def test_repository_has_only_allowlisted_llama_calls(self):
+        """除允许清单外仓库不应再有 ``Llama(`` 直接调用。"""
+        from src.infra.llm_service_factory import scan_llama_call_violations
+
+        repo_root = _WORKSPACE
+        violations = scan_llama_call_violations(
+            [repo_root / "src", repo_root / "web_console"],
+            workspace_root=repo_root,
+        )
+        self.assertEqual(
+            violations,
+            [],
+            f"出现未授权 Llama( 调用: {[v.to_dict() for v in violations]}",
+        )
+
+    def test_config_schema_exports(self):
+        source = (_SRC / "infrastructure" / "config_schema.py").read_text(encoding="utf-8")
+        for token in (
+            'CONTRACT_VERSION = "app-config-schema-v1"',
+            "class AppConfigSchema",
+            "class ApiConfig",
+            "class DatabaseConfig",
+            "class Neo4jConfig",
+            "class LoggingConfig",
+            "class WebConsoleConfig",
+            "class ConfigValidationError",
+            "class ConfigValidationReport",
+            "def validate_app_config",
+        ):
+            self.assertIn(token, source, f"config_schema 缺: {token}")
+
+
 if __name__ == "__main__":
     unittest.main()

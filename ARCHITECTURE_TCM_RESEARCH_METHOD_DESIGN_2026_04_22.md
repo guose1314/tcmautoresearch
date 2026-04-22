@@ -511,6 +511,15 @@ flowchart LR
 | L-3 | LLM 工厂统一 + 清理 web shim | 仓库零直接 `Llama(` 调用 | 收敛基础设施入口 | S |
 | L-4 | 配置 schema fail-fast | 坏配置在启动期即报错 | 降低隐性运行时错误 | M |
 
+#### Phase L 进度（2026-04-22）
+
+- ✅ L-1 已完成：新增 [src/research/phase_orchestrator_facade.py](src/research/phase_orchestrator_facade.py)，落 `phase-orchestrator-facade-v1` 契约 + `PhaseRunner` / `PhasePersistence` / `PhaseGraphExporter` / `PhaseOrchestratorFacades` / `build_phase_orchestrator_facades`，三个窄外观仅委托既有 `PhaseOrchestrator` 方法、API 零变更；新增 [tests/unit/test_phase_orchestrator_facade.py](tests/unit/test_phase_orchestrator_facade.py) 14 通过。详见审计稿 [Card L-1](ARCHITECTURE_TCM_RESEARCH_METHOD_AUDIT_2026_04_20.md#card-l-1拆分-phaseorchestrator-为三个窄外观)。
+- ✅ L-2 已完成：新增 [src/storage/outbox/](src/storage/outbox/)（`event_contract.py` + `outbox_store.py`），落 `outbox-event-v1` 契约 + `OutboxEvent`（三态：pending/processed/failed）+ `InMemoryOutboxStore`（线程安全）+ `replay_pending_events`（at-least-once 语义）；新增 [tests/unit/test_outbox.py](tests/unit/test_outbox.py) 21 通过。
+- ✅ L-3 已完成：新增 [src/infra/llm_service_factory.py](src/infra/llm_service_factory.py)，落 `llm-service-factory-v1` 契约 + `LLMServiceFactory`（包装 `CachedLLMService.from_*` 四个工厂方法）+ `scan_llama_call_violations` / `assert_no_unexpected_llama_calls`（默认放行 `src/llm/llm_engine.py` 与工厂自身）；仓库实测仅一处合法 `Llama(` 调用；新增 [tests/unit/test_llm_service_factory.py](tests/unit/test_llm_service_factory.py) 16 通过。
+- ✅ L-4 已完成：新增 [src/infrastructure/config_schema.py](src/infrastructure/config_schema.py)，落 `app-config-schema-v1` 契约 + 七个子段 schema（`extra=allow` 向后兼容）+ `validate_app_config(config, *, strict=False)` 返回 `ConfigValidationReport`、strict 抛 `ConfigValidationError`；新增 [tests/unit/test_config_schema.py](tests/unit/test_config_schema.py) 16 通过。
+- ✅ Guard #43 已完成：[tests/unit/test_architecture_regression_guard.py](tests/unit/test_architecture_regression_guard.py) `TestGuard43_PhaseLContracts` 6 用例锁定 L-1..L-4 关键符号 + 仓库 `Llama(` 实跑审计；`tests/unit` 1544 通过 / 14 subtests（基线 1471 + 14 facade + 21 outbox + 16 factory + 16 schema + 6 guard）。
+- ✅ Phase L 全部完成；可进入 Phase M（自学习升级）。
+
 ### Phase M（持续）—— 自学习升级
 
 | Card | 动作 | Done 定义 | 理由 | 代价 |
