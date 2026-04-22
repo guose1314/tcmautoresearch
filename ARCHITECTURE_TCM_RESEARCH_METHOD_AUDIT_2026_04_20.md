@@ -1112,6 +1112,80 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [x] 7 通过（topic_discovery / textual_criticism / llm_role_profile / prepare_planned_llm_call / self_refine / hypothesis_phase / publish_phase）
 - 当前状态：2026-04-22 已完成；Phase J 全部 5 张卡片收口，可进入 Phase K（图谱深化与中医推理）。
 
+### Card K-1：图谱新增 RhymeWitness / School / MENTORSHIP
+
+- 建议标题：`Phase K / K-1 图谱深化：RhymeWitness、School、MENTORSHIP`
+- 建议标签：`graph-schema`、`neo4j`、`phase-k`、`p1`
+- 目标：在 [src/storage/graph_schema.py](src/storage/graph_schema.py) 落 `RhymeWitness` / `School` 节点与 `RHYMES_WITH` / `BELONGS_TO_SCHOOL` / `MENTORSHIP` 关系，配套属性白名单与版本号上抬。
+- 范围：
+  - [x] `NodeLabel` 新增 `RHYME_WITNESS`、`SCHOOL`
+  - [x] `RelType` 新增 `RHYMES_WITH`、`BELONGS_TO_SCHOOL`、`MENTORSHIP`
+  - [x] `_ALLOWED_PROPERTIES` / `_ALLOWED_REL_PROPERTIES` 同步白名单
+  - [x] `GRAPH_SCHEMA_VERSION` 由 `"1.1.0"` 升至 `"1.2.0"`
+- 完成定义：
+  - [x] [tests/unit/test_graph_schema_phase_k.py](tests/unit/test_graph_schema_phase_k.py) 节点/关系/版本类用例通过
+  - [x] 既有 `test_graph_schema_versioning.py` 与全量回归不破
+- 测试：[tests/unit/test_graph_schema_phase_k.py](tests/unit/test_graph_schema_phase_k.py) 17 通过
+- 当前状态：2026-04-22 已完成。
+
+### Card K-2：tcm_reasoning 子阶段 + 5 条核心规则
+
+- 建议标题：`Phase K / K-2 中医推理：TCMReasoningTrace + 5 条规则`
+- 建议标签：`tcm-reasoning`、`contract`、`phase-k`、`p0`
+- 目标：新增 [src/research/tcm_reasoning/](src/research/tcm_reasoning/) 模块，落 `TCMReasoningTrace` 契约与同病异治 / 异病同治 / 三因制宜 / 方证对应 / 君臣佐使 5 条规则。
+- 范围：
+  - [x] `trace_contract.py`：`tcm-reasoning-trace-v1` + `TCMReasoningPremise` / `TCMReasoningStep` / `TCMReasoningTrace` + 5 个 `PATTERN_*` 常量
+  - [x] `tcm_reasoning_service.py`：5 条 `rule_*` 函数 + `apply_rule` + `build_default_rules` + `run_tcm_reasoning` + `build_tcm_reasoning_metadata`
+  - [x] `__init__.py` 统一 `__all__` 导出
+- 完成定义：
+  - [x] 5 条规则均能在适当 premise 下触发并写入 trace
+  - [x] `run_tcm_reasoning` 输出可被后续 reflect / publish 消费的 8 字段 metadata
+- 测试：[tests/unit/test_tcm_reasoning.py](tests/unit/test_tcm_reasoning.py) 22 通过
+- 当前状态：2026-04-22 已完成。
+
+### Card K-3：中医论文模板（方义阐释 / 证治分析 / 按语）
+
+- 建议标题：`Phase K / K-3 论文模板：tcm 模板 + 三个 TCM 章节`
+- 建议标签：`paper-writer`、`template`、`phase-k`、`p1`
+- 目标：在 [src/generation/paper_writer.py](src/generation/paper_writer.py) 增加 `tcm` 模板，输出 `formula_interpretation` / `pattern_analysis` / `commentary` 三章。
+- 范围：
+  - [x] 常量 `PAPER_TEMPLATE_DEFAULT` / `PAPER_TEMPLATE_TCM` / `SUPPORTED_PAPER_TEMPLATES` / `_TCM_EXTRA_SECTION_ORDER`
+  - [x] `_ZH_SECTION_TITLES` / `_EN_SECTION_TITLES` 扩展三个新章节
+  - [x] `__init__` 与 `build_draft` 支持 `template` 配置/参数双通道
+  - [x] 新增 `_coerce_template` / `_build_formula_interpretation` / `_build_pattern_analysis` / `_build_commentary`
+- 完成定义：
+  - [x] 默认 `imrd` 模板向后兼容
+  - [x] `tcm` 模板按顺序追加三章并写入 metadata
+- 测试：[tests/unit/test_paper_writer_tcm_template.py](tests/unit/test_paper_writer_tcm_template.py) 11 通过
+- 当前状态：2026-04-22 已完成。
+
+### Card K-4：Graph schema version 治理（启动期强校验）
+
+- 建议标题：`Phase K / K-4 Schema 治理：strict mode + assert_schema_consistent`
+- 建议标签：`graph-schema`、`neo4j-driver`、`phase-k`、`p0`
+- 目标：在 [src/storage/graph_schema.py](src/storage/graph_schema.py) 增加漂移强校验入口，并由 [src/storage/neo4j_driver.py](src/storage/neo4j_driver.py) 在 `connect()` 时按 `TCM__GRAPH_SCHEMA_STRICT` 决定是否抛错。
+- 范围：
+  - [x] `GRAPH_SCHEMA_STRICT_ENV` + `is_strict_mode_enabled`（识别 `1/true/yes/on/strict`）
+  - [x] `class GraphSchemaDriftError(RuntimeError)` 携带 `drift_report`
+  - [x] `assert_schema_consistent(stored_version, *, strict=False)` 复用 `detect_schema_drift`
+  - [x] `Neo4jDriver.ensure_schema_version(*, strict=...)` + `_enforce_strict_schema_if_enabled` 钩入 `connect()`
+- 完成定义：
+  - [x] 默认（非 strict）路径不破坏既有启动行为
+  - [x] strict 路径抛 `GraphSchemaDriftError` 并暴露 drift 详情
+- 测试：[tests/unit/test_graph_schema_phase_k.py](tests/unit/test_graph_schema_phase_k.py) strict mode / detect_drift 类用例通过；Guard #42 锁定符号
+- 当前状态：2026-04-22 已完成。
+
+### Card K-5（隐含）：Phase K 锁线 Guard #42
+
+- 建议标题：`Phase K 收口：Guard #42 锁定 K-1..K-4 契约`
+- 建议标签：`regression`、`guard`、`phase-k`、`p0`
+- 目标：把 K-1..K-4 的关键源码符号写进架构守门测试，防回退。
+- 范围：
+  - [x] [tests/unit/test_architecture_regression_guard.py](tests/unit/test_architecture_regression_guard.py) 新增 `TestGuard42_PhaseKContracts`
+  - [x] 7 个用例：节点 / 关系 / strict 导出 / driver 钩子 / tcm_reasoning 契约 / 5 条规则 / paper_writer tcm 模板
+- 测试：Guard #42 7 通过；`tests/unit` 1471 通过 / 14 subtests；`tests`（除 performance/integration/manual）3413 通过 / 2 skipped / 4 xfailed。
+- 当前状态：2026-04-22 已完成；Phase K 全部 4 张卡片 + Guard 收口。
+
 ---
 
 ## 附录 A：2026-04-21 代码质量治理推进摘要

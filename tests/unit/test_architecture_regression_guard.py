@@ -2894,5 +2894,99 @@ class TestGuard41_PhaseJContracts(unittest.TestCase):
         self.assertIn("build_self_refine_metadata", source)
 
 
+class TestGuard42_PhaseKContracts(unittest.TestCase):
+    """Guard #42 — 锁定 Phase K（K-1..K-4）核心契约。
+
+    覆盖：
+      1. graph_schema 新增 RhymeWitness / School 节点与 RHYMES_WITH /
+         BELONGS_TO_SCHOOL / MENTORSHIP 关系
+      2. graph_schema 提供 strict mode 与 GraphSchemaDriftError
+      3. neo4j_driver.connect() 调用 _enforce_strict_schema_if_enabled
+      4. tcm_reasoning 契约导出 5 条规则与 TCMReasoningTrace
+      5. paper_writer 提供 PAPER_TEMPLATE_TCM 与三个 TCM 章节 builder
+    """
+
+    def test_graph_schema_phase_k_node_labels(self):
+        source = (_SRC / "storage" / "graph_schema.py").read_text(encoding="utf-8")
+        for token in (
+            'RHYME_WITNESS = "RhymeWitness"',
+            'SCHOOL = "School"',
+        ):
+            self.assertIn(token, source, f"graph_schema 缺节点: {token}")
+
+    def test_graph_schema_phase_k_rel_types(self):
+        source = (_SRC / "storage" / "graph_schema.py").read_text(encoding="utf-8")
+        for token in (
+            'RHYMES_WITH = "RHYMES_WITH"',
+            'BELONGS_TO_SCHOOL = "BELONGS_TO_SCHOOL"',
+            'MENTORSHIP = "MENTORSHIP"',
+        ):
+            self.assertIn(token, source, f"graph_schema 缺关系: {token}")
+
+    def test_graph_schema_strict_mode_exports(self):
+        source = (_SRC / "storage" / "graph_schema.py").read_text(encoding="utf-8")
+        for token in (
+            "GRAPH_SCHEMA_STRICT_ENV",
+            "class GraphSchemaDriftError",
+            "def assert_schema_consistent",
+            "def is_strict_mode_enabled",
+        ):
+            self.assertIn(token, source, f"graph_schema strict mode 缺: {token}")
+
+    def test_neo4j_driver_enforces_strict_schema(self):
+        source = (_SRC / "storage" / "neo4j_driver.py").read_text(encoding="utf-8")
+        for token in (
+            "_enforce_strict_schema_if_enabled",
+            "GraphSchemaDriftError",
+            "is_strict_mode_enabled",
+        ):
+            self.assertIn(token, source, f"neo4j_driver strict mode 缺: {token}")
+
+    def test_tcm_reasoning_contract_exports(self):
+        path = _SRC / "research" / "tcm_reasoning"
+        self.assertTrue(path.is_dir(), "src/research/tcm_reasoning/ 不存在")
+        contract = (path / "trace_contract.py").read_text(encoding="utf-8")
+        for token in (
+            'CONTRACT_VERSION = "tcm-reasoning-trace-v1"',
+            "class TCMReasoningPremise",
+            "class TCMReasoningStep",
+            "class TCMReasoningTrace",
+            "PATTERN_TONGBING_YIZHI",
+            "PATTERN_YIBING_TONGZHI",
+            "PATTERN_SANYIN_ZHIYI",
+            "PATTERN_FANGZHENG_DUIYING",
+            "PATTERN_JUNCHEN_ZUOSHI",
+        ):
+            self.assertIn(token, contract, f"trace_contract 缺: {token}")
+
+    def test_tcm_reasoning_service_five_rules(self):
+        source = (_SRC / "research" / "tcm_reasoning" / "tcm_reasoning_service.py").read_text(encoding="utf-8")
+        for token in (
+            "def rule_tongbing_yizhi",
+            "def rule_yibing_tongzhi",
+            "def rule_sanyin_zhiyi",
+            "def rule_fangzheng_duiying",
+            "def rule_junchen_zuoshi",
+            "def run_tcm_reasoning",
+            "def build_tcm_reasoning_metadata",
+            "def build_default_rules",
+        ):
+            self.assertIn(token, source, f"tcm_reasoning_service 缺: {token}")
+
+    def test_paper_writer_tcm_template_exports(self):
+        source = (_SRC / "generation" / "paper_writer.py").read_text(encoding="utf-8")
+        for token in (
+            'PAPER_TEMPLATE_TCM = "tcm"',
+            "PAPER_TEMPLATE_DEFAULT",
+            "SUPPORTED_PAPER_TEMPLATES",
+            "_TCM_EXTRA_SECTION_ORDER",
+            "def _build_formula_interpretation",
+            "def _build_pattern_analysis",
+            "def _build_commentary",
+            "def _coerce_template",
+        ):
+            self.assertIn(token, source, f"paper_writer TCM template 缺: {token}")
+
+
 if __name__ == "__main__":
     unittest.main()

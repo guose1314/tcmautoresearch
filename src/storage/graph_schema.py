@@ -23,10 +23,13 @@ from typing import Any, Dict, FrozenSet, Mapping, Optional
 # Schema version — bump on every breaking label/relationship/property change
 # ═══════════════════════════════════════════════════════════════════════
 
-GRAPH_SCHEMA_VERSION = "1.1.0"
+GRAPH_SCHEMA_VERSION = "1.2.0"
 
 _SCHEMA_META_LABEL = "GraphSchemaMeta"
 _SCHEMA_META_NODE_ID = "graph_schema_meta::singleton"
+
+# 严格模式环境变量：当为真值时，drift 触发启动期 RuntimeError
+GRAPH_SCHEMA_STRICT_ENV = "TCM__GRAPH_SCHEMA_STRICT"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -55,6 +58,8 @@ class NodeLabel(str, Enum):
     EXEGESIS_TERM = "ExegesisTerm"
     FRAGMENT_CANDIDATE = "FragmentCandidate"
     TEXTUAL_EVIDENCE_CHAIN = "TextualEvidenceChain"
+    RHYME_WITNESS = "RhymeWitness"
+    SCHOOL = "School"
 
     # ── TCM 领域 ──
     FORMULA = "Formula"
@@ -132,6 +137,11 @@ class RelType(str, Enum):
     SIMILAR_TO = "SIMILAR_TO"
     ASSOCIATED_TARGET = "ASSOCIATED_TARGET"
     PARTICIPATES_IN = "PARTICIPATES_IN"
+
+    # ── 音韵 / 学派 ──
+    RHYMES_WITH = "RHYMES_WITH"
+    BELONGS_TO_SCHOOL = "BELONGS_TO_SCHOOL"
+    MENTORSHIP = "MENTORSHIP"
 
     # ── 通用 ──
     RELATED_TO = "RELATED_TO"
@@ -284,6 +294,21 @@ _ALLOWED_PROPERTIES: Dict[NodeLabel, FrozenSet[str]] = {
         "schema_version", "bootstrapped_at", "updated_at",
         "node_label_count", "rel_type_count",
     }),
+    NodeLabel.RHYME_WITNESS: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
+        "rhyme_id", "canonical", "label", "fanqie", "middle_chinese",
+        "old_chinese", "rhyme_group", "tone", "initial", "final",
+        "source_refs", "witness_refs", "notes", "exegesis_id",
+        "work_title", "document_title", "version_lineage_key", "witness_key",
+        "review_status", "needs_manual_review", "reviewer",
+        "reviewed_at", "decision_basis",
+    }),
+    NodeLabel.SCHOOL: _COMMON_TEMPORAL_PROPS | frozenset({
+        "school_id", "name", "alternative_names", "description",
+        "founding_dynasty", "core_doctrine", "representative_figures",
+        "representative_works", "lineage_summary", "source_refs",
+        "review_status", "needs_manual_review", "reviewer",
+        "reviewed_at", "decision_basis",
+    }),
 }
 
 _COMMON_REL_PROPS: FrozenSet[str] = frozenset({
@@ -296,6 +321,15 @@ _ALLOWED_REL_PROPERTIES: Dict[RelType, FrozenSet[str]] = {
     }),
     RelType.EXPLAINS_FORMULA: _COMMON_REL_PROPS | frozenset({
         "formula_canonical", "source_formula", "source_exegesis_id", "semantic_scope", "provenance_kind",
+    }),
+    RelType.RHYMES_WITH: _COMMON_REL_PROPS | frozenset({
+        "rhyme_group", "phonetic_basis", "source_refs", "confidence",
+    }),
+    RelType.BELONGS_TO_SCHOOL: _COMMON_REL_PROPS | frozenset({
+        "role", "period", "source_refs", "confidence",
+    }),
+    RelType.MENTORSHIP: _COMMON_REL_PROPS | frozenset({
+        "mentor_role", "apprentice_role", "period", "source_refs", "confidence",
     }),
 }
 
@@ -389,6 +423,43 @@ def detect_schema_drift(
         "expected_version": GRAPH_SCHEMA_VERSION,
         "detail": "schema version 一致",
     }
+
+
+class GraphSchemaDriftError(RuntimeError):
+    """Raised when ``assert_schema_consistent(strict=True)`` detects drift."""
+
+    def __init__(self, drift_report: Dict[str, Any]):
+        super().__init__(drift_report.get("detail", "graph schema drift detected"))
+        self.drift_report = dict(drift_report)
+
+
+def is_strict_mode_enabled(env_value: Optional[str] = None) -> bool:
+    """Return True iff ``TCM__GRAPH_SCHEMA_STRICT`` env var (or *env_value*) is truthy."""
+    import os
+    raw = env_value if env_value is not None else os.environ.get(GRAPH_SCHEMA_STRICT_ENV, "")
+    return str(raw or "").strip().lower() in {"1", "true", "yes", "on", "strict"}
+
+
+def assert_schema_consistent(
+    stored_version: Optional[str],
+    *,
+    strict: bool = False,
+) -> Dict[str, Any]:
+    """Run drift detection and optionally raise when drift is detected.
+
+    Parameters
+    ----------
+    stored_version
+        Version string read from the live Neo4j ``GraphSchemaMeta`` node.
+    strict
+        When True (or env ``TCM__GRAPH_SCHEMA_STRICT`` is truthy) raises
+        :class:`GraphSchemaDriftError` on drift; otherwise returns the report
+        and lets the caller decide.
+    """
+    report = detect_schema_drift(stored_version)
+    if report.get("drift_detected") and (strict or is_strict_mode_enabled()):
+        raise GraphSchemaDriftError(report)
+    return report
 
 
 # ── Label / RelType lookup helpers ────────────────────────────────────

@@ -22,12 +22,19 @@ from src.research.phase_result import (
 logger = logging.getLogger(__name__)
 
 _SECTION_ORDER = ["introduction", "methods", "results", "discussion", "conclusion"]
+_TCM_EXTRA_SECTION_ORDER = ["formula_interpretation", "pattern_analysis", "commentary"]
+PAPER_TEMPLATE_DEFAULT = "imrd"
+PAPER_TEMPLATE_TCM = "tcm"
+SUPPORTED_PAPER_TEMPLATES: tuple[str, ...] = (PAPER_TEMPLATE_DEFAULT, PAPER_TEMPLATE_TCM)
 _ZH_SECTION_TITLES = {
     "introduction": "1 引言（Introduction）",
     "methods": "2 方法（Methods）",
     "results": "3 结果（Results）",
     "discussion": "4 讨论（Discussion）",
     "conclusion": "5 结论（Conclusion）",
+    "formula_interpretation": "附 A 方义阐释",
+    "pattern_analysis": "附 B 证治分析",
+    "commentary": "附 C 按语",
 }
 _EN_SECTION_TITLES = {
     "introduction": "1. Introduction",
@@ -35,6 +42,9 @@ _EN_SECTION_TITLES = {
     "results": "3. Results",
     "discussion": "4. Discussion",
     "conclusion": "5. Conclusion",
+    "formula_interpretation": "Appendix A. Formula Interpretation",
+    "pattern_analysis": "Appendix B. Pattern Analysis",
+    "commentary": "Appendix C. Commentary",
 }
 _GRADE_LABELS_ZH = {
     "high": "高",
@@ -118,6 +128,7 @@ class PaperWriter(BaseModule):
         self.reference_format = str(self.config.get("reference_format", "GB/T 7714-2015"))
         self.embed_figures = bool(self.config.get("embed_figures", False))
         self.enable_iterative_refinement = bool(self.config.get("enable_iterative_refinement", True))
+        self.template = self._coerce_template(self.config.get("template", PAPER_TEMPLATE_DEFAULT))
         self.max_revision_rounds = self._coerce_iteration_limit(self.config.get("max_revision_rounds", 2))
         self.min_revision_rounds = self._coerce_iteration_limit(
             self.config.get("min_revision_rounds", 1),
@@ -177,13 +188,18 @@ class PaperWriter(BaseModule):
 
     def build_draft(self, context: Dict[str, Any]) -> PaperDraft:
         language = str(context.get("language") or self.language or "zh").lower()
+        template = self._coerce_template(context.get("template") or self.template)
         title = self._resolve_title(context)
         keywords = self._resolve_keywords(context)
         references = self._resolve_references(context)
         section_overrides = self._resolve_section_overrides(context, language)
 
+        section_order = list(_SECTION_ORDER)
+        if template == PAPER_TEMPLATE_TCM:
+            section_order = section_order + list(_TCM_EXTRA_SECTION_ORDER)
+
         sections: List[PaperSection] = []
-        for section_type in _SECTION_ORDER:
+        for section_type in section_order:
             if section_type == "conclusion" and not self.include_conclusion:
                 continue
             title_text = self._section_title(section_type, language)
@@ -207,6 +223,7 @@ class PaperWriter(BaseModule):
             "journal": str(context.get("journal") or "").strip(),
             "figure_paths": self._resolve_figure_paths(context),
             "section_overrides": sorted(section_overrides.keys()),
+            "template": template,
         }
         return PaperDraft(
             title=title,
@@ -840,6 +857,9 @@ class PaperWriter(BaseModule):
             "results": self._build_results,
             "discussion": self._build_discussion,
             "conclusion": self._build_conclusion,
+            "formula_interpretation": self._build_formula_interpretation,
+            "pattern_analysis": self._build_pattern_analysis,
+            "commentary": self._build_commentary,
         }
         builder = builders.get(section_type)
         if builder is None:
@@ -1057,6 +1077,111 @@ class PaperWriter(BaseModule):
             )
         return (
             f"综上，本服务围绕“{objective}”生成了可直接修订的 IMRD 论文初稿，能够把证据、数据挖掘结果与图表产物汇聚为统一稿件，为后续学术投稿提供基础。"
+        )
+
+    # ── 中医论文模板（template="tcm" 启用） ────────────────────────────
+
+    def _coerce_template(self, raw: Any) -> str:
+        value = str(raw or "").strip().lower()
+        if value in SUPPORTED_PAPER_TEMPLATES:
+            return value
+        return PAPER_TEMPLATE_DEFAULT
+
+    def _build_formula_interpretation(
+        self,
+        context: Dict[str, Any],
+        title: str,
+        language: str,
+        references: Sequence[str],
+    ) -> str:
+        """方义阐释：从上下文挑选君臣佐使药味与功效，给出结构化阐释。"""
+        formulas = list(context.get("formulas") or [])
+        herbs = list(context.get("herbs") or [])
+        primary_formula = ""
+        if formulas:
+            first = formulas[0]
+            if isinstance(first, dict):
+                primary_formula = str(first.get("name") or first.get("canonical") or "").strip()
+            else:
+                primary_formula = str(first).strip()
+        herb_names: List[str] = []
+        for item in herbs:
+            if isinstance(item, dict):
+                name = str(item.get("name") or item.get("canonical") or "").strip()
+            else:
+                name = str(item or "").strip()
+            if name and name not in herb_names:
+                herb_names.append(name)
+        head_herbs = "、".join(herb_names[:5]) if herb_names else "（待补充君臣佐使药味）"
+        if language == "en":
+            formula_text = primary_formula or "the principal formula"
+            return (
+                f"This appendix interprets the compositional intent of {formula_text}. "
+                f"Sovereign and minister herbs include {head_herbs}. The interpretation traces "
+                f"how each herb addresses the targeted pattern, supporting the IMRD discussion above."
+            )
+        formula_text = primary_formula or "本研究主方"
+        return (
+            f"本节围绕『{formula_text}』展开方义阐释，梳理君臣佐使的配伍意图。"
+            f"主要药味为：{head_herbs}。各药协同针对所论证候，与正文讨论形成互证。"
+        )
+
+    def _build_pattern_analysis(
+        self,
+        context: Dict[str, Any],
+        title: str,
+        language: str,
+        references: Sequence[str],
+    ) -> str:
+        """证治分析：列出 syndrome → 治法/方剂 映射。"""
+        syndromes = list(context.get("syndromes") or [])
+        if not syndromes:
+            evidence_records = self._resolve_evidence(context) or []
+            for rec in evidence_records:
+                if isinstance(rec, dict) and rec.get("syndrome"):
+                    syndromes.append(rec.get("syndrome"))
+        seen: List[str] = []
+        for s in syndromes:
+            text = str(s.get("name") if isinstance(s, dict) else s or "").strip()
+            if text and text not in seen:
+                seen.append(text)
+        if not seen:
+            seen = ["（待补充核心证候）"]
+        treatment_hint = str(context.get("treatment_principle") or "辨证论治").strip()
+        if language == "en":
+            return (
+                f"Pattern analysis groups the identified syndromes ({', '.join(seen)}) "
+                f"and aligns each with the corresponding treatment principle: {treatment_hint}. "
+                f"This appendix supports the discussion section by making the pattern-treatment "
+                f"mapping explicit."
+            )
+        return (
+            f"本节对识别到的证候 {('、'.join(seen))} 逐一进行证治分析，"
+            f"对应治法以『{treatment_hint}』为纲，与讨论部分相互印证。"
+        )
+
+    def _build_commentary(
+        self,
+        context: Dict[str, Any],
+        title: str,
+        language: str,
+        references: Sequence[str],
+    ) -> str:
+        """按语：研究者立场说明 + 取舍理由 + 后续研究展望。"""
+        commentary_text = str(context.get("commentary") or "").strip()
+        if commentary_text:
+            return commentary_text
+        objective = str(context.get("objective") or "本研究目标").strip()
+        limitation = str(self._resolve_limitations_text(context) or "").strip()
+        if language == "en":
+            return (
+                f"Commentary: this draft accepts existing classical interpretations as primary evidence "
+                f"while prioritizing reproducibility for {objective}. {limitation} "
+                f"Future revisions should incorporate expert clinical validation."
+            )
+        return (
+            f"按语：本研究在『{objective}』的目标下，先以经典文献为基线，再结合现代证据加以校核。"
+            f"{limitation}后续修订建议引入临床专家进一步验证与补订。"
         )
 
     def _resolve_gap_summary(self, context: Dict[str, Any]) -> str:

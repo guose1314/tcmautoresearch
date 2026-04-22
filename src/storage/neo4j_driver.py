@@ -128,6 +128,7 @@ class Neo4jDriver:
                 self.uri, self._pool_config["max_connection_pool_size"],
             )
             self._bootstrap_schema()
+            self._enforce_strict_schema_if_enabled()
         except Exception as e:
             logger.error(f"Neo4j 连接失败: {e}")
             raise
@@ -181,11 +182,31 @@ class Neo4jDriver:
             logger.warning("读取 schema version 失败: %s", exc)
             return None
 
-    def ensure_schema_version(self) -> Dict[str, Any]:
-        """检测当前 graph 的 schema drift 状态。"""
-        from .graph_schema import detect_schema_drift
+    def ensure_schema_version(self, *, strict: bool = False) -> Dict[str, Any]:
+        """检测当前 graph 的 schema drift 状态。
+
+        当 ``strict=True`` 或环境变量 ``TCM__GRAPH_SCHEMA_STRICT`` 为真时，
+        若检测到漂移会抛出 :class:`GraphSchemaDriftError`，便于在启动期
+        ``fail-fast``。
+        """
+        from .graph_schema import assert_schema_consistent
         stored = self.get_schema_version()
-        return detect_schema_drift(stored)
+        return assert_schema_consistent(stored, strict=strict)
+
+    def _enforce_strict_schema_if_enabled(self) -> None:
+        """启动期严格校验：当 ``TCM__GRAPH_SCHEMA_STRICT`` 为真时阻止漂移。
+
+        非严格模式下完全无副作用；严格模式下若检测到漂移会让 ``connect()``
+        失败，方便生产环境 ``fail-fast``。
+        """
+        from .graph_schema import GraphSchemaDriftError, is_strict_mode_enabled
+        if not is_strict_mode_enabled():
+            return
+        try:
+            self.ensure_schema_version(strict=True)
+        except GraphSchemaDriftError as exc:
+            logger.error("Graph schema strict mode 检测到漂移: %s", exc.drift_report)
+            raise
     
     def close(self):
         """关闭连接"""

@@ -493,6 +493,15 @@ flowchart LR
 | K-3 | 中医论文模板（方义阐释/证治分析/按语） | publish 模块可切换模板 | 贴近真实中医科研表达 | M |
 | K-4 | Graph schema version 治理 | 启动期强校验 | 防漂移 | S |
 
+#### Phase K 进度（2026-04-22）
+
+- ✅ K-1 已完成：[src/storage/graph_schema.py](src/storage/graph_schema.py) `NodeLabel` 增 `RHYME_WITNESS` / `SCHOOL`，`RelType` 增 `RHYMES_WITH` / `BELONGS_TO_SCHOOL` / `MENTORSHIP`，属性白名单同步，`GRAPH_SCHEMA_VERSION` 升至 `1.2.0`；新增 [tests/unit/test_graph_schema_phase_k.py](tests/unit/test_graph_schema_phase_k.py) 17 通过。详见审计稿 [Card K-1](ARCHITECTURE_TCM_RESEARCH_METHOD_AUDIT_2026_04_20.md#card-k-1图谱新增-rhymewitness--school--mentorship)。
+- ✅ K-2 已完成：新增 [src/research/tcm_reasoning/](src/research/tcm_reasoning/)（`trace_contract.py` + `tcm_reasoning_service.py`），落 `tcm-reasoning-trace-v1` 契约 + 5 条规则（同病异治 / 异病同治 / 三因制宜 / 方证对应 / 君臣佐使）+ `run_tcm_reasoning` + `build_tcm_reasoning_metadata`；新增 [tests/unit/test_tcm_reasoning.py](tests/unit/test_tcm_reasoning.py) 22 通过。
+- ✅ K-3 已完成：[src/generation/paper_writer.py](src/generation/paper_writer.py) 新增 `PAPER_TEMPLATE_TCM` / `_TCM_EXTRA_SECTION_ORDER` 与 `_build_formula_interpretation` / `_build_pattern_analysis` / `_build_commentary`，支持 `template` 配置 + per-call 切换；新增 [tests/unit/test_paper_writer_tcm_template.py](tests/unit/test_paper_writer_tcm_template.py) 11 通过。
+- ✅ K-4 已完成：[src/storage/graph_schema.py](src/storage/graph_schema.py) 新增 `GraphSchemaDriftError` / `assert_schema_consistent` / `is_strict_mode_enabled`（环境变量 `TCM__GRAPH_SCHEMA_STRICT`）；[src/storage/neo4j_driver.py](src/storage/neo4j_driver.py) `connect()` 钩入 `_enforce_strict_schema_if_enabled`；strict mode / drift 用例并入 K-1 测试文件。
+- ✅ Guard #42 已完成：[tests/unit/test_architecture_regression_guard.py](tests/unit/test_architecture_regression_guard.py) `TestGuard42_PhaseKContracts` 7 用例锁定 K-1..K-4 关键符号；`tests/unit` 1471 通过 / 14 subtests，全量（除 performance/integration/manual）3413 通过 / 2 skipped / 4 xfailed。
+- ✅ Phase K 全部完成；可进入 Phase L（可靠性与去耦）。
+
 ### Phase L（约 2 周）—— 可靠性与去耦
 
 | Card | 动作 | Done 定义 | 理由 | 代价 |
