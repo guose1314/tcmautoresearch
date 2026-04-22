@@ -7,29 +7,205 @@
     <script src="/static/js/tailwind.min.js"></script>
     <script defer src="/static/js/alpine.min.js"></script>
     <script src="/static/js/htmx.min.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/vis-network/styles/vis-network.min.css"
+    />
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
+      :root {
+        --font-display: "STSong", "Songti SC", "Noto Serif SC", serif;
+        --font-sans:
+          "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+        --shell-ink: #183533;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
       [x-cloak] {
         display: none !important;
       }
-      /* HTMX loading indicator */
+
+      body {
+        font-family: var(--font-sans);
+        background:
+          radial-gradient(
+            circle at top left,
+            rgba(16, 185, 129, 0.12),
+            transparent 26%
+          ),
+          radial-gradient(
+            circle at bottom right,
+            rgba(20, 184, 166, 0.1),
+            transparent 24%
+          ),
+          linear-gradient(180deg, #f7fcfa 0%, #f2faf7 48%, #fbfefd 100%);
+        color: var(--shell-ink);
+      }
+
+      .brand-title {
+        font-family: var(--font-display);
+        letter-spacing: 0.06em;
+      }
+
+      .shell-grid::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(rgba(15, 118, 110, 0.05) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(15, 118, 110, 0.05) 1px, transparent 1px);
+        background-size: 30px 30px;
+        mask-image: linear-gradient(
+          to bottom,
+          rgba(0, 0, 0, 0.25),
+          transparent 72%
+        );
+      }
+
+      .shell-topbar {
+        background: linear-gradient(
+          120deg,
+          rgba(8, 47, 42, 0.94) 0%,
+          rgba(15, 77, 67, 0.93) 45%,
+          rgba(12, 104, 92, 0.92) 100%
+        );
+        backdrop-filter: blur(18px);
+        box-shadow: 0 16px 34px rgba(15, 47, 47, 0.12);
+      }
+
+      .shell-sidebar {
+        background: rgba(7, 34, 30, 0.95);
+        backdrop-filter: blur(18px);
+        box-shadow: 0 22px 46px rgba(4, 20, 18, 0.22);
+      }
+
+      .shell-card {
+        background: rgba(255, 255, 255, 0.84);
+        border: 1px solid rgba(255, 255, 255, 0.82);
+        box-shadow: 0 18px 44px rgba(15, 47, 47, 0.08);
+        backdrop-filter: blur(16px);
+      }
+
+      .shell-card-soft {
+        background: linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.92),
+          rgba(248, 252, 250, 0.9)
+        );
+        border: 1px solid rgba(15, 118, 110, 0.08);
+        box-shadow: 0 10px 28px rgba(15, 47, 47, 0.05);
+      }
+
+      .metric-card {
+        position: relative;
+        overflow: hidden;
+      }
+
+      .metric-card::after {
+        content: "";
+        position: absolute;
+        right: -24px;
+        top: -24px;
+        width: 96px;
+        height: 96px;
+        border-radius: 999px;
+        background: linear-gradient(
+          135deg,
+          rgba(16, 185, 129, 0.12),
+          rgba(20, 184, 166, 0.04)
+        );
+      }
+
+      .tab-panel-enter {
+        animation: fadeUp 0.22s ease;
+      }
+
+      .soft-scroll::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+
+      .soft-scroll::-webkit-scrollbar-thumb {
+        background: rgba(15, 118, 110, 0.22);
+        border-radius: 999px;
+      }
+
+      .soft-scroll::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
       .htmx-indicator {
         opacity: 0;
-        transition: opacity 300ms ease-in;
+        transition: opacity 240ms ease-in;
       }
+
       .htmx-request .htmx-indicator {
         opacity: 1;
       }
+
+      .phase-chip-active {
+        box-shadow: 0 14px 26px rgba(16, 185, 129, 0.16);
+        transform: translateY(-1px);
+      }
+
+      #kg-network {
+        min-height: 460px;
+        background:
+          radial-gradient(
+            circle at top left,
+            rgba(16, 185, 129, 0.08),
+            transparent 26%
+          ),
+          linear-gradient(
+            180deg,
+            rgba(248, 252, 250, 0.96),
+            rgba(240, 248, 245, 0.96)
+          );
+      }
+
+      .assistant-bubble-user {
+        background: linear-gradient(135deg, #0f766e 0%, #10b981 100%);
+        color: #ffffff;
+      }
+
+      .assistant-bubble-ai {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid rgba(15, 118, 110, 0.08);
+      }
+
+      @keyframes fadeUp {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (max-width: 1024px) {
+        .shell-sidebar {
+          width: 18.5rem;
+        }
+      }
     </style>
     <script>
-      // ---- JWT helper: attach Authorization header to every HTMX request ----
+      function resolveAccessToken() {
+        return localStorage.getItem("access_token") || "";
+      }
+
       document.addEventListener("htmx:configRequest", function (evt) {
-        var token = localStorage.getItem("access_token");
+        var token = resolveAccessToken();
         if (token) {
           evt.detail.headers["Authorization"] = "Bearer " + token;
         }
       });
 
-      // If any HTMX response returns 401, redirect to login
       document.addEventListener("htmx:responseError", function (evt) {
         if (evt.detail.xhr && evt.detail.xhr.status === 401) {
           localStorage.removeItem("access_token");
@@ -39,413 +215,1612 @@
       });
     </script>
   </head>
-  <body class="min-h-screen bg-gray-50" x-data="dashboardApp()" x-cloak>
-    <!-- ====== Top Bar ====== -->
-    <header
-      class="fixed top-0 inset-x-0 h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 z-30"
-    >
-      <div class="flex items-center gap-3">
-        <button
-          @click="sidebarOpen = !sidebarOpen"
-          class="lg:hidden p-1.5 rounded-lg hover:bg-gray-100"
+  <body class="min-h-screen text-slate-900" x-data="dashboardApp()" x-cloak>
+    <div class="shell-grid relative min-h-screen">
+      <header
+        class="shell-topbar fixed inset-x-0 top-0 z-40 border-b border-white/10 text-white"
+      >
+        <div
+          class="mx-auto flex h-20 max-w-[1800px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8"
         >
-          <svg
-            class="w-5 h-5 text-gray-600"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M4 6h16M4 12h16M4 18h16"
-            />
-          </svg>
-        </button>
-        <span class="text-xl">🏥</span>
-        <h1 class="text-lg font-bold text-gray-800 hidden sm:block">
-          中医智慧科研平台
-        </h1>
-      </div>
-      <div class="flex items-center gap-4">
-        <span class="text-sm text-gray-600" x-text="'👤 ' + currentUser"></span>
-        <button
-          @click="handleLogout"
-          class="text-sm text-red-600 hover:text-red-800 font-medium transition"
-        >
-          退出登录
-        </button>
-      </div>
-    </header>
-
-    <!-- ====== Sidebar ====== -->
-    <!-- Overlay (mobile) -->
-    <div
-      x-show="sidebarOpen"
-      @click="sidebarOpen = false"
-      class="fixed inset-0 bg-black/30 z-30 lg:hidden"
-      x-transition.opacity
-    ></div>
-
-    <aside
-      :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
-      class="fixed top-14 left-0 bottom-0 w-60 bg-white border-r border-gray-200 z-40 transition-transform duration-200 overflow-y-auto"
-    >
-      <nav class="py-4 space-y-1 px-3">
-        <template x-for="item in navItems" :key="item.id">
-          <button
-            @click="switchTab(item.id)"
-            :class="activeTab === item.id
-                    ? 'bg-emerald-50 text-emerald-700 font-semibold'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
-            class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition"
-          >
-            <span x-text="item.icon" class="text-lg"></span>
-            <span x-text="item.label"></span>
-          </button>
-        </template>
-      </nav>
-    </aside>
-
-    <!-- ====== Main Content Area ====== -->
-    <main class="pt-14 lg:pl-60 min-h-screen">
-      <div class="p-6 max-w-7xl mx-auto space-y-6">
-        <!-- ---- Dashboard Tab ---- -->
-        <template x-if="activeTab === 'dashboard'">
-          <div class="space-y-6">
-            <!-- Stats Row (multi-row from backend) -->
-            <div
-              hx-get="/api/dashboard/stats"
-              hx-trigger="load"
-              hx-target="#stats-container"
-              hx-indicator="#stats-loading"
+          <div class="flex min-w-0 items-center gap-3 sm:gap-4">
+            <button
+              @click="sidebarOpen = !sidebarOpen"
+              class="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white transition hover:bg-white/15 lg:hidden"
             >
-              <div id="stats-container">
-                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div
-                    class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
-                  >
-                    <p class="text-xs text-gray-500 uppercase tracking-wide">
-                      加载中…
-                    </p>
-                    <p class="text-2xl font-bold text-gray-300 mt-1">—</p>
-                  </div>
-                  <div
-                    class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
-                  >
-                    <p class="text-xs text-gray-500 uppercase tracking-wide">
-                      加载中…
-                    </p>
-                    <p class="text-2xl font-bold text-gray-300 mt-1">—</p>
-                  </div>
-                  <div
-                    class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
-                  >
-                    <p class="text-xs text-gray-500 uppercase tracking-wide">
-                      加载中…
-                    </p>
-                    <p class="text-2xl font-bold text-gray-300 mt-1">—</p>
-                  </div>
-                  <div
-                    class="bg-white rounded-xl shadow-sm p-5 border border-gray-100"
-                  >
-                    <p class="text-xs text-gray-500 uppercase tracking-wide">
-                      加载中…
-                    </p>
-                    <p class="text-2xl font-bold text-gray-300 mt-1">—</p>
-                  </div>
-                </div>
-              </div>
-              <div
-                id="stats-loading"
-                class="htmx-indicator text-center text-sm text-gray-400 py-2"
+              <svg
+                class="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
               >
-                加载中…
-              </div>
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 6h16M4 12h16M4 18h16"
+                />
+              </svg>
+            </button>
+
+            <div
+              class="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-2xl shadow-lg shadow-black/10"
+            >
+              医
             </div>
 
-            <!-- Research Workflow Pipeline -->
-            <div
-              hx-get="/api/dashboard/research-workflow"
-              hx-trigger="load"
-              hx-target="#workflow-container"
-              hx-indicator="#workflow-loading"
-            >
-              <div id="workflow-container">
-                <div
-                  class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
-                >
-                  <h2 class="font-semibold text-gray-800 mb-2">
-                    🔬 科研论文书写流程
-                  </h2>
-                  <p class="text-sm text-gray-400">加载研究管线…</p>
-                </div>
-              </div>
-              <div
-                id="workflow-loading"
-                class="htmx-indicator text-center text-sm text-gray-400 py-2"
+            <div class="min-w-0">
+              <p
+                class="text-[11px] uppercase tracking-[0.32em] text-emerald-100/75"
               >
-                加载中…
+                TCM Intelligent Research
+              </p>
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <h1
+                  class="brand-title truncate text-xl font-semibold sm:text-2xl"
+                >
+                  中医智慧科研平台
+                </h1>
+                <span
+                  class="hidden rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs text-emerald-50/90 sm:inline-flex"
+                  >真实研究流程联动</span
+                >
               </div>
             </div>
+          </div>
 
-            <!-- Current Projects + Quality side by side -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <!-- Recent Research Sessions -->
-              <section
-                class="bg-white rounded-xl shadow-sm border border-gray-100"
+          <div
+            class="hidden min-w-0 flex-1 items-center justify-center lg:flex"
+          >
+            <div
+              class="w-full max-w-2xl rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm text-emerald-50/90 shadow-inner shadow-black/5"
+            >
+              <div class="flex items-center justify-between gap-4">
+                <div class="min-w-0">
+                  <p
+                    class="truncate text-base font-semibold"
+                    x-text="tabMeta(activeTab).label"
+                  ></p>
+                  <p
+                    class="truncate text-xs text-emerald-100/70"
+                    x-text="tabMeta(activeTab).subtitle"
+                  ></p>
+                </div>
+                <div class="flex items-center gap-2 text-xs text-emerald-50/80">
+                  <span class="h-2 w-2 rounded-full bg-emerald-300"></span>
+                  <span x-text="dashboardSummary.statusText"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 sm:gap-3">
+            <button
+              @click="switchTab('new_research')"
+              class="hidden rounded-2xl border border-emerald-200/20 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/15 sm:inline-flex"
+            >
+              新建研究
+            </button>
+            <button
+              @click="switchTab('ai_assistant')"
+              class="hidden rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-emerald-900 transition hover:bg-emerald-50 sm:inline-flex"
+            >
+              AI 助手
+            </button>
+
+            <div
+              class="rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-right"
+            >
+              <p class="text-xs text-emerald-100/70">当前用户</p>
+              <p
+                class="text-sm font-semibold"
+                x-text="currentDisplayName || currentUser"
+              ></p>
+            </div>
+
+            <button
+              @click="handleLogout"
+              class="inline-flex rounded-2xl border border-white/15 bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:bg-white/15"
+            >
+              退出登录
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div
+        x-show="sidebarOpen"
+        @click="sidebarOpen = false"
+        x-transition.opacity
+        class="fixed inset-0 z-30 bg-slate-950/40 backdrop-blur-sm lg:hidden"
+      ></div>
+
+      <aside
+        :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
+        class="shell-sidebar soft-scroll fixed bottom-0 left-0 top-20 z-40 w-80 overflow-y-auto border-r border-white/5 text-white transition-transform duration-200"
+      >
+        <div class="space-y-6 px-4 py-5">
+          <section class="rounded-[28px] border border-white/10 bg-white/5 p-5">
+            <p class="text-xs uppercase tracking-[0.3em] text-emerald-100/60">
+              管理总览
+            </p>
+            <h2 class="mt-3 brand-title text-2xl font-semibold">
+              研究管理界面
+            </h2>
+            <p class="mt-2 text-sm leading-6 text-emerald-50/72">
+              登录后统一调度研究任务、知识图谱、AI
+              助手与输出资产，保持同一套认证和操作入口。
+            </p>
+            <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+              <div class="rounded-2xl bg-white/10 px-4 py-3">
+                <p class="text-xs text-emerald-100/65">任务总数</p>
+                <p
+                  class="mt-1 text-lg font-semibold"
+                  x-text="dashboardSummary.totalCycles"
+                ></p>
+              </div>
+              <div class="rounded-2xl bg-white/10 px-4 py-3">
+                <p class="text-xs text-emerald-100/65">完成数</p>
+                <p
+                  class="mt-1 text-lg font-semibold"
+                  x-text="dashboardSummary.completedCycles"
+                ></p>
+              </div>
+            </div>
+          </section>
+
+          <template x-for="group in navGroups" :key="group.id">
+            <section
+              class="rounded-[26px] border border-white/8 bg-white/5 p-3"
+            >
+              <button
+                type="button"
+                @click="toggleNavGroup(group.id)"
+                class="flex w-full items-center justify-between rounded-2xl px-3 py-3 text-left transition hover:bg-white/5"
               >
-                <div
-                  class="px-5 py-4 border-b border-gray-100 flex items-center justify-between"
-                >
-                  <h2 class="font-semibold text-gray-800">📋 最近研究任务</h2>
+                <div>
+                  <p
+                    class="text-xs uppercase tracking-[0.26em] text-emerald-100/55"
+                    x-text="group.caption"
+                  ></p>
+                  <p
+                    class="mt-1 text-sm font-semibold text-white"
+                    x-text="group.label"
+                  ></p>
+                </div>
+                <span
+                  class="text-emerald-100/80"
+                  x-text="group.open ? '−' : '+'"
+                ></span>
+              </button>
+
+              <div x-show="group.open" x-transition class="mt-2 space-y-1.5">
+                <template x-for="item in group.items" :key="item.id">
                   <button
-                    class="text-sm text-emerald-600 hover:text-emerald-800 font-medium"
-                    hx-get="/api/projects/recent"
-                    hx-target="#projects-list"
-                    hx-indicator="#proj-loading"
+                    @click="switchTab(item.id)"
+                    :class="activeTab === item.id ? 'bg-emerald-500/18 text-white shadow-inner shadow-emerald-300/10' : 'text-emerald-50/80 hover:bg-white/6 hover:text-white'"
+                    class="flex w-full items-center justify-between rounded-2xl px-4 py-3 text-sm transition"
                   >
-                    刷新
+                    <span class="flex items-center gap-3">
+                      <span class="text-lg" x-text="item.icon"></span>
+                      <span class="font-medium" x-text="item.label"></span>
+                    </span>
+                    <span
+                      class="text-[11px] uppercase tracking-[0.18em] text-emerald-100/50"
+                      x-text="item.badge || ''"
+                    ></span>
+                  </button>
+                </template>
+              </div>
+            </section>
+          </template>
+
+          <section
+            class="rounded-[26px] border border-emerald-300/10 bg-emerald-400/10 p-4"
+          >
+            <p class="text-xs uppercase tracking-[0.26em] text-emerald-100/55">
+              运行提示
+            </p>
+            <ul class="mt-3 space-y-2 text-sm leading-6 text-emerald-50/78">
+              <li>
+                科研任务创建后可直接执行各阶段，并通过 WebSocket 接收实时进度。
+              </li>
+              <li>AI 助手支持 REST 与流式 WebSocket 两种调用模式。</li>
+              <li>
+                知识图谱页直接读取 /api/analysis/kg/* 真实数据进行可视化。
+              </li>
+            </ul>
+          </section>
+        </div>
+      </aside>
+
+      <main class="min-h-screen px-4 pb-8 pt-24 sm:px-6 lg:pl-[22rem] lg:pr-8">
+        <div class="mx-auto max-w-[1500px] space-y-6">
+          <section
+            class="shell-card relative overflow-hidden rounded-[34px] p-6 sm:p-8"
+          >
+            <div
+              class="absolute inset-y-0 right-0 w-64 bg-gradient-to-l from-emerald-100/50 to-transparent"
+            ></div>
+            <div
+              class="relative z-10 grid gap-6 xl:grid-cols-[1.2fr,0.8fr] xl:items-end"
+            >
+              <div class="space-y-4">
+                <div class="flex flex-wrap items-center gap-3">
+                  <span
+                    class="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700"
+                    >Management Shell</span
+                  >
+                  <span
+                    class="rounded-full border border-emerald-100 bg-white px-3 py-1 text-xs text-slate-500"
+                    x-text="'当前模块: ' + tabMeta(activeTab).label"
+                  ></span>
+                </div>
+                <div>
+                  <h2
+                    class="brand-title text-3xl font-semibold text-slate-900 sm:text-4xl"
+                    x-text="tabMeta(activeTab).label"
+                  ></h2>
+                  <p
+                    class="mt-3 max-w-3xl text-sm leading-7 text-slate-600 sm:text-base"
+                    x-text="tabMeta(activeTab).description"
+                  ></p>
+                </div>
+                <div class="flex flex-wrap gap-3">
+                  <button
+                    @click="switchTab('new_research')"
+                    class="inline-flex items-center gap-2 rounded-2xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-800"
+                  >
+                    <span>发起研究任务</span>
+                    <span>→</span>
+                  </button>
+                  <button
+                    @click="switchTab('knowledge_graph')"
+                    class="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                  >
+                    <span>查看知识图谱</span>
+                    <span>↗</span>
+                  </button>
+                  <button
+                    @click="switchTab('ai_assistant')"
+                    class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:text-emerald-800"
+                  >
+                    <span>打开 AI 助手</span>
+                    <span>↗</span>
                   </button>
                 </div>
-                <div
-                  id="projects-list"
-                  class="divide-y divide-gray-50"
-                  hx-get="/api/projects/recent"
-                  hx-trigger="load"
-                  hx-target="this"
-                  hx-indicator="#proj-loading"
-                >
-                  <div class="px-5 py-8 text-center text-sm text-gray-400">
-                    加载研究记录…
+              </div>
+
+              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-2">
+                <div class="metric-card shell-card-soft rounded-[28px] p-4">
+                  <p class="text-xs uppercase tracking-[0.22em] text-slate-400">
+                    研究任务
+                  </p>
+                  <p
+                    class="mt-3 text-3xl font-semibold text-slate-900"
+                    x-text="dashboardSummary.totalCycles"
+                  ></p>
+                  <p class="mt-2 text-sm text-slate-500">
+                    已加载的研究会话总数
+                  </p>
+                </div>
+                <div class="metric-card shell-card-soft rounded-[28px] p-4">
+                  <p class="text-xs uppercase tracking-[0.22em] text-slate-400">
+                    活跃任务
+                  </p>
+                  <p
+                    class="mt-3 text-3xl font-semibold text-emerald-700"
+                    x-text="dashboardSummary.activeCycles"
+                  ></p>
+                  <p class="mt-2 text-sm text-slate-500">
+                    当前仍处于进行中的研究
+                  </p>
+                </div>
+                <div class="metric-card shell-card-soft rounded-[28px] p-4">
+                  <p class="text-xs uppercase tracking-[0.22em] text-slate-400">
+                    完成交付
+                  </p>
+                  <p
+                    class="mt-3 text-3xl font-semibold text-slate-900"
+                    x-text="dashboardSummary.completedCycles"
+                  ></p>
+                  <p class="mt-2 text-sm text-slate-500">
+                    已完成完整阶段流程的任务
+                  </p>
+                </div>
+                <div class="metric-card shell-card-soft rounded-[28px] p-4">
+                  <p class="text-xs uppercase tracking-[0.22em] text-slate-400">
+                    知识图谱实体
+                  </p>
+                  <p
+                    class="mt-3 text-3xl font-semibold text-slate-900"
+                    x-text="knowledgeGraph.stats ? knowledgeGraph.stats.total_entities : '—'"
+                  ></p>
+                  <p class="mt-2 text-sm text-slate-500">
+                    首次打开知识图谱页后自动更新
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <template x-if="activeTab === 'dashboard'">
+            <div class="tab-panel-enter space-y-6">
+              <section class="grid gap-6 xl:grid-cols-[1.1fr,0.9fr]">
+                <div class="shell-card rounded-[30px] p-6 sm:p-7">
+                  <div
+                    class="flex flex-wrap items-center justify-between gap-4"
+                  >
+                    <div>
+                      <p
+                        class="text-xs uppercase tracking-[0.28em] text-emerald-700/70"
+                      >
+                        Research Workflow
+                      </p>
+                      <h3 class="mt-2 text-2xl font-semibold text-slate-900">
+                        科研流程管线
+                      </h3>
+                      <p class="mt-2 text-sm leading-6 text-slate-500">
+                        以真实研究任务为基底统计
+                        Observe、Hypothesis、Experiment、Analyze、Publish、Reflect
+                        各阶段分布。点击任一阶段可直接跳到任务执行面板。
+                      </p>
+                    </div>
+                    <button
+                      @click="refreshResearchCycles()"
+                      class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100"
+                    >
+                      刷新阶段统计
+                    </button>
+                  </div>
+
+                  <div class="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <template x-for="stage in workflowStages" :key="stage.id">
+                      <button
+                        @click="openResearchStage(stage.id)"
+                        :class="workflowStageClass(stage.id)"
+                        class="phase-chip-active rounded-[24px] border p-4 text-left transition hover:-translate-y-0.5"
+                      >
+                        <div class="flex items-start justify-between gap-3">
+                          <div>
+                            <p
+                              class="text-xs uppercase tracking-[0.2em]"
+                              x-text="stage.shortLabel"
+                            ></p>
+                            <p
+                              class="mt-2 text-lg font-semibold"
+                              x-text="stage.title"
+                            ></p>
+                          </div>
+                          <span
+                            class="rounded-full bg-white/70 px-2.5 py-1 text-xs font-semibold text-slate-700"
+                            x-text="dashboardSummary.phaseCounts[stage.id] || 0"
+                          ></span>
+                        </div>
+                        <p
+                          class="mt-3 text-sm leading-6 opacity-80"
+                          x-text="stage.summary"
+                        ></p>
+                      </button>
+                    </template>
                   </div>
                 </div>
-                <div
-                  id="proj-loading"
-                  class="htmx-indicator text-center text-sm text-gray-400 py-2"
-                >
-                  加载中…
+
+                <div class="shell-card rounded-[30px] p-6 sm:p-7">
+                  <div class="flex items-center justify-between gap-4">
+                    <div>
+                      <p
+                        class="text-xs uppercase tracking-[0.28em] text-emerald-700/70"
+                      >
+                        Module Access
+                      </p>
+                      <h3 class="mt-2 text-2xl font-semibold text-slate-900">
+                        模块快捷入口
+                      </h3>
+                    </div>
+                    <span
+                      class="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700"
+                      >稳定模式</span
+                    >
+                  </div>
+
+                  <div class="mt-6 grid gap-3 sm:grid-cols-2">
+                    <button
+                      @click="switchTab('projects')"
+                      class="shell-card-soft rounded-[24px] p-4 text-left transition hover:-translate-y-0.5 hover:border-emerald-200"
+                    >
+                      <p class="text-2xl">📋</p>
+                      <p class="mt-3 text-base font-semibold text-slate-900">
+                        最近研究任务
+                      </p>
+                      <p class="mt-1 text-sm leading-6 text-slate-500">
+                        查看详情抽屉、目录学核查与校勘条目。
+                      </p>
+                    </button>
+                    <button
+                      @click="switchTab('new_research')"
+                      class="shell-card-soft rounded-[24px] p-4 text-left transition hover:-translate-y-0.5 hover:border-emerald-200"
+                    >
+                      <p class="text-2xl">🚀</p>
+                      <p class="mt-3 text-base font-semibold text-slate-900">
+                        发起科研任务
+                      </p>
+                      <p class="mt-1 text-sm leading-6 text-slate-500">
+                        调用研究 API 创建课题并实时执行阶段。
+                      </p>
+                    </button>
+                    <button
+                      @click="switchTab('ai_assistant')"
+                      class="shell-card-soft rounded-[24px] p-4 text-left transition hover:-translate-y-0.5 hover:border-emerald-200"
+                    >
+                      <p class="text-2xl">🤖</p>
+                      <p class="mt-3 text-base font-semibold text-slate-900">
+                        AI 助手
+                      </p>
+                      <p class="mt-1 text-sm leading-6 text-slate-500">
+                        支持聊天、历史回放和流式回复。
+                      </p>
+                    </button>
+                    <button
+                      @click="switchTab('knowledge_graph')"
+                      class="shell-card-soft rounded-[24px] p-4 text-left transition hover:-translate-y-0.5 hover:border-emerald-200"
+                    >
+                      <p class="text-2xl">🕸️</p>
+                      <p class="mt-3 text-base font-semibold text-slate-900">
+                        知识图谱
+                      </p>
+                      <p class="mt-1 text-sm leading-6 text-slate-500">
+                        读取图谱统计并以关系网络方式浏览。
+                      </p>
+                    </button>
+                  </div>
                 </div>
               </section>
 
-              <!-- Quality Score -->
-              <section
-                class="bg-white rounded-xl shadow-sm border border-gray-100"
-                hx-get="/api/dashboard/quality"
-                hx-trigger="load"
-                hx-target="#quality-content"
-                hx-indicator="#quality-loading"
-              >
-                <div class="px-5 py-4 border-b border-gray-100">
-                  <h2 class="font-semibold text-gray-800">质量评分概览</h2>
-                </div>
-                <div id="quality-content" class="px-5 py-6">
-                  <div class="flex items-center gap-4">
-                    <div
-                      class="w-20 h-20 rounded-full border-4 border-emerald-500 flex items-center justify-center"
-                    >
-                      <span class="text-xl font-bold text-emerald-700">—</span>
+              <section class="grid gap-6 xl:grid-cols-[1.1fr,0.9fr]">
+                <section class="shell-card rounded-[30px] p-6">
+                  <div
+                    class="flex items-center justify-between gap-4 border-b border-slate-100 pb-4"
+                  >
+                    <div>
+                      <h3 class="text-lg font-semibold text-slate-900">
+                        最近研究任务
+                      </h3>
+                      <p class="mt-1 text-sm text-slate-500">
+                        直接复用现有研究详情抽屉、校勘核查与片段预览能力。
+                      </p>
                     </div>
-                    <div class="text-sm text-gray-500 space-y-1">
-                      <p>
-                        完整性：<span class="text-gray-700 font-medium">—</span>
+                    <button
+                      class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100"
+                      hx-get="/api/projects/recent"
+                      hx-target="#projects-list"
+                      hx-indicator="#proj-loading"
+                    >
+                      刷新
+                    </button>
+                  </div>
+                  <div
+                    id="projects-list"
+                    class="mt-4 divide-y divide-slate-100"
+                    hx-get="/api/projects/recent"
+                    hx-trigger="load"
+                    hx-target="this"
+                    hx-indicator="#proj-loading"
+                  >
+                    <div class="py-10 text-center text-sm text-slate-400">
+                      加载研究记录…
+                    </div>
+                  </div>
+                  <div
+                    id="proj-loading"
+                    class="htmx-indicator pt-3 text-center text-sm text-slate-400"
+                  >
+                    加载中…
+                  </div>
+                </section>
+
+                <div class="space-y-6">
+                  <section
+                    class="shell-card rounded-[30px] p-6"
+                    hx-get="/api/dashboard/quality"
+                    hx-trigger="load"
+                    hx-target="#quality-content"
+                    hx-indicator="#quality-loading"
+                  >
+                    <div class="border-b border-slate-100 pb-4">
+                      <h3 class="text-lg font-semibold text-slate-900">
+                        质量评分概览
+                      </h3>
+                      <p class="mt-1 text-sm text-slate-500">
+                        复用现有后端评分摘要并嵌入新的管理布局。
                       </p>
-                      <p>
-                        准确性：<span class="text-gray-700 font-medium">—</span>
-                      </p>
-                      <p>
-                        可追溯性：<span class="text-gray-700 font-medium"
-                          >—</span
+                    </div>
+                    <div id="quality-content" class="pt-5">
+                      <div class="flex items-center gap-4">
+                        <div
+                          class="flex h-20 w-20 items-center justify-center rounded-full border-4 border-emerald-500 bg-emerald-50 text-xl font-bold text-emerald-700"
                         >
+                          —
+                        </div>
+                        <div class="space-y-1 text-sm text-slate-500">
+                          <p>
+                            完整性：<span class="font-medium text-slate-700"
+                              >—</span
+                            >
+                          </p>
+                          <p>
+                            准确性：<span class="font-medium text-slate-700"
+                              >—</span
+                            >
+                          </p>
+                          <p>
+                            可追溯性：<span class="font-medium text-slate-700"
+                              >—</span
+                            >
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      id="quality-loading"
+                      class="htmx-indicator pt-3 text-center text-sm text-slate-400"
+                    >
+                      加载中…
+                    </div>
+                  </section>
+
+                  <section
+                    class="shell-card rounded-[30px] p-6"
+                    hx-get="/api/dashboard/smoke-health"
+                    hx-trigger="load"
+                    hx-target="#smoke-content"
+                    hx-indicator="#smoke-loading"
+                  >
+                    <div class="border-b border-slate-100 pb-4">
+                      <h3 class="text-lg font-semibold text-slate-900">
+                        Smoke 测试健康度
+                      </h3>
+                      <p class="mt-1 text-sm text-slate-500">
+                        观察系统健康、烟测结果和近期稳定性信号。
+                      </p>
+                    </div>
+                    <div id="smoke-content" class="pt-5">
+                      <p class="text-center text-sm text-slate-400">
+                        加载 Smoke 测试结果…
+                      </p>
+                    </div>
+                    <div
+                      id="smoke-loading"
+                      class="htmx-indicator pt-3 text-center text-sm text-slate-400"
+                    >
+                      加载中…
+                    </div>
+                  </section>
+                </div>
+              </section>
+
+              <section class="grid gap-6 xl:grid-cols-[0.95fr,1.05fr]">
+                <section
+                  class="shell-card rounded-[30px] p-6"
+                  hx-get="/api/dashboard/stats"
+                  hx-trigger="load"
+                  hx-target="#stats-container"
+                  hx-indicator="#stats-loading"
+                >
+                  <div
+                    class="flex items-center justify-between gap-4 border-b border-slate-100 pb-4"
+                  >
+                    <div>
+                      <h3 class="text-lg font-semibold text-slate-900">
+                        系统统计
+                      </h3>
+                      <p class="mt-1 text-sm text-slate-500">
+                        展示语料、输出与系统侧关键数量指标。
                       </p>
                     </div>
                   </div>
-                </div>
-                <div
-                  id="quality-loading"
-                  class="htmx-indicator text-center text-sm text-gray-400 py-2"
+                  <div id="stats-container" class="pt-5">
+                    <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                      <div class="shell-card-soft rounded-[24px] p-4">
+                        <p
+                          class="text-xs uppercase tracking-[0.2em] text-slate-400"
+                        >
+                          加载中…
+                        </p>
+                        <p class="mt-2 text-2xl font-semibold text-slate-300">
+                          —
+                        </p>
+                      </div>
+                      <div class="shell-card-soft rounded-[24px] p-4">
+                        <p
+                          class="text-xs uppercase tracking-[0.2em] text-slate-400"
+                        >
+                          加载中…
+                        </p>
+                        <p class="mt-2 text-2xl font-semibold text-slate-300">
+                          —
+                        </p>
+                      </div>
+                      <div class="shell-card-soft rounded-[24px] p-4">
+                        <p
+                          class="text-xs uppercase tracking-[0.2em] text-slate-400"
+                        >
+                          加载中…
+                        </p>
+                        <p class="mt-2 text-2xl font-semibold text-slate-300">
+                          —
+                        </p>
+                      </div>
+                      <div class="shell-card-soft rounded-[24px] p-4">
+                        <p
+                          class="text-xs uppercase tracking-[0.2em] text-slate-400"
+                        >
+                          加载中…
+                        </p>
+                        <p class="mt-2 text-2xl font-semibold text-slate-300">
+                          —
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    id="stats-loading"
+                    class="htmx-indicator pt-3 text-center text-sm text-slate-400"
+                  >
+                    加载中…
+                  </div>
+                </section>
+
+                <section
+                  class="shell-card rounded-[30px] p-6"
+                  hx-get="/api/dashboard/research-workflow"
+                  hx-trigger="load"
+                  hx-target="#workflow-container"
+                  hx-indicator="#workflow-loading"
                 >
-                  加载中…
+                  <div
+                    class="flex items-center justify-between gap-4 border-b border-slate-100 pb-4"
+                  >
+                    <div>
+                      <h3 class="text-lg font-semibold text-slate-900">
+                        科研论文书写流程
+                      </h3>
+                      <p class="mt-1 text-sm text-slate-500">
+                        保留现有后端工作流摘要，作为总览页的实时补充。
+                      </p>
+                    </div>
+                  </div>
+                  <div id="workflow-container" class="pt-5">
+                    <div class="shell-card-soft rounded-[24px] p-5">
+                      <p class="font-semibold text-slate-800">
+                        科研论文书写流程
+                      </p>
+                      <p class="mt-2 text-sm text-slate-400">加载研究管线…</p>
+                    </div>
+                  </div>
+                  <div
+                    id="workflow-loading"
+                    class="htmx-indicator pt-3 text-center text-sm text-slate-400"
+                  >
+                    加载中…
+                  </div>
+                </section>
+              </section>
+            </div>
+          </template>
+
+          <template x-if="activeTab === 'projects'">
+            <div class="tab-panel-enter shell-card rounded-[32px] p-6 sm:p-7">
+              <div
+                class="rounded-[24px] border border-slate-100 bg-white/80 p-5"
+                hx-get="/api/projects"
+                hx-trigger="load"
+                hx-target="this"
+                hx-indicator="#page-loading"
+              >
+                <h2 class="text-xl font-semibold text-slate-900">科研项目</h2>
+                <p class="mt-2 text-sm text-slate-400">加载项目列表…</p>
+              </div>
+            </div>
+          </template>
+
+          <template x-if="activeTab === 'new_research'">
+            <div class="tab-panel-enter space-y-6">
+              <section class="grid gap-6 xl:grid-cols-[0.9fr,1.1fr]">
+                <div class="shell-card rounded-[30px] p-6 sm:p-7">
+                  <div class="flex items-center justify-between gap-4">
+                    <div>
+                      <p
+                        class="text-xs uppercase tracking-[0.28em] text-emerald-700/70"
+                      >
+                        Research Create
+                      </p>
+                      <h3 class="mt-2 text-2xl font-semibold text-slate-900">
+                        发起科研任务
+                      </h3>
+                    </div>
+                    <span
+                      class="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700"
+                      >POST /api/research/create</span
+                    >
+                  </div>
+
+                  <form
+                    class="mt-6 space-y-4"
+                    @submit.prevent="createResearch()"
+                  >
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-slate-700"
+                        >课题名称</label
+                      >
+                      <input
+                        x-model="researchForm.cycle_name"
+                        type="text"
+                        required
+                        class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-800 outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+                        placeholder="例如：桂枝汤古籍证据链研究"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-slate-700"
+                        >研究目标</label
+                      >
+                      <textarea
+                        x-model="researchForm.objective"
+                        rows="3"
+                        class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-800 outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+                        placeholder="明确需要验证的疗效、证候或文献问题"
+                      ></textarea>
+                    </div>
+                    <div class="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <label
+                          class="mb-2 block text-sm font-medium text-slate-700"
+                          >研究范围</label
+                        >
+                        <input
+                          x-model="researchForm.scope"
+                          type="text"
+                          class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-800 outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+                          placeholder="如：伤寒论、金匮要略"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          class="mb-2 block text-sm font-medium text-slate-700"
+                          >研究人员</label
+                        >
+                        <input
+                          x-model="researchForm.researchersText"
+                          type="text"
+                          class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-800 outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+                          placeholder="逗号分隔，如 张三, 李四"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-slate-700"
+                        >描述</label
+                      >
+                      <textarea
+                        x-model="researchForm.description"
+                        rows="4"
+                        class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-800 outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+                        placeholder="补充课题背景、文本来源、校勘要求与产出形式"
+                      ></textarea>
+                    </div>
+
+                    <div
+                      class="rounded-[24px] border border-emerald-100 bg-emerald-50/70 px-4 py-3 text-sm leading-6 text-slate-600"
+                    >
+                      创建后将自动刷新研究列表，并可直接对所选课题执行
+                      Observe、Hypothesis、Experiment、Analyze、Publish、Reflect
+                      各阶段。
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-3">
+                      <button
+                        type="submit"
+                        :disabled="researchBusy"
+                        class="inline-flex items-center gap-2 rounded-2xl bg-emerald-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <svg
+                          x-show="researchBusy"
+                          class="h-5 w-5 animate-spin"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            class="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            stroke-width="4"
+                          ></circle>
+                          <path
+                            class="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                          ></path>
+                        </svg>
+                        <span
+                          x-text="researchBusy ? '创建中…' : '创建研究课题'"
+                        ></span>
+                      </button>
+                      <button
+                        type="button"
+                        @click="refreshResearchCycles()"
+                        class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:text-emerald-800"
+                      >
+                        刷新列表
+                      </button>
+                    </div>
+                    <p
+                      x-show="researchNotice"
+                      class="text-sm text-emerald-700"
+                      x-text="researchNotice"
+                    ></p>
+                  </form>
+                </div>
+
+                <div class="shell-card rounded-[30px] p-6 sm:p-7">
+                  <div
+                    class="flex flex-wrap items-center justify-between gap-4"
+                  >
+                    <div>
+                      <p
+                        class="text-xs uppercase tracking-[0.28em] text-emerald-700/70"
+                      >
+                        Phase Execute
+                      </p>
+                      <h3 class="mt-2 text-2xl font-semibold text-slate-900">
+                        阶段执行与实时进度
+                      </h3>
+                    </div>
+                    <span
+                      class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-500"
+                      >POST /api/research/{cycle_id}/execute</span
+                    >
+                  </div>
+
+                  <div class="mt-6 space-y-5" x-show="selectedCycle">
+                    <div
+                      class="grid gap-4 rounded-[28px] border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-5 lg:grid-cols-[0.95fr,1.05fr]"
+                    >
+                      <div>
+                        <div class="flex items-start justify-between gap-4">
+                          <div>
+                            <p
+                              class="text-xs uppercase tracking-[0.24em] text-emerald-700/70"
+                            >
+                              当前课题
+                            </p>
+                            <h4
+                              class="mt-2 text-xl font-semibold text-slate-900"
+                              x-text="selectedCycle ? selectedCycle.cycle_name : ''"
+                            ></h4>
+                          </div>
+                          <span
+                            :class="statusClass(selectedCycle ? selectedCycle.status : '')"
+                            class="rounded-full px-3 py-1 text-xs font-semibold"
+                            x-text="statusLabel(selectedCycle ? selectedCycle.status : '')"
+                          ></span>
+                        </div>
+                        <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                          <div class="rounded-2xl bg-white/80 px-4 py-3">
+                            <dt class="text-slate-400">课题 ID</dt>
+                            <dd
+                              class="mt-1 break-all font-medium text-slate-800"
+                              x-text="selectedCycle ? selectedCycle.cycle_id : ''"
+                            ></dd>
+                          </div>
+                          <div class="rounded-2xl bg-white/80 px-4 py-3">
+                            <dt class="text-slate-400">当前阶段</dt>
+                            <dd
+                              class="mt-1 font-medium text-slate-800"
+                              x-text="humanizePhase(selectedCycle ? selectedCycle.current_phase : '')"
+                            ></dd>
+                          </div>
+                          <div class="rounded-2xl bg-white/80 px-4 py-3">
+                            <dt class="text-slate-400">完成阶段</dt>
+                            <dd
+                              class="mt-1 font-medium text-slate-800"
+                              x-text="extractCompletedPhases(selectedCycle).length + ' / ' + workflowStages.length"
+                            ></dd>
+                          </div>
+                          <div class="rounded-2xl bg-white/80 px-4 py-3">
+                            <dt class="text-slate-400">更新时间</dt>
+                            <dd
+                              class="mt-1 font-medium text-slate-800"
+                              x-text="formatTimestamp(selectedCycle ? selectedCycle.updated_at || selectedCycle.started_at || selectedCycle.completed_at : '')"
+                            ></dd>
+                          </div>
+                        </dl>
+                        <p
+                          class="mt-4 text-sm leading-6 text-slate-600"
+                          x-text="selectedCycle ? (selectedCycle.research_objective || selectedCycle.description || '该任务尚未补充目标说明。') : ''"
+                        ></p>
+                        <div class="mt-4 flex flex-wrap gap-3">
+                          <button
+                            type="button"
+                            @click="openSelectedCycleDetail()"
+                            class="rounded-2xl border border-emerald-200 bg-white px-4 py-2.5 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                          >
+                            查看详情抽屉
+                          </button>
+                          <button
+                            type="button"
+                            @click="switchTab('knowledge_graph'); loadResearchGraphForSelectedCycle()"
+                            class="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:text-emerald-800"
+                          >
+                            打开课题图谱
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div class="flex items-center justify-between gap-4">
+                          <p class="text-sm font-semibold text-slate-700">
+                            阶段执行器
+                          </p>
+                          <span class="text-xs text-slate-400"
+                            >已接入 WebSocket 进度监听</span
+                          >
+                        </div>
+                        <div class="mt-4 grid gap-3 sm:grid-cols-2">
+                          <template
+                            x-for="stage in workflowStages"
+                            :key="stage.id + '-runner'"
+                          >
+                            <button
+                              type="button"
+                              @click="executePhase(stage.id)"
+                              :disabled="researchBusy"
+                              :class="selectedPhaseToRun === stage.id ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-200 hover:text-emerald-800'"
+                              class="rounded-[22px] border px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <div
+                                class="flex items-start justify-between gap-3"
+                              >
+                                <div>
+                                  <p
+                                    class="text-xs uppercase tracking-[0.18em] text-slate-400"
+                                    x-text="stage.shortLabel"
+                                  ></p>
+                                  <p
+                                    class="mt-1 text-sm font-semibold"
+                                    x-text="stage.title"
+                                  ></p>
+                                </div>
+                                <span
+                                  :class="phaseExecutionBadgeClass(stage.id)"
+                                  class="rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                                  x-text="phaseExecutionLabel(stage.id)"
+                                ></span>
+                              </div>
+                              <p
+                                class="mt-2 text-xs leading-5 text-slate-500"
+                                x-text="stage.summary"
+                              ></p>
+                            </button>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="grid gap-5 lg:grid-cols-[0.9fr,1.1fr]">
+                      <section class="shell-card-soft rounded-[28px] p-5">
+                        <div class="flex items-center justify-between gap-4">
+                          <h4 class="text-base font-semibold text-slate-900">
+                            研究任务列表
+                          </h4>
+                          <span
+                            class="text-xs text-slate-400"
+                            x-text="researchCycles.length + ' 条'"
+                            >0 条</span
+                          >
+                        </div>
+                        <div
+                          class="soft-scroll mt-4 max-h-[420px] space-y-3 overflow-y-auto pr-1"
+                        >
+                          <template
+                            x-for="cycle in researchCycles"
+                            :key="cycle.cycle_id"
+                          >
+                            <button
+                              type="button"
+                              @click="selectCycle(cycle.cycle_id)"
+                              :class="selectedCycleId === cycle.cycle_id ? 'border-emerald-300 bg-emerald-50/80 shadow-sm' : 'border-slate-200 bg-white hover:border-emerald-200'"
+                              class="w-full rounded-[22px] border px-4 py-4 text-left transition"
+                            >
+                              <div
+                                class="flex items-start justify-between gap-4"
+                              >
+                                <div class="min-w-0">
+                                  <p
+                                    class="truncate text-sm font-semibold text-slate-900"
+                                    x-text="cycle.cycle_name"
+                                  ></p>
+                                  <p
+                                    class="mt-1 truncate text-xs text-slate-400"
+                                    x-text="cycle.cycle_id"
+                                  ></p>
+                                </div>
+                                <span
+                                  :class="statusClass(cycle.status)"
+                                  class="rounded-full px-3 py-1 text-[11px] font-semibold"
+                                  x-text="statusLabel(cycle.status)"
+                                ></span>
+                              </div>
+                              <div
+                                class="mt-3 flex items-center justify-between text-xs text-slate-500"
+                              >
+                                <span
+                                  x-text="'当前阶段: ' + humanizePhase(cycle.current_phase)"
+                                ></span>
+                                <span
+                                  x-text="extractCompletedPhases(cycle).length + '/' + workflowStages.length"
+                                ></span>
+                              </div>
+                            </button>
+                          </template>
+                          <div
+                            x-show="!researchCycles.length"
+                            class="rounded-[22px] border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400"
+                          >
+                            暂无研究任务，请先创建课题。
+                          </div>
+                        </div>
+                      </section>
+
+                      <section class="shell-card-soft rounded-[28px] p-5">
+                        <div class="flex items-center justify-between gap-4">
+                          <h4 class="text-base font-semibold text-slate-900">
+                            实时进度流
+                          </h4>
+                          <span
+                            class="rounded-full bg-white px-3 py-1 text-xs text-slate-500"
+                            x-text="researchSocketCycleId ? ('WS: ' + researchSocketCycleId) : 'WS 未连接'"
+                          ></span>
+                        </div>
+                        <div
+                          class="mt-4 rounded-[22px] bg-slate-950 px-4 py-4 text-sm text-emerald-50"
+                        >
+                          <p
+                            class="text-xs uppercase tracking-[0.22em] text-emerald-200/70"
+                          >
+                            事件流
+                          </p>
+                          <div
+                            class="soft-scroll mt-3 max-h-[350px] space-y-3 overflow-y-auto pr-1"
+                          >
+                            <template
+                              x-for="event in researchProgressEvents"
+                              :key="event.id"
+                            >
+                              <div
+                                class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
+                              >
+                                <div
+                                  class="flex items-center justify-between gap-3 text-xs text-emerald-100/70"
+                                >
+                                  <span x-text="event.type"></span>
+                                  <span x-text="event.time"></span>
+                                </div>
+                                <p
+                                  class="mt-2 text-sm leading-6 text-white/90"
+                                  x-text="event.message"
+                                ></p>
+                              </div>
+                            </template>
+                            <div
+                              x-show="!researchProgressEvents.length"
+                              class="rounded-2xl border border-dashed border-white/15 px-4 py-5 text-center text-sm text-emerald-100/60"
+                            >
+                              选择课题后将建立进度通道，并在执行阶段时实时写入事件。
+                            </div>
+                          </div>
+                        </div>
+                      </section>
+                    </div>
+                  </div>
+
+                  <div
+                    x-show="!selectedCycle"
+                    class="mt-6 rounded-[26px] border border-dashed border-slate-200 px-5 py-10 text-center text-sm text-slate-400"
+                  >
+                    请选择一个研究任务，或先在左侧创建课题。
+                  </div>
                 </div>
               </section>
             </div>
-            <!-- close grid-cols-2 for projects + quality -->
+          </template>
 
-            <!-- Smoke Test Health -->
-            <section
-              class="bg-white rounded-xl shadow-sm border border-gray-100"
-              hx-get="/api/dashboard/smoke-health"
-              hx-trigger="load"
-              hx-target="#smoke-content"
-              hx-indicator="#smoke-loading"
+          <template x-if="activeTab === 'ai_assistant'">
+            <div
+              class="tab-panel-enter grid gap-6 xl:grid-cols-[0.38fr,0.62fr]"
             >
-              <div class="px-5 py-4 border-b border-gray-100">
-                <h2 class="font-semibold text-gray-800">🔬 Smoke 测试健康度</h2>
-              </div>
-              <div id="smoke-content" class="px-5 py-6">
-                <p class="text-sm text-gray-400 text-center">
-                  加载 Smoke 测试结果…
-                </p>
-              </div>
+              <section class="shell-card rounded-[30px] p-6 sm:p-7">
+                <div class="flex items-center justify-between gap-4">
+                  <div>
+                    <p
+                      class="text-xs uppercase tracking-[0.28em] text-emerald-700/70"
+                    >
+                      Assistant Session
+                    </p>
+                    <h3 class="mt-2 text-2xl font-semibold text-slate-900">
+                      AI 助手
+                    </h3>
+                  </div>
+                  <span
+                    class="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700"
+                    x-text="assistant.useStream ? 'WebSocket 流式' : 'REST 模式'"
+                  ></span>
+                </div>
+
+                <div class="mt-6 space-y-4">
+                  <div>
+                    <label class="mb-2 block text-sm font-medium text-slate-700"
+                      >会话 ID</label
+                    >
+                    <input
+                      x-model="assistant.sessionId"
+                      type="text"
+                      class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-800 outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+                      placeholder="dashboard-session"
+                    />
+                  </div>
+
+                  <label
+                    class="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600"
+                  >
+                    <input
+                      x-model="assistant.useStream"
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>优先使用 WebSocket 流式输出</span>
+                  </label>
+
+                  <div
+                    class="rounded-[24px] border border-emerald-100 bg-emerald-50/70 p-4 text-sm leading-6 text-slate-600"
+                  >
+                    助手请求会自动附加当前已选研究任务的 cycle_id、cycle_name 与
+                    current_phase，便于在管理界面内联动分析。
+                  </div>
+
+                  <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                    <button
+                      @click="loadAssistantHistory()"
+                      class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:text-emerald-800"
+                    >
+                      刷新历史
+                    </button>
+                    <button
+                      @click="clearAssistantHistory()"
+                      class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
+                    >
+                      清空历史
+                    </button>
+                  </div>
+                </div>
+
+                <div class="mt-6">
+                  <p class="text-sm font-semibold text-slate-800">快捷问题</p>
+                  <div class="mt-3 space-y-2">
+                    <template
+                      x-for="prompt in assistantQuickPrompts"
+                      :key="prompt"
+                    >
+                      <button
+                        type="button"
+                        @click="assistant.prompt = prompt"
+                        class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-600 transition hover:border-emerald-200 hover:text-emerald-800"
+                        x-text="prompt"
+                      ></button>
+                    </template>
+                  </div>
+                </div>
+
+                <div
+                  class="mt-6 rounded-[24px] border border-slate-100 bg-white/90 p-4"
+                >
+                  <p class="text-xs uppercase tracking-[0.22em] text-slate-400">
+                    运行状态
+                  </p>
+                  <p
+                    class="mt-2 text-base font-semibold text-slate-900"
+                    x-text="assistant.status"
+                  ></p>
+                  <p class="mt-2 text-sm text-slate-500">
+                    当前消息数：<span x-text="assistant.messages.length"></span>
+                  </p>
+                </div>
+              </section>
+
+              <section class="shell-card rounded-[30px] p-6 sm:p-7">
+                <div
+                  class="flex items-center justify-between gap-4 border-b border-slate-100 pb-4"
+                >
+                  <div>
+                    <h3 class="text-xl font-semibold text-slate-900">
+                      研究对话窗口
+                    </h3>
+                    <p class="mt-1 text-sm text-slate-500">
+                      支持历史回放、流式输出、建议动作与引用摘要。
+                    </p>
+                  </div>
+                  <span
+                    class="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500"
+                    x-text="assistant.sessionId"
+                  ></span>
+                </div>
+
+                <div
+                  class="soft-scroll mt-5 flex max-h-[520px] min-h-[520px] flex-col gap-4 overflow-y-auto pr-1"
+                >
+                  <template
+                    x-for="(message, index) in assistant.messages"
+                    :key="index + '-' + message.role + '-' + message.content.length"
+                  >
+                    <div
+                      :class="message.role === 'user' ? 'self-end assistant-bubble-user' : 'self-start assistant-bubble-ai'"
+                      class="max-w-[86%] rounded-[24px] px-4 py-3 shadow-sm"
+                    >
+                      <div
+                        class="flex items-center justify-between gap-4 text-xs opacity-75"
+                      >
+                        <span
+                          x-text="message.role === 'user' ? '你' : 'AI 助手'"
+                        ></span>
+                        <span x-text="message.time || ''"></span>
+                      </div>
+                      <p
+                        class="mt-2 whitespace-pre-wrap text-sm leading-7"
+                        x-text="message.content"
+                      ></p>
+                      <div
+                        x-show="message.references && message.references.length"
+                        class="mt-3 rounded-2xl bg-slate-50/90 px-3 py-2 text-xs text-slate-500"
+                      >
+                        <p class="font-semibold text-slate-600">参考</p>
+                        <template x-for="ref in message.references" :key="ref">
+                          <p class="mt-1" x-text="ref"></p>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                  <div
+                    x-show="!assistant.messages.length"
+                    class="flex h-full items-center justify-center rounded-[26px] border border-dashed border-slate-200 bg-slate-50/70 p-10 text-center text-sm leading-7 text-slate-400"
+                  >
+                    当前会话暂无消息。输入问题后可通过 REST 或 WebSocket
+                    直接调用后端 AI 助手。
+                  </div>
+                </div>
+
+                <div
+                  class="mt-5 rounded-[28px] border border-slate-100 bg-white/92 p-4"
+                >
+                  <textarea
+                    x-model="assistant.prompt"
+                    rows="4"
+                    class="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-800 outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+                    placeholder="输入你的研究问题，例如：比较桂枝汤与麻黄汤在证候上的差异，并给出可继续验证的观察点。"
+                  ></textarea>
+                  <div
+                    class="mt-4 flex flex-wrap items-center justify-between gap-3"
+                  >
+                    <div class="text-xs text-slate-400">
+                      上下文：<span
+                        x-text="selectedCycle ? (selectedCycle.cycle_name + ' / ' + humanizePhase(selectedCycle.current_phase)) : '未选择课题'"
+                      ></span>
+                    </div>
+                    <button
+                      @click="sendAssistantMessage()"
+                      :disabled="assistant.loading"
+                      class="inline-flex items-center gap-2 rounded-2xl bg-emerald-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <svg
+                        x-show="assistant.loading"
+                        class="h-5 w-5 animate-spin"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          class="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          stroke-width="4"
+                        ></circle>
+                        <path
+                          class="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        ></path>
+                      </svg>
+                      <span
+                        x-text="assistant.loading ? '发送中…' : '发送问题'"
+                      ></span>
+                    </button>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </template>
+
+          <template x-if="activeTab === 'literature'">
+            <div class="tab-panel-enter shell-card rounded-[32px] p-6 sm:p-7">
               <div
-                id="smoke-loading"
-                class="htmx-indicator text-center text-sm text-gray-400 py-2"
+                class="rounded-[24px] border border-slate-100 bg-white/80 p-5"
+                hx-get="/api/literature"
+                hx-trigger="load"
+                hx-target="this"
+                hx-indicator="#page-loading"
               >
-                加载中…
+                <h2 class="text-xl font-semibold text-slate-900">文献库</h2>
+                <p class="mt-2 text-sm text-slate-400">加载文献库…</p>
               </div>
-            </section>
+            </div>
+          </template>
 
-            <!-- Quick Access -->
-            <section>
-              <h2 class="font-semibold text-gray-800 mb-3">快捷入口</h2>
-              <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <button
-                  @click="switchTab('ai_assistant')"
-                  class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center hover:shadow-md hover:border-emerald-200 transition group"
-                >
-                  <span class="text-3xl block mb-2">🤖</span>
-                  <span
-                    class="text-sm font-medium text-gray-700 group-hover:text-emerald-700"
-                    >AI 助手</span
+          <template x-if="activeTab === 'knowledge_graph'">
+            <div class="tab-panel-enter space-y-6">
+              <section class="grid gap-6 xl:grid-cols-[0.34fr,0.66fr]">
+                <section class="shell-card rounded-[30px] p-6 sm:p-7">
+                  <div class="flex items-center justify-between gap-4">
+                    <div>
+                      <p
+                        class="text-xs uppercase tracking-[0.28em] text-emerald-700/70"
+                      >
+                        Knowledge Graph
+                      </p>
+                      <h3 class="mt-2 text-2xl font-semibold text-slate-900">
+                        知识图谱视图
+                      </h3>
+                    </div>
+                    <span
+                      class="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700"
+                      >vis-network</span
+                    >
+                  </div>
+
+                  <div class="mt-6 grid grid-cols-2 gap-3">
+                    <div class="shell-card-soft rounded-[24px] p-4">
+                      <p
+                        class="text-xs uppercase tracking-[0.2em] text-slate-400"
+                      >
+                        图谱实体
+                      </p>
+                      <p
+                        class="mt-2 text-2xl font-semibold text-slate-900"
+                        x-text="knowledgeGraph.stats ? knowledgeGraph.stats.total_entities : '—'"
+                      ></p>
+                    </div>
+                    <div class="shell-card-soft rounded-[24px] p-4">
+                      <p
+                        class="text-xs uppercase tracking-[0.2em] text-slate-400"
+                      >
+                        图谱关系
+                      </p>
+                      <p
+                        class="mt-2 text-2xl font-semibold text-slate-900"
+                        x-text="knowledgeGraph.stats ? knowledgeGraph.stats.total_relations : '—'"
+                      ></p>
+                    </div>
+                  </div>
+
+                  <div class="mt-6">
+                    <p class="text-sm font-semibold text-slate-800">图谱类型</p>
+                    <div class="mt-3 space-y-2">
+                      <template x-for="option in kgGraphTypes" :key="option.id">
+                        <button
+                          type="button"
+                          @click="selectKnowledgeGraphType(option.id)"
+                          :class="knowledgeGraph.graphType === option.id ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-200 hover:text-emerald-800'"
+                          class="w-full rounded-2xl border px-4 py-3 text-left transition"
+                        >
+                          <p
+                            class="text-sm font-semibold"
+                            x-text="option.label"
+                          ></p>
+                          <p
+                            class="mt-1 text-xs leading-5 text-slate-500"
+                            x-text="option.summary"
+                          ></p>
+                        </button>
+                      </template>
+                    </div>
+                  </div>
+
+                  <div
+                    class="mt-6 rounded-[24px] border border-slate-100 bg-white/90 p-4"
                   >
-                </button>
-                <button
-                  @click="switchTab('knowledge_graph')"
-                  class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center hover:shadow-md hover:border-emerald-200 transition group"
-                >
-                  <span class="text-3xl block mb-2">🕸️</span>
-                  <span
-                    class="text-sm font-medium text-gray-700 group-hover:text-emerald-700"
-                    >知识图谱</span
+                    <div class="flex items-center justify-between gap-4">
+                      <p class="text-sm font-semibold text-slate-800">
+                        选中节点
+                      </p>
+                      <button
+                        x-show="selectedCycle"
+                        @click="loadResearchGraphForSelectedCycle()"
+                        class="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-emerald-200 hover:text-emerald-800"
+                      >
+                        加载课题图谱
+                      </button>
+                    </div>
+                    <div
+                      class="mt-3 text-sm leading-6 text-slate-500"
+                      x-show="knowledgeGraph.selectedNode"
+                    >
+                      <p
+                        class="font-semibold text-slate-900"
+                        x-text="knowledgeGraph.selectedNode ? knowledgeGraph.selectedNode.label : ''"
+                      ></p>
+                      <p
+                        class="mt-1"
+                        x-text="knowledgeGraph.selectedNode ? ('类型：' + knowledgeGraph.selectedNode.type) : ''"
+                      ></p>
+                    </div>
+                    <p
+                      x-show="!knowledgeGraph.selectedNode"
+                      class="mt-3 text-sm text-slate-400"
+                    >
+                      点击图中的节点可在此查看其名称与类型。
+                    </p>
+                  </div>
+                </section>
+
+                <section class="shell-card rounded-[30px] p-6 sm:p-7">
+                  <div
+                    class="flex items-center justify-between gap-4 border-b border-slate-100 pb-4"
                   >
-                </button>
-                <button
-                  @click="switchTab('literature')"
-                  class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center hover:shadow-md hover:border-emerald-200 transition group"
-                >
-                  <span class="text-3xl block mb-2">📚</span>
-                  <span
-                    class="text-sm font-medium text-gray-700 group-hover:text-emerald-700"
-                    >文献管理</span
+                    <div>
+                      <h3
+                        class="text-xl font-semibold text-slate-900"
+                        x-text="knowledgeGraph.title"
+                      ></h3>
+                      <p
+                        class="mt-1 text-sm text-slate-500"
+                        x-text="knowledgeGraph.subtitle"
+                      ></p>
+                    </div>
+                    <button
+                      @click="loadKnowledgeGraph()"
+                      class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100"
+                    >
+                      刷新图谱
+                    </button>
+                  </div>
+
+                  <div
+                    class="mt-5 overflow-hidden rounded-[28px] border border-slate-100 bg-white"
                   >
-                </button>
-                <button
-                  @click="switchTab('analysis')"
-                  class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center hover:shadow-md hover:border-emerald-200 transition group"
-                >
-                  <span class="text-3xl block mb-2">📊</span>
-                  <span
-                    class="text-sm font-medium text-gray-700 group-hover:text-emerald-700"
-                    >分析报告</span
+                    <div id="kg-network" class="w-full"></div>
+                  </div>
+
+                  <div
+                    x-show="knowledgeGraph.loading"
+                    class="pt-3 text-center text-sm text-slate-400"
                   >
-                </button>
+                    知识图谱加载中…
+                  </div>
+                  <div
+                    x-show="knowledgeGraph.error"
+                    class="pt-3 text-center text-sm text-rose-600"
+                    x-text="knowledgeGraph.error"
+                  ></div>
+
+                  <div class="mt-5 grid gap-4 lg:grid-cols-2">
+                    <div
+                      class="rounded-[24px] border border-slate-100 bg-white/90 p-4"
+                    >
+                      <p class="text-sm font-semibold text-slate-800">
+                        当前子图统计
+                      </p>
+                      <div class="mt-3 space-y-2 text-sm text-slate-500">
+                        <div class="flex items-center justify-between gap-4">
+                          <span>节点数</span>
+                          <span
+                            class="font-semibold text-slate-900"
+                            x-text="knowledgeGraph.subgraphStats.nodes_count"
+                          ></span>
+                        </div>
+                        <div class="flex items-center justify-between gap-4">
+                          <span>边数</span>
+                          <span
+                            class="font-semibold text-slate-900"
+                            x-text="knowledgeGraph.subgraphStats.edges_count"
+                          ></span>
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      class="rounded-[24px] border border-slate-100 bg-white/90 p-4"
+                    >
+                      <p class="text-sm font-semibold text-slate-800">
+                        实体类型 Top
+                      </p>
+                      <div class="mt-3 space-y-2 text-sm text-slate-500">
+                        <template
+                          x-for="entry in topEntries(knowledgeGraph.stats ? knowledgeGraph.stats.entity_types : {}, 5)"
+                          :key="entry.key"
+                        >
+                          <div class="flex items-center justify-between gap-4">
+                            <span x-text="entry.key"></span>
+                            <span
+                              class="font-semibold text-slate-900"
+                              x-text="entry.value"
+                            ></span>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </section>
+            </div>
+          </template>
+
+          <template x-if="activeTab === 'analysis'">
+            <div class="tab-panel-enter shell-card rounded-[32px] p-6 sm:p-7">
+              <div
+                class="rounded-[24px] border border-slate-100 bg-white/80 p-5"
+                hx-get="/api/analysis/tools"
+                hx-trigger="load"
+                hx-target="this"
+                hx-indicator="#page-loading"
+              >
+                <h2 class="text-xl font-semibold text-slate-900">分析工具</h2>
+                <p class="mt-2 text-sm text-slate-400">加载分析工具…</p>
               </div>
-            </section>
-          </div>
-        </template>
+            </div>
+          </template>
 
-        <!-- ---- Other Tabs (placeholder containers with HTMX partial loading) ---- -->
-        <template x-if="activeTab === 'projects'">
+          <template x-if="activeTab === 'output'">
+            <div class="tab-panel-enter shell-card rounded-[32px] p-6 sm:p-7">
+              <div
+                class="rounded-[24px] border border-slate-100 bg-white/80 p-5"
+                hx-get="/api/output"
+                hx-trigger="load"
+                hx-target="this"
+                hx-indicator="#page-loading"
+              >
+                <h2 class="text-xl font-semibold text-slate-900">输出中心</h2>
+                <p class="mt-2 text-sm text-slate-400">加载输出列表…</p>
+              </div>
+            </div>
+          </template>
+
+          <template x-if="activeTab === 'settings'">
+            <div class="tab-panel-enter shell-card rounded-[32px] p-6 sm:p-7">
+              <div
+                class="rounded-[24px] border border-slate-100 bg-white/80 p-5"
+                hx-get="/api/settings"
+                hx-trigger="load"
+                hx-target="this"
+                hx-indicator="#page-loading"
+              >
+                <h2 class="text-xl font-semibold text-slate-900">系统设置</h2>
+                <p class="mt-2 text-sm text-slate-400">加载系统设置…</p>
+              </div>
+            </div>
+          </template>
+
           <div
-            class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
-            hx-get="/api/projects"
-            hx-trigger="load"
-            hx-target="this"
-            hx-indicator="#page-loading"
+            id="page-loading"
+            class="htmx-indicator pt-2 text-center text-sm text-slate-400"
           >
-            <h2 class="font-semibold text-gray-800 mb-4">科研项目</h2>
-            <p class="text-sm text-gray-400">加载项目列表…</p>
+            加载中…
           </div>
-        </template>
-
-        <template x-if="activeTab === 'ai_assistant'">
-          <div
-            class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
-            hx-get="/api/ai/assistant"
-            hx-trigger="load"
-            hx-target="this"
-            hx-indicator="#page-loading"
-          >
-            <h2 class="font-semibold text-gray-800 mb-4">AI 助手</h2>
-            <p class="text-sm text-gray-400">加载 AI 助手界面…</p>
-          </div>
-        </template>
-
-        <template x-if="activeTab === 'literature'">
-          <div
-            class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
-            hx-get="/api/literature"
-            hx-trigger="load"
-            hx-target="this"
-            hx-indicator="#page-loading"
-          >
-            <h2 class="font-semibold text-gray-800 mb-4">文献库</h2>
-            <p class="text-sm text-gray-400">加载文献库…</p>
-          </div>
-        </template>
-
-        <template x-if="activeTab === 'knowledge_graph'">
-          <div
-            class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
-            hx-get="/api/knowledge-graph"
-            hx-trigger="load"
-            hx-target="this"
-            hx-indicator="#page-loading"
-          >
-            <h2 class="font-semibold text-gray-800 mb-4">知识图谱</h2>
-            <p class="text-sm text-gray-400">加载知识图谱…</p>
-          </div>
-        </template>
-
-        <template x-if="activeTab === 'analysis'">
-          <div
-            class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
-            hx-get="/api/analysis/tools"
-            hx-trigger="load"
-            hx-target="this"
-            hx-indicator="#page-loading"
-          >
-            <h2 class="font-semibold text-gray-800 mb-4">分析工具</h2>
-            <p class="text-sm text-gray-400">加载分析工具…</p>
-          </div>
-        </template>
-
-        <template x-if="activeTab === 'output'">
-          <div
-            class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
-            hx-get="/api/output"
-            hx-trigger="load"
-            hx-target="this"
-            hx-indicator="#page-loading"
-          >
-            <h2 class="font-semibold text-gray-800 mb-4">输出中心</h2>
-            <p class="text-sm text-gray-400">加载输出列表…</p>
-          </div>
-        </template>
-
-        <template x-if="activeTab === 'settings'">
-          <div
-            class="bg-white rounded-xl shadow-sm border border-gray-100 p-6"
-            hx-get="/api/settings"
-            hx-trigger="load"
-            hx-target="this"
-            hx-indicator="#page-loading"
-          >
-            <h2 class="font-semibold text-gray-800 mb-4">系统设置</h2>
-            <p class="text-sm text-gray-400">加载系统设置…</p>
-          </div>
-        </template>
-
-        <!-- Global page-level loading -->
-        <div
-          id="page-loading"
-          class="htmx-indicator text-center text-sm text-gray-400 py-4"
-        >
-          加载中…
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
 
     <div
       id="session-detail-drawer"
@@ -457,26 +1832,26 @@
         onclick="closeSessionDetailDrawer()"
       ></div>
       <div
-        class="absolute right-0 top-0 h-full w-full max-w-4xl bg-white shadow-2xl overflow-y-auto"
+        class="absolute right-0 top-0 h-full w-full max-w-4xl overflow-y-auto bg-white shadow-2xl"
       >
         <div
           id="session-detail-drawer-content"
           class="bg-white rounded-none border-0 shadow-none"
         >
           <div
-            class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3"
+            class="flex items-center justify-between gap-3 border-b border-gray-100 px-5 py-4"
           >
             <div>
               <h3 class="text-base font-semibold text-gray-800">
                 研究任务详情
               </h3>
-              <p class="text-sm text-gray-400 mt-1">
+              <p class="mt-1 text-sm text-gray-400">
                 聚合展示 Observe 阶段术语标准表与校勘条目
               </p>
             </div>
             <button
               type="button"
-              class="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-500 hover:text-gray-800 hover:border-gray-300 transition"
+              class="inline-flex items-center rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-500 transition hover:border-gray-300 hover:text-gray-800"
               onclick="closeSessionDetailDrawer()"
             >
               关闭
@@ -501,22 +1876,22 @@
       <div class="absolute inset-0 flex items-center justify-center p-4">
         <div
           id="document-fragment-modal-content"
-          class="bg-white rounded-2xl border border-gray-100 shadow-2xl max-w-3xl w-full overflow-hidden"
+          class="w-full max-w-3xl overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-2xl"
         >
           <div
-            class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3"
+            class="flex items-center justify-between gap-3 border-b border-gray-100 px-5 py-4"
           >
             <div>
               <h3 class="text-base font-semibold text-gray-800">
                 原始文档片段
               </h3>
-              <p class="text-sm text-gray-400 mt-1">
+              <p class="mt-1 text-sm text-gray-400">
                 点击校勘条目的“跳到原始片段”后在此预览
               </p>
             </div>
             <button
               type="button"
-              class="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-500 hover:text-gray-800 hover:border-gray-300 transition"
+              class="inline-flex items-center rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-500 transition hover:border-gray-300 hover:text-gray-800"
               onclick="closeDocumentFragmentModal()"
             >
               关闭
@@ -566,8 +1941,7 @@
       });
 
       function dashboardApp() {
-        // Redirect to login if no token
-        if (!localStorage.getItem("access_token")) {
+        if (!resolveAccessToken()) {
           window.location.href = "/login";
         }
 
@@ -575,54 +1949,1295 @@
           sidebarOpen: false,
           activeTab: "dashboard",
           currentUser: "用户",
-
-          navItems: [
-            { id: "dashboard", icon: "📊", label: "仪表盘" },
-            { id: "projects", icon: "🔬", label: "科研项目" },
-            { id: "ai_assistant", icon: "🤖", label: "AI 助手" },
-            { id: "literature", icon: "📚", label: "文献库" },
-            { id: "knowledge_graph", icon: "🕸️", label: "知识图谱" },
-            { id: "analysis", icon: "🧪", label: "分析工具" },
-            { id: "output", icon: "📤", label: "输出中心" },
-            { id: "settings", icon: "⚙️", label: "系统设置" },
+          currentDisplayName: "",
+          dashboardSummary: {
+            totalCycles: 0,
+            activeCycles: 0,
+            completedCycles: 0,
+            phaseCounts: {},
+            statusText: "等待载入研究任务",
+          },
+          navGroups: [
+            {
+              id: "overview",
+              caption: "Overview",
+              label: "总览与任务",
+              open: true,
+              items: [
+                { id: "dashboard", icon: "📊", label: "仪表盘", badge: "LIVE" },
+                {
+                  id: "projects",
+                  icon: "📋",
+                  label: "科研项目",
+                  badge: "HTMX",
+                },
+                {
+                  id: "new_research",
+                  icon: "🚀",
+                  label: "发起科研任务",
+                  badge: "API",
+                },
+              ],
+            },
+            {
+              id: "intelligence",
+              caption: "Intelligence",
+              label: "智能研究层",
+              open: true,
+              items: [
+                {
+                  id: "ai_assistant",
+                  icon: "🤖",
+                  label: "AI 助手",
+                  badge: "WS",
+                },
+                {
+                  id: "knowledge_graph",
+                  icon: "🕸️",
+                  label: "知识图谱",
+                  badge: "GRAPH",
+                },
+                {
+                  id: "analysis",
+                  icon: "🧪",
+                  label: "分析工具",
+                  badge: "TOOLS",
+                },
+              ],
+            },
+            {
+              id: "assets",
+              caption: "Assets",
+              label: "资产与设置",
+              open: false,
+              items: [
+                {
+                  id: "literature",
+                  icon: "📚",
+                  label: "文献库",
+                  badge: "TEXT",
+                },
+                { id: "output", icon: "📤", label: "输出中心", badge: "IMRD" },
+                { id: "settings", icon: "⚙️", label: "系统设置", badge: "SYS" },
+              ],
+            },
           ],
+          tabCatalog: {
+            dashboard: {
+              label: "总览仪表盘",
+              subtitle: "查看流程状态、最近任务、质量评分与系统统计",
+              description:
+                "这是升级后的主控台入口。它在保留现有 HTMX 后端片段的基础上，把研究流程、任务管理、AI 助手与知识图谱聚合为一套更明确的管理外壳。",
+            },
+            projects: {
+              label: "科研项目",
+              subtitle: "保留原有项目清单与详情抽屉能力",
+              description:
+                "沿用现有 /api/projects 视图，继续支持最近任务、详情抽屉、术语标准表、校勘条目与片段预览。",
+            },
+            new_research: {
+              label: "发起科研任务",
+              subtitle: "通过真实研究 API 创建课题、执行阶段并监听实时进度",
+              description:
+                "这里直接调用 /api/research/create 和 /api/research/{id}/execute，并在同页监听 /api/research/progress/{id}，让创建和执行不再割裂。",
+            },
+            ai_assistant: {
+              label: "AI 助手",
+              subtitle: "以 REST 与 WebSocket 两种模式协助研究推理与答疑",
+              description:
+                "聊天窗口会附带当前选中课题的上下文，并支持历史回放、清空历史、流式回复与引用摘要显示。",
+            },
+            literature: {
+              label: "文献库",
+              subtitle: "继续使用已有文献管理界面",
+              description:
+                "文献库沿用现有后端局部渲染能力，保持与当前数据与流程的兼容。",
+            },
+            knowledge_graph: {
+              label: "知识图谱",
+              subtitle: "从真实 KG 接口拉取统计与子图并进行网络渲染",
+              description:
+                "知识图谱页直接调用 /api/analysis/kg/stats 与 /api/analysis/kg/subgraph，并可把当前课题的图谱结果切换到同一块画布中查看。",
+            },
+            analysis: {
+              label: "分析工具",
+              subtitle: "文本处理、方剂分析与图谱接口工具集合",
+              description:
+                "分析工具页保留现有后端渲染内容，以便继续访问文本处理、方剂分析与图谱相关工具。",
+            },
+            output: {
+              label: "输出中心",
+              subtitle: "查看论文、报告与导出资产",
+              description:
+                "输出中心保持现有接口不变，用于浏览 IMRD 报告和其他交付文件。",
+            },
+            settings: {
+              label: "系统设置",
+              subtitle: "平台级参数、鉴权与运行设置入口",
+              description:
+                "系统设置仍复用现有渲染内容，保证配置与管理动作可继续沿用当前实现。",
+            },
+          },
+          workflowStages: [
+            {
+              id: "observe",
+              shortLabel: "OBSERVE",
+              title: "文献观察",
+              summary: "采集古籍、预处理、术语标准化与校勘基线构建。",
+            },
+            {
+              id: "hypothesis",
+              shortLabel: "HYPOTHESIS",
+              title: "假设生成",
+              summary: "从语料与图谱中归纳假设与待证命题。",
+            },
+            {
+              id: "experiment",
+              shortLabel: "EXPERIMENT",
+              title: "实验方案",
+              summary: "制定研究协议、验证步骤与评价指标。",
+            },
+            {
+              id: "experiment_execution",
+              shortLabel: "EXECUTE",
+              title: "结果导入",
+              summary: "接收实验结果、外部观测或补录数据。",
+            },
+            {
+              id: "analyze",
+              shortLabel: "ANALYZE",
+              title: "数据分析",
+              summary: "进行统计分析、结构化建模与可视化。",
+            },
+            {
+              id: "publish",
+              shortLabel: "PUBLISH",
+              title: "论文生成",
+              summary: "整理 IMRD 结构与论文交付内容。",
+            },
+            {
+              id: "reflect",
+              shortLabel: "REFLECT",
+              title: "反思总结",
+              summary: "回流策略建议、质量反馈与下一轮优化。",
+            },
+          ],
+          researchForm: {
+            cycle_name: "",
+            description: "",
+            objective: "",
+            scope: "",
+            researchersText: "",
+          },
+          researchCycles: [],
+          selectedCycleId: "",
+          selectedCycle: null,
+          selectedPhaseToRun: "observe",
+          researchBusy: false,
+          researchNotice: "",
+          researchProgressEvents: [],
+          researchSocket: null,
+          researchSocketCycleId: "",
+          assistantQuickPrompts: [
+            "概括当前选中课题的研究目标与下一步建议。",
+            "从中医证候角度比较桂枝汤与麻黄汤的差异。",
+            "给出一个适合 Observe 阶段的术语标准化检查清单。",
+            "如果要把当前研究整理为论文，需要先补哪些证据链？",
+          ],
+          assistant: {
+            sessionId: "dashboard-main",
+            prompt: "",
+            messages: [],
+            loading: false,
+            useStream: true,
+            status: "待发送",
+          },
+          kgGraphTypes: [
+            {
+              id: "herb_relations",
+              label: "药物关系图",
+              summary: "聚焦中药、功效、药性与配伍关系。",
+            },
+            {
+              id: "formula_composition",
+              label: "方剂组成图",
+              summary: "查看方剂与君臣佐使或组成关系。",
+            },
+            {
+              id: "syndrome_treatment",
+              label: "证治关系图",
+              summary: "追踪证候、治法、方剂之间的治疗关联。",
+            },
+            {
+              id: "literature_citation",
+              label: "文献引用图",
+              summary: "观察文献引用或出处关系，必要时回退显示全图。",
+            },
+          ],
+          knowledgeGraph: {
+            graphType: "herb_relations",
+            title: "药物关系图",
+            subtitle: "读取真实子图并在当前页进行关系可视化。",
+            stats: null,
+            loading: false,
+            error: "",
+            selectedNode: null,
+            subgraphStats: { nodes_count: 0, edges_count: 0 },
+            currentMode: "subgraph",
+            projectGraphLoaded: false,
+          },
+          knowledgeGraphNetwork: null,
 
           init() {
             this.loadUserInfo();
-            // Alpine 渲染完 <template x-if> 后通知 HTMX 处理新元素
+            this.refreshResearchCycles();
+            this.bootstrapTabFromUrl();
             this.$nextTick(() => {
-              if (window.htmx) htmx.process(document.body);
+              if (window.htmx) {
+                window.htmx.process(document.body);
+              }
+            });
+            window.addEventListener("beforeunload", () => {
+              this.disconnectResearchSocket();
+              if (this.knowledgeGraphNetwork) {
+                this.knowledgeGraphNetwork.destroy();
+              }
+            });
+          },
+
+          tabMeta(tabId) {
+            return this.tabCatalog[tabId] || this.tabCatalog.dashboard;
+          },
+
+          bootstrapTabFromUrl() {
+            var params = new URLSearchParams(window.location.search);
+            var tab = params.get("tab");
+            if (tab && this.tabCatalog[tab]) {
+              this.switchTab(tab);
+            }
+          },
+
+          toggleNavGroup(groupId) {
+            this.navGroups = this.navGroups.map(function (group) {
+              if (group.id === groupId) {
+                group.open = !group.open;
+              }
+              return group;
             });
           },
 
           switchTab(tabId) {
             this.activeTab = tabId;
             this.sidebarOpen = false;
-            // 切换 tab 后 Alpine 会重建 DOM 节点，需要让 HTMX 重新扫描
             this.$nextTick(() => {
-              if (window.htmx) htmx.process(document.body);
+              if (window.htmx) {
+                window.htmx.process(document.body);
+              }
+              if (tabId === "knowledge_graph") {
+                this.initializeKnowledgeGraph();
+              }
+              if (tabId === "ai_assistant") {
+                this.loadAssistantHistory();
+              }
+              if (tabId === "new_research" && this.selectedCycleId) {
+                this.connectResearchProgress(this.selectedCycleId);
+              }
             });
           },
 
+          getToken() {
+            return resolveAccessToken();
+          },
+
+          buildAuthHeaders(extraHeaders) {
+            var headers = extraHeaders ? Object.assign({}, extraHeaders) : {};
+            var token = this.getToken();
+            if (token) {
+              headers.Authorization = "Bearer " + token;
+            }
+            return headers;
+          },
+
+          buildWsUrl(path) {
+            var protocol =
+              window.location.protocol === "https:" ? "wss:" : "ws:";
+            return protocol + "//" + window.location.host + path;
+          },
+
+          humanizePhase(phase) {
+            var map = {
+              observe: "Observe / 文献观察",
+              hypothesis: "Hypothesis / 假设生成",
+              experiment: "Experiment / 实验方案",
+              experiment_execution: "Execute / 结果导入",
+              analyze: "Analyze / 数据分析",
+              publish: "Publish / 论文生成",
+              reflect: "Reflect / 反思总结",
+            };
+            return map[phase] || phase || "未开始";
+          },
+
+          statusLabel(status) {
+            var normalized = String(status || "pending").toLowerCase();
+            if (normalized === "completed") return "已完成";
+            if (normalized === "active" || normalized === "running")
+              return "进行中";
+            if (normalized === "failed") return "异常";
+            return "待执行";
+          },
+
+          statusClass(status) {
+            var normalized = String(status || "pending").toLowerCase();
+            if (normalized === "completed") {
+              return "bg-emerald-50 text-emerald-700 border border-emerald-200";
+            }
+            if (normalized === "active" || normalized === "running") {
+              return "bg-amber-50 text-amber-700 border border-amber-200";
+            }
+            if (normalized === "failed") {
+              return "bg-rose-50 text-rose-700 border border-rose-200";
+            }
+            return "bg-slate-100 text-slate-600 border border-slate-200";
+          },
+
+          workflowStageClass(stageId) {
+            var count = this.dashboardSummary.phaseCounts[stageId] || 0;
+            if (count > 0) {
+              return "border-emerald-200 bg-gradient-to-br from-emerald-50 to-white text-slate-800";
+            }
+            return "border-slate-200 bg-white text-slate-600";
+          },
+
+          extractCompletedPhases(cycle) {
+            if (!cycle) return [];
+            if (Array.isArray(cycle.completed_phases)) {
+              return cycle.completed_phases.slice();
+            }
+            if (
+              cycle.metadata &&
+              cycle.metadata.analysis_summary &&
+              Array.isArray(cycle.metadata.analysis_summary.completed_phases)
+            ) {
+              return cycle.metadata.analysis_summary.completed_phases.slice();
+            }
+            if (
+              cycle.analysis_summary &&
+              Array.isArray(cycle.analysis_summary.completed_phases)
+            ) {
+              return cycle.analysis_summary.completed_phases.slice();
+            }
+            var phases = [];
+            var executions = cycle.phase_executions || {};
+            Object.keys(executions).forEach(function (phaseName) {
+              var item = executions[phaseName] || {};
+              var result =
+                item.result && typeof item.result === "object"
+                  ? item.result
+                  : item;
+              var status = String(
+                item.status || result.status || "completed",
+              ).toLowerCase();
+              if (status === "completed" || status === "success") {
+                phases.push(phaseName);
+              }
+            });
+            return phases;
+          },
+
+          normalizeCycle(cycle) {
+            var metadata =
+              cycle && cycle.metadata && typeof cycle.metadata === "object"
+                ? cycle.metadata
+                : {};
+            var analysisSummary =
+              metadata.analysis_summary &&
+              typeof metadata.analysis_summary === "object"
+                ? metadata.analysis_summary
+                : cycle.analysis_summary || {};
+            return {
+              cycle_id: cycle.cycle_id || cycle.id || "",
+              cycle_name: cycle.cycle_name || cycle.title || "未命名课题",
+              description: cycle.description || "",
+              research_objective:
+                cycle.research_objective || cycle.objective || "",
+              research_scope: cycle.research_scope || cycle.scope || "",
+              researchers: Array.isArray(cycle.researchers)
+                ? cycle.researchers
+                : [],
+              status: cycle.status || analysisSummary.final_status || "pending",
+              current_phase:
+                cycle.current_phase || analysisSummary.last_phase || "observe",
+              phase_executions: cycle.phase_executions || {},
+              metadata: metadata,
+              analysis_summary: analysisSummary,
+              completed_phases: this.extractCompletedPhases(cycle),
+              started_at: cycle.started_at || "",
+              completed_at: cycle.completed_at || "",
+              updated_at:
+                cycle.updated_at ||
+                cycle.completed_at ||
+                cycle.started_at ||
+                "",
+              raw: cycle,
+            };
+          },
+
+          formatTimestamp(value) {
+            if (!value) return "—";
+            try {
+              var date = new Date(value);
+              if (Number.isNaN(date.getTime())) {
+                return String(value);
+              }
+              return date.toLocaleString("zh-CN", {
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+              });
+            } catch (e) {
+              return String(value);
+            }
+          },
+
+          topEntries(record, limit) {
+            var source = record && typeof record === "object" ? record : {};
+            return Object.keys(source)
+              .map(function (key) {
+                return { key: key, value: source[key] };
+              })
+              .sort(function (left, right) {
+                return Number(right.value || 0) - Number(left.value || 0);
+              })
+              .slice(0, limit || 5);
+          },
+
           async loadUserInfo() {
-            var token = localStorage.getItem("access_token");
+            var token = this.getToken();
             if (!token) return;
             try {
               var resp = await fetch("/api/auth/me", {
-                headers: { Authorization: "Bearer " + token },
+                headers: this.buildAuthHeaders(),
               });
               if (resp.ok) {
                 var data = await resp.json();
                 this.currentUser = data.username || data.user_id || "用户";
+                this.currentDisplayName =
+                  data.display_name ||
+                  localStorage.getItem("display_name") ||
+                  this.currentUser;
               }
             } catch (e) {
-              /* ignore */
+              this.currentDisplayName =
+                localStorage.getItem("display_name") || "用户";
             }
+          },
+
+          async refreshResearchCycles(keepSelection) {
+            if (typeof keepSelection === "undefined") {
+              keepSelection = true;
+            }
+            try {
+              var resp = await fetch("/api/research/list", {
+                headers: this.buildAuthHeaders(),
+              });
+              if (!resp.ok) {
+                throw new Error("研究列表加载失败");
+              }
+              var data = await resp.json();
+              var cycles = Array.isArray(data.cycles)
+                ? data.cycles.map((cycle) => this.normalizeCycle(cycle))
+                : [];
+              this.researchCycles = cycles;
+              this.updateDashboardSummary(cycles);
+
+              if (keepSelection && this.selectedCycleId) {
+                var selectedExists = cycles.some(
+                  (cycle) => cycle.cycle_id === this.selectedCycleId,
+                );
+                if (selectedExists) {
+                  this.loadSelectedCycle();
+                  return;
+                }
+              }
+
+              if (cycles.length && !this.selectedCycleId) {
+                this.selectCycle(cycles[0].cycle_id);
+              } else if (!cycles.length) {
+                this.selectedCycle = null;
+              }
+            } catch (e) {
+              this.dashboardSummary.statusText = "研究列表加载失败";
+            }
+          },
+
+          updateDashboardSummary(cycles) {
+            var total = cycles.length;
+            var active = cycles.filter(function (cycle) {
+              return String(cycle.status || "").toLowerCase() === "active";
+            }).length;
+            var completed = cycles.filter(function (cycle) {
+              return String(cycle.status || "").toLowerCase() === "completed";
+            }).length;
+            var phaseCounts = {};
+
+            this.workflowStages.forEach(function (stage) {
+              phaseCounts[stage.id] = 0;
+            });
+
+            cycles.forEach((cycle) => {
+              this.extractCompletedPhases(cycle).forEach(function (phaseName) {
+                if (phaseCounts[phaseName] !== undefined) {
+                  phaseCounts[phaseName] += 1;
+                }
+              });
+              if (
+                cycle.current_phase &&
+                phaseCounts[cycle.current_phase] !== undefined
+              ) {
+                phaseCounts[cycle.current_phase] += 1;
+              }
+            });
+
+            this.dashboardSummary = {
+              totalCycles: total,
+              activeCycles: active,
+              completedCycles: completed,
+              phaseCounts: phaseCounts,
+              statusText: total ? "研究任务已同步" : "尚未创建研究任务",
+            };
+          },
+
+          openResearchStage(stageId) {
+            this.selectedPhaseToRun = stageId;
+            this.switchTab("new_research");
+          },
+
+          selectCycle(cycleId) {
+            this.selectedCycleId = cycleId;
+            this.selectedPhaseToRun = this.selectedPhaseToRun || "observe";
+            this.loadSelectedCycle();
+            this.connectResearchProgress(cycleId);
+          },
+
+          async loadSelectedCycle() {
+            if (!this.selectedCycleId) return;
+            try {
+              var resp = await fetch(
+                "/api/research/" + encodeURIComponent(this.selectedCycleId),
+                {
+                  headers: this.buildAuthHeaders(),
+                },
+              );
+              if (!resp.ok) {
+                throw new Error("课题详情加载失败");
+              }
+              var data = await resp.json();
+              this.selectedCycle = this.normalizeCycle(data.cycle || {});
+            } catch (e) {
+              this.researchNotice = "课题详情加载失败";
+            }
+          },
+
+          async createResearch() {
+            if (!this.researchForm.cycle_name.trim()) {
+              this.researchNotice = "请填写课题名称";
+              return;
+            }
+            this.researchBusy = true;
+            this.researchNotice = "";
+            try {
+              var researchers = this.researchForm.researchersText
+                .split(/[，,]/)
+                .map(function (item) {
+                  return item.trim();
+                })
+                .filter(Boolean);
+              var payload = {
+                cycle_name: this.researchForm.cycle_name.trim(),
+                description: this.researchForm.description.trim(),
+                objective: this.researchForm.objective.trim(),
+                scope: this.researchForm.scope.trim(),
+                researchers: researchers.length ? researchers : null,
+              };
+              var resp = await fetch("/api/research/create", {
+                method: "POST",
+                headers: this.buildAuthHeaders({
+                  "Content-Type": "application/json",
+                }),
+                body: JSON.stringify(payload),
+              });
+              var data = await resp.json();
+              if (!resp.ok) {
+                throw new Error(data.detail || "创建失败");
+              }
+              this.researchNotice = data.message || "研究课题创建成功";
+              this.researchForm.description = "";
+              this.researchForm.objective = "";
+              this.researchForm.scope = "";
+              this.researchForm.researchersText = "";
+              this.researchForm.cycle_name = "";
+              await this.refreshResearchCycles(false);
+              if (data.cycle && data.cycle.cycle_id) {
+                this.selectCycle(data.cycle.cycle_id);
+              }
+            } catch (e) {
+              this.researchNotice = e.message || "创建研究课题失败";
+            } finally {
+              this.researchBusy = false;
+            }
+          },
+
+          phaseExecutionLabel(stageId) {
+            if (!this.selectedCycle) return "待执行";
+            var completed = this.extractCompletedPhases(this.selectedCycle);
+            if (completed.indexOf(stageId) >= 0) return "已完成";
+            if (this.selectedCycle.current_phase === stageId) return "当前阶段";
+            return "执行";
+          },
+
+          phaseExecutionBadgeClass(stageId) {
+            var label = this.phaseExecutionLabel(stageId);
+            if (label === "已完成") return "bg-emerald-50 text-emerald-700";
+            if (label === "当前阶段") return "bg-amber-50 text-amber-700";
+            return "bg-slate-100 text-slate-500";
+          },
+
+          async executePhase(phaseId) {
+            if (!this.selectedCycleId) {
+              this.researchNotice = "请先选择研究课题";
+              return;
+            }
+            this.selectedPhaseToRun = phaseId;
+            this.researchBusy = true;
+            this.researchNotice = "";
+            this.pushResearchEvent(
+              "phase_request",
+              "请求执行阶段：" + this.humanizePhase(phaseId),
+            );
+            this.connectResearchProgress(this.selectedCycleId);
+            try {
+              var resp = await fetch(
+                "/api/research/" +
+                  encodeURIComponent(this.selectedCycleId) +
+                  "/execute",
+                {
+                  method: "POST",
+                  headers: this.buildAuthHeaders({
+                    "Content-Type": "application/json",
+                  }),
+                  body: JSON.stringify({
+                    phase: phaseId,
+                    phase_context: {},
+                  }),
+                },
+              );
+              var data = await resp.json();
+              if (!resp.ok) {
+                throw new Error(data.detail || "阶段执行失败");
+              }
+              this.researchNotice = data.message || "阶段执行完成";
+              this.pushResearchEvent("phase_response", this.researchNotice);
+              await this.refreshResearchCycles();
+              await this.loadSelectedCycle();
+            } catch (e) {
+              this.researchNotice = e.message || "阶段执行失败";
+              this.pushResearchEvent("phase_error", this.researchNotice);
+            } finally {
+              this.researchBusy = false;
+            }
+          },
+
+          connectResearchProgress(cycleId) {
+            if (!cycleId) return;
+            if (this.researchSocket && this.researchSocketCycleId === cycleId) {
+              return;
+            }
+            this.disconnectResearchSocket();
+
+            var socket = new WebSocket(
+              this.buildWsUrl(
+                "/api/research/progress/" + encodeURIComponent(cycleId),
+              ),
+            );
+            this.researchSocket = socket;
+            this.researchSocketCycleId = cycleId;
+
+            socket.onopen = () => {
+              socket.send(JSON.stringify({ token: this.getToken() }));
+            };
+
+            socket.onmessage = async (evt) => {
+              var data = {};
+              try {
+                data = JSON.parse(evt.data);
+              } catch (e) {
+                return;
+              }
+              if (data.type === "auth_ok") {
+                this.pushResearchEvent("ws", "已连接研究进度通道");
+                return;
+              }
+              if (data.type === "pong") {
+                return;
+              }
+              if (data.type === "phase_started") {
+                this.pushResearchEvent(
+                  "phase_started",
+                  JSON.stringify(data.data || {}),
+                );
+                return;
+              }
+              if (data.type === "phase_progress") {
+                this.pushResearchEvent(
+                  "phase_progress",
+                  JSON.stringify(data.data || {}),
+                );
+                return;
+              }
+              if (data.type === "phase_completed") {
+                this.pushResearchEvent(
+                  "phase_completed",
+                  JSON.stringify(data.data || {}),
+                );
+                await this.refreshResearchCycles();
+                await this.loadSelectedCycle();
+                return;
+              }
+              if (data.type === "research_done") {
+                this.pushResearchEvent(
+                  "research_done",
+                  JSON.stringify(data.data || {}),
+                );
+                await this.refreshResearchCycles();
+                await this.loadSelectedCycle();
+                return;
+              }
+              if (data.type === "error") {
+                this.pushResearchEvent(
+                  "ws_error",
+                  data.detail || "研究进度通道异常",
+                );
+              }
+            };
+
+            socket.onerror = () => {
+              this.pushResearchEvent("ws_error", "研究进度通道连接失败");
+            };
+
+            socket.onclose = () => {
+              if (this.researchSocket === socket) {
+                this.researchSocket = null;
+              }
+            };
+          },
+
+          disconnectResearchSocket() {
+            if (this.researchSocket) {
+              try {
+                this.researchSocket.close();
+              } catch (e) {
+                /* ignore */
+              }
+            }
+            this.researchSocket = null;
+            this.researchSocketCycleId = "";
+          },
+
+          pushResearchEvent(type, message) {
+            this.researchProgressEvents.unshift({
+              id: Date.now() + Math.random(),
+              type: type,
+              message: message,
+              time: new Date().toLocaleTimeString("zh-CN", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              }),
+            });
+            this.researchProgressEvents = this.researchProgressEvents.slice(
+              0,
+              40,
+            );
+          },
+
+          async openSelectedCycleDetail() {
+            if (!this.selectedCycleId) return;
+            try {
+              var resp = await fetch(
+                "/api/projects/" +
+                  encodeURIComponent(this.selectedCycleId) +
+                  "/detail?terminology_page=1&collation_page=1&drawer=1",
+                { headers: this.buildAuthHeaders() },
+              );
+              if (!resp.ok) {
+                throw new Error("详情加载失败");
+              }
+              var html = await resp.text();
+              var container = document.getElementById(
+                "session-detail-drawer-content",
+              );
+              if (container) {
+                container.innerHTML = html;
+                openSessionDetailDrawer();
+                this.$nextTick(() => {
+                  if (window.htmx) {
+                    window.htmx.process(container);
+                  }
+                });
+              }
+            } catch (e) {
+              this.researchNotice = e.message || "详情加载失败";
+            }
+          },
+
+          assistantContext() {
+            if (!this.selectedCycle) {
+              return { source: "dashboard" };
+            }
+            return {
+              source: "dashboard",
+              cycle_id: this.selectedCycle.cycle_id,
+              cycle_name: this.selectedCycle.cycle_name,
+              current_phase: this.selectedCycle.current_phase,
+              completed_phases: this.extractCompletedPhases(this.selectedCycle),
+            };
+          },
+
+          normalizeAssistantHistory(items) {
+            return (Array.isArray(items) ? items : []).map(function (item) {
+              return {
+                role: item.role || "assistant",
+                content: item.content || "",
+                references: [],
+                time: new Date().toLocaleTimeString("zh-CN", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }),
+              };
+            });
+          },
+
+          async loadAssistantHistory() {
+            if (!this.assistant.sessionId) return;
+            try {
+              var resp = await fetch(
+                "/api/assistant/history/" +
+                  encodeURIComponent(this.assistant.sessionId),
+                {
+                  headers: this.buildAuthHeaders(),
+                },
+              );
+              if (!resp.ok) {
+                throw new Error("历史加载失败");
+              }
+              var data = await resp.json();
+              this.assistant.messages = this.normalizeAssistantHistory(
+                data.history || [],
+              );
+              this.assistant.status = "历史已同步";
+            } catch (e) {
+              this.assistant.status = e.message || "历史加载失败";
+            }
+          },
+
+          async clearAssistantHistory() {
+            if (!this.assistant.sessionId) return;
+            try {
+              var resp = await fetch(
+                "/api/assistant/history/" +
+                  encodeURIComponent(this.assistant.sessionId),
+                {
+                  method: "DELETE",
+                  headers: this.buildAuthHeaders(),
+                },
+              );
+              if (!resp.ok && resp.status !== 204) {
+                throw new Error("历史清空失败");
+              }
+              this.assistant.messages = [];
+              this.assistant.status = "历史已清空";
+            } catch (e) {
+              this.assistant.status = e.message || "历史清空失败";
+            }
+          },
+
+          appendAssistantMessage(role, content, extra) {
+            this.assistant.messages.push(
+              Object.assign(
+                {
+                  role: role,
+                  content: content,
+                  references: [],
+                  time: new Date().toLocaleTimeString("zh-CN", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  }),
+                },
+                extra || {},
+              ),
+            );
+          },
+
+          async sendAssistantMessage() {
+            var prompt = (this.assistant.prompt || "").trim();
+            if (!prompt) {
+              this.assistant.status = "请输入问题";
+              return;
+            }
+
+            this.appendAssistantMessage("user", prompt);
+            this.assistant.prompt = "";
+            this.assistant.loading = true;
+            this.assistant.status = this.assistant.useStream
+              ? "WebSocket 回复中"
+              : "REST 回复中";
+
+            try {
+              if (this.assistant.useStream) {
+                await this.sendAssistantByStream(prompt);
+              } else {
+                await this.sendAssistantByRest(prompt);
+              }
+            } catch (e) {
+              if (this.assistant.useStream) {
+                try {
+                  this.assistant.status = "流式失败，切换 REST";
+                  await this.sendAssistantByRest(prompt);
+                } catch (inner) {
+                  this.assistant.status = inner.message || "发送失败";
+                }
+              } else {
+                this.assistant.status = e.message || "发送失败";
+              }
+            } finally {
+              this.assistant.loading = false;
+            }
+          },
+
+          async sendAssistantByRest(prompt) {
+            var resp = await fetch("/api/assistant/chat", {
+              method: "POST",
+              headers: this.buildAuthHeaders({
+                "Content-Type": "application/json",
+              }),
+              body: JSON.stringify({
+                message: prompt,
+                session_id: this.assistant.sessionId,
+                context: this.assistantContext(),
+              }),
+            });
+            var data = await resp.json();
+            if (!resp.ok) {
+              throw new Error(data.detail || "AI 助手调用失败");
+            }
+            this.appendAssistantMessage("assistant", data.reply || "", {
+              references: Array.isArray(data.references) ? data.references : [],
+            });
+            this.assistant.status = data.intent
+              ? "回复完成 · " + data.intent
+              : "回复完成";
+          },
+
+          sendAssistantByStream(prompt) {
+            return new Promise((resolve, reject) => {
+              var ws = new WebSocket(this.buildWsUrl("/api/assistant/stream"));
+              var messageIndex = -1;
+              var settled = false;
+
+              ws.onopen = () => {
+                ws.send(JSON.stringify({ token: this.getToken() }));
+              };
+
+              ws.onmessage = (evt) => {
+                var data = {};
+                try {
+                  data = JSON.parse(evt.data);
+                } catch (e) {
+                  return;
+                }
+                if (data.type === "auth_ok") {
+                  this.assistant.messages.push({
+                    role: "assistant",
+                    content: "",
+                    references: [],
+                    time: new Date().toLocaleTimeString("zh-CN", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }),
+                  });
+                  messageIndex = this.assistant.messages.length - 1;
+                  ws.send(
+                    JSON.stringify({
+                      message: prompt,
+                      session_id: this.assistant.sessionId,
+                      context: this.assistantContext(),
+                    }),
+                  );
+                  return;
+                }
+                if (data.type === "chunk") {
+                  if (messageIndex >= 0) {
+                    this.assistant.messages[messageIndex].content +=
+                      data.content || "";
+                  }
+                  return;
+                }
+                if (data.type === "done") {
+                  if (messageIndex >= 0) {
+                    this.assistant.messages[messageIndex].content =
+                      data.reply ||
+                      this.assistant.messages[messageIndex].content;
+                    this.assistant.messages[messageIndex].references =
+                      Array.isArray(data.references) ? data.references : [];
+                  }
+                  this.assistant.status = data.intent
+                    ? "回复完成 · " + data.intent
+                    : "回复完成";
+                  settled = true;
+                  ws.close();
+                  resolve();
+                  return;
+                }
+                if (data.type === "error") {
+                  settled = true;
+                  ws.close();
+                  reject(new Error(data.detail || "流式对话失败"));
+                }
+              };
+
+              ws.onerror = () => {
+                if (!settled) {
+                  settled = true;
+                  reject(new Error("流式连接失败"));
+                }
+              };
+
+              ws.onclose = () => {
+                if (!settled && messageIndex < 0) {
+                  reject(new Error("流式连接提前关闭"));
+                }
+              };
+            });
+          },
+
+          async initializeKnowledgeGraph() {
+            if (!this.knowledgeGraph.stats) {
+              await this.loadKnowledgeGraphStats();
+            }
+            await this.loadKnowledgeGraph();
+          },
+
+          async loadKnowledgeGraphStats() {
+            try {
+              var resp = await fetch("/api/analysis/kg/stats", {
+                headers: this.buildAuthHeaders(),
+              });
+              if (!resp.ok) {
+                throw new Error("图谱统计加载失败");
+              }
+              this.knowledgeGraph.stats = await resp.json();
+            } catch (e) {
+              this.knowledgeGraph.error = e.message || "图谱统计加载失败";
+            }
+          },
+
+          selectKnowledgeGraphType(graphType) {
+            this.knowledgeGraph.graphType = graphType;
+            this.knowledgeGraph.currentMode = "subgraph";
+            this.knowledgeGraph.projectGraphLoaded = false;
+            this.loadKnowledgeGraph();
+          },
+
+          async loadKnowledgeGraph() {
+            this.knowledgeGraph.loading = true;
+            this.knowledgeGraph.error = "";
+            this.knowledgeGraph.selectedNode = null;
+            try {
+              var option =
+                this.kgGraphTypes.find(
+                  (item) => item.id === this.knowledgeGraph.graphType,
+                ) || this.kgGraphTypes[0];
+              this.knowledgeGraph.title = option.label;
+              this.knowledgeGraph.subtitle = option.summary;
+              var resp = await fetch(
+                "/api/analysis/kg/subgraph?graph_type=" +
+                  encodeURIComponent(this.knowledgeGraph.graphType),
+                {
+                  headers: this.buildAuthHeaders(),
+                },
+              );
+              var data = await resp.json();
+              if (!resp.ok) {
+                throw new Error(data.detail || "图谱加载失败");
+              }
+              this.knowledgeGraph.subgraphStats = data.statistics || {
+                nodes_count: 0,
+                edges_count: 0,
+              };
+              this.renderKnowledgeGraph(data.nodes || [], data.edges || []);
+            } catch (e) {
+              this.knowledgeGraph.error = e.message || "图谱加载失败";
+            } finally {
+              this.knowledgeGraph.loading = false;
+            }
+          },
+
+          async loadResearchGraphForSelectedCycle() {
+            if (!this.selectedCycleId) return;
+            this.switchTab("knowledge_graph");
+            this.knowledgeGraph.loading = true;
+            this.knowledgeGraph.error = "";
+            this.knowledgeGraph.currentMode = "project";
+            this.knowledgeGraph.projectGraphLoaded = true;
+            this.knowledgeGraph.title = "课题知识图谱";
+            this.knowledgeGraph.subtitle =
+              "展示当前所选研究任务的 Observe 图谱数据。";
+            try {
+              var resp = await fetch(
+                "/api/analysis/graph/" +
+                  encodeURIComponent(this.selectedCycleId),
+                {
+                  headers: this.buildAuthHeaders(),
+                },
+              );
+              var data = await resp.json();
+              if (!resp.ok) {
+                throw new Error(data.detail || "课题图谱加载失败");
+              }
+              var graph = data.graph || {
+                nodes: [],
+                edges: [],
+                statistics: {},
+              };
+              this.knowledgeGraph.subgraphStats = graph.statistics || {
+                nodes_count: Array.isArray(graph.nodes)
+                  ? graph.nodes.length
+                  : 0,
+                edges_count: Array.isArray(graph.edges)
+                  ? graph.edges.length
+                  : 0,
+              };
+              this.renderKnowledgeGraph(
+                graph.nodes || [],
+                graph.edges || [],
+                true,
+              );
+            } catch (e) {
+              this.knowledgeGraph.error = e.message || "课题图谱加载失败";
+            } finally {
+              this.knowledgeGraph.loading = false;
+            }
+          },
+
+          renderKnowledgeGraph(rawNodes, rawEdges, isProjectGraph) {
+            var container = document.getElementById("kg-network");
+            if (!container || !window.vis) {
+              this.knowledgeGraph.error = "vis-network 未加载";
+              return;
+            }
+
+            if (this.knowledgeGraphNetwork) {
+              this.knowledgeGraphNetwork.destroy();
+              this.knowledgeGraphNetwork = null;
+            }
+
+            var nodes = (Array.isArray(rawNodes) ? rawNodes : []).map(
+              (node) => {
+                var id = node.id || node.name || node.label;
+                var label = node.label || node.name || String(id || "");
+                var type = node.type || node.group || "generic";
+                return {
+                  id: id,
+                  label: label,
+                  title: label + " (" + type + ")",
+                  type: type,
+                  shape: "dot",
+                  size: isProjectGraph ? 16 : 13,
+                  color: this.graphColor(type),
+                  font: { color: "#143432", face: "Microsoft YaHei", size: 12 },
+                };
+              },
+            );
+
+            var edges = (Array.isArray(rawEdges) ? rawEdges : []).map(
+              function (edge, index) {
+                return {
+                  id: "edge-" + index,
+                  from: edge.source || edge.from,
+                  to: edge.target || edge.to,
+                  label: edge.relation || edge.label || "",
+                  arrows: "to",
+                  color: { color: "#94a3b8", highlight: "#0f766e" },
+                  font: { size: 10, align: "top", color: "#64748b" },
+                  smooth: { type: "continuous" },
+                };
+              },
+            );
+
+            var network = new window.vis.Network(
+              container,
+              {
+                nodes: new window.vis.DataSet(nodes),
+                edges: new window.vis.DataSet(edges),
+              },
+              {
+                autoResize: true,
+                interaction: {
+                  hover: true,
+                  tooltipDelay: 100,
+                  navigationButtons: true,
+                },
+                nodes: {
+                  borderWidth: 1,
+                },
+                edges: {
+                  width: 1.2,
+                },
+                physics: {
+                  stabilization: { iterations: 180 },
+                  barnesHut: {
+                    gravitationalConstant: -3800,
+                    springLength: 120,
+                    springConstant: 0.02,
+                  },
+                },
+              },
+            );
+
+            network.on("click", (params) => {
+              if (!params.nodes || !params.nodes.length) {
+                this.knowledgeGraph.selectedNode = null;
+                return;
+              }
+              var nodeId = params.nodes[0];
+              var selected = nodes.find(function (node) {
+                return node.id === nodeId;
+              });
+              this.knowledgeGraph.selectedNode = selected || null;
+            });
+
+            this.knowledgeGraphNetwork = network;
+          },
+
+          graphColor(type) {
+            var palette = {
+              herb: { background: "#d1fae5", border: "#10b981" },
+              efficacy: { background: "#dcfce7", border: "#22c55e" },
+              formula: { background: "#dbeafe", border: "#3b82f6" },
+              syndrome: { background: "#fef3c7", border: "#f59e0b" },
+              symptom: { background: "#fee2e2", border: "#ef4444" },
+              generic: { background: "#e2e8f0", border: "#64748b" },
+            };
+            return palette[type] || palette.generic;
           },
 
           handleLogout() {
             localStorage.removeItem("access_token");
             localStorage.removeItem("token_type");
+            localStorage.removeItem("display_name");
+            this.disconnectResearchSocket();
             window.location.href = "/login";
           },
         };

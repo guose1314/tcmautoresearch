@@ -78,29 +78,32 @@ def _count_output_files() -> int:
         return 0
 
 
-def _card(label: str, value: str, color: str = "gray-800") -> str:
+def _card(label: str, value: str, color: str = "slate-900") -> str:
+    # 统一为新仪表盘外壳的 shell-card-soft 语言：圆角更大、配色用 slate / emerald 系。
     return (
-        f'<div class="bg-white rounded-xl shadow-sm p-5 border border-gray-100">'
-        f'<p class="text-xs text-gray-500 uppercase tracking-wide">{label}</p>'
-        f'<p class="text-2xl font-bold text-{color} mt-1">{value}</p>'
+        f'<div class="shell-card-soft rounded-2xl p-5">'
+        f'<p class="text-[11px] uppercase tracking-[0.2em] text-slate-400">{label}</p>'
+        f'<p class="mt-2 text-2xl font-semibold text-{color}">{value}</p>'
         f"</div>"
     )
 
 
 def _empty_state(icon: str, title: str, desc: str) -> str:
     return (
-        f'<div class="flex flex-col items-center justify-center py-12 text-center">'
-        f'<span class="text-5xl mb-4">{icon}</span>'
-        f'<h3 class="text-lg font-semibold text-gray-700 mb-2">{title}</h3>'
-        f'<p class="text-sm text-gray-400 max-w-md">{desc}</p>'
+        f'<div class="shell-card-soft flex flex-col items-center justify-center rounded-[24px] py-12 text-center">'
+        f'<span class="mb-4 text-5xl">{icon}</span>'
+        f'<h3 class="mb-2 text-lg font-semibold text-slate-800">{title}</h3>'
+        f'<p class="max-w-md text-sm text-slate-400">{desc}</p>'
         f"</div>"
     )
 
 
 def _section_header(title: str, subtitle: str = "") -> str:
-    sub = f'<p class="text-sm text-gray-400 mt-1">{subtitle}</p>' if subtitle else ""
+    sub = f'<p class="mt-1 text-sm text-slate-500">{subtitle}</p>' if subtitle else ""
     return (
-        f'<h2 class="font-semibold text-gray-800 text-lg mb-4">{title}</h2>{sub}'
+        f'<div class="mb-5">'
+        f'<h2 class="text-lg font-semibold text-slate-900">{title}</h2>{sub}'
+        f'</div>'
     )
 
 
@@ -2413,46 +2416,45 @@ async def projects_recent(
     sessions = _scan_research_sessions(request)[:8]  # 最近 8 条
     if not sessions:
         return HTMLResponse(
-            '<div class="px-5 py-8 text-center text-sm text-gray-400">'
+            '<div class="shell-card-soft rounded-[20px] px-5 py-8 text-center text-sm text-slate-400">'
             '暂无研究记录 — 可通过 POST /api/research/run 直接运行，或 POST /api/research/jobs 创建异步任务</div>'
         )
 
     _STATUS_MAP = {
         "completed": ("✅", "已完成", "text-emerald-600"),
-        "active": ("🔄", "进行中", "text-blue-600"),
-        "running": ("🔄", "运行中", "text-blue-600"),
-        "failed": ("❌", "失败", "text-red-500"),
-        "pending": ("⏳", "待执行", "text-amber-500"),
+        "active": ("🔄", "进行中", "text-sky-600"),
+        "running": ("🔄", "运行中", "text-sky-600"),
+        "failed": ("❌", "失败", "text-rose-500"),
+        "pending": ("⏳", "待执行", "text-amber-600"),
     }
     rows = ""
     for s in sessions:
-        icon, label, cls = _STATUS_MAP.get(s["status"], ("❓", s["status"], "text-gray-500"))
+        icon, label, cls = _STATUS_MAP.get(s["status"], ("❓", s["status"], "text-slate-500"))
         phases_tags = " ".join(
-            f'<span class="inline-block px-1.5 py-0.5 text-[10px] font-medium rounded '
-            f'bg-emerald-50 text-emerald-700">{p}</span>'
+            f'<span class="inline-block rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">{p}</span>'
             for p in s["phases"]
-        ) or '<span class="text-xs text-gray-300">—</span>'
+        ) or '<span class="text-xs text-slate-300">—</span>'
         title = s["title"][:60]
-        paper_badge = ' <span class="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">📝 论文</span>' if s["has_reports"] else ""
+        paper_badge = ' <span class="ml-1 rounded bg-purple-50 px-1.5 py-0.5 text-[10px] text-purple-600">📝 论文</span>' if s["has_reports"] else ""
         detail_button = ""
         if s["cycle_id"]:
             detail_url = _project_detail_url(s["cycle_id"], drawer=True)
             detail_button = (
-                f'<button type="button" class="inline-flex items-center px-2.5 py-1 rounded-lg border border-gray-200 '
-                f'text-xs text-gray-500 hover:text-gray-800 hover:border-gray-300 transition" '
+                f'<button type="button" class="inline-flex items-center rounded-lg border border-slate-200 bg-white/70 px-2.5 py-1 '
+                f'text-xs text-slate-500 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700" '
                 f'onclick="openSessionDetailDrawer()" hx-get="{_safe_html(detail_url)}" '
                 f'hx-target="#session-detail-drawer-content" hx-swap="outerHTML">查看详情</button>'
             )
         rows += f"""
-        <div class="px-5 py-3 hover:bg-gray-50 transition">
+        <div class="px-5 py-3 transition hover:bg-emerald-50/40">
             <div class="flex items-start justify-between gap-3">
-                <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-gray-800 truncate">{title}{paper_badge}</p>
+                <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm font-medium text-slate-800">{title}{paper_badge}</p>
                     <div class="mt-1 flex flex-wrap gap-1">{phases_tags}</div>
-                    <p class="mt-1 text-[10px] text-gray-400 truncate">cycle: {_safe_html(s['cycle_id'][:40]) or '—'}</p>
+                    <p class="mt-1 truncate text-[10px] text-slate-400">cycle: {_safe_html(s['cycle_id'][:40]) or '—'}</p>
                 </div>
                 <div class="flex flex-col items-end gap-2">
-                    <span class="text-xs {cls} whitespace-nowrap">{icon} {label}</span>
+                    <span class="whitespace-nowrap text-xs {cls}">{icon} {label}</span>
                     {detail_button}
                 </div>
             </div>
@@ -2490,34 +2492,34 @@ async def projects_page(
 
     project_cards = ""
     for s in sessions:
-        icon, label, cls = status_map.get(s["status"], ("❓", s["status"], "bg-gray-50 text-gray-500"))
+        icon, label, cls = status_map.get(s["status"], ("❓", s["status"], "bg-slate-100 text-slate-500"))
         phases_html = " ".join(
-            f'<span class="inline-block px-1.5 py-0.5 text-[10px] font-medium rounded bg-gray-100 text-gray-600">{p}</span>'
+            f'<span class="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">{p}</span>'
             for p in s["phases"]
-        ) or '<span class="text-xs text-gray-300">无阶段</span>'
-        paper_badge = '<span class="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded ml-1">📝 论文</span>' if s["has_reports"] else ""
+        ) or '<span class="text-xs text-slate-300">无阶段</span>'
+        paper_badge = '<span class="ml-1 rounded bg-purple-50 px-1.5 py-0.5 text-[10px] text-purple-600">📝 论文</span>' if s["has_reports"] else ""
         title = s["title"][:70]
         question = str(s.get("question") or "").strip()
         detail_button = ""
         if s["cycle_id"]:
             detail_button = (
-                f'<button type="button" class="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-200 '
-                f'text-sm text-gray-600 hover:text-gray-900 hover:border-gray-300 hover:bg-gray-50 transition" '
+                f'<button type="button" class="inline-flex items-center rounded-xl border border-slate-200 bg-white/70 px-3 py-1.5 '
+                f'text-sm text-slate-600 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700" '
                 f'hx-get="{_safe_html(_project_detail_url(s["cycle_id"]))}" '
                 f'hx-target="#project-detail-panel" hx-swap="outerHTML">查看详情</button>'
             )
         project_cards += f"""
-        <article class="bg-white rounded-2xl border border-gray-100 p-4 hover:shadow-md transition">
-            <div class="flex items-start justify-between gap-3 mb-2">
+        <article class="shell-card-soft rounded-[20px] p-5 transition hover:shadow-md">
+            <div class="mb-2 flex items-start justify-between gap-3">
                 <div class="min-w-0 flex-1">
-                    <h3 class="text-sm font-semibold text-gray-800 truncate">{title}{paper_badge}</h3>
-                    <p class="text-xs text-gray-500 mt-1 line-clamp-2">{_safe_html(question or '暂无问题摘要')}</p>
+                    <h3 class="truncate text-sm font-semibold text-slate-800">{title}{paper_badge}</h3>
+                    <p class="mt-1 line-clamp-2 text-xs text-slate-500">{_safe_html(question or '暂无问题摘要')}</p>
                 </div>
-                <span class="text-[10px] font-medium px-2 py-0.5 rounded-full {cls} whitespace-nowrap">{icon} {label}</span>
+                <span class="whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium {cls}">{icon} {label}</span>
             </div>
-            <div class="flex flex-wrap gap-1 mb-3">{phases_html}</div>
+            <div class="mb-3 flex flex-wrap gap-1">{phases_html}</div>
             <div class="flex items-center justify-between gap-3">
-                <p class="text-[10px] text-gray-400 truncate">cycle: {_safe_html(s['cycle_id'][:40]) or '—'}</p>
+                <p class="truncate text-[10px] text-slate-400">cycle: {_safe_html(s['cycle_id'][:40]) or '—'}</p>
                 {detail_button}
             </div>
         </article>"""
@@ -2533,12 +2535,12 @@ async def projects_page(
 
     html = f"""
     {_section_header("研究任务", f"共 {total} 个研究任务 · 已完成 {completed} · 论文产出 {imrd['total']} 份")}
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-        {_card("🔬 研究任务", str(total), "blue-600")}
-        {_card("✅ 已完成", str(completed), "emerald-600")}
-        {_card("📝 论文输出", str(imrd["total"]), "purple-600")}
+    <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+        {_card("🔬 研究任务", str(total), "sky-700")}
+        {_card("✅ 已完成", str(completed), "emerald-700")}
+        {_card("📝 论文输出", str(imrd["total"]), "purple-700")}
     </div>
-    <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-4 items-start">
+    <div class="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <div class="space-y-4">{project_cards}</div>
         {detail_panel}
     </div>
@@ -3022,21 +3024,21 @@ async def literature_page(
             name = f.stem
             size_kb = f.stat().st_size / 1024
             items_html += (
-                f'<tr class="hover:bg-gray-50">'
-                f'<td class="px-4 py-3 text-sm text-gray-700">{name}</td>'
-                f'<td class="px-4 py-3 text-sm text-gray-500">{size_kb:.1f} KB</td>'
-                f'<td class="px-4 py-3 text-sm text-gray-500">TXT</td>'
+                f'<tr class="transition hover:bg-emerald-50/40">'
+                f'<td class="px-4 py-3 text-sm text-slate-700">{name}</td>'
+                f'<td class="px-4 py-3 text-sm text-slate-500">{size_kb:.1f} KB</td>'
+                f'<td class="px-4 py-3 text-sm text-slate-500">TXT</td>'
                 f"</tr>"
             )
         remaining = len(files) - 20
         if remaining > 0:
             items_html += (
-                f'<tr><td colspan="3" class="px-4 py-3 text-sm text-gray-400 text-center">'
+                f'<tr><td colspan="3" class="px-4 py-3 text-center text-sm text-slate-400">'
                 f"… 还有 {remaining} 个文件</td></tr>"
             )
     except Exception as exc:
         items_html = (
-            f'<tr><td colspan="3" class="px-4 py-3 text-sm text-red-500">'
+            f'<tr><td colspan="3" class="px-4 py-3 text-sm text-rose-500">'
             f"加载失败: {exc}</td></tr>"
         )
 
@@ -3044,17 +3046,19 @@ async def literature_page(
 
     html = f"""
     {_section_header("文献库", f"共 {corpus_count} 部古籍文献")}
-    <div class="overflow-x-auto">
-        <table class="min-w-full">
-            <thead>
-                <tr class="border-b border-gray-200">
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">文献名</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">大小</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">格式</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-100">{items_html}</tbody>
-        </table>
+    <div class="shell-card-soft overflow-hidden rounded-[24px]">
+        <div class="overflow-x-auto">
+            <table class="min-w-full">
+                <thead>
+                    <tr class="border-b border-slate-100 bg-white/60">
+                        <th class="px-4 py-3 text-left text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">文献名</th>
+                        <th class="px-4 py-3 text-left text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">大小</th>
+                        <th class="px-4 py-3 text-left text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">格式</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">{items_html}</tbody>
+            </table>
+        </div>
     </div>
     """
     return HTMLResponse(html)
@@ -3510,54 +3514,51 @@ async def analysis_tools_page(
     {_section_header("分析工具", "中医古籍智能分析工具箱")}
 
     <!-- ===== 知识增长总览面板 ===== -->
-    <div id="kg-growth-bar" class="mb-6 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-100 p-5">
-        <div class="flex items-center justify-between mb-3">
-            <h3 class="font-semibold text-emerald-800 text-sm">📊 知识库增长总览</h3>
+    <div id="kg-growth-bar" class="shell-card-soft mb-6 rounded-[24px] p-5">
+        <div class="mb-3 flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-emerald-800">📊 知识库增长总览</h3>
             <button type="button" onclick="refreshKgGrowth()" id="kg-refresh-btn"
-                    class="text-xs text-emerald-600 hover:text-emerald-800 transition">🔄 刷新</button>
+                    class="text-xs text-emerald-600 transition hover:text-emerald-800">🔄 刷新</button>
         </div>
-        <div id="kg-growth-cards" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            <div class="bg-white/80 rounded-lg p-3 text-center animate-pulse">
-                <p class="text-xs text-gray-400">加载中…</p>
+        <div id="kg-growth-cards" class="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
+            <div class="animate-pulse rounded-lg bg-white/80 p-3 text-center">
+                <p class="text-xs text-slate-400">加载中…</p>
             </div>
         </div>
         <div id="kg-growth-types" class="mt-3 flex flex-wrap gap-2"></div>
     </div>
     <!-- 工具卡片入口 -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <button type="button" onclick="openTool('text')"
                 id="tool-btn-text"
-                class="bg-white rounded-xl border border-gray-100 p-5 text-left hover:shadow-md
-                       hover:border-emerald-200 transition cursor-pointer">
-            <span class="text-3xl block mb-3">📝</span>
-            <h3 class="font-semibold text-gray-800 mb-1">文本处理链</h3>
-            <p class="text-sm text-gray-500">古籍预处理 → 实体抽取 → 语义建模</p>
+                class="shell-card-soft cursor-pointer rounded-[20px] p-5 text-left transition hover:-translate-y-0.5 hover:shadow-md">
+            <span class="mb-3 block text-3xl">📝</span>
+            <h3 class="mb-1 font-semibold text-slate-800">文本处理链</h3>
+            <p class="text-sm text-slate-500">古籍预处理 → 实体抽取 → 语义建模</p>
         </button>
         <button type="button" onclick="openTool('formula')"
                 id="tool-btn-formula"
-                class="bg-white rounded-xl border border-gray-100 p-5 text-left hover:shadow-md
-                       hover:border-emerald-200 transition cursor-pointer">
-            <span class="text-3xl block mb-3">💊</span>
-            <h3 class="font-semibold text-gray-800 mb-1">方剂综合分析</h3>
-            <p class="text-sm text-gray-500">方剂配伍分析与综合评分</p>
+                class="shell-card-soft cursor-pointer rounded-[20px] p-5 text-left transition hover:-translate-y-0.5 hover:shadow-md">
+            <span class="mb-3 block text-3xl">💊</span>
+            <h3 class="mb-1 font-semibold text-slate-800">方剂综合分析</h3>
+            <p class="text-sm text-slate-500">方剂配伍分析与综合评分</p>
         </button>
         <button type="button" onclick="openTool('kg')"
                 id="tool-btn-kg"
-                class="bg-white rounded-xl border border-gray-100 p-5 text-left hover:shadow-md
-                       hover:border-emerald-200 transition cursor-pointer">
-            <span class="text-3xl block mb-3">🕸️</span>
-            <h3 class="font-semibold text-gray-800 mb-1">知识图谱生成</h3>
-            <p class="text-sm text-gray-500">从文本生成知识图谱并可视化</p>
+                class="shell-card-soft cursor-pointer rounded-[20px] p-5 text-left transition hover:-translate-y-0.5 hover:shadow-md">
+            <span class="mb-3 block text-3xl">🕸️</span>
+            <h3 class="mb-1 font-semibold text-slate-800">知识图谱生成</h3>
+            <p class="text-sm text-slate-500">从文本生成知识图谱并可视化</p>
         </button>
     </div>
 
     <!-- ==================== 文本处理链面板 ==================== -->
-    <div id="panel-text" class="hidden mb-6">
-        <div class="bg-white rounded-xl border border-gray-100 p-6">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="font-semibold text-gray-800">📝 文本处理链</h3>
+    <div id="panel-text" class="mb-6 hidden">
+        <div class="shell-card-soft rounded-[24px] p-6">
+            <div class="mb-4 flex items-center justify-between">
+                <h3 class="font-semibold text-slate-800">📝 文本处理链</h3>
                 <button type="button" onclick="closeTool('text')"
-                        class="text-sm text-gray-400 hover:text-gray-600">✕ 关闭</button>
+                        class="text-sm text-slate-400 hover:text-slate-700">✕ 关闭</button>
             </div>
             <textarea id="at-text-input" rows="6"
                       placeholder="粘贴古籍原文或中医方剂文本…&#10;示例：麻黄汤由麻黄、桂枝、杏仁、甘草组成，主治太阳伤寒表实证。"
@@ -3580,12 +3581,12 @@ async def analysis_tools_page(
     </div>
 
     <!-- ==================== 方剂综合分析面板 ==================== -->
-    <div id="panel-formula" class="hidden mb-6">
-        <div class="bg-white rounded-xl border border-gray-100 p-6">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="font-semibold text-gray-800">💊 方剂综合分析</h3>
+    <div id="panel-formula" class="mb-6 hidden">
+        <div class="shell-card-soft rounded-[24px] p-6">
+            <div class="mb-4 flex items-center justify-between">
+                <h3 class="font-semibold text-slate-800">💊 方剂综合分析</h3>
                 <button type="button" onclick="closeTool('formula')"
-                        class="text-sm text-gray-400 hover:text-gray-600">✕ 关闭</button>
+                        class="text-sm text-slate-400 hover:text-slate-700">✕ 关闭</button>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                 <div>
@@ -3625,12 +3626,12 @@ async def analysis_tools_page(
     </div>
 
     <!-- ==================== 知识图谱生成面板 ==================== -->
-    <div id="panel-kg" class="hidden mb-6">
-        <div class="bg-white rounded-xl border border-gray-100 p-6">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="font-semibold text-gray-800">🕸️ 知识图谱生成</h3>
+    <div id="panel-kg" class="mb-6 hidden">
+        <div class="shell-card-soft rounded-[24px] p-6">
+            <div class="mb-4 flex items-center justify-between">
+                <h3 class="font-semibold text-slate-800">🕸️ 知识图谱生成</h3>
                 <button type="button" onclick="closeTool('kg')"
-                        class="text-sm text-gray-400 hover:text-gray-600">✕ 关闭</button>
+                        class="text-sm text-slate-400 hover:text-slate-700">✕ 关闭</button>
             </div>
             <textarea id="at-kg-input" rows="6"
                       placeholder="输入古籍/方剂文本，系统将提取实体与关系并生成可视化图谱…"
@@ -4000,10 +4001,10 @@ async def output_page(
                 rel = f.relative_to(_OUTPUT_DIR)
                 size_kb = f.stat().st_size / 1024
                 items_html += (
-                    f'<tr class="hover:bg-gray-50">'
-                    f'<td class="px-4 py-3 text-sm text-gray-700">{rel}</td>'
-                    f'<td class="px-4 py-3 text-sm text-gray-500">{size_kb:.1f} KB</td>'
-                    f'<td class="px-4 py-3 text-sm text-gray-500">{f.suffix or "—"}</td>'
+                    f'<tr class="transition hover:bg-emerald-50/40">'
+                    f'<td class="px-4 py-3 text-sm text-slate-700">{rel}</td>'
+                    f'<td class="px-4 py-3 text-sm text-slate-500">{size_kb:.1f} KB</td>'
+                    f'<td class="px-4 py-3 text-sm text-slate-500">{f.suffix or "—"}</td>'
                     f"</tr>"
                 )
     except Exception:
@@ -4018,17 +4019,19 @@ async def output_page(
     count = _count_output_files()
     html = f"""
     {_section_header("输出中心", f"共 {count} 个输出文件")}
-    <div class="overflow-x-auto">
-        <table class="min-w-full">
-            <thead>
-                <tr class="border-b border-gray-200">
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">文件名</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">大小</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">类型</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-100">{items_html}</tbody>
-        </table>
+    <div class="shell-card-soft overflow-hidden rounded-[24px]">
+        <div class="overflow-x-auto">
+            <table class="min-w-full">
+                <thead>
+                    <tr class="border-b border-slate-100 bg-white/60">
+                        <th class="px-4 py-3 text-left text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">文件名</th>
+                        <th class="px-4 py-3 text-left text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">大小</th>
+                        <th class="px-4 py-3 text-left text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">类型</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">{items_html}</tbody>
+            </table>
+        </div>
     </div>
     """
     return HTMLResponse(html)
@@ -4062,22 +4065,22 @@ async def settings_page(
     html = f"""
     {_section_header("系统设置")}
     <div class="space-y-4">
-        <div class="bg-white rounded-xl border border-gray-100 p-5">
-            <h3 class="font-semibold text-gray-700 mb-3">系统信息</h3>
+        <div class="shell-card-soft rounded-[24px] p-6">
+            <h3 class="mb-3 font-semibold text-slate-800">系统信息</h3>
             <dl class="grid grid-cols-2 gap-3 text-sm">
-                <dt class="text-gray-500">系统名称</dt>
-                <dd class="text-gray-800 font-medium">{name}</dd>
-                <dt class="text-gray-500">版本</dt>
-                <dd class="text-gray-800 font-medium">{version}</dd>
-                <dt class="text-gray-500">运行环境</dt>
-                <dd class="text-gray-800 font-medium">development</dd>
-                <dt class="text-gray-500">Python</dt>
-                <dd class="text-gray-800 font-medium">3.10</dd>
+                <dt class="text-slate-500">系统名称</dt>
+                <dd class="font-medium text-slate-800">{name}</dd>
+                <dt class="text-slate-500">版本</dt>
+                <dd class="font-medium text-slate-800">{version}</dd>
+                <dt class="text-slate-500">运行环境</dt>
+                <dd class="font-medium text-slate-800">development</dd>
+                <dt class="text-slate-500">Python</dt>
+                <dd class="font-medium text-slate-800">3.10</dd>
             </dl>
         </div>
-        <div class="bg-white rounded-xl border border-gray-100 p-5">
-            <h3 class="font-semibold text-gray-700 mb-3">配置文件</h3>
-            <ul class="text-sm text-gray-600 space-y-1.5">
+        <div class="shell-card-soft rounded-[24px] p-6">
+            <h3 class="mb-3 font-semibold text-slate-800">配置文件</h3>
+            <ul class="space-y-1.5 text-sm text-slate-600">
                 <li>📄 config.yml — 主配置</li>
                 <li>🔒 secrets.yml — 密钥与凭据</li>
                 <li>📁 config/development.yml — 开发环境覆盖</li>

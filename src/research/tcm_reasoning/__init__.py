@@ -4,18 +4,6 @@
 显式建模为可审计的 trace + rules，可被 reflect 阶段评分回收。
 """
 
-from .trace_contract import (
-    REASONING_PATTERNS,
-    PATTERN_TONGBING_YIZHI,
-    PATTERN_YIBING_TONGZHI,
-    PATTERN_SANYIN_ZHIYI,
-    PATTERN_FANGZHENG_DUIYING,
-    PATTERN_JUNCHEN_ZUOSHI,
-    TCM_REASONING_CONTRACT_VERSION,
-    TCMReasoningPremise,
-    TCMReasoningStep,
-    TCMReasoningTrace,
-)
 from .tcm_reasoning_service import (
     DEFAULT_RULE_NAMES,
     TCMReasoningRule,
@@ -28,6 +16,18 @@ from .tcm_reasoning_service import (
     rule_tongbing_yizhi,
     rule_yibing_tongzhi,
     run_tcm_reasoning,
+)
+from .trace_contract import (
+    PATTERN_FANGZHENG_DUIYING,
+    PATTERN_JUNCHEN_ZUOSHI,
+    PATTERN_SANYIN_ZHIYI,
+    PATTERN_TONGBING_YIZHI,
+    PATTERN_YIBING_TONGZHI,
+    REASONING_PATTERNS,
+    TCM_REASONING_CONTRACT_VERSION,
+    TCMReasoningPremise,
+    TCMReasoningStep,
+    TCMReasoningTrace,
 )
 
 __all__ = [

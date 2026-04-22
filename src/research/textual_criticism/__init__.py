@@ -9,6 +9,12 @@
 依赖最小化：仅依赖 catalog_contract 字段名常量与 evidence 风格。
 """
 
+from src.research.textual_criticism.textual_criticism_service import (
+    TextualCriticismService,
+    assess_catalog_authenticity,
+    assess_catalog_batch,
+    build_textual_criticism_summary,
+)
 from src.research.textual_criticism.verdict_contract import (
     AUTHENTICITY_AUTHENTIC,
     AUTHENTICITY_DOUBTFUL,
@@ -30,12 +36,6 @@ from src.research.textual_criticism.verdict_contract import (
     AuthenticityVerdict,
     VerdictEvidence,
     normalize_authenticity_verdicts,
-)
-from src.research.textual_criticism.textual_criticism_service import (
-    TextualCriticismService,
-    assess_catalog_authenticity,
-    assess_catalog_batch,
-    build_textual_criticism_summary,
 )
 
 __all__ = [

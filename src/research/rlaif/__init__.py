@@ -2,10 +2,10 @@
 
 from .preference_dataset import (  # noqa: F401
     RLAIF_PREFERENCE_DATASET_CONTRACT_VERSION,
-    PreferencePair,
-    PreferenceDataset,
     LoRADatasetSpec,
-    build_preference_pair,
+    PreferenceDataset,
+    PreferencePair,
     build_dataset_from_fallback_records,
+    build_preference_pair,
     export_dataset_to_jsonl,
 )

@@ -520,24 +520,7 @@ flowchart LR
 - ✅ Guard #43 已完成：[tests/unit/test_architecture_regression_guard.py](tests/unit/test_architecture_regression_guard.py) `TestGuard43_PhaseLContracts` 6 用例锁定 L-1..L-4 关键符号 + 仓库 `Llama(` 实跑审计；`tests/unit` 1544 通过 / 14 subtests（基线 1471 + 14 facade + 21 outbox + 16 factory + 16 schema + 6 guard）。
 - ✅ Phase L 全部完成；可进入 Phase M（自学习升级）。
 
-### Phase M（持续）—— 自学习升级
-
-| Card | 动作 | Done 定义 | 理由 | 代价 |
-| --- | --- | --- | --- | --- |
-| M-1 | STaR / ReAct 风格 trace | hypothesis 输出可用于离线评测 | 对齐最新 NLP 工程实践 | S |
-| M-2 | Tool calling 化 | LLM 可调用 query_neo4j / query_catalog / query_exegesis 等工具 | 减少超长 prompt | M |
-| M-3 | RLAIF-lite / LoRA | 基于 fallback quality 数据做离线微调 | 让自学习真正回到模型 | M |
-| M-4 | reflect 结果回流策略层 | 下一轮研究自动消费上轮策略建议 | 从“指标级优化”升级到“方法级优化” | M |
-
-#### Phase M 进度（2026-04-22）
-
-- ✅ M-1 已完成：新增 [src/research/star_react_trace.py](src/research/star_react_trace.py)，落 `star-react-trace-v1` 契约 + `TraceStep`（thought/action/observation/answer，action 必带 tool_name）+ `ReasoningTrace`（含 to_dict/from_dict 完整往返）+ `build_reasoning_trace` + `export_traces_for_offline_eval`；新增 [tests/unit/test_star_react_trace.py](tests/unit/test_star_react_trace.py) 10 通过。详见审计稿 [Card M-1](ARCHITECTURE_TCM_RESEARCH_METHOD_AUDIT_2026_04_20.md#card-m-1star--react-trace-契约)。
-- ✅ M-2 已完成：新增 [src/research/tool_calling.py](src/research/tool_calling.py)，落 `tool-calling-v1` 契约 + `ToolSpec` / `ToolCall` / `ToolResult` / `ToolRegistry`（注册/绑定/异常封装 invoke）+ `build_default_tool_registry` 注册 `query_neo4j` / `query_catalog` / `query_exegesis` 三个 spec + `render_tool_catalog_for_prompt`；新增 [tests/unit/test_tool_calling.py](tests/unit/test_tool_calling.py) 12 通过。
-- ✅ M-3 已完成：新增 [src/research/rlaif/](src/research/rlaif/)（`__init__.py` + `preference_dataset.py`），落 `rlaif-preference-dataset-v1` 契约 + `PreferencePair` / `LoRADatasetSpec` / `PreferenceDataset` + `build_preference_pair` + `build_dataset_from_fallback_records`（自动选高分方为 chosen，支持 min_score_delta 过滤、dict 形式 output 抽取）+ `export_dataset_to_jsonl`；新增 [tests/unit/test_rlaif_preference_dataset.py](tests/unit/test_rlaif_preference_dataset.py) 14 通过。
-- ✅ M-4 已完成：新增 [src/research/strategy_feedback.py](src/research/strategy_feedback.py)，落 `strategy-feedback-v1` 契约 + `StrategySuggestion`（target_phase 白名单 + priority ∈ [0,1]）+ `StrategyFeedback` + `StrategyFeedbackStore`（线程安全跨 cycle）+ `build_strategy_feedback_from_reflect`（兼容 improvement_plan / reflections / learning_summary.suggestions 三种来源 + 去重）+ `apply_strategy_feedback_to_context`；新增 [tests/unit/test_strategy_feedback.py](tests/unit/test_strategy_feedback.py) 19 通过。
-- ✅ Guard #44 已完成：[tests/unit/test_architecture_regression_guard.py](tests/unit/test_architecture_regression_guard.py) `TestGuard44_PhaseMContracts` 4 用例锁定 M-1..M-4 关键符号；`tests/unit` 1603 通过 / 14 subtests 通过（基线 1544 + 10 trace + 12 tool + 14 rlaif + 19 feedback + 4 guard）；全量（除 perf/integration/manual）3545 通过 / 2 skipped / 4 xfailed。
-- ✅ Phase M 全部完成；下一阶段可考虑：编排器子阶段 wiring（把 M-1 trace、M-2 tool registry、M-4 strategy feedback 接入 hypothesis / topic_discovery / reflect），或 D5/D7/D8/D9 余债收敛。
-
+###
 
 ```mermaid
 gantt

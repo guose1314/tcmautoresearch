@@ -1288,7 +1288,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
 - 目标：把 fallback quality matrix 中"baseline vs optimized"对，转成 (chosen, rejected) 偏好对，可导出 jsonl 供 DPO / LoRA 离线训练。
 - 范围：
   - [x] [src/research/rlaif/preference_dataset.py](src/research/rlaif/preference_dataset.py)：`PreferencePair`（含 score 校验、chosen!=rejected）+ `LoRADatasetSpec` + `PreferenceDataset` + `build_preference_pair` + `build_dataset_from_fallback_records`（自动选高分方为 chosen，支持 min_score_delta 过滤、dict 形式 output 抽取）+ `export_dataset_to_jsonl`
-  - [x] [src/research/rlaif/__init__.py](src/research/rlaif/__init__.py) 重新导出
+  - [x] [src/research/rlaif/\_\_init\_\_.py](src/research/rlaif/__init__.py) 重新导出
 - 测试：[tests/unit/test_rlaif_preference_dataset.py](tests/unit/test_rlaif_preference_dataset.py) 14 通过
 - 当前状态：2026-04-22 已完成。
 

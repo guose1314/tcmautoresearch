@@ -11,15 +11,15 @@ from unittest.mock import patch
 from src.infra.llm_service import PlannedLLMCall, prepare_planned_llm_call
 from src.research.llm_role_profile import (
     DEFAULT_ROLE_NAMES,
-    KVCacheDescriptor,
-    KVCacheStore,
-    LLMRoleProfile,
     ROLE_JIAOKAN,
     ROLE_JINGFANG,
     ROLE_PROFILE_CONTRACT_VERSION,
     ROLE_WENBING,
     ROLE_XUNGU,
     ROLE_YIJING,
+    KVCacheDescriptor,
+    KVCacheStore,
+    LLMRoleProfile,
     get_role_profile,
     list_role_profiles,
     register_role_profile,

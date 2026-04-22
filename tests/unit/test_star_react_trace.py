@@ -6,9 +6,9 @@ import unittest
 
 from src.research.star_react_trace import (
     STAR_REACT_TRACE_CONTRACT_VERSION,
+    VALID_STEP_KINDS,
     ReasoningTrace,
     TraceStep,
-    VALID_STEP_KINDS,
     build_reasoning_trace,
     export_traces_for_offline_eval,
 )

@@ -6,10 +6,10 @@ import unittest
 
 from src.research.strategy_feedback import (
     STRATEGY_FEEDBACK_CONTRACT_VERSION,
+    VALID_TARGET_PHASES,
     StrategyFeedback,
     StrategyFeedbackStore,
     StrategySuggestion,
-    VALID_TARGET_PHASES,
     apply_strategy_feedback_to_context,
     build_strategy_feedback_from_reflect,
 )

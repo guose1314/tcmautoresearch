@@ -10,8 +10,8 @@ from src.infra.llm_service_factory import (
     CONTRACT_VERSION,
     DEFAULT_LLAMA_CALL_ALLOWLIST,
     LLM_SERVICE_FACTORY_CONTRACT_VERSION,
-    LLMServiceFactory,
     LlamaCallViolation,
+    LLMServiceFactory,
     assert_no_unexpected_llama_calls,
     scan_llama_call_violations,
 )
