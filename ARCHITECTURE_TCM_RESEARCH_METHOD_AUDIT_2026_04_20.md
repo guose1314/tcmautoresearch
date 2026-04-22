@@ -1259,6 +1259,60 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
 - 测试：Guard #43 6 通过；`tests/unit` 1544 通过 / 14 subtests 通过（基线 1471 + 14 facade + 21 outbox + 16 factory + 16 schema + 6 guard）
 - 当前状态：2026-04-22 已完成；Phase L 全部 4 张卡片 + Guard 收口。
 
+### Card M-1：STaR / ReAct trace 契约
+
+- 建议标题：`新增 src/research/star_react_trace.py，落 star-react-trace-v1`
+- 建议标签：`enhancement`、`self-learning`、`phase-m`、`p1`
+- 目标：把 hypothesis 等阶段的"思考过程"显式记录为 thought / action / observation / answer 四类 step，便于离线评测与 RLAIF 数据导出。
+- 范围：
+  - [x] [src/research/star_react_trace.py](src/research/star_react_trace.py)：`STAR_REACT_TRACE_CONTRACT_VERSION` + `TraceStep`（kind 校验 + action 必带 tool_name）+ `ReasoningTrace`（含 to_dict/from_dict 完整往返）+ `build_reasoning_trace` + `export_traces_for_offline_eval`
+  - [x] 不强制接入既有 phase；先沉淀契约，后续卡片再 wire
+- 测试：[tests/unit/test_star_react_trace.py](tests/unit/test_star_react_trace.py) 10 通过
+- 当前状态：2026-04-22 已完成。
+
+### Card M-2：Tool calling 注册表
+
+- 建议标题：`新增 src/research/tool_calling.py，落 tool-calling-v1`
+- 建议标签：`enhancement`、`llm`、`phase-m`、`p1`
+- 目标：把"查图谱 / 查目录 / 查训诂"等能力封装为 LLM 可调用 tool，替代超长 prompt 拼接，提高小模型可控性。
+- 范围：
+  - [x] [src/research/tool_calling.py](src/research/tool_calling.py)：`TOOL_CALLING_CONTRACT_VERSION` + `ToolSpec` / `ToolCall` / `ToolResult` + `ToolRegistry`（注册 / 绑定 handler / 安全 invoke 含异常封装）+ `build_default_tool_registry` 注册 `query_neo4j` / `query_catalog` / `query_exegesis` 三个 spec + `render_tool_catalog_for_prompt`
+  - [x] handler 注入式，便于测试替身；spec 上带 JSON Schema parameters
+- 测试：[tests/unit/test_tool_calling.py](tests/unit/test_tool_calling.py) 12 通过
+- 当前状态：2026-04-22 已完成。
+
+### Card M-3：RLAIF-lite / LoRA 偏好数据集
+
+- 建议标题：`新增 src/research/rlaif/，落 rlaif-preference-dataset-v1`
+- 建议标签：`enhancement`、`self-learning`、`phase-m`、`p1`
+- 目标：把 fallback quality matrix 中"baseline vs optimized"对，转成 (chosen, rejected) 偏好对，可导出 jsonl 供 DPO / LoRA 离线训练。
+- 范围：
+  - [x] [src/research/rlaif/preference_dataset.py](src/research/rlaif/preference_dataset.py)：`PreferencePair`（含 score 校验、chosen!=rejected）+ `LoRADatasetSpec` + `PreferenceDataset` + `build_preference_pair` + `build_dataset_from_fallback_records`（自动选高分方为 chosen，支持 min_score_delta 过滤、dict 形式 output 抽取）+ `export_dataset_to_jsonl`
+  - [x] [src/research/rlaif/__init__.py](src/research/rlaif/__init__.py) 重新导出
+- 测试：[tests/unit/test_rlaif_preference_dataset.py](tests/unit/test_rlaif_preference_dataset.py) 14 通过
+- 当前状态：2026-04-22 已完成。
+
+### Card M-4：Reflect 策略反馈回流
+
+- 建议标题：`新增 src/research/strategy_feedback.py，落 strategy-feedback-v1`
+- 建议标签：`enhancement`、`research-loop`、`phase-m`、`p1`
+- 目标：把上一轮 reflect 阶段产生的 improvement_plan / reflections / learning_summary.suggestions 沉淀为下一轮可消费的结构化 `StrategySuggestion`，从"指标级优化"升级到"方法级优化"。
+- 范围：
+  - [x] [src/research/strategy_feedback.py](src/research/strategy_feedback.py)：`STRATEGY_FEEDBACK_CONTRACT_VERSION` + `StrategySuggestion`（target_phase 白名单 + priority ∈ [0,1] 校验）+ `StrategyFeedback`（按 phase 过滤 + 完整 to_dict/from_dict）+ `StrategyFeedbackStore`（线程安全，跨 cycle）+ `build_strategy_feedback_from_reflect`（兼容三种来源 + 去重）+ `apply_strategy_feedback_to_context`
+  - [x] 不修改既有 reflect/learning 流，仅提供"次轮消费"路径
+- 测试：[tests/unit/test_strategy_feedback.py](tests/unit/test_strategy_feedback.py) 19 通过
+- 当前状态：2026-04-22 已完成。
+
+### Card M-5（隐含）：Phase M 锁线 Guard #44
+
+- 建议标题：`Phase M 收口：Guard #44 锁定 M-1..M-4 契约`
+- 建议标签：`regression`、`guard`、`phase-m`、`p0`
+- 目标：把 M-1..M-4 关键源码符号写入架构守门测试。
+- 范围：
+  - [x] [tests/unit/test_architecture_regression_guard.py](tests/unit/test_architecture_regression_guard.py) 新增 `TestGuard44_PhaseMContracts`，4 用例
+- 测试：Guard #44 4 通过；`tests/unit` 1603 通过 / 14 subtests 通过（基线 1544 + 10 trace + 12 tool + 14 rlaif + 19 feedback + 4 guard）；全量（除 perf/integration/manual）3545 通过 / 2 skipped / 4 xfailed
+- 当前状态：2026-04-22 已完成；Phase M 全部 4 张卡片 + Guard 收口。
+
 ---
 
 ## 附录 A：2026-04-21 代码质量治理推进摘要

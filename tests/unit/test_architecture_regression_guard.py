@@ -3086,5 +3086,82 @@ class TestGuard43_PhaseLContracts(unittest.TestCase):
             self.assertIn(token, source, f"config_schema 缺: {token}")
 
 
+class TestGuard44_PhaseMContracts(unittest.TestCase):
+    """Guard #44 — 锁定 Phase M（M-1..M-4）核心契约。
+
+    覆盖：
+      1. STaR / ReAct trace 契约（star_react_trace.py）
+      2. Tool calling registry（tool_calling.py）
+      3. RLAIF-lite 偏好数据集（rlaif/preference_dataset.py + 包导出）
+      4. Reflect 策略反馈回流（strategy_feedback.py）
+    """
+
+    def test_star_react_trace_exports(self):
+        source = (_SRC / "research" / "star_react_trace.py").read_text(encoding="utf-8")
+        for token in (
+            'STAR_REACT_TRACE_CONTRACT_VERSION = "star-react-trace-v1"',
+            "class TraceStep",
+            "class ReasoningTrace",
+            "VALID_STEP_KINDS",
+            "def build_reasoning_trace",
+            "def export_traces_for_offline_eval",
+        ):
+            self.assertIn(token, source, f"star_react_trace 缺: {token}")
+
+    def test_tool_calling_exports(self):
+        source = (_SRC / "research" / "tool_calling.py").read_text(encoding="utf-8")
+        for token in (
+            'TOOL_CALLING_CONTRACT_VERSION = "tool-calling-v1"',
+            "class ToolSpec",
+            "class ToolCall",
+            "class ToolResult",
+            "class ToolRegistry",
+            "def build_default_tool_registry",
+            "def render_tool_catalog_for_prompt",
+            '"query_neo4j"',
+            '"query_catalog"',
+            '"query_exegesis"',
+        ):
+            self.assertIn(token, source, f"tool_calling 缺: {token}")
+
+    def test_rlaif_preference_dataset_exports(self):
+        path = _SRC / "research" / "rlaif"
+        self.assertTrue(path.is_dir(), "src/research/rlaif/ 不存在")
+        init_source = (path / "__init__.py").read_text(encoding="utf-8")
+        for token in (
+            "RLAIF_PREFERENCE_DATASET_CONTRACT_VERSION",
+            "PreferencePair",
+            "PreferenceDataset",
+            "LoRADatasetSpec",
+            "build_dataset_from_fallback_records",
+            "export_dataset_to_jsonl",
+        ):
+            self.assertIn(token, init_source, f"rlaif/__init__ 缺: {token}")
+        ds_source = (path / "preference_dataset.py").read_text(encoding="utf-8")
+        for token in (
+            'RLAIF_PREFERENCE_DATASET_CONTRACT_VERSION = "rlaif-preference-dataset-v1"',
+            "class PreferencePair",
+            "class LoRADatasetSpec",
+            "class PreferenceDataset",
+            "def build_preference_pair",
+            "def build_dataset_from_fallback_records",
+            "def export_dataset_to_jsonl",
+        ):
+            self.assertIn(token, ds_source, f"rlaif/preference_dataset 缺: {token}")
+
+    def test_strategy_feedback_exports(self):
+        source = (_SRC / "research" / "strategy_feedback.py").read_text(encoding="utf-8")
+        for token in (
+            'STRATEGY_FEEDBACK_CONTRACT_VERSION = "strategy-feedback-v1"',
+            "class StrategySuggestion",
+            "class StrategyFeedback",
+            "class StrategyFeedbackStore",
+            "VALID_TARGET_PHASES",
+            "def build_strategy_feedback_from_reflect",
+            "def apply_strategy_feedback_to_context",
+        ):
+            self.assertIn(token, source, f"strategy_feedback 缺: {token}")
+
+
 if __name__ == "__main__":
     unittest.main()
