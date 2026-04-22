@@ -52,6 +52,12 @@ from src.api.schemas import (
     ReviewAssignmentReassignRequest,
     ReviewAssignmentReleaseRequest,
     ReviewAssignmentResponse,
+    ReviewDisputeAssignRequest,
+    ReviewDisputeListResponse,
+    ReviewDisputeOpenRequest,
+    ReviewDisputeResolveRequest,
+    ReviewDisputeResponse,
+    ReviewDisputeWithdrawRequest,
     ReviewerWorkloadResponse,
 )
 from src.infrastructure.research_session_repo import ResearchSessionRepository
@@ -216,11 +222,16 @@ def get_research_job_dashboard(
     )
     cycle_id = _resolve_cycle_id(snapshot)
     review_assignments: list = []
+    review_disputes: list = []
     if cycle_id:
         try:
             review_assignments = repository.list_review_queue(cycle_id=cycle_id)
         except Exception:
             review_assignments = []
+        try:
+            review_disputes = repository.list_review_disputes(cycle_id=cycle_id)
+        except Exception:
+            review_disputes = []
     current_reviewer = _resolve_review_reviewer(request, "")
     return build_research_dashboard_payload(
         snapshot,
@@ -236,6 +247,7 @@ def get_research_job_dashboard(
         },
         review_assignments=review_assignments,
         current_reviewer=current_reviewer,
+        review_disputes=review_disputes,
     )
 
 
@@ -613,6 +625,142 @@ def get_research_reviewer_workload(
 ) -> ReviewerWorkloadResponse:
     items = repository.aggregate_reviewer_workload(cycle_id=cycle_id)
     return ReviewerWorkloadResponse(cycle_id=cycle_id, items=items, count=len(items))
+
+
+# ---------------------------------------------------------------------------
+# Phase H / H-3: Review dispute endpoints
+# ---------------------------------------------------------------------------
+
+
+def _dispute_or_404(value, *, action: str):
+    if value is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"无法 {action}: cycle 或 dispute case 不存在",
+        )
+    return value
+
+
+@router.post("/sessions/{cycle_id}/review-disputes/open")
+def open_research_review_dispute(
+    cycle_id: str,
+    payload: ReviewDisputeOpenRequest,
+    request: Request,
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ReviewDisputeResponse:
+    opened_by = _resolve_review_reviewer(request, payload.opened_by or "")
+    try:
+        result = repository.open_review_dispute(
+            cycle_id,
+            payload.asset_type,
+            payload.asset_key,
+            opened_by,
+            payload.summary,
+            case_id=payload.case_id,
+            arbitrator=payload.arbitrator,
+            metadata=payload.metadata,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    dispute = _dispute_or_404(result, action="open dispute")
+    return ReviewDisputeResponse(cycle_id=cycle_id, dispute=dispute)
+
+
+@router.post("/sessions/{cycle_id}/review-disputes/{case_id}/assign")
+def assign_research_review_dispute(
+    cycle_id: str,
+    case_id: str,
+    payload: ReviewDisputeAssignRequest,
+    request: Request,
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ReviewDisputeResponse:
+    actor = _resolve_review_reviewer(request, "")
+    try:
+        result = repository.assign_review_dispute(
+            cycle_id,
+            case_id,
+            payload.arbitrator,
+            actor=actor,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    dispute = _dispute_or_404(result, action="assign dispute")
+    return ReviewDisputeResponse(cycle_id=cycle_id, dispute=dispute)
+
+
+@router.post("/sessions/{cycle_id}/review-disputes/{case_id}/resolve")
+def resolve_research_review_dispute(
+    cycle_id: str,
+    case_id: str,
+    payload: ReviewDisputeResolveRequest,
+    request: Request,
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ReviewDisputeResponse:
+    resolved_by = _resolve_review_reviewer(request, payload.resolved_by or "")
+    try:
+        result = repository.resolve_review_dispute(
+            cycle_id,
+            case_id,
+            payload.resolution,
+            resolved_by=resolved_by,
+            resolution_notes=payload.resolution_notes,
+            writeback_review_status=payload.writeback_review_status,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    dispute = _dispute_or_404(result, action="resolve dispute")
+    return ReviewDisputeResponse(cycle_id=cycle_id, dispute=dispute)
+
+
+@router.post("/sessions/{cycle_id}/review-disputes/{case_id}/withdraw")
+def withdraw_research_review_dispute(
+    cycle_id: str,
+    case_id: str,
+    payload: ReviewDisputeWithdrawRequest,
+    request: Request,
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ReviewDisputeResponse:
+    actor = _resolve_review_reviewer(request, "")
+    try:
+        result = repository.withdraw_review_dispute(
+            cycle_id,
+            case_id,
+            actor=actor,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    dispute = _dispute_or_404(result, action="withdraw dispute")
+    return ReviewDisputeResponse(cycle_id=cycle_id, dispute=dispute)
+
+
+@router.get("/sessions/{cycle_id}/review-disputes")
+def list_research_review_disputes(
+    cycle_id: str,
+    dispute_status: str=Query(""),
+    arbitrator: str=Query(""),
+    opened_by: str=Query(""),
+    asset_type: str=Query(""),
+    case_id: str=Query(""),
+    limit: int=Query(0),
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ReviewDisputeListResponse:
+    items = repository.list_review_disputes(
+        cycle_id=cycle_id,
+        dispute_status=dispute_status or None,
+        arbitrator=arbitrator or None,
+        opened_by=opened_by or None,
+        asset_type=asset_type or None,
+        case_id=case_id or None,
+        limit=limit if limit > 0 else None,
+    )
+    return ReviewDisputeListResponse(cycle_id=cycle_id, items=items, count=len(items))
 
 
 @router.delete("/jobs/{job_id}")

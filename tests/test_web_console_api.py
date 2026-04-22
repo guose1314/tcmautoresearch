@@ -1646,5 +1646,158 @@ class TestReviewAssignmentEndpoints(unittest.TestCase):
         self.assertEqual(by_label["未认领"]["unassigned"], 1)
 
 
+class TestReviewDisputeEndpoints(unittest.TestCase):
+    """Phase H / H-3: open / assign / resolve / withdraw / list dispute endpoints."""
+
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory(dir=os.getcwd())
+        self.artifact_markdown_path = os.path.join(self.tempdir.name, "final-report.md")
+        self.job_storage_dir = os.path.join(self.tempdir.name, "jobs")
+        with open(self.artifact_markdown_path, "w", encoding="utf-8") as handle:
+            handle.write("# H-3 测试产物\n")
+
+        self.manager = ResearchJobManager(
+            runner_factory=lambda config: FakeRunner(
+                {**config, "artifact_markdown_path": self.artifact_markdown_path}
+            ),
+            storage_dir=self.job_storage_dir,
+            default_orchestrator_config={"runtime_profile": "web_research"},
+        )
+        app = create_app(job_manager=self.manager)
+        app.state.settings.secrets.pop("security", None)
+        self.client = TestClient(app)
+
+        repo = ResearchSessionRepository(self.client.app.state.db_manager)
+        self.cycle_id = "cycle-h3-endpoints"
+        if repo.get_session(self.cycle_id) is not None:
+            repo.delete_session(self.cycle_id)
+        repo.create_session(
+            {
+                "cycle_id": self.cycle_id,
+                "cycle_name": "H-3 dispute archive",
+                "description": "endpoint smoke",
+                "research_objective": "review dispute REST API",
+                "status": "running",
+                "current_phase": "observe",
+            }
+        )
+
+    def tearDown(self):
+        self.manager.close()
+        self.tempdir.cleanup()
+
+    def _open(self, asset_key: str, opened_by: str, summary: str = "争议", **extra):
+        body = {
+            "asset_type": "catalog",
+            "asset_key": asset_key,
+            "summary": summary,
+            "opened_by": opened_by,
+        }
+        body.update(extra)
+        return self.client.post(
+            f"/api/research/sessions/{self.cycle_id}/review-disputes/open",
+            json=body,
+        )
+
+    def test_open_endpoint_creates_case(self):
+        response = self._open("k-1", "李研究员")
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["cycle_id"], self.cycle_id)
+        dispute = payload["dispute"]
+        self.assertEqual(dispute["asset_key"], "k-1")
+        self.assertEqual(dispute["dispute_status"], "open")
+        self.assertEqual(dispute["opened_by"], "李研究员")
+        self.assertTrue(dispute["case_id"].startswith("DISP-"))
+
+    def test_open_endpoint_with_arbitrator_assigns(self):
+        response = self._open("k-1", "李研究员", arbitrator="张专家")
+        self.assertEqual(response.status_code, 200, response.text)
+        dispute = response.json()["dispute"]
+        self.assertEqual(dispute["dispute_status"], "assigned")
+        self.assertEqual(dispute["arbitrator"], "张专家")
+
+    def test_open_endpoint_404_when_session_missing(self):
+        response = self.client.post(
+            "/api/research/sessions/missing-cycle/review-disputes/open",
+            json={
+                "asset_type": "catalog",
+                "asset_key": "k-1",
+                "summary": "争议",
+                "opened_by": "李研究员",
+            },
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_assign_endpoint_updates_arbitrator(self):
+        opened = self._open("k-1", "李研究员").json()["dispute"]
+        case_id = opened["case_id"]
+        response = self.client.post(
+            f"/api/research/sessions/{self.cycle_id}/review-disputes/{case_id}/assign",
+            json={"arbitrator": "张专家", "notes": "安排裁决"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        dispute = response.json()["dispute"]
+        self.assertEqual(dispute["arbitrator"], "张专家")
+        self.assertEqual(dispute["dispute_status"], "assigned")
+
+    def test_resolve_endpoint_marks_resolved(self):
+        opened = self._open("k-1", "李研究员").json()["dispute"]
+        case_id = opened["case_id"]
+        response = self.client.post(
+            f"/api/research/sessions/{self.cycle_id}/review-disputes/{case_id}/resolve",
+            json={
+                "resolution": "accepted",
+                "resolved_by": "张专家",
+                "resolution_notes": "同意原审",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        dispute = response.json()["dispute"]
+        self.assertEqual(dispute["dispute_status"], "resolved")
+        self.assertEqual(dispute["resolution"], "accepted")
+
+    def test_withdraw_endpoint_marks_withdrawn(self):
+        opened = self._open("k-1", "李研究员").json()["dispute"]
+        case_id = opened["case_id"]
+        response = self.client.post(
+            f"/api/research/sessions/{self.cycle_id}/review-disputes/{case_id}/withdraw",
+            json={"notes": "撤回"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        dispute = response.json()["dispute"]
+        self.assertEqual(dispute["dispute_status"], "withdrawn")
+
+    def test_list_endpoint_supports_filters(self):
+        a = self._open("k-1", "李研究员").json()["dispute"]
+        b = self._open("k-2", "张研究员", arbitrator="王专家").json()["dispute"]
+        c = self._open("k-3", "李研究员").json()["dispute"]
+        # Resolve c
+        self.client.post(
+            f"/api/research/sessions/{self.cycle_id}/review-disputes/{c['case_id']}/resolve",
+            json={"resolution": "rejected", "resolved_by": "裁判"},
+        )
+
+        response = self.client.get(
+            f"/api/research/sessions/{self.cycle_id}/review-disputes",
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["count"], 3)
+
+        only_open = self.client.get(
+            f"/api/research/sessions/{self.cycle_id}/review-disputes",
+            params={"dispute_status": "open"},
+        )
+        case_ids = {item["case_id"] for item in only_open.json()["items"]}
+        self.assertEqual(case_ids, {a["case_id"]})
+
+        only_arbitrator = self.client.get(
+            f"/api/research/sessions/{self.cycle_id}/review-disputes",
+            params={"arbitrator": "王专家"},
+        )
+        case_ids = {item["case_id"] for item in only_arbitrator.json()["items"]}
+        self.assertEqual(case_ids, {b["case_id"]})
+
+
 if __name__ == "__main__":
     unittest.main()

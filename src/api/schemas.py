@@ -278,6 +278,80 @@ class ReviewerWorkloadResponse(BaseModel):
     count: int = Field(default=0, description="返回条目数")
 
 
+# ---------------------------------------------------------------------------
+# Phase H / H-3: Review dispute archive
+# ---------------------------------------------------------------------------
+
+
+class ReviewDisputeOpenRequest(BaseModel):
+    asset_type: str = Field(..., description="争议指向的 review 资产类型")
+    asset_key: str = Field(..., description="争议指向的 review 资产键")
+    summary: str = Field(..., min_length=1, description="争议简述（必填）")
+    case_id: Optional[str] = Field(default=None, description="可选自定义 case_id；缺省自动生成")
+    arbitrator: Optional[str] = Field(default=None, description="可选预指派的裁决人")
+    opened_by: Optional[str] = Field(default=None, description="发起人；缺省取认证身份")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="争议元数据")
+
+
+class ReviewDisputeAssignRequest(BaseModel):
+    arbitrator: str = Field(..., min_length=1, description="新指派的裁决人")
+    notes: Optional[str] = Field(default=None, description="改派备注")
+
+
+class ReviewDisputeResolveRequest(BaseModel):
+    resolution: str = Field(
+        ..., description="裁决结果：accepted / rejected / needs_source / no_change"
+    )
+    resolution_notes: Optional[str] = Field(default=None, description="裁决说明")
+    writeback_review_status: Optional[str] = Field(
+        default=None,
+        description="是否同步回写 workbench 状态：accepted / rejected / needs_source / pending",
+    )
+    resolved_by: Optional[str] = Field(default=None, description="裁决人；缺省取认证身份")
+
+
+class ReviewDisputeWithdrawRequest(BaseModel):
+    notes: Optional[str] = Field(default=None, description="撤销说明")
+
+
+class ReviewDisputeRecord(BaseModel):
+    id: str = Field(..., description="dispute 主键")
+    cycle_id: str = Field(..., description="周期 ID")
+    case_id: str = Field(..., description="案件 ID")
+    asset_type: str = Field(..., description="争议指向的资产类型")
+    asset_key: str = Field(..., description="争议指向的资产键")
+    dispute_status: str = Field(..., description="争议状态：open/assigned/resolved/withdrawn")
+    resolution: Optional[str] = Field(default=None, description="裁决结果")
+    opened_by: str = Field(..., description="发起人")
+    arbitrator: Optional[str] = Field(default=None, description="裁决人")
+    summary: str = Field(default="", description="争议简述")
+    resolution_notes: Optional[str] = Field(default=None, description="裁决说明")
+    events: List[Dict[str, Any]] = Field(default_factory=list, description="争议事件流水")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="附加元数据")
+    opened_at: Optional[str] = Field(default=None, description="发起时间")
+    assigned_at: Optional[str] = Field(default=None, description="指派时间")
+    resolved_at: Optional[str] = Field(default=None, description="关闭时间")
+    created_at: Optional[str] = Field(default=None, description="创建时间")
+    updated_at: Optional[str] = Field(default=None, description="更新时间")
+    writeback_applied: Optional[bool] = Field(
+        default=None, description="是否已联动回写 workbench 状态"
+    )
+    writeback_review_status: Optional[str] = Field(
+        default=None, description="联动回写的 workbench 状态"
+    )
+
+
+class ReviewDisputeResponse(BaseModel):
+    cycle_id: str = Field(..., description="周期 ID")
+    dispute: ReviewDisputeRecord = Field(..., description="争议记录")
+
+
+class ReviewDisputeListResponse(BaseModel):
+    cycle_id: str = Field(..., description="周期 ID")
+    items: List[ReviewDisputeRecord] = Field(default_factory=list, description="争议列表")
+    count: int = Field(default=0, description="返回条目数")
+
+
 class ResearchJobListItem(BaseModel):
     job_id: str = Field(..., description="任务 ID")
     topic: str = Field(..., description="研究主题")

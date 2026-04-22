@@ -867,20 +867,20 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
 
 - 建议标题：`Phase H / H-3 争议归档与裁决流`
 - 建议标签：`philology`、`dispute-resolution`、`review-workbench`、`phase-h`、`p1`
+- 当前状态：2026-04-22 已全部完成，新增 34 个测试（15 仓储 + 12 看板契约 + 7 端点），核心子集 1419 passed。alembic migration revision `c7e9a32d8b54` 已就绪，需在生产环境执行 `alembic upgrade head` 创建 `review_disputes` 表。
 - 目标：把 decision history 从审计线索升级为真实 dispute workflow，支持升级、裁决、关闭三步闭环。
 - 范围：
-  - [ ] 在 `src/research/review_workbench.py`、`src/api/schemas.py` 增加 dispute / resolution 相关字段
-  - [ ] 在 `src/infrastructure/persistence.py`、`src/infrastructure/research_session_repo.py`、`alembic/versions/` 增加 dispute archive
-  - [ ] 在 `src/api/research_utils.py`、`src/web/routes/dashboard.py`、`web_console/static/index.html` 增加 dispute inbox / history
-  - [ ] 在 `src/api/routes/research.py` 增加标记争议、指定裁决人、裁决关闭接口
+  - [x] 在 `src/research/review_workbench.py`、`src/api/schemas.py` 增加 dispute / resolution 相关字段（H-3 在 schemas.py 新增 7 个 ReviewDispute* 模型）
+  - [x] 在 `src/infrastructure/persistence.py`、`src/infrastructure/research_session_repo.py`、`alembic/versions/` 增加 dispute archive（新增 `ReviewDispute` ORM、6 个仓储方法、`c7e9a32d8b54_add_review_disputes_table.py`）
+  - [x] 在 `src/api/research_utils.py`、`src/web/routes/dashboard.py`、`web_console/static/index.html` 增加 dispute inbox / history（新增 `build_dispute_archive_board`、dashboard 路由 thread `review_disputes`、UI 新增 `buildDisputeArchiveBoard` 三 tab：待处理/我裁决/历史）
+  - [x] 在 `src/api/routes/research.py` 增加标记争议、指定裁决人、裁决关闭接口（5 个 endpoint：open/assign/resolve/withdraw/list）
 - 完成定义：
-  - [ ] reviewer 冲突可形成 dispute case，并可按 case_id 查询完整历史
-  - [ ] 裁决关闭后，对应 workbench item 会自动回写最终状态
+  - [x] reviewer 冲突可形成 dispute case，并可按 case_id 查询完整历史
+  - [x] 裁决关闭后，对应 workbench item 会自动回写最终状态（`resolve_review_dispute` 通过 `writeback_review_status` 调用 `upsert_observe_workbench_review_batch`）
 - 测试：
-  - [ ] `tests/unit/test_review_dispute_contract.py`
-  - [ ] `tests/test_research_pipeline_observe.py`
-  - [ ] `tests/test_workbench_evidence_chain.py`
-  - [ ] `tests/test_web_console_api.py`
+  - [x] `tests/unit/test_review_dispute_contract.py`（12 通过）
+  - [x] `tests/test_research_session_repo.py::TestReviewDisputes`（15 通过）
+  - [x] `tests/test_web_console_api.py::TestReviewDisputeEndpoints`（7 通过）
 
 ###### Card H-4
 
@@ -1018,7 +1018,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
 | Neo4j schema versioning 与标签注册表 | `src/storage/graph_schema.py`、`src/storage/neo4j_driver.py`、`src/api/routes/analysis.py` | G-1 完成 schema registry、drift 检查与 KG stats 输出 |
 | hypothesis / evidence graph assets 首轮资产化 | `src/research/graph_assets.py`、`src/research/phases/hypothesis_phase.py`、`src/research/phases/analyze_phase.py`、`src/research/phase_orchestrator.py` | G-2 完成子图构建、统一事务投影、graph_report 计数 |
 
-### Phase G-3 / G-4 / H-1 / H-2 状态更新（2026-04-21 末）
+### Phase G-3 / G-4 / H-1 / H-2 / H-3 状态更新（2026-04-22）
 
 Phase G-3（文献学子图治理）已**全部完成**：
 
@@ -1047,6 +1047,13 @@ Phase H-2（Reviewer 分配与负载视图）已**全部完成**：
 - [x] H-2-2：`ResearchSessionRepository` 已增加 claim / release / reassign / complete / list_review_queue / aggregate_reviewer_workload ✓
 - [x] H-2-3：5 个新 API 端点 + 8 个 Pydantic 模型已上线 ✓
 - [x] H-2-4：`build_reviewer_workload_board()` 已接入 dashboard payload；web console 已增加"我负责 / 无人认领 / 超期项"三 tab 看板 ✓
+
+Phase H-3（争议归档与裁决流）已**全部完成**：
+
+- [x] H-3-1：`ReviewDispute` ORM 模型已新增（UniqueConstraint(cycle_id, case_id) + 4 索引），alembic migration `c7e9a32d8b54` 已就绪 ✓
+- [x] H-3-2：`ResearchSessionRepository` 已增加 open / assign / resolve / withdraw / list_review_disputes / get_review_dispute（含 `_generate_dispute_case_id` / `_append_dispute_event` 帮手）✓
+- [x] H-3-3：5 个新 API 端点 + 7 个 Pydantic 模型已上线（POST open/assign/resolve/withdraw + GET list）✓
+- [x] H-3-4：`build_dispute_archive_board()` 已接入 dashboard payload；`resolve_review_dispute` 通过 `writeback_review_status` 自动回写 workbench 终态；web console 已增加"待处理 / 我裁决 / 历史"三 tab 看板 ✓
 
 ### Phase G-1 / G-2 状态更新
 
@@ -1083,10 +1090,10 @@ SmallModelOptimizer planner 已与 hypothesis / reflect / quality / experiment /
 从本文档任意一天恢复工作时，建议按以下顺序：
 
 1. 运行核心子集回归确认基线：`.\venv310\Scripts\Activate.ps1; python -m pytest tests/unit tests/test_research_session_repo.py tests/test_research_utils.py tests/test_web_console_api.py -q --disable-warnings`
-2. 确认 1385 passed / 0 failed（含 H-2 新增 31 个用例）
-3. 生产环境执行 `alembic upgrade head` 创建 `review_assignments` 表（migration `b5d8a91e3c47`）
+2. 确认 1419 passed / 0 failed（含 H-2 31 个 + H-3 34 个新增用例）
+3. 生产环境执行 `alembic upgrade head` 创建 `review_disputes` 表（migration `c7e9a32d8b54`，down_revision `b5d8a91e3c47`）
 4. 如需补验证面，执行 `test_kg_e2e.py` 对 live `/api/analysis/kg/stats` 与 graph asset 输出做一次端到端确认
-5. 按 **Phase H-3 -> H-4 -> I-2 -> I-3** 顺序继续推进
+5. 按 **Phase H-4 -> I-2 -> I-3** 顺序继续推进
 
 ---
 

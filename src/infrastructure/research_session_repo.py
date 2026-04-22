@@ -37,6 +37,7 @@ from src.infrastructure.persistence import (
     ResearchLearningFeedback,
     ResearchSession,
     ReviewAssignment,
+    ReviewDispute,
     SessionStatusEnum,
     _json_dumps,
     _json_loads,
@@ -1042,6 +1043,358 @@ class ResearchSessionRepository:
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
             "backlog_age_seconds": backlog_age_seconds,
             "is_overdue": is_overdue,
+        }
+
+    # ---- Phase H / H-3: Review disputes ---------------------------------
+
+    _REVIEW_DISPUTE_STATUSES = ("open", "assigned", "resolved", "withdrawn")
+    _REVIEW_DISPUTE_RESOLUTIONS = (
+        "accepted",
+        "rejected",
+        "needs_source",
+        "no_change",
+    )
+
+    def open_review_dispute(
+        self,
+        cycle_id: str,
+        asset_type: str,
+        asset_key: str,
+        opened_by: str,
+        summary: str,
+        *,
+        case_id: Optional[str] = None,
+        arbitrator: Optional[str] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Create a new dispute case for a workbench item.
+
+        Returns ``None`` when ``cycle_id`` does not resolve to a session.
+        Raises ``ValueError`` when required fields are missing.
+        """
+
+        normalized_opened_by = (opened_by or "").strip()
+        if not normalized_opened_by:
+            raise ValueError("opened_by is required to open a review dispute")
+        normalized_asset_type = str(asset_type or "").strip()
+        normalized_asset_key = str(asset_key or "").strip()
+        if not normalized_asset_type or not normalized_asset_key:
+            raise ValueError("asset_type and asset_key are required")
+        normalized_summary = str(summary or "").strip()
+        if not normalized_summary:
+            raise ValueError("summary is required to open a review dispute")
+
+        with self._session_scope(session) as db_session:
+            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            if rs is None:
+                return None
+
+            resolved_case_id = (case_id or "").strip() or self._generate_dispute_case_id(
+                db_session, cycle_id
+            )
+            now = datetime.utcnow()
+            arbitrator_value = (arbitrator or "").strip() or None
+            initial_status = "assigned" if arbitrator_value else "open"
+            opened_event = {
+                "event": "opened",
+                "actor": normalized_opened_by,
+                "at": now.isoformat(),
+                "summary": normalized_summary,
+            }
+            events: list[Dict[str, Any]] = [opened_event]
+            if arbitrator_value:
+                events.append({
+                    "event": "assigned",
+                    "actor": normalized_opened_by,
+                    "arbitrator": arbitrator_value,
+                    "at": now.isoformat(),
+                })
+            row = ReviewDispute(
+                session_id=rs.id,
+                cycle_id=cycle_id,
+                case_id=resolved_case_id,
+                asset_type=normalized_asset_type,
+                asset_key=normalized_asset_key,
+                dispute_status=initial_status,
+                opened_by=normalized_opened_by,
+                arbitrator=arbitrator_value,
+                summary=normalized_summary,
+                events_json=_json_dumps(events, "[]"),
+                metadata_json=_json_dumps(dict(metadata or {}), "{}"),
+                opened_at=now,
+                assigned_at=now if arbitrator_value else None,
+            )
+            db_session.add(row)
+            db_session.flush()
+            return self._review_dispute_to_dict(row)
+
+    def assign_review_dispute(
+        self,
+        cycle_id: str,
+        case_id: str,
+        arbitrator: str,
+        *,
+        actor: Optional[str] = None,
+        notes: Optional[str] = None,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        normalized_arbitrator = (arbitrator or "").strip()
+        if not normalized_arbitrator:
+            raise ValueError("arbitrator is required to assign a review dispute")
+        with self._session_scope(session) as db_session:
+            row = self._find_review_dispute(db_session, cycle_id, case_id)
+            if row is None:
+                return None
+            if row.dispute_status not in {"open", "assigned"}:
+                raise ValueError(
+                    f"dispute case {case_id} 已是终态 {row.dispute_status}, 不可改派"
+                )
+            now = datetime.utcnow()
+            row.arbitrator = normalized_arbitrator
+            row.dispute_status = "assigned"
+            row.assigned_at = now
+            self._append_dispute_event(
+                row,
+                {
+                    "event": "assigned",
+                    "actor": (actor or normalized_arbitrator).strip(),
+                    "arbitrator": normalized_arbitrator,
+                    "at": now.isoformat(),
+                    "notes": notes,
+                },
+            )
+            db_session.flush()
+            return self._review_dispute_to_dict(row)
+
+    def resolve_review_dispute(
+        self,
+        cycle_id: str,
+        case_id: str,
+        resolution: str,
+        *,
+        resolved_by: str,
+        resolution_notes: Optional[str] = None,
+        writeback_review_status: Optional[str] = None,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Close a dispute and (optionally) write back the final review status
+        onto the matching workbench item.
+        """
+
+        normalized_resolved_by = (resolved_by or "").strip()
+        if not normalized_resolved_by:
+            raise ValueError("resolved_by is required to resolve a review dispute")
+        normalized_resolution = (resolution or "").strip().lower()
+        if normalized_resolution not in self._REVIEW_DISPUTE_RESOLUTIONS:
+            raise ValueError(
+                f"invalid resolution {resolution!r}; expected one of "
+                f"{self._REVIEW_DISPUTE_RESOLUTIONS}"
+            )
+        with self._session_scope(session) as db_session:
+            row = self._find_review_dispute(db_session, cycle_id, case_id)
+            if row is None:
+                return None
+            if row.dispute_status in {"resolved", "withdrawn"}:
+                raise ValueError(
+                    f"dispute case {case_id} 已是终态 {row.dispute_status}, 不可重复关闭"
+                )
+            now = datetime.utcnow()
+            row.dispute_status = "resolved"
+            row.resolution = normalized_resolution
+            row.resolved_at = now
+            if resolution_notes is not None:
+                row.resolution_notes = str(resolution_notes)
+            self._append_dispute_event(
+                row,
+                {
+                    "event": "resolved",
+                    "actor": normalized_resolved_by,
+                    "resolution": normalized_resolution,
+                    "at": now.isoformat(),
+                    "notes": resolution_notes,
+                    "writeback_review_status": writeback_review_status,
+                },
+            )
+            db_session.flush()
+            payload = self._review_dispute_to_dict(row)
+
+        # Optional write-back to workbench item — runs in a fresh session
+        # so the dispute row commits even if writeback fails downstream.
+        writeback_status = (writeback_review_status or "").strip().lower()
+        if writeback_status in {"accepted", "rejected", "needs_source", "pending"}:
+            try:
+                self.upsert_observe_workbench_review_batch(
+                    cycle_id,
+                    {
+                        "decisions": [
+                            {
+                                "asset_type": payload["asset_type"],
+                                "asset_key": payload["asset_key"],
+                                "review_status": writeback_status,
+                                "reviewer": normalized_resolved_by,
+                                "decision_basis": (
+                                    f"裁决关闭 dispute {payload['case_id']}: "
+                                    f"{normalized_resolution}"
+                                ),
+                                "review_reasons": [
+                                    f"dispute_resolution:{normalized_resolution}",
+                                    f"dispute_case:{payload['case_id']}",
+                                ],
+                            }
+                        ],
+                        "reviewer": normalized_resolved_by,
+                        "shared_decision_basis": (
+                            f"H-3 dispute {payload['case_id']} 裁决关闭"
+                        ),
+                    },
+                )
+                payload["writeback_applied"] = True
+                payload["writeback_review_status"] = writeback_status
+            except Exception:  # pragma: no cover — best-effort
+                payload["writeback_applied"] = False
+                payload["writeback_review_status"] = writeback_status
+        else:
+            payload["writeback_applied"] = False
+            payload["writeback_review_status"] = None
+        return payload
+
+    def withdraw_review_dispute(
+        self,
+        cycle_id: str,
+        case_id: str,
+        *,
+        actor: str,
+        notes: Optional[str] = None,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        normalized_actor = (actor or "").strip()
+        if not normalized_actor:
+            raise ValueError("actor is required to withdraw a review dispute")
+        with self._session_scope(session) as db_session:
+            row = self._find_review_dispute(db_session, cycle_id, case_id)
+            if row is None:
+                return None
+            if row.dispute_status in {"resolved", "withdrawn"}:
+                raise ValueError(
+                    f"dispute case {case_id} 已是终态 {row.dispute_status}, 不可撤销"
+                )
+            now = datetime.utcnow()
+            row.dispute_status = "withdrawn"
+            row.resolved_at = now
+            if notes is not None:
+                row.resolution_notes = str(notes)
+            self._append_dispute_event(
+                row,
+                {
+                    "event": "withdrawn",
+                    "actor": normalized_actor,
+                    "at": now.isoformat(),
+                    "notes": notes,
+                },
+            )
+            db_session.flush()
+            return self._review_dispute_to_dict(row)
+
+    def list_review_disputes(
+        self,
+        *,
+        cycle_id: Optional[str] = None,
+        dispute_status: Optional[str] = None,
+        arbitrator: Optional[str] = None,
+        opened_by: Optional[str] = None,
+        asset_type: Optional[str] = None,
+        case_id: Optional[str] = None,
+        limit: Optional[int] = None,
+        session: Optional[Session] = None,
+    ) -> List[Dict[str, Any]]:
+        with self._session_scope(session) as db_session:
+            query = db_session.query(ReviewDispute)
+            if cycle_id:
+                query = query.filter(ReviewDispute.cycle_id == cycle_id)
+            if dispute_status:
+                normalized_status = str(dispute_status).strip().lower()
+                if normalized_status in self._REVIEW_DISPUTE_STATUSES:
+                    query = query.filter(ReviewDispute.dispute_status == normalized_status)
+            if arbitrator:
+                query = query.filter(ReviewDispute.arbitrator == str(arbitrator).strip())
+            if opened_by:
+                query = query.filter(ReviewDispute.opened_by == str(opened_by).strip())
+            if asset_type:
+                query = query.filter(ReviewDispute.asset_type == str(asset_type).strip())
+            if case_id:
+                query = query.filter(ReviewDispute.case_id == str(case_id).strip())
+            query = query.order_by(
+                ReviewDispute.dispute_status.asc(), ReviewDispute.created_at.asc()
+            )
+            if limit is not None and limit > 0:
+                query = query.limit(int(limit))
+            return [self._review_dispute_to_dict(r) for r in query.all()]
+
+    def get_review_dispute(
+        self,
+        cycle_id: str,
+        case_id: str,
+        *,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        with self._session_scope(session) as db_session:
+            row = self._find_review_dispute(db_session, cycle_id, case_id)
+            return self._review_dispute_to_dict(row) if row else None
+
+    @staticmethod
+    def _find_review_dispute(
+        db_session: Session, cycle_id: str, case_id: str
+    ) -> Optional[ReviewDispute]:
+        return (
+            db_session.query(ReviewDispute)
+            .filter_by(cycle_id=cycle_id, case_id=str(case_id).strip())
+            .one_or_none()
+        )
+
+    @staticmethod
+    def _append_dispute_event(row: ReviewDispute, event: Dict[str, Any]) -> None:
+        events = _json_loads(row.events_json, []) or []
+        if not isinstance(events, list):
+            events = []
+        events.append({k: v for k, v in event.items() if v is not None})
+        row.events_json = _json_dumps(events, "[]")
+
+    @staticmethod
+    def _generate_dispute_case_id(db_session: Session, cycle_id: str) -> str:
+        existing = (
+            db_session.query(ReviewDispute)
+            .filter(ReviewDispute.cycle_id == cycle_id)
+            .count()
+        )
+        suffix = uuid.uuid4().hex[:6].upper()
+        return f"DISP-{existing + 1:04d}-{suffix}"
+
+    @staticmethod
+    def _review_dispute_to_dict(row: ReviewDispute) -> Dict[str, Any]:
+        events = _json_loads(row.events_json, [])
+        if not isinstance(events, list):
+            events = []
+        return {
+            "id": str(row.id),
+            "session_id": str(row.session_id),
+            "cycle_id": row.cycle_id,
+            "case_id": row.case_id,
+            "asset_type": row.asset_type,
+            "asset_key": row.asset_key,
+            "dispute_status": row.dispute_status,
+            "resolution": row.resolution,
+            "opened_by": row.opened_by,
+            "arbitrator": row.arbitrator,
+            "summary": row.summary,
+            "resolution_notes": row.resolution_notes,
+            "events": events,
+            "metadata": _json_loads(row.metadata_json, {}),
+            "opened_at": row.opened_at.isoformat() if row.opened_at else None,
+            "assigned_at": row.assigned_at.isoformat() if row.assigned_at else None,
+            "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
 
     def upsert_observe_catalog_review(

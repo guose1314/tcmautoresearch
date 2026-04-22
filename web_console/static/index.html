@@ -4280,6 +4280,97 @@
             return wrapper;
         }
 
+        function buildDisputeArchiveBoard(reviewWorkbench) {
+            const board = reviewWorkbench?.review_queue?.dispute_board
+                && typeof reviewWorkbench.review_queue.dispute_board === "object"
+                ? reviewWorkbench.review_queue.dispute_board
+                : (reviewWorkbench?.dispute_board && typeof reviewWorkbench.dispute_board === "object"
+                    ? reviewWorkbench.dispute_board
+                    : null);
+            if (!board || board.supported !== true) {
+                return null;
+            }
+            const summary = board.summary && typeof board.summary === "object" ? board.summary : {};
+            const views = board.views && typeof board.views === "object" ? board.views : {};
+            const currentReviewer = String(board.current_reviewer || "").trim();
+
+            const wrapper = document.createElement("div");
+            wrapper.className = "dashboard-review-meta";
+            wrapper.style.display = "flex";
+            wrapper.style.flexDirection = "column";
+            wrapper.style.gap = "6px";
+
+            const heading = document.createElement("div");
+            heading.style.fontWeight = "600";
+            heading.textContent = `争议归档（裁决人：${currentReviewer || "未识别"}）`;
+            wrapper.appendChild(heading);
+
+            const tabsRow = document.createElement("div");
+            tabsRow.style.display = "flex";
+            tabsRow.style.gap = "12px";
+            tabsRow.style.flexWrap = "wrap";
+
+            const detail = document.createElement("div");
+            detail.style.fontSize = "12px";
+            detail.style.lineHeight = "1.4";
+            detail.style.whiteSpace = "pre-wrap";
+
+            const tabDefs = [
+                { key: "inbox", label: "待处理" },
+                { key: "mine", label: "我裁决" },
+                { key: "history", label: "历史" },
+            ];
+
+            function renderDetail(items) {
+                const safeItems = Array.isArray(items) ? items : [];
+                if (safeItems.length === 0) {
+                    detail.textContent = "（无）";
+                    return;
+                }
+                detail.textContent = safeItems
+                    .slice(0, 8)
+                    .map((entry) => {
+                        const caseId = entry?.case_id || "";
+                        const status = entry?.dispute_status || "open";
+                        const assetType = entry?.asset_type || "";
+                        const assetKey = entry?.asset_key || "";
+                        const arbitrator = entry?.arbitrator || "未指派";
+                        const opener = entry?.opened_by || "";
+                        const resolution = entry?.resolution ? ` -> ${entry.resolution}` : "";
+                        return `[${status}] ${caseId} · ${assetType}/${assetKey} · 提交：${opener} · 裁决：${arbitrator}${resolution}`;
+                    })
+                    .join("\n");
+            }
+
+            const tabButtons = [];
+            tabDefs.forEach((def, idx) => {
+                const count = safeNumber(summary[def.key], 0);
+                const button = document.createElement("button");
+                button.type = "button";
+                button.textContent = `${def.label}（${count}）`;
+                button.style.padding = "4px 10px";
+                button.style.borderRadius = "999px";
+                button.style.border = "1px solid #cbd5f5";
+                button.style.background = idx === 0 ? "#eef2ff" : "#fff";
+                button.style.cursor = "pointer";
+                button.dataset.viewKey = def.key;
+                button.addEventListener("click", function() {
+                    tabButtons.forEach((other) => {
+                        other.style.background = "#fff";
+                    });
+                    button.style.background = "#eef2ff";
+                    renderDetail(views[def.key]);
+                });
+                tabButtons.push(button);
+                tabsRow.appendChild(button);
+            });
+
+            wrapper.appendChild(tabsRow);
+            wrapper.appendChild(detail);
+            renderDetail(views.inbox);
+            return wrapper;
+        }
+
         function buildReviewWorkbenchFilterControl(jobId, fieldName, labelText, options, activeValue) {
             const wrapper = document.createElement("div");
             wrapper.className = "dashboard-review-filter";
@@ -4475,6 +4566,7 @@
 
             const workloadSummary = buildReviewerWorkloadSummary(reviewWorkbench);
             const workloadBoard = buildReviewerWorkloadBoard(reviewWorkbench);
+            const disputeBoard = buildDisputeArchiveBoard(reviewWorkbench);
 
             toolbar.appendChild(filters);
             toolbar.appendChild(summary);
@@ -4483,6 +4575,9 @@
             }
             if (workloadBoard) {
                 toolbar.appendChild(workloadBoard);
+            }
+            if (disputeBoard) {
+                toolbar.appendChild(disputeBoard);
             }
             toolbar.appendChild(batchPanel);
             return toolbar;

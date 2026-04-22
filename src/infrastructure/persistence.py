@@ -586,6 +586,12 @@ class ResearchSession(Base):
         cascade="all, delete-orphan",
         order_by="ReviewAssignment.created_at",
     )
+    review_disputes = relationship(
+        "ReviewDispute",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="ReviewDispute.created_at",
+    )
 
     __table_args__ = (
         Index("idx_rs_status", "status"),
@@ -745,6 +751,51 @@ class ReviewAssignment(Base):
         Index("idx_rva_assignee_status", "assignee", "queue_status"),
         Index("idx_rva_cycle_status", "cycle_id", "queue_status"),
         Index("idx_rva_due_at", "due_at"),
+    )
+
+
+class ReviewDispute(Base):
+    """Phase H / H-3: Review dispute archive — 把 reviewer 冲突升级为可裁决案件。
+
+    支持 open / assign / resolve / withdraw 闭环；裁决关闭时由仓储层
+    自动回写到对应的 review workbench item，实现"裁决->最终状态"打通。
+    """
+
+    __tablename__ = "review_disputes"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(
+        GUID(), ForeignKey("research_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    cycle_id = Column(String(128), nullable=False)
+    case_id = Column(String(64), nullable=False)
+    asset_type = Column(String(64), nullable=False)
+    asset_key = Column(String(255), nullable=False)
+    dispute_status = Column(String(32), nullable=False, default="open")
+    resolution = Column(String(32), nullable=True)
+    opened_by = Column(String(255), nullable=False)
+    arbitrator = Column(String(255), nullable=True)
+    summary = Column(Text, nullable=False, default="")
+    resolution_notes = Column(Text, nullable=True)
+    events_json = Column(Text, nullable=False, default="[]")
+    metadata_json = Column(Text, nullable=False, default="{}")
+
+    opened_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    assigned_at = Column(DateTime, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    session = relationship("ResearchSession", back_populates="review_disputes")
+
+    __table_args__ = (
+        UniqueConstraint("cycle_id", "case_id", name="uq_review_dispute_case"),
+        Index("idx_rvd_session_status", "session_id", "dispute_status"),
+        Index("idx_rvd_cycle_status", "cycle_id", "dispute_status"),
+        Index("idx_rvd_arbitrator", "arbitrator", "dispute_status"),
+        Index("idx_rvd_target", "cycle_id", "asset_type", "asset_key"),
     )
 
 

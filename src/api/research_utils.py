@@ -834,6 +834,68 @@ def build_reviewer_workload_board(
     }
 
 
+def build_dispute_archive_board(
+    review_disputes: Any,
+    *,
+    current_reviewer: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build the H-3 dispute archive board (inbox / mine / history).
+
+    ``inbox`` collects open + assigned cases (active workload); ``history``
+    collects resolved + withdrawn cases. ``mine`` filters inbox cases where
+    the current reviewer is the arbitrator. Returns ``{"supported": False}``
+    when the input is not a list so legacy snapshots degrade gracefully.
+    """
+
+    if not isinstance(review_disputes, (list, tuple)):
+        return {
+            "supported": False,
+            "summary": {},
+            "views": {"inbox": [], "mine": [], "history": []},
+            "disputes": [],
+            "current_reviewer": _as_text(current_reviewer) or "",
+        }
+    normalized: list[Dict[str, Any]] = []
+    for entry in review_disputes:
+        if isinstance(entry, dict):
+            normalized.append(dict(entry))
+    current = _as_text(current_reviewer)
+    inbox: list[Dict[str, Any]] = []
+    mine: list[Dict[str, Any]] = []
+    history: list[Dict[str, Any]] = []
+    by_status: Dict[str, int] = {}
+    for entry in normalized:
+        status = _as_text(entry.get("dispute_status")) or "open"
+        by_status[status] = by_status.get(status, 0) + 1
+        if status in {"open", "assigned"}:
+            inbox.append(entry)
+            if current and _as_text(entry.get("arbitrator")) == current:
+                mine.append(entry)
+        elif status in {"resolved", "withdrawn"}:
+            history.append(entry)
+    summary = {
+        "total": len(normalized),
+        "open": by_status.get("open", 0),
+        "assigned": by_status.get("assigned", 0),
+        "resolved": by_status.get("resolved", 0),
+        "withdrawn": by_status.get("withdrawn", 0),
+        "inbox": len(inbox),
+        "mine": len(mine),
+        "history": len(history),
+    }
+    return {
+        "supported": True,
+        "summary": summary,
+        "views": {
+            "inbox": inbox,
+            "mine": mine,
+            "history": history,
+        },
+        "disputes": normalized,
+        "current_reviewer": current,
+    }
+
+
 def _build_recent_batch_operations(observe_philology: Dict[str, Any]) -> list[Dict[str, Any]]:
     operations: list[Dict[str, Any]] = []
     for source_name, field_name in (
@@ -1224,6 +1286,7 @@ def _build_review_workbench(
     *,
     review_assignments: Optional[list[Dict[str, Any]]] = None,
     current_reviewer: Optional[str] = None,
+    review_disputes: Optional[list[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     decision_lookup = _build_review_workbench_decision_lookup(observe_philology)
     section_payloads = [
@@ -1286,6 +1349,10 @@ def _build_review_workbench(
         review_assignments,
         current_reviewer=current_reviewer,
     )
+    dispute_board = build_dispute_archive_board(
+        review_disputes,
+        current_reviewer=current_reviewer,
+    )
     return {
         "sections": sections,
         "section_count": len(sections),
@@ -1301,8 +1368,10 @@ def _build_review_workbench(
             "recent_batch_operations": recent_batch_operations,
             "last_batch_summary": recent_batch_operations[0] if recent_batch_operations else {},
             "workload_board": workload_board,
+            "dispute_board": dispute_board,
         },
         "reviewer_workload_board": workload_board,
+        "dispute_board": dispute_board,
         "selection_supported": True,
         "batch_audit_supported": True,
     }
@@ -1735,6 +1804,7 @@ def _build_dashboard_evidence_board(
     *,
     review_assignments: Optional[list[Dict[str, Any]]] = None,
     current_reviewer: Optional[str] = None,
+    review_disputes: Optional[list[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     evidence_records = _as_list(evidence_protocol.get("evidence_records"))
     claims = _as_list(evidence_protocol.get("claims"))
@@ -1754,6 +1824,7 @@ def _build_dashboard_evidence_board(
         review_queue_filters,
         review_assignments=review_assignments,
         current_reviewer=current_reviewer,
+        review_disputes=review_disputes,
     )
     philology_graph_view = _build_dashboard_philology_graph_view(
         cycle_id,
@@ -1798,6 +1869,7 @@ def _build_dashboard_evidence_board(
         "queue_filters": _as_dict(review_workbench.get("queue_filters")),
         "review_queue": _as_dict(review_workbench.get("review_queue")),
         "reviewer_workload_board": _as_dict(review_workbench.get("reviewer_workload_board")),
+        "dispute_board": _as_dict(review_workbench.get("dispute_board")),
         "review_workbench": review_workbench,
     }
 
@@ -2043,6 +2115,7 @@ def build_research_dashboard_payload(
     philology_filters: Optional[Dict[str, Any]] = None,
     review_assignments: Optional[list[Dict[str, Any]]] = None,
     current_reviewer: Optional[str] = None,
+    review_disputes: Optional[list[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build a visualization-friendly dashboard payload from a job snapshot."""
 
@@ -2123,6 +2196,7 @@ def build_research_dashboard_payload(
             review_queue_filters,
             review_assignments=review_assignments,
             current_reviewer=current_reviewer,
+            review_disputes=review_disputes,
         ),
         "learning_feedback_board": learning_feedback_board,
         "knowledge_graph_board": knowledge_graph_board,

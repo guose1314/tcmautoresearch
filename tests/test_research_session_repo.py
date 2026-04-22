@@ -1787,3 +1787,179 @@ class TestReviewAssignments:
         buckets = repo.aggregate_reviewer_workload(cycle_id=cycle_id)
         assert buckets[0]["overdue"] == 1
 
+
+class TestReviewDisputes:
+    """Phase H / H-3: open / assign / resolve / withdraw / list disputes."""
+
+    def _seed_session(self, repo) -> str:
+        payload = _make_payload()
+        repo.create_session(payload)
+        return payload["cycle_id"]
+
+    def test_open_persists_with_auto_case_id(self, repo):
+        cycle_id = self._seed_session(repo)
+        result = repo.open_review_dispute(
+            cycle_id, "catalog", "k-1", "李研究员",
+            "需要重新审核版本谱系",
+        )
+        assert result is not None
+        assert result["dispute_status"] == "open"
+        assert result["asset_type"] == "catalog"
+        assert result["asset_key"] == "k-1"
+        assert result["opened_by"] == "李研究员"
+        assert result["arbitrator"] in (None, "")
+        assert isinstance(result["case_id"], str) and result["case_id"].startswith("DISP-")
+        assert isinstance(result["events"], list) and len(result["events"]) == 1
+        assert result["events"][0].get("event") == "opened"
+
+    def test_open_with_arbitrator_marks_assigned(self, repo):
+        cycle_id = self._seed_session(repo)
+        result = repo.open_review_dispute(
+            cycle_id, "catalog", "k-1", "李研究员",
+            "需要专家裁决",
+            arbitrator="张专家",
+        )
+        assert result["dispute_status"] == "assigned"
+        assert result["arbitrator"] == "张专家"
+        events = result["events"]
+        assert len(events) == 2
+        assert {e.get("event") for e in events} == {"opened", "assigned"}
+
+    def test_open_blank_summary_raises(self, repo):
+        cycle_id = self._seed_session(repo)
+        with pytest.raises(ValueError):
+            repo.open_review_dispute(cycle_id, "catalog", "k-1", "李研究员", "  ")
+
+    def test_open_returns_none_when_session_missing(self, repo):
+        result = repo.open_review_dispute(
+            "cycle-does-not-exist", "catalog", "k-1", "李研究员", "测试",
+        )
+        assert result is None
+
+    def test_open_with_explicit_case_id_unique(self, repo):
+        cycle_id = self._seed_session(repo)
+        first = repo.open_review_dispute(
+            cycle_id, "catalog", "k-1", "李研究员", "case-1",
+            case_id="DISP-MANUAL-001",
+        )
+        assert first["case_id"] == "DISP-MANUAL-001"
+        with pytest.raises(Exception):
+            repo.open_review_dispute(
+                cycle_id, "catalog", "k-2", "李研究员", "case-1-dup",
+                case_id="DISP-MANUAL-001",
+            )
+
+    def test_assign_updates_arbitrator_and_appends_event(self, repo):
+        cycle_id = self._seed_session(repo)
+        opened = repo.open_review_dispute(
+            cycle_id, "catalog", "k-1", "李研究员", "测试",
+        )
+        case_id = opened["case_id"]
+        assigned = repo.assign_review_dispute(
+            cycle_id, case_id, "张专家", actor="管理员", notes="安排裁决",
+        )
+        assert assigned is not None
+        assert assigned["dispute_status"] == "assigned"
+        assert assigned["arbitrator"] == "张专家"
+        assert any(e.get("event") == "assigned" for e in assigned["events"])
+
+    def test_assign_terminal_status_raises(self, repo):
+        cycle_id = self._seed_session(repo)
+        opened = repo.open_review_dispute(
+            cycle_id, "catalog", "k-1", "李研究员", "测试",
+        )
+        case_id = opened["case_id"]
+        repo.withdraw_review_dispute(cycle_id, case_id, actor="李研究员")
+        with pytest.raises(ValueError):
+            repo.assign_review_dispute(cycle_id, case_id, "张专家")
+
+    def test_assign_returns_none_for_missing_case(self, repo):
+        cycle_id = self._seed_session(repo)
+        assert repo.assign_review_dispute(cycle_id, "DISP-NONE", "张专家") is None
+
+    def test_resolve_marks_resolved_and_records_event(self, repo):
+        cycle_id = self._seed_session(repo)
+        opened = repo.open_review_dispute(
+            cycle_id, "catalog", "k-1", "李研究员", "测试", arbitrator="张专家",
+        )
+        case_id = opened["case_id"]
+        resolved = repo.resolve_review_dispute(
+            cycle_id, case_id, "accepted",
+            resolved_by="张专家", resolution_notes="同意原审",
+        )
+        assert resolved is not None
+        assert resolved["dispute_status"] == "resolved"
+        assert resolved["resolution"] == "accepted"
+        assert resolved["resolution_notes"] == "同意原审"
+        assert any(e.get("event") == "resolved" for e in resolved["events"])
+
+    def test_resolve_invalid_resolution_raises(self, repo):
+        cycle_id = self._seed_session(repo)
+        opened = repo.open_review_dispute(
+            cycle_id, "catalog", "k-1", "李研究员", "测试",
+        )
+        with pytest.raises(ValueError):
+            repo.resolve_review_dispute(cycle_id, opened["case_id"], "invalid", resolved_by="张专家")
+
+    def test_resolve_terminal_status_raises(self, repo):
+        cycle_id = self._seed_session(repo)
+        opened = repo.open_review_dispute(
+            cycle_id, "catalog", "k-1", "李研究员", "测试",
+        )
+        case_id = opened["case_id"]
+        repo.resolve_review_dispute(cycle_id, case_id, "accepted", resolved_by="张专家")
+        with pytest.raises(ValueError):
+            repo.resolve_review_dispute(cycle_id, case_id, "rejected", resolved_by="张专家")
+
+    def test_withdraw_marks_terminal(self, repo):
+        cycle_id = self._seed_session(repo)
+        opened = repo.open_review_dispute(
+            cycle_id, "catalog", "k-1", "李研究员", "测试",
+        )
+        withdrawn = repo.withdraw_review_dispute(
+            cycle_id, opened["case_id"], actor="李研究员", notes="撤回",
+        )
+        assert withdrawn is not None
+        assert withdrawn["dispute_status"] == "withdrawn"
+        assert any(e.get("event") == "withdrawn" for e in withdrawn["events"])
+
+    def test_withdraw_terminal_raises(self, repo):
+        cycle_id = self._seed_session(repo)
+        opened = repo.open_review_dispute(
+            cycle_id, "catalog", "k-1", "李研究员", "测试",
+        )
+        case_id = opened["case_id"]
+        repo.resolve_review_dispute(cycle_id, case_id, "accepted", resolved_by="张专家")
+        with pytest.raises(ValueError):
+            repo.withdraw_review_dispute(cycle_id, case_id, actor="李研究员")
+
+    def test_list_review_disputes_filters(self, repo):
+        cycle_id = self._seed_session(repo)
+        a = repo.open_review_dispute(cycle_id, "catalog", "k-1", "李研究员", "S1")
+        b = repo.open_review_dispute(cycle_id, "catalog", "k-2", "张研究员", "S2", arbitrator="王专家")
+        c = repo.open_review_dispute(cycle_id, "workbench", "k-3", "李研究员", "S3")
+        repo.resolve_review_dispute(cycle_id, c["case_id"], "rejected", resolved_by="裁判")
+
+        all_items = repo.list_review_disputes(cycle_id=cycle_id)
+        assert len(all_items) == 3
+
+        only_open = repo.list_review_disputes(cycle_id=cycle_id, dispute_status="open")
+        assert {row["case_id"] for row in only_open} == {a["case_id"]}
+
+        only_arbitrator = repo.list_review_disputes(cycle_id=cycle_id, arbitrator="王专家")
+        assert {row["case_id"] for row in only_arbitrator} == {b["case_id"]}
+
+        only_workbench = repo.list_review_disputes(cycle_id=cycle_id, asset_type="workbench")
+        assert {row["case_id"] for row in only_workbench} == {c["case_id"]}
+
+        only_li = repo.list_review_disputes(cycle_id=cycle_id, opened_by="李研究员")
+        assert {row["case_id"] for row in only_li} == {a["case_id"], c["case_id"]}
+
+    def test_get_review_dispute(self, repo):
+        cycle_id = self._seed_session(repo)
+        opened = repo.open_review_dispute(cycle_id, "catalog", "k-1", "李研究员", "S1")
+        fetched = repo.get_review_dispute(cycle_id, opened["case_id"])
+        assert fetched is not None
+        assert fetched["case_id"] == opened["case_id"]
+        assert repo.get_review_dispute(cycle_id, "DISP-NONE") is None
+
