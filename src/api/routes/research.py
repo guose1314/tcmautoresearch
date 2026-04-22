@@ -58,6 +58,9 @@ from src.api.schemas import (
     ReviewDisputeResolveRequest,
     ReviewDisputeResponse,
     ReviewDisputeWithdrawRequest,
+    ReviewQualitySummaryResponse,
+    ReviewSampleRequest,
+    ReviewSampleResponse,
     ReviewerWorkloadResponse,
 )
 from src.infrastructure.research_session_repo import ResearchSessionRepository
@@ -223,6 +226,7 @@ def get_research_job_dashboard(
     cycle_id = _resolve_cycle_id(snapshot)
     review_assignments: list = []
     review_disputes: list = []
+    review_quality_summary: dict | None = None
     if cycle_id:
         try:
             review_assignments = repository.list_review_queue(cycle_id=cycle_id)
@@ -232,6 +236,10 @@ def get_research_job_dashboard(
             review_disputes = repository.list_review_disputes(cycle_id=cycle_id)
         except Exception:
             review_disputes = []
+        try:
+            review_quality_summary = repository.aggregate_review_quality_summary(cycle_id=cycle_id)
+        except Exception:
+            review_quality_summary = None
     current_reviewer = _resolve_review_reviewer(request, "")
     return build_research_dashboard_payload(
         snapshot,
@@ -248,6 +256,7 @@ def get_research_job_dashboard(
         review_assignments=review_assignments,
         current_reviewer=current_reviewer,
         review_disputes=review_disputes,
+        review_quality_summary=review_quality_summary,
     )
 
 
@@ -761,6 +770,56 @@ def list_research_review_disputes(
         limit=limit if limit > 0 else None,
     )
     return ReviewDisputeListResponse(cycle_id=cycle_id, items=items, count=len(items))
+
+
+# ---------------------------------------------------------------------------
+# Phase H / H-4: Review sampling & quality summary
+# ---------------------------------------------------------------------------
+
+
+@router.post("/sessions/{cycle_id}/review-sample")
+def sample_research_review_queue(
+    cycle_id: str,
+    payload: ReviewSampleRequest,
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ReviewSampleResponse:
+    from src.research.review_sampling import build_review_sample
+
+    queue_items = repository.list_review_queue(cycle_id=cycle_id)
+    try:
+        result = build_review_sample(
+            queue_items,
+            sample_size=payload.sample_size,
+            seed=payload.seed,
+            reviewer=payload.reviewer,
+            asset_type=payload.asset_type,
+            review_status=payload.review_status,
+            priority_bucket=payload.priority_bucket,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ReviewSampleResponse(
+        cycle_id=cycle_id,
+        summary=result["summary"],
+        items=result["items"],
+    )
+
+
+@router.get("/sessions/{cycle_id}/review-quality-summary")
+def get_research_review_quality_summary(
+    cycle_id: str,
+    reviewer: str=Query(""),
+    asset_type: str=Query(""),
+    repository: ResearchSessionRepository=Depends(get_research_session_repository),
+    _: None=Depends(require_management_api_key),
+) -> ReviewQualitySummaryResponse:
+    summary = repository.aggregate_review_quality_summary(
+        cycle_id=cycle_id,
+        reviewer=reviewer or None,
+        asset_type=asset_type or None,
+    )
+    return ReviewQualitySummaryResponse(cycle_id=cycle_id, summary=summary)
 
 
 @router.delete("/jobs/{job_id}")

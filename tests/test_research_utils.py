@@ -1139,6 +1139,53 @@ class TestResearchUtils(unittest.TestCase):
         self.assertEqual(data_mining_summary, {})
         self.assertEqual(data_mining_methods, [])
 
+    # ------------------------------------------------------------------
+    # Phase H / H-4: review_quality_summary propagation
+    # ------------------------------------------------------------------
+
+    def test_dashboard_payload_propagates_review_quality_summary(self):
+        snapshot = {
+            "job_id": "job-h4",
+            "topic": "h4",
+            "status": "completed",
+            "progress": 100.0,
+            "result": {"cycle_id": "cycle-h4"},
+        }
+        summary = {
+            "supported": True,
+            "agreement_rate": 0.75,
+            "overturn_rate": 0.25,
+            "recheck_count": 4,
+            "overdue_count": 1,
+            "median_backlog_age_hours": 1.5,
+            "assignment_count": 2,
+            "dispute_count": 4,
+            "resolved_dispute_count": 4,
+        }
+        payload = build_research_dashboard_payload(
+            snapshot,
+            review_quality_summary=summary,
+        )
+        evidence_board = payload["evidence_board"]
+        self.assertIn("review_quality_summary", evidence_board)
+        self.assertTrue(evidence_board["review_quality_summary"]["supported"])
+        self.assertEqual(evidence_board["review_quality_summary"]["agreement_rate"], 0.75)
+        self.assertEqual(evidence_board["review_quality_summary"]["recheck_count"], 4)
+
+    def test_dashboard_payload_quality_summary_unsupported_when_omitted(self):
+        snapshot = {
+            "job_id": "job-h4",
+            "topic": "h4",
+            "status": "completed",
+            "progress": 100.0,
+            "result": {"cycle_id": "cycle-h4"},
+        }
+        payload = build_research_dashboard_payload(snapshot)
+        self.assertEqual(
+            payload["evidence_board"]["review_quality_summary"]["supported"],
+            False,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

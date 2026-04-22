@@ -1799,5 +1799,114 @@ class TestReviewDisputeEndpoints(unittest.TestCase):
         self.assertEqual(case_ids, {b["case_id"]})
 
 
+class TestReviewQualityAndSamplingEndpoints(unittest.TestCase):
+    """Phase H / H-4: review-sample + review-quality-summary endpoints."""
+
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory(dir=os.getcwd())
+        self.artifact_markdown_path = os.path.join(self.tempdir.name, "final-report.md")
+        self.job_storage_dir = os.path.join(self.tempdir.name, "jobs")
+        with open(self.artifact_markdown_path, "w", encoding="utf-8") as handle:
+            handle.write("# H-4 测试产物\n")
+
+        self.manager = ResearchJobManager(
+            runner_factory=lambda config: FakeRunner(
+                {**config, "artifact_markdown_path": self.artifact_markdown_path}
+            ),
+            storage_dir=self.job_storage_dir,
+            default_orchestrator_config={"runtime_profile": "web_research"},
+        )
+        app = create_app(job_manager=self.manager)
+        app.state.settings.secrets.pop("security", None)
+        self.client = TestClient(app)
+
+        repo = ResearchSessionRepository(self.client.app.state.db_manager)
+        self.cycle_id = "cycle-h4-endpoints"
+        if repo.get_session(self.cycle_id) is not None:
+            repo.delete_session(self.cycle_id)
+        repo.create_session(
+            {
+                "cycle_id": self.cycle_id,
+                "cycle_name": "H-4 quality summary",
+                "description": "endpoint smoke",
+                "research_objective": "review sampling + QC summary",
+                "status": "running",
+                "current_phase": "observe",
+            }
+        )
+        # Seed 4 assignments + 2 disputes for richer metrics.
+        repo.claim_review_assignment(self.cycle_id, "catalog", "k-1", "李研究员", priority_bucket="high")
+        repo.claim_review_assignment(self.cycle_id, "catalog", "k-2", "李研究员", priority_bucket="medium")
+        repo.claim_review_assignment(self.cycle_id, "catalog", "k-3", "张研究员", priority_bucket="low")
+        repo.claim_review_assignment(self.cycle_id, "workbench", "k-4", "张研究员", priority_bucket="high")
+        a = repo.open_review_dispute(self.cycle_id, "catalog", "k-1", "李研究员", "S1")
+        b = repo.open_review_dispute(self.cycle_id, "catalog", "k-2", "李研究员", "S2")
+        repo.resolve_review_dispute(self.cycle_id, a["case_id"], "accepted", resolved_by="裁判")
+        repo.resolve_review_dispute(self.cycle_id, b["case_id"], "rejected", resolved_by="裁判")
+
+    def tearDown(self):
+        self.manager.close()
+        self.tempdir.cleanup()
+
+    def test_sample_endpoint_returns_deterministic_subset(self):
+        response = self.client.post(
+            f"/api/research/sessions/{self.cycle_id}/review-sample",
+            json={"sample_size": 2, "seed": "seed-A"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["cycle_id"], self.cycle_id)
+        self.assertEqual(payload["summary"]["sample_size"], 2)
+        self.assertEqual(payload["summary"]["selected_count"], 2)
+        self.assertEqual(len(payload["items"]), 2)
+        first_keys = [it["asset_key"] for it in payload["items"]]
+        # Same call → same selection
+        again = self.client.post(
+            f"/api/research/sessions/{self.cycle_id}/review-sample",
+            json={"sample_size": 2, "seed": "seed-A"},
+        )
+        self.assertEqual([it["asset_key"] for it in again.json()["items"]], first_keys)
+
+    def test_sample_endpoint_filters_by_reviewer(self):
+        response = self.client.post(
+            f"/api/research/sessions/{self.cycle_id}/review-sample",
+            json={"sample_size": 5, "reviewer": "李研究员"},
+        )
+        self.assertEqual(response.status_code, 200)
+        keys = {it["asset_key"] for it in response.json()["items"]}
+        self.assertEqual(keys, {"k-1", "k-2"})
+
+    def test_sample_endpoint_400_for_negative_size(self):
+        response = self.client.post(
+            f"/api/research/sessions/{self.cycle_id}/review-sample",
+            json={"sample_size": -1},
+        )
+        # Pydantic constraint (ge=0) yields 422
+        self.assertIn(response.status_code, (400, 422))
+
+    def test_quality_summary_endpoint_returns_metrics(self):
+        response = self.client.get(
+            f"/api/research/sessions/{self.cycle_id}/review-quality-summary",
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        summary = payload["summary"]
+        self.assertTrue(summary["supported"])
+        self.assertEqual(summary["assignment_count"], 4)
+        self.assertEqual(summary["dispute_count"], 2)
+        self.assertEqual(summary["resolved_dispute_count"], 2)
+        self.assertEqual(summary["agreement_rate"], 0.5)
+        self.assertEqual(summary["overturn_rate"], 0.5)
+
+    def test_quality_summary_endpoint_filters_by_reviewer(self):
+        response = self.client.get(
+            f"/api/research/sessions/{self.cycle_id}/review-quality-summary",
+            params={"reviewer": "李研究员"},
+        )
+        self.assertEqual(response.status_code, 200)
+        summary = response.json()["summary"]
+        self.assertEqual(summary["assignment_count"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

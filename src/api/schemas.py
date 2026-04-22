@@ -352,6 +352,53 @@ class ReviewDisputeListResponse(BaseModel):
     count: int = Field(default=0, description="返回条目数")
 
 
+# ---------------------------------------------------------------------------
+# Phase H / H-4: Review sampling & quality summary
+# ---------------------------------------------------------------------------
+
+
+class ReviewSampleRequest(BaseModel):
+    sample_size: int = Field(default=10, ge=0, le=500, description="抽样数量上限")
+    seed: str = Field(default="", description="确定性 seed；同 seed 同输入返回同样本")
+    reviewer: Optional[str] = Field(default=None, description="按审核人过滤")
+    asset_type: Optional[str] = Field(default=None, description="按资产类型过滤")
+    review_status: Optional[str] = Field(default=None, description="按审核状态过滤")
+    priority_bucket: Optional[str] = Field(default=None, description="按优先级过滤")
+
+
+class ReviewSampleSummary(BaseModel):
+    input_count: int = Field(default=0, description="输入条目数")
+    filtered_count: int = Field(default=0, description="过滤后条目数")
+    sample_size: int = Field(default=0, description="申请抽样数量")
+    selected_count: int = Field(default=0, description="实际抽样数量")
+    seed: str = Field(default="", description="使用的 seed")
+    filters: Dict[str, Any] = Field(default_factory=dict, description="抽样过滤条件回显")
+
+
+class ReviewSampleResponse(BaseModel):
+    cycle_id: str = Field(..., description="周期 ID")
+    summary: ReviewSampleSummary = Field(..., description="抽样摘要")
+    items: List[Dict[str, Any]] = Field(default_factory=list, description="抽样命中的 review 条目")
+
+
+class ReviewQualitySummary(BaseModel):
+    supported: bool = Field(default=True, description="是否支持 QC 计算")
+    filters: Dict[str, Any] = Field(default_factory=dict, description="过滤条件回显")
+    assignment_count: int = Field(default=0, description="参与计算的分配数")
+    dispute_count: int = Field(default=0, description="参与计算的争议数")
+    resolved_dispute_count: int = Field(default=0, description="已裁决的争议数")
+    agreement_rate: float = Field(default=0.0, description="原审被维持的比例")
+    overturn_rate: float = Field(default=0.0, description="原审被推翻的比例")
+    recheck_count: int = Field(default=0, description="复核被触发次数")
+    overdue_count: int = Field(default=0, description="超期分配数")
+    median_backlog_age_hours: float = Field(default=0.0, description="积压中位数（小时）")
+
+
+class ReviewQualitySummaryResponse(BaseModel):
+    cycle_id: str = Field(..., description="周期 ID")
+    summary: ReviewQualitySummary = Field(..., description="QC 摘要指标")
+
+
 class ResearchJobListItem(BaseModel):
     job_id: str = Field(..., description="任务 ID")
     topic: str = Field(..., description="研究主题")

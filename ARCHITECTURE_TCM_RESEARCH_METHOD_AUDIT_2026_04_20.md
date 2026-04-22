@@ -887,20 +887,21 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
 - 建议标题：`Phase H / H-4 抽样质检与质量看板`
 - 建议标签：`philology`、`quality-control`、`dashboard`、`phase-h`、`p2`
 - 目标：建立 review sampling 与 QC summary，让批量复核效率提升不会以质量失控为代价。
+- 当前状态：2026-04-22 已全部完成；新增 33 个测试（17 sampling 单测 + 3 repo + 2 utils + 5 endpoint + 6 Guard #38），核心子集 1452 通过 / 0 失败（H-3 基线为 1419）；本卡未引入 alembic migration（QC 指标全部基于 `review_assignments` + `review_disputes` 实时聚合）。
 - 范围：
-  - [ ] 新建 `src/research/review_sampling.py`，支持按 reviewer / asset_type / review_status / priority 抽样
-  - [ ] 在持久化层与仓储层记录 `agreement_rate`、`overturn_rate`、`recheck_count`、`overdue_count`、`median_backlog_age_hours`
-  - [ ] 在 `src/api/routes/research.py`、`src/api/schemas.py`、`src/web/routes/dashboard.py`、`web_console/static/index.html` 增加 sampling 与 `review_quality_summary`
-  - [ ] 新增架构守卫，确保 queue / quality summary / batch toolbar 不被后续改动删掉
+  - [x] 新建 `src/research/review_sampling.py`，支持按 reviewer / asset_type / review_status / priority 抽样
+  - [x] 在持久化层与仓储层记录 `agreement_rate`、`overturn_rate`、`recheck_count`、`overdue_count`、`median_backlog_age_hours`
+  - [x] 在 `src/api/routes/research.py`、`src/api/schemas.py`、`src/web/routes/dashboard.py`、`web_console/static/index.html` 增加 sampling 与 `review_quality_summary`
+  - [x] 新增架构守卫，确保 queue / quality summary / batch toolbar 不被后续改动删掉
 - 完成定义：
-  - [ ] 可生成稳定 sample set，并能按 cycle / reviewer / asset_type 返回 QC summary
-  - [ ] dashboard 或独立 API 能展示 review quality summary 并触发抽样
+  - [x] 可生成稳定 sample set，并能按 cycle / reviewer / asset_type 返回 QC summary
+  - [x] dashboard 或独立 API 能展示 review quality summary 并触发抽样
 - 测试：
-  - [ ] `tests/unit/test_review_quality_sampling.py`
-  - [ ] `tests/test_research_session_repo.py`
-  - [ ] `tests/test_research_utils.py`
-  - [ ] `tests/test_web_console_api.py`
-  - [ ] `tests/unit/test_architecture_regression_guard.py`（Guard #38）
+  - [x] `tests/unit/test_review_quality_sampling.py`（17 通过）
+  - [x] `tests/test_research_session_repo.py::TestReviewQualitySummaryRepo`（3 通过）
+  - [x] `tests/test_research_utils.py`（2 个 H-4 propagation 测试通过）
+  - [x] `tests/test_web_console_api.py::TestReviewQualityAndSamplingEndpoints`（5 通过）
+  - [x] `tests/unit/test_architecture_regression_guard.py::TestGuard38_ReviewQualityToolbar`（6 通过）
 
 ###### Card I-1
 
@@ -1018,7 +1019,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
 | Neo4j schema versioning 与标签注册表 | `src/storage/graph_schema.py`、`src/storage/neo4j_driver.py`、`src/api/routes/analysis.py` | G-1 完成 schema registry、drift 检查与 KG stats 输出 |
 | hypothesis / evidence graph assets 首轮资产化 | `src/research/graph_assets.py`、`src/research/phases/hypothesis_phase.py`、`src/research/phases/analyze_phase.py`、`src/research/phase_orchestrator.py` | G-2 完成子图构建、统一事务投影、graph_report 计数 |
 
-### Phase G-3 / G-4 / H-1 / H-2 / H-3 状态更新（2026-04-22）
+### Phase G-3 / G-4 / H-1 / H-2 / H-3 / H-4 状态更新（2026-04-22）
 
 Phase G-3（文献学子图治理）已**全部完成**：
 
@@ -1055,6 +1056,13 @@ Phase H-3（争议归档与裁决流）已**全部完成**：
 - [x] H-3-3：5 个新 API 端点 + 7 个 Pydantic 模型已上线（POST open/assign/resolve/withdraw + GET list）✓
 - [x] H-3-4：`build_dispute_archive_board()` 已接入 dashboard payload；`resolve_review_dispute` 通过 `writeback_review_status` 自动回写 workbench 终态；web console 已增加"待处理 / 我裁决 / 历史"三 tab 看板 ✓
 
+Phase H-4（抽样质检与质量看板）已**全部完成**：
+
+- [x] H-4-1：新建 `src/research/review_sampling.py`，导出 `build_review_sample`（按 reviewer/asset_type/review_status/priority 过滤 + 基于 sha256 的稳定排序 + seed 去随机化）与 `compute_review_quality_summary`（agreement_rate / overturn_rate / recheck_count / overdue_count / median_backlog_age_hours，repo `assignee` 与测试 `reviewer` 字段双兼容）✓
+- [x] H-4-2：`ResearchSessionRepository.aggregate_review_quality_summary(cycle_id, reviewer, asset_type, now)` 已新增，复用 `list_review_queue` + `list_review_disputes` 实时聚合，无需新表 / 无 alembic migration ✓
+- [x] H-4-3：`POST /api/research/sessions/{cycle_id}/review-sample` 与 `GET /api/research/sessions/{cycle_id}/review-quality-summary` 端点 + 5 个 Pydantic 模型（`ReviewSampleRequest/Summary/Response`、`ReviewQualitySummary/Response`）已上线；dashboard payload 与 `evidence_board.review_quality_summary` 已联通；web console 已新增 `buildReviewQualitySummary` 工具区 ✓
+- [x] H-4-4：Guard #38 已新增（6 个断言：sampling 模块符号 / repo 聚合方法 / dashboard payload 字段 / H-1~H-4 端点路径 / web console review 工具条函数 / Pydantic schema 指标字段）✓
+
 ### Phase G-1 / G-2 状态更新
 
 Phase G-1（Neo4j schema versioning 与标签注册表）在 2026-04-21 已**全部完成**：
@@ -1090,10 +1098,10 @@ SmallModelOptimizer planner 已与 hypothesis / reflect / quality / experiment /
 从本文档任意一天恢复工作时，建议按以下顺序：
 
 1. 运行核心子集回归确认基线：`.\venv310\Scripts\Activate.ps1; python -m pytest tests/unit tests/test_research_session_repo.py tests/test_research_utils.py tests/test_web_console_api.py -q --disable-warnings`
-2. 确认 1419 passed / 0 failed（含 H-2 31 个 + H-3 34 个新增用例）
-3. 生产环境执行 `alembic upgrade head` 创建 `review_disputes` 表（migration `c7e9a32d8b54`，down_revision `b5d8a91e3c47`）
+2. 确认 1452 passed / 0 failed（含 H-2 31 个 + H-3 34 个 + H-4 33 个新增用例）
+3. 生产环境执行 `alembic upgrade head` 创建 `review_disputes` 表（migration `c7e9a32d8b54`，down_revision `b5d8a91e3c47`）；H-4 不引入新 migration
 4. 如需补验证面，执行 `test_kg_e2e.py` 对 live `/api/analysis/kg/stats` 与 graph asset 输出做一次端到端确认
-5. 按 **Phase H-4 -> I-2 -> I-3** 顺序继续推进
+5. 按 **Phase I-2 -> I-3** 顺序继续推进
 
 ---
 

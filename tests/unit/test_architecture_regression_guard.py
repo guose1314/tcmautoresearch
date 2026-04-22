@@ -25,6 +25,7 @@ Guard #34: EvidenceEnvelope 跨阶段 phase_origin 统一协议（Phase F-1）
 Guard #35: Phase output 形状收口 — metadata 最小公约键（Phase F-3）
 Guard #36: Neo4j graph schema versioning、标签注册表与 hypothesis/evidence graph assets（Phase G-1/G-2）
 Guard #37: 图回归守卫与历史资产 backfill—schema v2 dry-run 摘要 / force 重生 / philology 资产模板（Phase G-4）
+Guard #38: review queue / quality summary / batch toolbar 持久化（Phase H-4）
 """
 
 import ast
@@ -2632,6 +2633,84 @@ class TestGuard37_GraphAssetRegression(unittest.TestCase):
         for token in ("VersionWitness", "ATTESTS_TO", "ExegesisTerm",
                        "FragmentCandidate", "graph_source"):
             self.assertIn(token, cypher)
+
+
+# Guard #38 — review queue / quality summary / batch toolbar 持久化 (Phase H-4)
+
+
+class TestGuard38_ReviewQualityToolbar(unittest.TestCase):
+    """Guard #38: 审核队列工具条、质量看板与抽样接口必须持续暴露。
+
+    Phase H-1 ~ H-4 在 evidence_board 上累积形成了一组关键 review 工具：
+    queue summary、reviewer workload、dispute archive、quality summary、
+    web console 批量操作工具条。任何一个被后续重构悄悄删除都会让"批量复核
+    效率提升不会以质量失控为代价"的承诺落空，因此用结构化断言锁定。
+    """
+
+    def test_review_sampling_module_exists(self):
+        path = _SRC / "research" / "review_sampling.py"
+        self.assertTrue(path.exists(), "src/research/review_sampling.py 不存在")
+        source = path.read_text(encoding="utf-8")
+        for token in (
+            "def build_review_sample",
+            "def compute_review_quality_summary",
+            "agreement_rate",
+            "overturn_rate",
+            "recheck_count",
+            "overdue_count",
+            "median_backlog_age_hours",
+        ):
+            self.assertIn(token, source, f"review_sampling 模块缺关键符号: {token}")
+
+    def test_repository_exposes_quality_aggregator(self):
+        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(encoding="utf-8")
+        self.assertIn("def aggregate_review_quality_summary", source)
+        # 必须复用 sampling 模块的纯函数，而不是另起一份算法
+        self.assertIn("compute_review_quality_summary", source)
+
+    def test_dashboard_payload_carries_review_quality_summary(self):
+        source = (_SRC / "api" / "research_utils.py").read_text(encoding="utf-8")
+        self.assertIn("review_quality_summary", source)
+        self.assertIn("def build_research_dashboard_payload", source)
+
+    def test_routes_expose_h1_to_h4_review_endpoints(self):
+        source = (_SRC / "api" / "routes" / "research.py").read_text(encoding="utf-8")
+        for token in (
+            # H-1: dashboard + batch
+            "def get_research_job_dashboard",
+            # H-2: assignments + workload
+            "/review-assignments/claim",
+            "/reviewer-workload",
+            # H-3: dispute archive
+            "/review-disputes/open",
+            "/review-disputes/{case_id}/resolve",
+            # H-4: sample + quality summary
+            "/review-sample",
+            "/review-quality-summary",
+        ):
+            self.assertIn(token, source, f"research routes 缺关键端点: {token}")
+
+    def test_web_console_review_toolbar_intact(self):
+        path = _WORKSPACE / "web_console" / "static" / "index.html"
+        source = path.read_text(encoding="utf-8")
+        for token in (
+            "buildReviewWorkbenchToolbar",
+            "buildReviewerWorkloadBoard",
+            "buildDisputeArchiveBoard",
+            "buildReviewQualitySummary",
+            "data-batch-review-status",
+        ):
+            self.assertIn(token, source, f"web console review 工具条缺关键函数: {token}")
+
+    def test_quality_summary_metrics_present_in_pydantic_schema(self):
+        source = (_SRC / "api" / "schemas.py").read_text(encoding="utf-8")
+        self.assertIn("class ReviewQualitySummary", source)
+        self.assertIn("class ReviewSampleRequest", source)
+        for token in (
+            "agreement_rate", "overturn_rate", "recheck_count",
+            "overdue_count", "median_backlog_age_hours",
+        ):
+            self.assertIn(token, source, f"ReviewQualitySummary 缺指标字段: {token}")
 
 
 if __name__ == "__main__":

@@ -1805,6 +1805,7 @@ def _build_dashboard_evidence_board(
     review_assignments: Optional[list[Dict[str, Any]]] = None,
     current_reviewer: Optional[str] = None,
     review_disputes: Optional[list[Dict[str, Any]]] = None,
+    review_quality_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     evidence_records = _as_list(evidence_protocol.get("evidence_records"))
     claims = _as_list(evidence_protocol.get("claims"))
@@ -1870,6 +1871,9 @@ def _build_dashboard_evidence_board(
         "review_queue": _as_dict(review_workbench.get("review_queue")),
         "reviewer_workload_board": _as_dict(review_workbench.get("reviewer_workload_board")),
         "dispute_board": _as_dict(review_workbench.get("dispute_board")),
+        "review_quality_summary": _as_dict(review_quality_summary)
+            if isinstance(review_quality_summary, dict)
+            else {"supported": False},
         "review_workbench": review_workbench,
     }
 
@@ -2116,6 +2120,7 @@ def build_research_dashboard_payload(
     review_assignments: Optional[list[Dict[str, Any]]] = None,
     current_reviewer: Optional[str] = None,
     review_disputes: Optional[list[Dict[str, Any]]] = None,
+    review_quality_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build a visualization-friendly dashboard payload from a job snapshot."""
 
@@ -2197,6 +2202,7 @@ def build_research_dashboard_payload(
             review_assignments=review_assignments,
             current_reviewer=current_reviewer,
             review_disputes=review_disputes,
+            review_quality_summary=review_quality_summary,
         ),
         "learning_feedback_board": learning_feedback_board,
         "knowledge_graph_board": knowledge_graph_board,

@@ -4371,6 +4371,42 @@
             return wrapper;
         }
 
+        function buildReviewQualitySummary(evidenceBoard) {
+            const summary = evidenceBoard?.review_quality_summary
+                && typeof evidenceBoard.review_quality_summary === "object"
+                ? evidenceBoard.review_quality_summary
+                : null;
+            if (!summary || summary.supported !== true) {
+                return null;
+            }
+            const wrapper = document.createElement("div");
+            wrapper.className = "dashboard-review-meta";
+            wrapper.style.display = "flex";
+            wrapper.style.flexDirection = "column";
+            wrapper.style.gap = "4px";
+            const heading = document.createElement("div");
+            heading.style.fontWeight = "600";
+            heading.textContent = "审核质量看板（QC）";
+            wrapper.appendChild(heading);
+            const detail = document.createElement("div");
+            detail.style.fontSize = "12px";
+            detail.style.lineHeight = "1.5";
+            detail.style.whiteSpace = "pre-wrap";
+            const agreement = (safeNumber(summary.agreement_rate, 0) * 100).toFixed(1);
+            const overturn = (safeNumber(summary.overturn_rate, 0) * 100).toFixed(1);
+            detail.textContent = [
+                `分配数：${safeNumber(summary.assignment_count, 0)}`,
+                `争议数：${safeNumber(summary.dispute_count, 0)}（已裁决 ${safeNumber(summary.resolved_dispute_count, 0)}）`,
+                `维持率：${agreement}%`,
+                `推翻率：${overturn}%`,
+                `复核次数：${safeNumber(summary.recheck_count, 0)}`,
+                `超期数：${safeNumber(summary.overdue_count, 0)}`,
+                `积压中位数：${safeNumber(summary.median_backlog_age_hours, 0).toFixed(2)} 小时`,
+            ].join("\n");
+            wrapper.appendChild(detail);
+            return wrapper;
+        }
+
         function buildReviewWorkbenchFilterControl(jobId, fieldName, labelText, options, activeValue) {
             const wrapper = document.createElement("div");
             wrapper.className = "dashboard-review-filter";
@@ -4567,6 +4603,7 @@
             const workloadSummary = buildReviewerWorkloadSummary(reviewWorkbench);
             const workloadBoard = buildReviewerWorkloadBoard(reviewWorkbench);
             const disputeBoard = buildDisputeArchiveBoard(reviewWorkbench);
+            const qualitySummary = buildReviewQualitySummary(evidenceBoard);
 
             toolbar.appendChild(filters);
             toolbar.appendChild(summary);
@@ -4578,6 +4615,9 @@
             }
             if (disputeBoard) {
                 toolbar.appendChild(disputeBoard);
+            }
+            if (qualitySummary) {
+                toolbar.appendChild(qualitySummary);
             }
             toolbar.appendChild(batchPanel);
             return toolbar;

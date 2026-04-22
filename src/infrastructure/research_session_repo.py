@@ -929,6 +929,38 @@ class ResearchSessionRepository:
         )
         return [buckets[label] for label in ordered_keys]
 
+    def aggregate_review_quality_summary(
+        self,
+        *,
+        cycle_id: Optional[str] = None,
+        reviewer: Optional[str] = None,
+        asset_type: Optional[str] = None,
+        now: Optional[datetime] = None,
+        session: Optional[Session] = None,
+    ) -> Dict[str, Any]:
+        """Phase H / H-4: aggregate review QC metrics for a cycle.
+
+        Pulls assignments + dispute archive once and delegates to
+        :func:`src.research.review_sampling.compute_review_quality_summary`
+        for the math. Filters are applied during aggregation, not at the SQL
+        layer, so the same call serves dashboard and ad-hoc reports.
+        """
+
+        # Local import keeps this module import-graph clean.
+        from src.research.review_sampling import compute_review_quality_summary
+
+        reference_now = now or datetime.utcnow()
+        assignments = self.list_review_queue(
+            cycle_id=cycle_id, now=reference_now, session=session,
+        )
+        disputes = self.list_review_disputes(cycle_id=cycle_id, session=session)
+        return compute_review_quality_summary(
+            review_assignments=assignments,
+            review_disputes=disputes,
+            reviewer=reviewer,
+            asset_type=asset_type,
+        )
+
     def _upsert_review_assignment(
         self,
         *,

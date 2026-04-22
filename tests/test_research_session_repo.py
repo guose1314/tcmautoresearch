@@ -1963,3 +1963,55 @@ class TestReviewDisputes:
         assert fetched["case_id"] == opened["case_id"]
         assert repo.get_review_dispute(cycle_id, "DISP-NONE") is None
 
+
+class TestReviewQualitySummaryRepo:
+    """Phase H / H-4: aggregate_review_quality_summary integration."""
+
+    def _seed_session(self, repo) -> str:
+        payload = _make_payload()
+        repo.create_session(payload)
+        return payload["cycle_id"]
+
+    def test_empty_cycle_returns_supported_zero_metrics(self, repo):
+        cycle_id = self._seed_session(repo)
+        summary = repo.aggregate_review_quality_summary(cycle_id=cycle_id)
+        assert summary["supported"] is True
+        assert summary["assignment_count"] == 0
+        assert summary["dispute_count"] == 0
+        assert summary["agreement_rate"] == 0.0
+        assert summary["overdue_count"] == 0
+
+    def test_overdue_and_dispute_metrics_combine(self, repo):
+        cycle_id = self._seed_session(repo)
+        past_due = datetime(2020, 1, 1, 12, 0, 0)
+        repo.claim_review_assignment(
+            cycle_id, "catalog", "k-1", "李研究员", due_at=past_due,
+        )
+        repo.claim_review_assignment(cycle_id, "catalog", "k-2", "张研究员")
+        opened_a = repo.open_review_dispute(cycle_id, "catalog", "k-1", "李研究员", "S1")
+        opened_b = repo.open_review_dispute(cycle_id, "catalog", "k-2", "张研究员", "S2")
+        repo.resolve_review_dispute(
+            cycle_id, opened_a["case_id"], "accepted", resolved_by="裁判",
+        )
+        repo.resolve_review_dispute(
+            cycle_id, opened_b["case_id"], "rejected", resolved_by="裁判",
+        )
+
+        summary = repo.aggregate_review_quality_summary(cycle_id=cycle_id)
+        assert summary["assignment_count"] == 2
+        assert summary["overdue_count"] == 1
+        assert summary["dispute_count"] == 2
+        assert summary["resolved_dispute_count"] == 2
+        assert summary["agreement_rate"] == 0.5
+        assert summary["overturn_rate"] == 0.5
+
+    def test_filter_by_reviewer_narrows_metrics(self, repo):
+        cycle_id = self._seed_session(repo)
+        repo.claim_review_assignment(cycle_id, "catalog", "k-1", "李研究员")
+        repo.claim_review_assignment(cycle_id, "catalog", "k-2", "张研究员")
+
+        summary = repo.aggregate_review_quality_summary(
+            cycle_id=cycle_id, reviewer="李研究员",
+        )
+        assert summary["assignment_count"] == 1
+
