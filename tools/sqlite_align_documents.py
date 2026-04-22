@@ -102,11 +102,12 @@ def _stamp_alembic_head() -> str | None:
     """把 alembic_version 标到当前 head，幂等。"""
     # 仅在 sys.path 准备好后再 import alembic，避免污染顶部
     sys.path.insert(0, str(REPO_ROOT))
-    from alembic import command
     from alembic.config import Config
     from alembic.runtime.migration import MigrationContext
     from alembic.script import ScriptDirectory
     from sqlalchemy import create_engine
+
+    from alembic import command
 
     cfg = Config(str(REPO_ROOT / "alembic.ini"))
     cfg.set_main_option(
