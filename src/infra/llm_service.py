@@ -113,6 +113,8 @@ class PlannedLLMCall:
     plan: Optional["CallPlan"] = None
     fallback_path: Optional[str] = None
     prompt_application: Dict[str, Any] = field(default_factory=dict)
+    role_profile: Optional[Any] = None  # LLMRoleProfile, 可选；J-3 角色化 prompt 池
+    kv_cache_descriptor: Optional[Any] = None  # KVCacheDescriptor, 可选；J-3 KV cache
 
     @property
     def should_call_llm(self) -> bool:
@@ -123,8 +125,17 @@ class PlannedLLMCall:
         return self.plan.should_call_llm
 
     def build_prompt(self, prompt: str, system_prompt: str = "") -> tuple[str, str]:
+        role_prefix = ""
+        if self.role_profile is not None:
+            role_prefix = str(getattr(self.role_profile, "system_prompt", "") or "").strip()
+
         if self.plan is None:
-            return str(prompt or ""), str(system_prompt or "")
+            merged_system = "\n\n".join(
+                section
+                for section in (role_prefix, str(system_prompt or ""))
+                if section.strip()
+            )
+            return str(prompt or ""), merged_system
 
         prompt_sections = []
         if self.plan.context_text.strip():
@@ -136,7 +147,11 @@ class PlannedLLMCall:
         merged_prompt = "\n\n".join(section for section in prompt_sections if section.strip())
         merged_system_prompt = "\n\n".join(
             section
-            for section in (str(system_prompt or ""), self.plan.reasoning_directive)
+            for section in (
+                role_prefix,
+                str(system_prompt or ""),
+                self.plan.reasoning_directive,
+            )
             if section.strip()
         )
         return merged_prompt, merged_system_prompt
@@ -173,6 +188,18 @@ class PlannedLLMCall:
             payload["fallback_path"] = self.fallback_path
         if self.prompt_application:
             payload["prompt_application"] = dict(self.prompt_application)
+        if self.role_profile is not None:
+            payload["role_name"] = str(getattr(self.role_profile, "role_name", "") or "")
+            payload["role_temperature"] = float(
+                getattr(self.role_profile, "temperature", 0.0) or 0.0
+            )
+            cache_key = str(getattr(self.role_profile, "kv_cache_key", "") or "")
+            if cache_key:
+                payload["role_kv_cache_key"] = cache_key
+        if self.kv_cache_descriptor is not None:
+            payload["kv_cache_valid"] = bool(
+                getattr(self.kv_cache_descriptor, "valid", False)
+            )
         return payload
 
     def get_cost_report(self) -> Optional[Dict[str, Any]]:
@@ -246,8 +273,22 @@ def prepare_planned_llm_call(
     cache_hit_likelihood: float = 0.0,
     retry_count: int = 0,
     llm_config: Optional[Dict[str, Any]] = None,
+    role: Optional[str] = None,
+    kv_cache_descriptor: Any = None,
 ) -> PlannedLLMCall:
-    """为一次业务侧 LLM 调用准备统一 planner 上下文。"""
+    """为一次业务侧 LLM 调用准备统一 planner 上下文。
+
+    role / kv_cache_descriptor 为 J-3 引入：
+      role: LLMRoleProfile.role_name；命中则把角色 system_prompt 注入。
+      kv_cache_descriptor: KVCacheDescriptor，仅作元数据透传，由调用方负责
+        在加载 LLMEngine 后实际写入/读取 KV cache 文件。
+    """
+
+    role_profile = None
+    if role:
+        from src.research.llm_role_profile import get_role_profile
+
+        role_profile = get_role_profile(role)
 
     if llm_config is None:
         from src.infrastructure.config_loader import load_settings_section
@@ -278,6 +319,8 @@ def prepare_planned_llm_call(
             policy_source="missing_llm_engine",
             cache_hit_likelihood=cache_hit_likelihood,
             fallback_path="rules_engine",
+            role_profile=role_profile,
+            kv_cache_descriptor=kv_cache_descriptor,
         )
 
     normalized_sections = _normalize_dossier_sections(dossier_sections)
@@ -290,6 +333,8 @@ def prepare_planned_llm_call(
             enabled=False,
             policy_source="models.llm.small_model_optimizer.disabled" if not planner_enabled else "empty_dossier",
             cache_hit_likelihood=cache_hit_likelihood,
+            role_profile=role_profile,
+            kv_cache_descriptor=kv_cache_descriptor,
         )
 
     plan = get_small_model_optimizer().prepare_call(
@@ -318,6 +363,8 @@ def prepare_planned_llm_call(
         cache_hit_likelihood=cache_hit_likelihood,
         plan=plan,
         fallback_path=fallback_path,
+        role_profile=role_profile,
+        kv_cache_descriptor=kv_cache_descriptor,
     )
 
 # ─────────────────────────────────────────────────────────────────────────────

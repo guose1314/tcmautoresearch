@@ -478,7 +478,9 @@ flowchart LR
 #### Phase J 进度（2026-04-22）
 
 - ✅ J-1 已完成：新增 [src/research/topic_discovery/](src/research/topic_discovery/)（`contract.py` + `topic_discovery_service.py`），落 `TopicProposal` / `TopicSourceCandidate` / `propose_topics`；新增 [tests/unit/test_topic_discovery.py](tests/unit/test_topic_discovery.py) 16 通过；核心子集 1641 通过 / 0 失败 / 1 xfailed / 14 subtests 通过（基线 1625 + 16）。详见审计稿 [Card J-1](ARCHITECTURE_TCM_RESEARCH_METHOD_AUDIT_2026_04_20.md#card-j-1)。
-- ⏳ J-2 / J-3 / J-4 / J-5 待开工。
+- ✅ J-2 已完成：新增 [src/research/textual_criticism/](src/research/textual_criticism/)（`verdict_contract.py` + `textual_criticism_service.py`），落 `AuthenticityVerdict` / `VerdictEvidence` / `assess_catalog_authenticity` / `assess_catalog_batch` / `build_textual_criticism_summary`；新增 [tests/unit/test_textual_criticism.py](tests/unit/test_textual_criticism.py) 17 通过。详见审计稿 [Card J-2](ARCHITECTURE_TCM_RESEARCH_METHOD_AUDIT_2026_04_20.md#card-j-2)。
+- ✅ J-3 已完成：新增 [src/research/llm_role_profile.py](src/research/llm_role_profile.py)，落 `LLMRoleProfile` 池（医经家 / 经方家 / 温病家 / 校勘家 / 训诂家）+ `KVCacheDescriptor` / `KVCacheStore`；扩展 [src/infra/llm_service.py](src/infra/llm_service.py) `prepare_planned_llm_call(role=..., kv_cache_descriptor=...)` 与 `PlannedLLMCall.role_profile` / `build_prompt` / `to_metadata`；新增 [tests/unit/test_llm_role_profile.py](tests/unit/test_llm_role_profile.py) 15 通过；核心子集 1673 通过 / 0 失败 / 1 xfailed / 14 subtests 通过（基线 1641 + 17 J-2 + 15 J-3）。详见审计稿 [Card J-3](ARCHITECTURE_TCM_RESEARCH_METHOD_AUDIT_2026_04_20.md#card-j-3)。
+- ⏳ J-4 / J-5 待开工；J-2 / J-3 编排器 wiring 推迟到后续卡片。
 
 ### Phase K（约 2-3 周）—— 图谱深化与中医推理
 

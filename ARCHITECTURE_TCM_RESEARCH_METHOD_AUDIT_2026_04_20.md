@@ -1026,6 +1026,49 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [x] `tests/unit/test_topic_discovery.py`（新建，16 通过：contract 5 + service 11，覆盖 round-trip / clamp / normalize / summary / catalog / kg / textual-only / llm 注入与失败回退 / json 序列化）
 - 当前状态：2026-04-22 已完成；核心子集 1641 通过 / 0 失败 / 1 xfailed / 14 subtests 通过（基线 1625 + 16 新增），与 J-1 Done 定义一致。Phase J 进入 J-2（`textual_criticism` 子阶段 + `AuthenticityVerdict`）。
 
+#### Card J-2
+
+- 建议标题：`Phase J / J-2 textual_criticism 子阶段 + AuthenticityVerdict contract`
+- 建议标签：`research-method`、`textual-criticism`、`contract`、`phase-j`、`p1`
+- 目标：补齐中医文献研究法环节③（考据）。让 catalog 资产可落『真伪 / 年代 / 作者』裁定，使考据环节可审计、可复核、可持久化，与 evidence/catalog/topic-discovery contract 一致。
+- 范围：
+  - [x] 新增 [src/research/textual_criticism/](src/research/textual_criticism/) 子包（`verdict_contract.py` + `textual_criticism_service.py` + 包导出）
+  - [x] 提供 `AuthenticityVerdict` / `VerdictEvidence` / `VERDICT_CONTRACT_VERSION = "authenticity-verdict-v1"`
+  - [x] 提供三类枚举：`DATE_VERDICTS`（confirmed/range/disputed/legendary/unknown）、`AUTHOR_VERDICTS`（confirmed/attributed/anonymous/disputed）、`AUTHENTICITY_LEVELS`（authentic/doubtful/forged/indeterminate）
+  - [x] 提供 `assess_catalog_authenticity` / `assess_catalog_batch` / `build_textual_criticism_summary` / `normalize_authenticity_verdicts` 与 `TextualCriticismService` facade
+  - [x] 仅做规则化裁定（关键词 + 朝代/作者启发式），LLM 仅用于补 reviewer 复核要点，调用失败静默回退
+- 完成定义：
+  - [x] confirmed dynasty + confirmed author → AUTHENTIC（`test_confirmed_dynasty_and_author_yields_authentic`）
+  - [x] legendary date 单独触发 → DOUBTFUL，legendary + disputed author → FORGED（`test_legendary_attribution_yields_doubtful` + `test_legendary_and_disputed_yields_forged`）
+  - [x] dynasty 范围词（如『唐宋之际』『宋元』）识别为 RANGE（`test_dynasty_range_is_classified`）
+  - [x] disputed 朝代关键词触发 DOUBTFUL（`test_disputed_dynasty_yields_doubtful`）
+  - [x] 缺 `catalog_id` 抛 ValueError、非 Mapping 抛 TypeError、batch 跳过非法（`test_missing_catalog_id_raises` + `test_non_mapping_raises` + `test_batch_skips_invalid_entries`）
+  - [x] LLM 注入失败不影响裁定（`test_llm_caller_failure_does_not_break_verdict`）
+- 测试：
+  - [x] [tests/unit/test_textual_criticism.py](tests/unit/test_textual_criticism.py)（新建，17 通过：contract 4 + service 13）
+- 当前状态：2026-04-22 已完成；与 J-1 后基线 1641 相比 +17，待与 J-3 合并回归。
+
+#### Card J-3
+
+- 建议标题：`Phase J / J-3 qwen 角色 prompt 池 + KV cache descriptor + prepare_planned_llm_call(role=...)`
+- 建议标签：`research-method`、`llm`、`role-pool`、`kv-cache`、`phase-j`、`p1`
+- 目标：让 planner 端可按中医角色（医经家 / 经方家 / 温病家 / 校勘家 / 训诂家）注入 system_prompt 与温度，并预留 KV cache 元数据通道，提升中医语境一致性、并为本地 qwen 重复 system prompt 的复用打基础。
+- 范围：
+  - [x] 新增 [src/research/llm_role_profile.py](src/research/llm_role_profile.py)：`LLMRoleProfile` dataclass + `ROLE_PROFILE_CONTRACT_VERSION = "llm-role-profile-v1"` + 5 个默认角色
+  - [x] 提供 `get_role_profile` / `list_role_profiles` / `register_role_profile` / `reset_role_profiles_for_tests`
+  - [x] 提供 `KVCacheDescriptor` + `KVCacheStore`（仅元数据持久化到 `index.json`，不直接调用 llama.cpp 内部 API）
+  - [x] 扩展 [src/infra/llm_service.py](src/infra/llm_service.py)：`PlannedLLMCall` 增 `role_profile` / `kv_cache_descriptor` 字段；`build_prompt` 把角色 system_prompt 前置注入合并 system；`to_metadata` 暴露 `role_name` / `role_temperature` / `role_kv_cache_key` / `kv_cache_valid`；`prepare_planned_llm_call` 增 `role` / `kv_cache_descriptor` 关键字参数
+- 完成定义：
+  - [x] 默认池含 5 个角色，每个均带非空 system_prompt + `kv_cache_key`（`test_default_pool_has_five_roles` + `test_each_role_carries_system_prompt_and_temperature`）
+  - [x] `prepare_planned_llm_call(role="医经家", ...)` 注入角色到 PlannedLLMCall 与 metadata（`test_role_injects_profile_into_planned_call`）
+  - [x] 未知角色不抛异常、不污染 metadata（`test_unknown_role_does_not_crash`）
+  - [x] `kv_cache_descriptor` 透传并出现在 metadata（`test_kv_cache_descriptor_passthrough`）
+  - [x] 即使无 plan，`build_prompt` 也会把角色 system_prompt 前置（`test_build_prompt_without_plan_still_prepends_role`）
+  - [x] `KVCacheStore` upsert/get/invalidate 支持跨实例复读（`test_upsert_and_retrieve`）
+- 测试：
+  - [x] [tests/unit/test_llm_role_profile.py](tests/unit/test_llm_role_profile.py)（新建，15 通过：contract 7 + descriptor 2 + store 2 + prepare-injection 4）
+- 当前状态：2026-04-22 已完成；尚未在编排器中接入（与 J-2 一同推迟到 phase orchestrator wiring 卡片）；核心子集 1673 通过 / 0 失败 / 1 xfailed / 14 subtests 通过（基线 1641 + 17 J-2 + 15 J-3）。
+
 ---
 
 ## 附录 A：2026-04-21 代码质量治理推进摘要
