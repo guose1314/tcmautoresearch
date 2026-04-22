@@ -152,5 +152,24 @@ class TestPolicySummary(unittest.TestCase):
         self.assertEqual(sum(s["counts"].values()), s["total_tasks"])
 
 
+class TestPhaseI3PolicyAlignment(unittest.TestCase):
+    """Phase I-3：每个 SUITABLE 任务都应该有可执行的 token / temperature 推荐。"""
+
+    def test_suitable_tasks_have_recommendations(self):
+        from src.infra.llm_task_policy import TASK_POLICY, SuitabilityTier, evaluate_task
+        for task_name, spec in TASK_POLICY.items():
+            if spec.tier != SuitabilityTier.SUITABLE:
+                continue
+            verdict = evaluate_task(task_name)
+            self.assertIsNotNone(
+                verdict.recommended_max_tokens,
+                f"{task_name} 缺少 recommended_max_tokens",
+            )
+            self.assertIsNotNone(
+                verdict.recommended_temperature,
+                f"{task_name} 缺少 recommended_temperature",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

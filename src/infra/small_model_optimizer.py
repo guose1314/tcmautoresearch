@@ -36,6 +36,7 @@ from src.infra.reasoning_template_selector import (
     ReasoningFramework,
     ReasoningTemplateSelector,
     SelectionResult,
+    _PHASE_DEFAULT_FRAMEWORK,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,10 +56,30 @@ class CallPlan:
     decision_reason: str
     degradation_hints: Dict[str, Any] = field(default_factory=dict)
     sub_contexts: List[str] = field(default_factory=list)  # decompose 时的子上下文
+    # Phase I-3 telemetry — 用于 benchmark 命中率统计与学习闭环回灌
+    template_hit: bool = False  # 选中的框架是否为该阶段的默认推荐框架
+    budget_hit: bool = True     # 是否在不 decompose / 不 skip 的情况下完成调用
+    layer_hit: bool = False     # 是否使用了最高（最丰富）的可用 dossier 层
+    max_layer_available: int = -1  # 当次 LayeredDossier 中可用的最高层级
+    complexity_tier: str = "medium"  # 任务复杂度推断结果
 
     @property
     def should_call_llm(self) -> bool:
         return self.action in ("proceed", "retry_simplified")
+
+    def telemetry_dict(self) -> Dict[str, Any]:
+        """Phase I-3：导出 telemetry 字段，供 benchmark 与 learning loop 使用。"""
+        return {
+            "action": self.action,
+            "framework_name": self.framework_name,
+            "layer_used": self.layer_used,
+            "max_layer_available": self.max_layer_available,
+            "template_hit": bool(self.template_hit),
+            "budget_hit": bool(self.budget_hit),
+            "layer_hit": bool(self.layer_hit),
+            "complexity_tier": self.complexity_tier,
+            "estimated_tokens": int(self.estimated_tokens),
+        }
 
 
 class SmallModelOptimizer:
@@ -129,6 +150,7 @@ class SmallModelOptimizer:
         """
         # Step 1: 压缩上下文
         layered = self._layer_compressor.compress(dossier_sections)
+        max_layer_available = max(layered.layers.keys()) if layered.layers else -1
 
         # Step 2: 选择推理框架
         effective_budget = self._context_window - self._output_reserve
@@ -139,6 +161,9 @@ class SmallModelOptimizer:
             available_budget_tokens=effective_budget,
         )
         framework = selection.framework
+        complexity_tier = self._infer_complexity(task_type)
+        default_framework_name = _PHASE_DEFAULT_FRAMEWORK.get(phase, "")
+        template_hit = bool(default_framework_name) and framework.name == default_framework_name
 
         # Step 3: 估算总 input tokens（context + framework overhead）
         # 先按 Layer 1 估算
@@ -165,6 +190,11 @@ class SmallModelOptimizer:
                 estimated_tokens=0,
                 decision_reason=decision.reason,
                 degradation_hints=decision.degradation_hints,
+                template_hit=template_hit,
+                budget_hit=False,
+                layer_hit=False,
+                max_layer_available=max_layer_available,
+                complexity_tier=complexity_tier,
             )
 
         if decision.action == "decompose":
@@ -184,6 +214,11 @@ class SmallModelOptimizer:
                 decision_reason=decision.reason,
                 degradation_hints=decision.degradation_hints,
                 sub_contexts=sub_contexts,
+                template_hit=template_hit,
+                budget_hit=False,
+                layer_hit=(0 == max_layer_available),
+                max_layer_available=max_layer_available,
+                complexity_tier=complexity_tier,
             )
 
         if decision.action == "retry_simplified":
@@ -200,6 +235,11 @@ class SmallModelOptimizer:
                 estimated_tokens=decision.estimated_cost_tokens,
                 decision_reason=decision.reason,
                 degradation_hints=decision.degradation_hints,
+                template_hit=template_hit,
+                budget_hit=True,
+                layer_hit=(layer.level == max_layer_available),
+                max_layer_available=max_layer_available,
+                complexity_tier=complexity_tier,
             )
 
         # proceed: 选择最佳层级
@@ -216,6 +256,11 @@ class SmallModelOptimizer:
             estimated_tokens=layer.estimated_tokens + framework.token_overhead,
             decision_reason=decision.reason,
             degradation_hints=decision.degradation_hints,
+            template_hit=template_hit,
+            budget_hit=True,
+            layer_hit=(layer.level == max_layer_available),
+            max_layer_available=max_layer_available,
+            complexity_tier=complexity_tier,
         )
 
     def get_cost_report(self) -> Dict[str, Any]:

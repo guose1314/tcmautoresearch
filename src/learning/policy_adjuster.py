@@ -162,6 +162,106 @@ class PolicyAdjuster:
                 "version_id": self._current_version_id(),
             }
 
+    # ------------------------------------------------------------------
+    # Phase I-3：消费 SmallModel benchmark summary，回灌策略调整。
+    # ------------------------------------------------------------------
+
+    def apply_benchmark_summary(
+        self,
+        benchmark_summary: Dict[str, Any],
+        *,
+        max_template_delta: float = 0.2,
+        max_threshold_delta: float = 0.2,
+    ) -> PolicyAdjustment:
+        """根据 benchmark report 中的 ``learning_recommendations`` 调整模板偏好与阶段阈值。
+
+        Parameters
+        ----------
+        benchmark_summary :
+            ``run_phase_benchmark`` 输出的 dict，需包含 ``learning_recommendations``。
+        max_template_delta :
+            单次调用 ``template_preferences[name]`` 最大累计调整量。
+        max_threshold_delta :
+            单次调用 ``phase_thresholds[key]`` 最大累计调整量。
+        """
+        with self._lock:
+            recommendations = (benchmark_summary or {}).get("learning_recommendations") or {}
+            template_adjustments = (recommendations.get("template_preference_adjustments") or {})
+            phase_threshold_adjustments = (recommendations.get("phase_threshold_adjustments") or {})
+
+            changes: List[Dict[str, Any]] = []
+
+            for framework_name, raw_delta in template_adjustments.items():
+                try:
+                    delta = float(raw_delta)
+                except (TypeError, ValueError):
+                    continue
+                if delta == 0.0:
+                    continue
+                bounded_delta = max(-max_template_delta, min(max_template_delta, delta))
+                old_val = self._template_preferences.get(str(framework_name), 0.5)
+                new_val = max(0.0, min(1.0, old_val + bounded_delta))
+                if new_val == old_val:
+                    continue
+                self._template_preferences[str(framework_name)] = round(new_val, 4)
+                changes.append({
+                    "field": f"template_preferences.{framework_name}",
+                    "old": old_val,
+                    "new": new_val,
+                    "direction": "strengthen" if bounded_delta > 0 else "weaken",
+                    "source": "benchmark",
+                })
+
+            for phase_name, threshold_payload in phase_threshold_adjustments.items():
+                if not isinstance(threshold_payload, dict):
+                    continue
+                for key, raw_delta in threshold_payload.items():
+                    try:
+                        delta = float(raw_delta)
+                    except (TypeError, ValueError):
+                        continue
+                    if delta == 0.0:
+                        continue
+                    bounded_delta = max(-max_threshold_delta, min(max_threshold_delta, delta))
+                    threshold_key = f"{phase_name}.{key}"
+                    old_val = float(self._phase_thresholds.get(threshold_key, 0.0))
+                    new_val = round(old_val + bounded_delta, 4)
+                    self._phase_thresholds[threshold_key] = new_val
+                    changes.append({
+                        "field": f"phase_thresholds.{threshold_key}",
+                        "old": old_val,
+                        "new": new_val,
+                        "direction": "strengthen" if bounded_delta > 0 else "weaken",
+                        "source": "benchmark",
+                    })
+
+            global_summary = (benchmark_summary or {}).get("global_summary") or {}
+            quality_score = global_summary.get("average_quality_score")
+            try:
+                quality_score_f = float(quality_score) if quality_score is not None else None
+            except (TypeError, ValueError):
+                quality_score_f = None
+
+            rationale = (
+                f"benchmark template_default_hit_rate="
+                f"{float(global_summary.get('template_default_hit_rate', 0.0)):.2f}, "
+                f"budget_proceed_hit_rate="
+                f"{float(global_summary.get('budget_proceed_hit_rate', 0.0)):.2f}, "
+                f"layer_top_hit_rate="
+                f"{float(global_summary.get('layer_top_hit_rate', 0.0)):.2f}, "
+                f"changes={len(changes)}"
+            )
+
+            self._record_version("benchmark", cycle_score=quality_score_f, summary=rationale)
+
+            return PolicyAdjustment(
+                evidence_policy=dict(self._evidence_policy),
+                phase_thresholds=dict(self._phase_thresholds),
+                template_preferences=dict(self._template_preferences),
+                changes=changes,
+                rationale=rationale,
+            )
+
     def get_policy_history(self, limit: int = 10) -> List[Dict[str, Any]]:
         """返回最近 N 个版本记录。"""
         with self._lock:

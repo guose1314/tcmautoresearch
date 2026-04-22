@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from tools.small_model_phase_benchmark import (
-    evaluate_case,
     build_optimizer,
+    evaluate_case,
     load_phase_cases,
     run_phase_benchmark,
 )

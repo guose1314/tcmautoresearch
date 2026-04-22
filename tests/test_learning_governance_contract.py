@@ -278,5 +278,87 @@ class TestPipelineLearningManifest(unittest.TestCase):
         self.assertFalse(summary["cross_phase_consistent"])
 
 
+class TestBenchmarkFeedbackContract(unittest.TestCase):
+    """Phase I-3 — PolicyAdjuster.apply_benchmark_summary 与
+    LearningLoopOrchestrator.consume_benchmark_summary 必须把命中率回灌至策略状态。"""
+
+    def _make_summary(self) -> dict:
+        return {
+            "global_summary": {
+                "average_quality_score": 0.72,
+                "template_default_hit_rate": 0.4,
+                "budget_proceed_hit_rate": 0.6,
+                "layer_top_hit_rate": 0.3,
+            },
+            "learning_recommendations": {
+                "thresholds": {
+                    "template_default_hit_rate_target": 0.7,
+                    "budget_proceed_hit_rate_target": 0.8,
+                    "layer_top_hit_rate_target": 0.5,
+                    "skip_rate_max": 0.3,
+                    "decompose_rate_max": 0.3,
+                },
+                "phase_signals": {
+                    "analyze": {
+                        "below_targets": ["template_default_hit_rate", "budget_proceed_hit_rate"],
+                    },
+                },
+                "template_preference_adjustments": {
+                    "analytical": 0.15,
+                    "evidential": 0.05,
+                },
+                "phase_threshold_adjustments": {
+                    "analyze": {"context_budget_tighten": 0.2},
+                },
+            },
+        }
+
+    def test_policy_adjuster_apply_benchmark_summary(self):
+        from src.learning.policy_adjuster import PolicyAdjuster
+
+        adjuster = PolicyAdjuster()
+        baseline_pref = adjuster.get_active_policy()["template_preferences"]["analytical"]
+        baseline_versions = adjuster.version_count
+
+        adjustment = adjuster.apply_benchmark_summary(self._make_summary())
+
+        # 模板偏好被强化
+        self.assertGreater(adjustment.template_preferences["analytical"], baseline_pref)
+        # 阶段阈值被记录
+        self.assertIn("analyze.context_budget_tighten", adjustment.phase_thresholds)
+        # 至少触发一项 change，且来源标记为 benchmark
+        self.assertGreater(len(adjustment.changes), 0)
+        self.assertTrue(any(c.get("source") == "benchmark" for c in adjustment.changes))
+        # 历史版本号 +1 且 trigger=benchmark
+        self.assertEqual(adjuster.version_count, baseline_versions + 1)
+        history = adjuster.get_policy_history(limit=1)
+        self.assertEqual(history[-1]["trigger"], "benchmark")
+
+    def test_orchestrator_consume_benchmark_summary(self):
+        from src.research.learning_loop_orchestrator import LearningLoopOrchestrator
+
+        orchestrator = LearningLoopOrchestrator()
+        result = orchestrator.consume_benchmark_summary(self._make_summary())
+
+        self.assertTrue(result["applied"])
+        self.assertIsNotNone(result["policy_adjustment"])
+        self.assertIn("template_preferences", result["policy_adjustment"])
+        self.assertIn("phase_thresholds", result["policy_adjustment"])
+        # 与 policy_adjuster 持有同一份策略状态
+        active = orchestrator.policy_adjuster.get_active_policy()
+        self.assertEqual(
+            active["template_preferences"],
+            result["policy_adjustment"]["template_preferences"],
+        )
+
+    def test_orchestrator_handles_empty_summary(self):
+        from src.research.learning_loop_orchestrator import LearningLoopOrchestrator
+
+        orchestrator = LearningLoopOrchestrator()
+        result = orchestrator.consume_benchmark_summary({})
+        self.assertFalse(result["applied"])
+        self.assertIsNone(result["policy_adjustment"])
+
+
 if __name__ == "__main__":
     unittest.main()

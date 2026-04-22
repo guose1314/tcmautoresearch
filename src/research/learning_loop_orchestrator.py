@@ -60,6 +60,40 @@ class LearningLoopOrchestrator:
         return self._policy_adjuster
 
     # ------------------------------------------------------------------
+    # Phase I-3：消费 SmallModel benchmark summary，回灌策略调整。
+    # ------------------------------------------------------------------
+
+    def consume_benchmark_summary(self, benchmark_summary: Dict[str, Any]) -> Dict[str, Any]:
+        """将 SmallModel benchmark 报告中的命中率回灌至 PolicyAdjuster。
+
+        Returns
+        -------
+        dict
+            ``policy_adjustment``：本次调整摘要（changes/rationale）。
+            ``learning_recommendations``：原始建议（拷贝），便于 UI 与日志展示。
+        """
+        if not isinstance(benchmark_summary, dict) or not benchmark_summary:
+            return {
+                "policy_adjustment": None,
+                "learning_recommendations": {},
+                "applied": False,
+            }
+
+        adjustment = self._policy_adjuster.apply_benchmark_summary(benchmark_summary)
+        recommendations = deepcopy(benchmark_summary.get("learning_recommendations") or {})
+        return {
+            "policy_adjustment": {
+                "evidence_policy": adjustment.evidence_policy,
+                "phase_thresholds": adjustment.phase_thresholds,
+                "template_preferences": adjustment.template_preferences,
+                "changes": adjustment.changes,
+                "rationale": adjustment.rationale,
+            },
+            "learning_recommendations": recommendations,
+            "applied": True,
+        }
+
+    # ------------------------------------------------------------------
     # ① prepare_cycle — 在循环第一个阶段执行前调用
     # ------------------------------------------------------------------
 

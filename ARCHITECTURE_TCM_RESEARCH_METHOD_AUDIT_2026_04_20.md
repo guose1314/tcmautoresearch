@@ -949,20 +949,21 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
 - 建议标题：`Phase I / I-3 模板命中与 budget 命中评测`
 - 建议标签：`llm`、`benchmark`、`token-budget`、`phase-i`、`p1`
 - 目标：把 template selection、budget policy、layer compression 的命中效果做成可度量指标，并回灌给学习闭环。
+- 当前状态：2026-04-22 已全部完成；`CallPlan` 增补 `template_hit` / `budget_hit` / `layer_hit` / `max_layer_available` / `complexity_tier` telemetry，`PlannedLLMCall.to_metadata` 透传；benchmark 工具新增 `template_default_hit_rate` / `budget_proceed_hit_rate` / `layer_top_hit_rate` / `decompose_rate` / `skip_rate` 与 `learning_recommendations`；config（默认 / production / test）新增 `benchmark_thresholds`；`PolicyAdjuster.apply_benchmark_summary` 与 `LearningLoopOrchestrator.consume_benchmark_summary` 完成回灌闭环；新增 13 个测试，核心子集 1497 通过 / 0 失败（基线 1464）。
 - 范围：
-  - [ ] 扩展 `src/infra/small_model_optimizer.py`、`src/infra/dynamic_invocation_strategy.py`、`src/infra/llm_service.py` 的 telemetry 字段
-  - [ ] 扩展 `tools/small_model_phase_benchmark.py`，输出 `template_hit_rate`、`budget_hit_rate`、`layer_hit_rate`、`decompose_rate`、`skip_rate`
-  - [ ] 在 `config.yml`、`config/production.yml`、`config/test.yml` 增加 `models.llm.small_model_optimizer` 默认开关与阈值
-  - [ ] 让 `src/learning/policy_adjuster.py`、`src/research/learning_loop_orchestrator.py` 消费 benchmark summary
+  - [x] 扩展 `src/infra/small_model_optimizer.py`、`src/infra/dynamic_invocation_strategy.py`、`src/infra/llm_service.py` 的 telemetry 字段
+  - [x] 扩展 `tools/small_model_phase_benchmark.py`，输出 `template_hit_rate`、`budget_hit_rate`、`layer_hit_rate`、`decompose_rate`、`skip_rate`
+  - [x] 在 `config.yml`、`config/production.yml`、`config/test.yml` 增加 `models.llm.small_model_optimizer` 默认开关与阈值
+  - [x] 让 `src/learning/policy_adjuster.py`、`src/research/learning_loop_orchestrator.py` 消费 benchmark summary
 - 完成定义：
-  - [ ] benchmark 报告可按 phase 输出命中率，并定位 miss case
-  - [ ] benchmark summary 能生成下一轮 `template_preferences` / `phase_thresholds` 调整建议
+  - [x] benchmark 报告可按 phase 输出命中率，并定位 miss case
+  - [x] benchmark summary 能生成下一轮 `template_preferences` / `phase_thresholds` 调整建议
 - 测试：
-  - [ ] `tests/unit/test_token_budget_policy.py`
-  - [ ] `tests/unit/test_llm_task_policy.py`
-  - [ ] `tests/unit/test_reasoning_template_selector.py`
-  - [ ] `tests/unit/test_small_model_optimizer_metrics.py`
-  - [ ] `tests/test_learning_governance_contract.py`
+  - [x] `tests/unit/test_token_budget_policy.py`（追加 2 个 budget hit/miss 用例）
+  - [x] `tests/unit/test_llm_task_policy.py`（追加 SUITABLE 任务推荐契约）
+  - [x] `tests/unit/test_reasoning_template_selector.py`（I-2 已覆盖 PhaseIBenchmarkReplay，命中率断言通过 `test_small_model_optimizer_metrics.py` 行使）
+  - [x] `tests/unit/test_small_model_optimizer_metrics.py`（新建，9 通过：CallPlan telemetry 3 + summary hit-rate 2 + recommendations 2 + decompose / skip 边界 2）
+  - [x] `tests/test_learning_governance_contract.py`（追加 `TestBenchmarkFeedbackContract` 3 通过）
 
 ###### Card I-4
 
@@ -1099,10 +1100,10 @@ SmallModelOptimizer planner 已与 hypothesis / reflect / quality / experiment /
 从本文档任意一天恢复工作时，建议按以下顺序：
 
 1. 运行核心子集回归确认基线：`.\venv310\Scripts\Activate.ps1; python -m pytest tests/unit tests/test_research_session_repo.py tests/test_research_utils.py tests/test_web_console_api.py -q --disable-warnings`
-2. 确认 1464 passed / 0 failed（含 H-2 31 个 + H-3 34 个 + H-4 33 个 + I-2 12 个新增用例）
-3. 生产环境执行 `alembic upgrade head` 创建 `review_disputes` 表（migration `c7e9a32d8b54`，down_revision `b5d8a91e3c47`）；H-4 / I-2 不引入新 migration
+2. 确认 1497 passed / 0 failed（含 H-2 31 个 + H-3 34 个 + H-4 33 个 + I-2 12 个 + I-3 13 个新增用例）
+3. 生产环境执行 `alembic upgrade head` 创建 `review_disputes` 表（migration `c7e9a32d8b54`，down_revision `b5d8a91e3c47`）；H-4 / I-2 / I-3 不引入新 migration
 4. 如需补验证面，执行 `test_kg_e2e.py` 对 live `/api/analysis/kg/stats` 与 graph asset 输出做一次端到端确认
-5. 按 **Phase I-3** 顺序继续推进
+5. 按 **Phase I-4** 顺序继续推进
 
 ---
 

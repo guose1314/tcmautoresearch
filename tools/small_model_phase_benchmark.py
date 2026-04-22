@@ -7,9 +7,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.infra.prompt_registry import export_prompt_registry_snapshot
 from src.infra.small_model_optimizer import SmallModelOptimizer
 from src.infra.token_budget_policy import estimate_text_tokens
-from src.infra.prompt_registry import export_prompt_registry_snapshot
 from src.research.dossier_builder import build_benchmark_input_snapshot
 
 _FIXTURE_FILES: Dict[str, str] = {
@@ -139,6 +139,8 @@ def evaluate_case(case: Dict[str, Any], optimizer: SmallModelOptimizer) -> Dict[
             "budget_hit": budget_hit,
             "beats_baseline": beats_baseline,
         },
+        # Phase I-3：直接来自 CallPlan 的命中 telemetry，独立于 fixture expectations。
+        "telemetry": plan.telemetry_dict(),
         "quality_score": quality_score,
         "token_delta": baseline_tokens - plan.estimated_tokens,
         "dossier_snapshot": build_benchmark_input_snapshot(dossier_sections, phase=phase),
@@ -160,7 +162,16 @@ def _summarize_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             "baseline_win_rate": 0.0,
             "average_quality_score": 0.0,
             "average_token_delta": 0.0,
+            # Phase I-3 telemetry-based rates
+            "template_default_hit_rate": 0.0,
+            "budget_proceed_hit_rate": 0.0,
+            "layer_top_hit_rate": 0.0,
+            "decompose_rate": 0.0,
+            "skip_rate": 0.0,
         }
+
+    def _telemetry(item: Dict[str, Any], key: str, default: Any = False) -> Any:
+        return (item.get("telemetry") or {}).get(key, default)
 
     return {
         "case_count": total,
@@ -184,6 +195,139 @@ def _summarize_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
         ),
         "average_quality_score": round(sum(item["quality_score"] for item in results) / total, 4),
         "average_token_delta": round(sum(item["token_delta"] for item in results) / total, 2),
+        # Phase I-3 telemetry-based rates: 直接源自 CallPlan，不依赖 fixture expectations
+        "template_default_hit_rate": round(
+            sum(1 for item in results if _telemetry(item, "template_hit")) / total, 4,
+        ),
+        "budget_proceed_hit_rate": round(
+            sum(1 for item in results if _telemetry(item, "budget_hit", True)) / total, 4,
+        ),
+        "layer_top_hit_rate": round(
+            sum(1 for item in results if _telemetry(item, "layer_hit")) / total, 4,
+        ),
+        "decompose_rate": round(
+            sum(1 for item in results if str(_telemetry(item, "action", "")) == "decompose") / total, 4,
+        ),
+        "skip_rate": round(
+            sum(1 for item in results if str(_telemetry(item, "action", "")) == "skip") / total, 4,
+        ),
+    }
+
+
+def _load_benchmark_thresholds() -> Dict[str, float]:
+    """读取 small_model_optimizer 阈值，用于生成学习建议。"""
+    defaults: Dict[str, float] = {
+        "template_default_hit_rate_target": 0.7,
+        "budget_proceed_hit_rate_target": 0.8,
+        "layer_top_hit_rate_target": 0.5,
+        "skip_rate_max": 0.3,
+        "decompose_rate_max": 0.3,
+    }
+    try:
+        from src.infrastructure.config_loader import load_settings_section
+
+        llm_config = load_settings_section("models.llm", default={})
+        thresholds = ((llm_config.get("small_model_optimizer") or {}).get("benchmark_thresholds") or {})
+        for key, value in thresholds.items():
+            try:
+                defaults[str(key)] = float(value)
+            except (TypeError, ValueError):
+                continue
+    except Exception:
+        pass
+    return defaults
+
+
+def build_learning_recommendations(
+    phase_reports: Dict[str, Dict[str, Any]],
+    *,
+    thresholds: Optional[Dict[str, float]] = None,
+) -> Dict[str, Any]:
+    """根据各 phase 命中率派生策略调整建议，回灌到 PolicyAdjuster。
+
+    返回结构::
+
+        {
+          "thresholds": {...},
+          "phase_signals": {phase: {...}},
+          "template_preference_adjustments": {framework: float, ...},
+          "phase_threshold_adjustments": {phase: {key: value, ...}},
+        }
+    """
+    th = dict(thresholds or _load_benchmark_thresholds())
+    template_target = float(th.get("template_default_hit_rate_target", 0.7))
+    budget_target = float(th.get("budget_proceed_hit_rate_target", 0.8))
+    layer_target = float(th.get("layer_top_hit_rate_target", 0.5))
+    skip_max = float(th.get("skip_rate_max", 0.3))
+    decompose_max = float(th.get("decompose_rate_max", 0.3))
+
+    # 阶段→默认框架的本地副本，避免对内部模块产生新的强依赖。
+    phase_default_framework = {
+        "observe": "evidential",
+        "analyze": "analytical",
+        "hypothesis": "analytical",
+        "experiment": "comparative",
+        "experiment_execution": "evidential",
+        "discuss": "dialectical",
+        "reflect": "dialectical",
+        "publish": "concise",
+    }
+
+    phase_signals: Dict[str, Dict[str, Any]] = {}
+    template_adjustments: Dict[str, float] = {}
+    phase_threshold_adjustments: Dict[str, Dict[str, float]] = {}
+
+    for phase, phase_report in phase_reports.items():
+        summary = phase_report.get("summary") or {}
+        template_rate = float(summary.get("template_default_hit_rate", 0.0))
+        budget_rate = float(summary.get("budget_proceed_hit_rate", 0.0))
+        layer_rate = float(summary.get("layer_top_hit_rate", 0.0))
+        skip_rate = float(summary.get("skip_rate", 0.0))
+        decompose_rate = float(summary.get("decompose_rate", 0.0))
+
+        signals: Dict[str, Any] = {
+            "template_default_hit_rate": template_rate,
+            "budget_proceed_hit_rate": budget_rate,
+            "layer_top_hit_rate": layer_rate,
+            "skip_rate": skip_rate,
+            "decompose_rate": decompose_rate,
+            "below_targets": [],
+        }
+
+        if template_rate < template_target:
+            signals["below_targets"].append("template_default_hit_rate")
+            default_fw = phase_default_framework.get(phase)
+            if default_fw:
+                gap = template_target - template_rate
+                template_adjustments[default_fw] = round(
+                    template_adjustments.get(default_fw, 0.0) + min(0.2, gap), 4
+                )
+
+        per_phase_thresholds: Dict[str, float] = {}
+        if budget_rate < budget_target or decompose_rate > decompose_max:
+            per_phase_thresholds["context_budget_tighten"] = round(
+                max(budget_target - budget_rate, decompose_rate - decompose_max), 4
+            )
+            signals["below_targets"].append("budget_proceed_hit_rate")
+
+        if layer_rate < layer_target:
+            per_phase_thresholds["layer_richness_relax"] = round(layer_target - layer_rate, 4)
+            signals["below_targets"].append("layer_top_hit_rate")
+
+        if skip_rate > skip_max:
+            per_phase_thresholds["cache_likelihood_lower"] = round(skip_rate - skip_max, 4)
+            signals["below_targets"].append("skip_rate")
+
+        if per_phase_thresholds:
+            phase_threshold_adjustments[phase] = per_phase_thresholds
+
+        phase_signals[phase] = signals
+
+    return {
+        "thresholds": th,
+        "phase_signals": phase_signals,
+        "template_preference_adjustments": template_adjustments,
+        "phase_threshold_adjustments": phase_threshold_adjustments,
     }
 
 
@@ -271,6 +415,7 @@ def run_phase_benchmark(
         "phase_reports": phase_reports,
         "global_summary": _summarize_results(all_results),
         "prompt_registry_snapshot": export_prompt_registry_snapshot(),
+        "learning_recommendations": build_learning_recommendations(phase_reports),
     }
     if write_output:
         report["artifacts"] = write_benchmark_report(report, output_dir)

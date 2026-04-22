@@ -97,5 +97,45 @@ class TestTokenBudgetApplication(unittest.TestCase):
         self.assertGreater(count, 0)
 
 
+class TestPhaseI3BudgetHitTelemetry(unittest.TestCase):
+    """Phase I-3 — budget 命中评测：判断 resolve 输出是否达到了请求预算。"""
+
+    def test_purpose_budget_within_hard_cap_is_a_hit(self):
+        resolution = resolve_token_budget(
+            purpose="paper_plugin",
+            settings={
+                "enabled": True,
+                "default_input_tokens": 1024,
+                "min_input_tokens": 128,
+                "max_context_tokens": 4096,
+                "reserve_output_tokens": 512,
+                "purpose_input_budgets": {"paper_plugin": 1500},
+                "task_input_budgets": {},
+            },
+        )
+        # 请求 1500 < hard cap 3584 → 完整命中
+        self.assertEqual(resolution.input_budget_tokens, 1500)
+        self.assertEqual(resolution.source, "purpose")
+        self.assertGreaterEqual(resolution.hard_cap_tokens, resolution.input_budget_tokens)
+
+    def test_budget_capped_by_context_window_is_a_miss(self):
+        resolution = resolve_token_budget(
+            task="paper_full_section",
+            settings={
+                "enabled": True,
+                "default_input_tokens": 1024,
+                "min_input_tokens": 128,
+                "max_context_tokens": 1024,
+                "reserve_output_tokens": 512,
+                "purpose_input_budgets": {},
+                "task_input_budgets": {"paper_full_section": 2048},
+            },
+        )
+        # 请求 2048 但 hard cap 仅 512 → budget miss
+        self.assertEqual(resolution.hard_cap_tokens, 512)
+        self.assertEqual(resolution.input_budget_tokens, 512)
+        self.assertEqual(resolution.source, "task")
+
+
 if __name__ == "__main__":
     unittest.main()

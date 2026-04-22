@@ -241,6 +241,12 @@ models:
       benchmark:
         output_dir: "./output/phase_benchmarks"
         compare_baseline: true
+      benchmark_thresholds:                # Phase I-3：命中率目标，用于回灌学习闭环
+        template_default_hit_rate_target: 0.7
+        budget_proceed_hit_rate_target: 0.8
+        layer_top_hit_rate_target: 0.5
+        skip_rate_max: 0.3
+        decompose_rate_max: 0.3
     token_budget_policy:
       enabled: true                      # 启用统一输入预算策略，保护本地 7B 稳定性
       default_input_tokens: 1536         # 常规 prompt 输入预算

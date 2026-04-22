@@ -18,6 +18,12 @@ models:
       enabled: true
       benchmark:
         output_dir: "./output/test/phase_benchmarks"
+      benchmark_thresholds:                 # Phase I-3：测试环境放宽，避免噪声触发学习
+        template_default_hit_rate_target: 0.6
+        budget_proceed_hit_rate_target: 0.7
+        layer_top_hit_rate_target: 0.4
+        skip_rate_max: 0.4
+        decompose_rate_max: 0.4
 
 modules:
   document_preprocessing:

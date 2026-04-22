@@ -72,3 +72,9 @@ models:
       enabled: true
       benchmark:
         output_dir: "./output/production/phase_benchmarks"
+      benchmark_thresholds:                 # Phase I-3：生产环境目标稍严
+        template_default_hit_rate_target: 0.75
+        budget_proceed_hit_rate_target: 0.85
+        layer_top_hit_rate_target: 0.55
+        skip_rate_max: 0.25
+        decompose_rate_max: 0.25

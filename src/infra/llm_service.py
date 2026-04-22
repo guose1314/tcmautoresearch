@@ -161,6 +161,12 @@ class PlannedLLMCall:
                     "decision_reason": self.plan.decision_reason,
                     "degradation_hints": dict(self.plan.degradation_hints),
                     "sub_context_count": len(self.plan.sub_contexts),
+                    # Phase I-3 命中率 telemetry
+                    "template_hit": bool(getattr(self.plan, "template_hit", False)),
+                    "budget_hit": bool(getattr(self.plan, "budget_hit", True)),
+                    "layer_hit": bool(getattr(self.plan, "layer_hit", False)),
+                    "max_layer_available": int(getattr(self.plan, "max_layer_available", -1)),
+                    "complexity_tier": str(getattr(self.plan, "complexity_tier", "medium")),
                 }
             )
         if self.fallback_path:
