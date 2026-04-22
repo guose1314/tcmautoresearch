@@ -470,9 +470,10 @@ async def llm_distill(
         assistant = _get_engine()
         llm = assistant._get_llm()
         if llm is None:
+            reason = getattr(assistant, "_last_llm_load_error", "") or "未知原因，请检查模型文件是否存在与 llm 配置"
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="本地 LLM 引擎未加载，无法进行知识蒸馏",
+                detail=f"本地 LLM 引擎未加载，无法进行知识蒸馏：{reason}",
             )
 
         # 分片蒸馏 — 长文本按 _DISTILL_TEXT_LIMIT 切片逐段调用 LLM

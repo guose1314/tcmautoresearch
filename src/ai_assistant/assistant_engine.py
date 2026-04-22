@@ -97,6 +97,9 @@ class AssistantEngine:
         self._max_turns = max_history_turns
         self._kg_rag = kg_rag
         self._history: Dict[str, List[Dict[str, str]]] = defaultdict(list)
+        # 记录最近一次 LLM 加载失败原因，便于上层（如 /api/analysis/distill）
+        # 在返回 503 时把根因透出，避免被静默吞掉。
+        self._last_llm_load_error: str = ""
         logger.info("AssistantEngine 初始化完成 (max_turns=%d)", max_history_turns)
 
     # ------------------------------------------------------------------
@@ -269,10 +272,12 @@ class AssistantEngine:
             svc = get_llm_service("assistant")
             svc.load()
             self._llm = svc
+            self._last_llm_load_error = ""
             return svc
         except Exception as exc:
             # 加载失败时显式回滚，避免缓存未初始化引擎对象。
             self._llm = None
+            self._last_llm_load_error = f"{type(exc).__name__}: {exc}"
             logger.warning("无法加载 LLM 引擎: %s", exc)
             return None
 
