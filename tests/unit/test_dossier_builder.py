@@ -9,6 +9,7 @@ from src.research.dossier_builder import (
     DossierSection,
     ResearchDossier,
     ResearchDossierBuilder,
+    build_benchmark_input_snapshot,
 )
 
 
@@ -555,6 +556,45 @@ class TestResearchDossierBuilder(unittest.TestCase):
 
         self.assertEqual(sorted(dossiers.keys()), ["analyze", "observe", "publish"])
         self.assertEqual(dossiers["publish"].metadata["dossier_kind"], "publish")
+
+
+class TestBenchmarkInputSnapshot(unittest.TestCase):
+    """Phase I / I-2: replay-friendly dossier snapshot helper."""
+
+    def test_snapshot_is_deterministic_for_identical_input(self):
+        sections = {
+            "objective": "研究桌枝汤减轻发热。",
+            "evidence": "试验 A、试验 B、试验 C。",
+        }
+        first = build_benchmark_input_snapshot(sections, phase="hypothesis")
+        second = build_benchmark_input_snapshot(sections, phase="hypothesis")
+        self.assertEqual(first["fingerprint"], second["fingerprint"])
+        self.assertEqual(first["section_count"], 2)
+
+    def test_snapshot_normalizes_whitespace(self):
+        a = build_benchmark_input_snapshot({"objective": "一二三"})
+        b = build_benchmark_input_snapshot({"objective": "  一二三  "})
+        c = build_benchmark_input_snapshot({"objective": "一二三\n\n\n\n"})
+        self.assertEqual(a["fingerprint"], b["fingerprint"])
+        self.assertEqual(a["fingerprint"], c["fingerprint"])
+
+    def test_snapshot_changes_when_section_content_changes(self):
+        a = build_benchmark_input_snapshot({"objective": "原始"})
+        b = build_benchmark_input_snapshot({"objective": "修改后"})
+        self.assertNotEqual(a["fingerprint"], b["fingerprint"])
+
+    def test_snapshot_section_order_is_alphabetical(self):
+        snapshot = build_benchmark_input_snapshot(
+            {"zeta": "a", "alpha": "b", "middle": "c"},
+        )
+        names = [entry["name"] for entry in snapshot["sections"]]
+        self.assertEqual(names, ["alpha", "middle", "zeta"])
+
+    def test_snapshot_handles_empty_sections(self):
+        snapshot = build_benchmark_input_snapshot({})
+        self.assertEqual(snapshot["section_count"], 0)
+        self.assertEqual(snapshot["total_estimated_tokens"], 0)
+        self.assertEqual(len(snapshot["fingerprint"]), 64)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,6 @@ import hashlib
 import statistics
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-
 __all__ = [
     "build_review_sample",
     "compute_review_quality_summary",

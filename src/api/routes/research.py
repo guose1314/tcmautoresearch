@@ -58,10 +58,10 @@ from src.api.schemas import (
     ReviewDisputeResolveRequest,
     ReviewDisputeResponse,
     ReviewDisputeWithdrawRequest,
+    ReviewerWorkloadResponse,
     ReviewQualitySummaryResponse,
     ReviewSampleRequest,
     ReviewSampleResponse,
-    ReviewerWorkloadResponse,
 )
 from src.infrastructure.research_session_repo import ResearchSessionRepository
 from web_console.job_manager import ResearchJobManager, format_sse

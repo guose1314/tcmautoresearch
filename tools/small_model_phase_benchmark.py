@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional
 
 from src.infra.small_model_optimizer import SmallModelOptimizer
 from src.infra.token_budget_policy import estimate_text_tokens
+from src.infra.prompt_registry import export_prompt_registry_snapshot
+from src.research.dossier_builder import build_benchmark_input_snapshot
 
 _FIXTURE_FILES: Dict[str, str] = {
     "hypothesis": "hypothesis_cases.json",
@@ -139,6 +141,7 @@ def evaluate_case(case: Dict[str, Any], optimizer: SmallModelOptimizer) -> Dict[
         },
         "quality_score": quality_score,
         "token_delta": baseline_tokens - plan.estimated_tokens,
+        "dossier_snapshot": build_benchmark_input_snapshot(dossier_sections, phase=phase),
     }
 
 
@@ -246,9 +249,19 @@ def run_phase_benchmark(
 
     for phase_name, phase_cases in cases_by_phase.items():
         case_results = [evaluate_case(case, optimizer) for case in phase_cases]
+        failed_cases = [
+            {
+                "case_id": item["case_id"],
+                "missing": [k for k, v in item["score_components"].items() if not v],
+                "quality_score": item["quality_score"],
+            }
+            for item in case_results
+            if not all(item["score_components"].values())
+        ]
         phase_reports[phase_name] = {
             "summary": _summarize_results(case_results),
             "cases": case_results,
+            "failed_cases": failed_cases,
         }
         all_results.extend(case_results)
 
@@ -257,6 +270,7 @@ def run_phase_benchmark(
         "fixtures_dir": str(Path(fixtures_dir or _default_fixtures_dir())),
         "phase_reports": phase_reports,
         "global_summary": _summarize_results(all_results),
+        "prompt_registry_snapshot": export_prompt_registry_snapshot(),
     }
     if write_output:
         report["artifacts"] = write_benchmark_report(report, output_dir)

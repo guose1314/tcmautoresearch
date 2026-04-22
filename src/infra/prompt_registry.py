@@ -353,6 +353,40 @@ def get_registry_summary() -> Dict[str, Any]:
     }
 
 
+def export_prompt_registry_snapshot() -> Dict[str, Any]:
+    """导出 benchmark replay 用的确定性 prompt registry 快照。
+
+    Phase I / I-2: 用于让 phase benchmark 在 JSON 报告中固化当时使用的
+    prompt 模板版本，从而支持 "同一 case 多次 replay 得到一致 prompt 结构"
+    的判定，并方便回归对比。返回结构按名字稳定排序，每条携带 system + user
+    模板的 sha256 指纹与是否带 schema。
+    """
+
+    import hashlib
+
+    entries: list[Dict[str, Any]] = []
+    for name in sorted(PROMPT_REGISTRY):
+        spec = PROMPT_REGISTRY[name]
+        body = "\n--\n".join([spec.system_prompt or "", spec.user_template or ""])
+        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        entries.append(
+            {
+                "name": name,
+                "purpose": spec.purpose,
+                "task": spec.task,
+                "output_kind": spec.output_kind,
+                "has_schema": spec.output_schema is not None,
+                "fingerprint": digest,
+            }
+        )
+    aggregate = "\n".join(f"{e['name']}:{e['fingerprint']}" for e in entries)
+    return {
+        "total_prompts": len(entries),
+        "fingerprint": hashlib.sha256(aggregate.encode("utf-8")).hexdigest(),
+        "entries": entries,
+    }
+
+
 @lru_cache(maxsize=1)
 def load_prompt_registry_settings() -> Dict[str, Any]:
     """从配置加载 Prompt Registry 行为开关。"""

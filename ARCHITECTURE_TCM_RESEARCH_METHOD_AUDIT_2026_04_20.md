@@ -930,18 +930,19 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
 - 建议标题：`Phase I / I-2 建立 phase benchmark 资产集与运行器`
 - 建议标签：`llm`、`benchmark`、`evaluation`、`phase-i`、`p1`
 - 目标：建立一套可重复 replay 的 phase benchmark，比较优化路径与直接调用基线，而不是只凭体感判断优化效果。
+- 当前状态：2026-04-22 已全部完成；benchmark 工具 + 4 个 phase fixture + 3 个测试文件都在位，本轮补齐 dossier_builder / prompt_registry 的 benchmark-ready snapshot 导出、benchmark 报告增加 `failed_cases` 与 `prompt_registry_snapshot`；新增 12 个测试（49 逻辑在本卡范围内通过），核心子集 1464 通过 / 0 失败。
 - 范围：
-  - [ ] 新建 `tools/small_model_phase_benchmark.py`，输出 JSON + Markdown 对照报告
-  - [ ] 新建 `tests/fixtures/phase_i/` 下的 hypothesis / analyze / publish / reflect case 资产
-  - [ ] 让 `src/research/dossier_builder.py`、`src/infra/prompt_registry.py` 能导出 benchmark-ready 输入快照
-  - [ ] 让 benchmark 输出沉淀到 `output/`，供学习闭环与人工复核复用
+  - [x] 新建 `tools/small_model_phase_benchmark.py`，输出 JSON + Markdown 对照报告
+  - [x] 新建 `tests/fixtures/phase_i/` 下的 hypothesis / analyze / publish / reflect case 资产
+  - [x] 让 `src/research/dossier_builder.py`、`src/infra/prompt_registry.py` 能导出 benchmark-ready 输入快照（`build_benchmark_input_snapshot` / `export_prompt_registry_snapshot`）
+  - [x] 让 benchmark 输出沉淀到 `output/phase_benchmarks/`，供学习闭环与人工复核复用
 - 完成定义：
-  - [ ] 单次运行后能拿到 per-phase 成本、动作分布、质量分、case diff、失败样例
-  - [ ] 同一 case 多次 replay 得到一致 dossier snapshot 与 prompt 结构
+  - [x] 单次运行后能拿到 per-phase 成本、动作分布、质量分、case diff、失败样例（`failed_cases` 按 phase 汇总）
+  - [x] 同一 case 多次 replay 得到一致 dossier snapshot 与 prompt 结构（sha256 fingerprint 希望完全一致）
 - 测试：
-  - [ ] `tests/unit/test_small_model_phase_benchmark.py`
-  - [ ] `tests/unit/test_dossier_builder.py`
-  - [ ] `tests/unit/test_reasoning_template_selector.py`
+  - [x] `tests/unit/test_small_model_phase_benchmark.py`（8 通过，含 4 个 I-2 新增 replay/快照/失败样例用例）
+  - [x] `tests/unit/test_dossier_builder.py::TestBenchmarkInputSnapshot`（5 通过）
+  - [x] `tests/unit/test_reasoning_template_selector.py::TestPhaseIBenchmarkReplay`（3 通过）
 
 ###### Card I-3
 
@@ -1098,10 +1099,10 @@ SmallModelOptimizer planner 已与 hypothesis / reflect / quality / experiment /
 从本文档任意一天恢复工作时，建议按以下顺序：
 
 1. 运行核心子集回归确认基线：`.\venv310\Scripts\Activate.ps1; python -m pytest tests/unit tests/test_research_session_repo.py tests/test_research_utils.py tests/test_web_console_api.py -q --disable-warnings`
-2. 确认 1452 passed / 0 failed（含 H-2 31 个 + H-3 34 个 + H-4 33 个新增用例）
-3. 生产环境执行 `alembic upgrade head` 创建 `review_disputes` 表（migration `c7e9a32d8b54`，down_revision `b5d8a91e3c47`）；H-4 不引入新 migration
+2. 确认 1464 passed / 0 failed（含 H-2 31 个 + H-3 34 个 + H-4 33 个 + I-2 12 个新增用例）
+3. 生产环境执行 `alembic upgrade head` 创建 `review_disputes` 表（migration `c7e9a32d8b54`，down_revision `b5d8a91e3c47`）；H-4 / I-2 不引入新 migration
 4. 如需补验证面，执行 `test_kg_e2e.py` 对 live `/api/analysis/kg/stats` 与 graph asset 输出做一次端到端确认
-5. 按 **Phase I-2 -> I-3** 顺序继续推进
+5. 按 **Phase I-3** 顺序继续推进
 
 ---
 

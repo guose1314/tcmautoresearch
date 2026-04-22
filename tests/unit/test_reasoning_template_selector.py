@@ -114,5 +114,53 @@ class TestSelectReasoningFramework(unittest.TestCase):
         self.assertEqual(result.framework_id, "formula_compatibility")
 
 
+class TestPhaseIBenchmarkReplay(unittest.TestCase):
+    """Phase I / I-2: 同一 case 多次 replay 必须得到一致 prompt 结构。"""
+
+    def test_select_reasoning_framework_is_deterministic(self):
+        objective = "黄芪-人参药对的配伍协同增效机制"
+        context = {"entities": [{"text": "黄芪", "type": "herb"}, {"text": "人参", "type": "herb"}]}
+        first = select_reasoning_framework(objective, context)
+        second = select_reasoning_framework(objective, context)
+        self.assertEqual(first.framework_id, second.framework_id)
+        self.assertEqual(first.confidence, second.confidence)
+        self.assertEqual(first.selection_reasons, second.selection_reasons)
+
+    def test_optimizer_prepare_call_is_deterministic(self):
+        from src.infra.small_model_optimizer import SmallModelOptimizer
+
+        optimizer = SmallModelOptimizer()
+        sections = {
+            "objective": "研究桂枝汤减轻发热",
+            "evidence": "试验 A、试验 B、试验 C 各取得正向结果",
+        }
+        a = optimizer.prepare_call(
+            phase="hypothesis",
+            task_type="hypothesis_generation",
+            dossier_sections=sections,
+        )
+        b = optimizer.prepare_call(
+            phase="hypothesis",
+            task_type="hypothesis_generation",
+            dossier_sections=sections,
+        )
+        self.assertEqual(a.action, b.action)
+        self.assertEqual(a.framework_name, b.framework_name)
+        self.assertEqual(a.estimated_tokens, b.estimated_tokens)
+        self.assertEqual(a.context_text, b.context_text)
+        self.assertEqual(a.output_scaffold, b.output_scaffold)
+
+    def test_prompt_registry_snapshot_is_deterministic(self):
+        from src.infra.prompt_registry import export_prompt_registry_snapshot
+
+        first = export_prompt_registry_snapshot()
+        second = export_prompt_registry_snapshot()
+        self.assertEqual(first["fingerprint"], second["fingerprint"])
+        self.assertEqual(first["total_prompts"], second["total_prompts"])
+        # entries must be alphabetically sorted
+        names = [entry["name"] for entry in first["entries"]]
+        self.assertEqual(names, sorted(names))
+
+
 if __name__ == "__main__":
     unittest.main()

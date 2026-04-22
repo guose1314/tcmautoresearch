@@ -1503,3 +1503,52 @@ def _truncate(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 1] + "…"
+
+
+# ── Phase I / I-2: benchmark-ready dossier snapshot ─────────────────────────
+
+
+def build_benchmark_input_snapshot(
+    dossier_sections: Mapping[str, Any],
+    *,
+    phase: Optional[str] = None,
+) -> Dict[str, Any]:
+    """生成 benchmark replay 用的确定性输入快照。
+
+    Phase I / I-2: phase benchmark 必须保证 "同一 case 多次 replay 得到一致
+    dossier snapshot 与 prompt 结构"。本函数返回稳定排序、归一化空白后的
+    section 列表与 sha256 指纹，方便 benchmark JSON 报告中做 diff。
+    """
+
+    import hashlib
+    import re
+
+    normalized: List[Dict[str, Any]] = []
+    for name in sorted(dossier_sections or {}):
+        raw = dossier_sections.get(name, "")
+        text = "" if raw is None else str(raw)
+        # Normalize whitespace so that cosmetic differences (CRLF / trailing
+        # spaces / runs of blank lines) don't perturb the snapshot fingerprint.
+        cleaned = re.sub(r"[ \t]+", " ", text).strip()
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        digest = hashlib.sha256(cleaned.encode("utf-8")).hexdigest()
+        estimated = max(1, int(len(cleaned) / _CHARS_PER_TOKEN_CN)) if cleaned else 0
+        normalized.append(
+            {
+                "name": name,
+                "char_count": len(cleaned),
+                "estimated_tokens": estimated,
+                "sha256": digest,
+            }
+        )
+    combined = "\n\n".join(
+        f"## {entry['name']}\n{entry['sha256']}" for entry in normalized
+    )
+    fingerprint = hashlib.sha256(combined.encode("utf-8")).hexdigest()
+    return {
+        "phase": phase or "",
+        "section_count": len(normalized),
+        "total_estimated_tokens": sum(item["estimated_tokens"] for item in normalized),
+        "fingerprint": fingerprint,
+        "sections": normalized,
+    }
