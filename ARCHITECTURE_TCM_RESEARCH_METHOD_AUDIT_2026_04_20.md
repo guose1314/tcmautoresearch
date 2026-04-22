@@ -10,6 +10,25 @@
 
 测试基线（2026-04-21 更新）：全量套件基线 3046+ passed / 0 failed / 4 xfailed / 2 skipped；G-3/G-4/H-1/H-2 推进后核心子集（tests/unit + test_research_session_repo + test_research_utils + test_web_console_api）**1385 passed / 0 failed**（H-2 阶段新增 31 个用例）。
 
+## 文档导航
+
+- 上游审计稿：[ARCHITECTURE_TCM_RESEARCH_METHOD_AUDIT_2026_04_12.md](ARCHITECTURE_TCM_RESEARCH_METHOD_AUDIT_2026_04_12.md)
+- 对应设计稿：[ARCHITECTURE_TCM_RESEARCH_METHOD_DESIGN_2026_04_22.md](ARCHITECTURE_TCM_RESEARCH_METHOD_DESIGN_2026_04_22.md)
+
+### 本文索引
+
+- 执行摘要
+- 以《中医文献研究法》衡量当前实现度
+- 核心模块与当前状态
+- 真实科研工作流是否已经成立
+- 针对本地 Qwen1.5-7B-Chat Q8_0 的专项评估
+- 当前架构的主要优点与主要约束
+- 建议的目标架构
+- 具体优化建议
+- 分阶段实施计划
+- 附录 A：2026-04-21 代码质量治理推进摘要
+- 最终判断
+
 ---
 
 ## 1. 执行摘要
@@ -741,7 +760,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
 
 ---
 
-###### Card G-1
+#### Card G-1
 
 当前状态：2026-04-21 已完成首轮落地，后续只保留 live E2E / backfill 联调到 G-4 一并收口。
 
@@ -761,7 +780,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [x] `tests/unit/test_neo4j_driver.py`
   - [ ] `test_kg_e2e.py`（脚本已扩展，live API 尚未执行）
 
-###### Card G-2
+#### Card G-2
 
 当前状态：2026-04-21 核心实现与全量回归已完成，剩余 live KG E2E 验证建议并入 G-4 资产级回归一起做。
 
@@ -781,7 +800,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [x] `tests/unit/test_architecture_regression_guard.py`（Guard #36）
   - [ ] `test_kg_e2e.py`（脚本已扩展，live API 尚未执行）
 
-###### Card G-3
+#### Card G-3
 
 当前状态：2026-04-21 已全部完成。
 
@@ -802,7 +821,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [x] `tests/unit/test_textual_evidence_chain.py`
   - [x] `tests/unit/test_catalog_contract.py`
 
-###### Card G-4
+#### Card G-4
 
 当前状态：2026-04-21 已全部完成。production-local preflight 预检输出：schema version=1.1.0（match）、projected nodes=703、edges=1393；`test_kg_e2e.py` live 端到端待在生产环境补跑。
 
@@ -822,7 +841,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [x] `tests/unit/test_architecture_regression_guard.py`（Guard #37）
   - [ ] `test_kg_e2e.py`（脚本已扩展，live API 尚未执行）
 
-###### Card H-1
+#### Card H-1
 
 当前状态：2026-04-21 已全部完成，新增 18 个测试（`tests/unit/test_review_queue_contract.py`），全量单元套件 1234 passed。
 
@@ -843,7 +862,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [x] `tests/test_web_console_api.py`
   - [x] `tests/unit/test_dashboard_copy.py`
 
-###### Card H-2
+#### Card H-2
 
 当前状态：2026-04-21 已全部完成，新增 31 个测试（12 仓储 + 12 看板契约 + 7 端点），核心子集 1385 passed。alembic migration revision `b5d8a91e3c47` 已就绪，需在生产环境执行 `alembic upgrade head`。
 
@@ -863,7 +882,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [x] `tests/unit/test_reviewer_workload_board.py`（新建，12 例契约测试）
   - [x] `tests/test_web_console_api.py`（`TestReviewAssignmentEndpoints` 7 例）
 
-###### Card H-3
+#### Card H-3
 
 - 建议标题：`Phase H / H-3 争议归档与裁决流`
 - 建议标签：`philology`、`dispute-resolution`、`review-workbench`、`phase-h`、`p1`
@@ -882,7 +901,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [x] `tests/test_research_session_repo.py::TestReviewDisputes`（15 通过）
   - [x] `tests/test_web_console_api.py::TestReviewDisputeEndpoints`（7 通过）
 
-###### Card H-4
+#### Card H-4
 
 - 建议标题：`Phase H / H-4 抽样质检与质量看板`
 - 建议标签：`philology`、`quality-control`、`dashboard`、`phase-h`、`p2`
@@ -903,7 +922,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [x] `tests/test_web_console_api.py::TestReviewQualityAndSamplingEndpoints`（5 通过）
   - [x] `tests/unit/test_architecture_regression_guard.py::TestGuard38_ReviewQualityToolbar`（6 通过）
 
-###### Card I-1
+#### Card I-1
 
 - 建议标题：`Phase I / I-1 SmallModelOptimizer 默认执行路径接线`
 - 建议标签：`llm`、`optimizer`、`runtime`、`phase-i`、`p0`
@@ -925,7 +944,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [ ] `tests/test_quality_assessor.py`
   - [ ] `tests/test_hypothesis_engine.py`
 
-###### Card I-2
+#### Card I-2
 
 - 建议标题：`Phase I / I-2 建立 phase benchmark 资产集与运行器`
 - 建议标签：`llm`、`benchmark`、`evaluation`、`phase-i`、`p1`
@@ -944,7 +963,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [x] `tests/unit/test_dossier_builder.py::TestBenchmarkInputSnapshot`（5 通过）
   - [x] `tests/unit/test_reasoning_template_selector.py::TestPhaseIBenchmarkReplay`（3 通过）
 
-###### Card I-3
+#### Card I-3
 
 - 建议标题：`Phase I / I-3 模板命中与 budget 命中评测`
 - 建议标签：`llm`、`benchmark`、`token-budget`、`phase-i`、`p1`
@@ -965,7 +984,7 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [x] `tests/unit/test_small_model_optimizer_metrics.py`（新建，9 通过：CallPlan telemetry 3 + summary hit-rate 2 + recommendations 2 + decompose / skip 边界 2）
   - [x] `tests/test_learning_governance_contract.py`（追加 `TestBenchmarkFeedbackContract` 3 通过）
 
-###### Card I-4
+#### Card I-4
 
 - 建议标题：`Phase I / I-4 Fallback 质量评测与回归基线`
 - 建议标签：`llm`、`fallback`、`benchmark`、`phase-i`、`p1`
@@ -985,6 +1004,27 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
   - [x] `tests/unit/test_reflect_phase.py`（追加 `TestReflectFallbackQualityMetadata` 2 通过）
   - [x] `tests/test_quality_assessor.py`（追加 `TestPhaseI4FallbackQuality` 5 通过）
 - 当前状态：2026-04-22 已全部完成；`quality_assessor` 增 `assess_fallback_quality` / `build_phase_fallback_metadata` / `DEFAULT_FALLBACK_DELTA_THRESHOLD` / `FALLBACK_ACTIONS`；`DynamicInvocationStrategy.CostMetrics` 增 `fallback_samples` / `fallback_acceptances` / `fallback_acceptance_rate` / `avg_fallback_quality_score` 与 `record_fallback_quality` 接入点；benchmark 工具新增 `_build_fallback_quality_matrix` / `build_regression_baseline` / `export_regression_baseline` 与 `fallback_acceptance_rate_target` / `fallback_baseline_delta_floor` 阈值；`hypothesis_phase` / `reflect_phase` / `publish_phase` / `experiment_designer` 在各自 fallback 触发条件下写入 `fallback_quality_score` / `fallback_acceptance` / `fallback_reason` / `fallback_quality_matrix`；新增 Guard #40 锁定上述契约。核心子集 1625 通过 / 0 失败（基线 1497）。
+
+#### Card J-1
+
+- 建议标题：`Phase J / J-1 topic_discovery 子阶段 + TopicProposal contract`
+- 建议标签：`research-method`、`topic-discovery`、`contract`、`phase-j`、`p1`
+- 目标：补齐中医文献研究法环节①（选题）。从用户输入的研究方向 seed 出发，自动给出 3-5 个候选课题，每条均带可证伪假说提示与证据来源候选，并保持与 evidence/catalog contract 一致的 dataclass + to_dict/from_dict 序列化风格。
+- 范围：
+  - [x] 新增 [src/research/topic_discovery/](src/research/topic_discovery/) 子包（`contract.py` + `topic_discovery_service.py` + 包导出）
+  - [x] 提供 `TopicProposal` / `TopicSourceCandidate` / `TOPIC_PROPOSAL_CONTRACT_VERSION = "topic-proposal-v1"` 与 `TOPIC_PROPOSAL_MIN/MAX = 3/5`
+  - [x] 提供 `propose_topics(seed, *, catalog_entries=None, kg=None, llm_caller=None)` 与 `TopicDiscoveryService`
+  - [x] 提供 `normalize_topic_proposals` / `build_topic_discovery_summary` 给 dashboard / artifact 复用
+  - [x] 不依赖真实 LLMEngine 与 Neo4j，KG 仅依赖 `entities_by_type` 协议（与 `TCMKnowledgeGraph` 内存图兼容）
+- 完成定义：
+  - [x] 可从用户 seed 生成 3-5 个候选课题并带证据来源（`test_propose_returns_count_within_contract` + `test_each_proposal_has_evidence_and_hint`）
+  - [x] 候选角度去重且全部来自 `CANDIDATE_ANGLES`（`test_propose_yields_unique_angles`）
+  - [x] 优先级降序排列、`from_dict` 对 priority 做 0..1 钳制（`test_priority_sorted_descending` + `test_priority_clamped_in_from_dict`）
+  - [x] 考据 / 训诂 / 目录类角度只吸纳 catalog 类来源，避免 KG 噪声（`test_textual_angle_excludes_kg_sources`）
+  - [x] LLM 注入失败可静默回退到规则模板，不破坏批处理（`test_llm_caller_failure_falls_back`）
+- 测试：
+  - [x] `tests/unit/test_topic_discovery.py`（新建，16 通过：contract 5 + service 11，覆盖 round-trip / clamp / normalize / summary / catalog / kg / textual-only / llm 注入与失败回退 / json 序列化）
+- 当前状态：2026-04-22 已完成；核心子集 1641 通过 / 0 失败 / 1 xfailed / 14 subtests 通过（基线 1625 + 16 新增），与 J-1 Done 定义一致。Phase J 进入 J-2（`textual_criticism` 子阶段 + `AuthenticityVerdict`）。
 
 ---
 
