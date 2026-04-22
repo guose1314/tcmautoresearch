@@ -74,6 +74,107 @@ class ComplianceReport:
 
 
 # ---------------------------------------------------------------------------
+# Phase I-4: Fallback 质量评测原语
+# ---------------------------------------------------------------------------
+
+# 默认接受阈值：optimized 路径的质量分相对 baseline 不得劣化超过此值
+DEFAULT_FALLBACK_DELTA_THRESHOLD = 0.1
+
+# 哪些 action 视为"发生了 fallback"，需要进入质量矩阵评测
+FALLBACK_ACTIONS = frozenset({"skip", "decompose", "retry_simplified"})
+
+
+def assess_fallback_quality(
+    *,
+    action: str,
+    baseline_score: float,
+    optimized_score: float,
+    delta_threshold: float = DEFAULT_FALLBACK_DELTA_THRESHOLD,
+    reason_extra: Optional[str] = None,
+) -> Dict[str, Any]:
+    """评估单次 fallback 是否可被接受。
+
+    返回字段::
+
+        {
+          "action": str,
+          "fallback_quality_score": float,    # 0..1，等于 optimized_score
+          "baseline_score": float,
+          "delta": float,                     # optimized - baseline，可正可负
+          "delta_threshold": float,
+          "fallback_acceptance": bool,        # delta >= -threshold OR action == "proceed"
+          "fallback_reason": str,
+        }
+    """
+    try:
+        baseline = float(baseline_score)
+    except (TypeError, ValueError):
+        baseline = 0.0
+    try:
+        optimized = float(optimized_score)
+    except (TypeError, ValueError):
+        optimized = 0.0
+    try:
+        threshold = float(delta_threshold)
+    except (TypeError, ValueError):
+        threshold = DEFAULT_FALLBACK_DELTA_THRESHOLD
+    threshold = max(0.0, threshold)
+
+    delta = round(optimized - baseline, 4)
+    action_label = str(action or "").strip() or "unknown"
+    if action_label == "proceed":
+        accepted = True
+    else:
+        accepted = delta >= -threshold
+
+    if action_label == "proceed":
+        reason = "no_fallback"
+    elif accepted:
+        reason = f"{action_label}_within_threshold"
+    else:
+        reason = f"{action_label}_below_baseline"
+    if reason_extra:
+        reason = f"{reason}:{reason_extra}"
+
+    return {
+        "action": action_label,
+        "fallback_quality_score": round(max(0.0, min(1.0, optimized)), 4),
+        "baseline_score": round(max(0.0, min(1.0, baseline)), 4),
+        "delta": delta,
+        "delta_threshold": round(threshold, 4),
+        "fallback_acceptance": bool(accepted),
+        "fallback_reason": reason,
+    }
+
+
+def build_phase_fallback_metadata(
+    *,
+    action: str,
+    baseline_score: float,
+    optimized_score: float,
+    delta_threshold: float = DEFAULT_FALLBACK_DELTA_THRESHOLD,
+    reason_extra: Optional[str] = None,
+) -> Dict[str, Any]:
+    """构造 phase metadata 三件套：fallback_quality_score / fallback_acceptance / fallback_reason。
+
+    供各 phase mixin 在发生 fallback 时附加到 metadata，避免重复键拼写。
+    """
+    matrix = assess_fallback_quality(
+        action=action,
+        baseline_score=baseline_score,
+        optimized_score=optimized_score,
+        delta_threshold=delta_threshold,
+        reason_extra=reason_extra,
+    )
+    return {
+        "fallback_quality_score": matrix["fallback_quality_score"],
+        "fallback_acceptance": matrix["fallback_acceptance"],
+        "fallback_reason": matrix["fallback_reason"],
+        "fallback_quality_matrix": matrix,
+    }
+
+
+# ---------------------------------------------------------------------------
 # 主类
 # ---------------------------------------------------------------------------
 

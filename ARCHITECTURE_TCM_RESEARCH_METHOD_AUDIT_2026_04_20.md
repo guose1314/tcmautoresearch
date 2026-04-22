@@ -971,19 +971,20 @@ Phase G 如果只补模型、不补回归和回填，图谱会继续停留在“
 - 建议标签：`llm`、`fallback`、`benchmark`、`phase-i`、`p1`
 - 目标：把 `skip` / `decompose` / `retry_simplified` / rules fallback 的质量边界制度化，避免默认策略化后只知道动作触发、不知道质量是否可接受。
 - 范围：
-  - [ ] 在 `tools/small_model_phase_benchmark.py`、`src/infra/dynamic_invocation_strategy.py`、`src/quality/quality_assessor.py` 建立 fallback 质量矩阵
-  - [ ] 为 `src/research/phases/hypothesis_phase.py`、`src/research/phases/reflect_phase.py`、`src/research/phases/publish_phase.py`、`src/research/experiment_designer.py`、`src/quality/quality_assessor.py` 增加 fallback 质量元数据
-  - [ ] 导出 regression baseline，明确“优化路径至少不劣于 direct-call baseline”的 phase 阈值
-  - [ ] 新增 Guard #40 与专项测试，锁定 benchmark baseline、fallback summary、phase metadata
+  - [x] 在 `tools/small_model_phase_benchmark.py`、`src/infra/dynamic_invocation_strategy.py`、`src/quality/quality_assessor.py` 建立 fallback 质量矩阵
+  - [x] 为 `src/research/phases/hypothesis_phase.py`、`src/research/phases/reflect_phase.py`、`src/research/phases/publish_phase.py`、`src/research/experiment_designer.py`、`src/quality/quality_assessor.py` 增加 fallback 质量元数据
+  - [x] 导出 regression baseline，明确“优化路径至少不劣于 direct-call baseline”的 phase 阈值
+  - [x] 新增 Guard #40 与专项测试，锁定 benchmark baseline、fallback summary、phase metadata
 - 完成定义：
-  - [ ] benchmark 报告可输出 fallback 质量分、失败率、与 baseline 的 delta
-  - [ ] 发生 fallback 时 phase metadata 含 `fallback_quality_score`、`fallback_acceptance`、`fallback_reason`
+  - [x] benchmark 报告可输出 fallback 质量分、失败率、与 baseline 的 delta
+  - [x] 发生 fallback 时 phase metadata 含 `fallback_quality_score`、`fallback_acceptance`、`fallback_reason`
 - 测试：
-  - [ ] `tests/unit/test_small_model_fallback_quality.py`
-  - [ ] `tests/test_hypothesis_engine.py`
-  - [ ] `tests/unit/test_publish_phase.py`
-  - [ ] `tests/unit/test_reflect_phase.py`
-  - [ ] `tests/test_quality_assessor.py`
+  - [x] `tests/unit/test_small_model_fallback_quality.py`（新建，≥21 通过：assess_fallback_quality 10 + build_phase_fallback_metadata 2 + DynamicInvocationStrategy 3 + benchmark matrix 5 + regression baseline 4）
+  - [x] `tests/test_hypothesis_engine.py`（既有 1497 测试不回归；hypothesis fallback metadata 由 Guard #40 + reflect/publish 用例覆盖）
+  - [x] `tests/unit/test_publish_phase.py`（追加 `TestPublishFallbackQualityMetadata` 2 通过）
+  - [x] `tests/unit/test_reflect_phase.py`（追加 `TestReflectFallbackQualityMetadata` 2 通过）
+  - [x] `tests/test_quality_assessor.py`（追加 `TestPhaseI4FallbackQuality` 5 通过）
+- 当前状态：2026-04-22 已全部完成；`quality_assessor` 增 `assess_fallback_quality` / `build_phase_fallback_metadata` / `DEFAULT_FALLBACK_DELTA_THRESHOLD` / `FALLBACK_ACTIONS`；`DynamicInvocationStrategy.CostMetrics` 增 `fallback_samples` / `fallback_acceptances` / `fallback_acceptance_rate` / `avg_fallback_quality_score` 与 `record_fallback_quality` 接入点；benchmark 工具新增 `_build_fallback_quality_matrix` / `build_regression_baseline` / `export_regression_baseline` 与 `fallback_acceptance_rate_target` / `fallback_baseline_delta_floor` 阈值；`hypothesis_phase` / `reflect_phase` / `publish_phase` / `experiment_designer` 在各自 fallback 触发条件下写入 `fallback_quality_score` / `fallback_acceptance` / `fallback_reason` / `fallback_quality_matrix`；新增 Guard #40 锁定上述契约。核心子集 1625 通过 / 0 失败（基线 1497）。
 
 ---
 
@@ -1100,10 +1101,10 @@ SmallModelOptimizer planner 已与 hypothesis / reflect / quality / experiment /
 从本文档任意一天恢复工作时，建议按以下顺序：
 
 1. 运行核心子集回归确认基线：`.\venv310\Scripts\Activate.ps1; python -m pytest tests/unit tests/test_research_session_repo.py tests/test_research_utils.py tests/test_web_console_api.py -q --disable-warnings`
-2. 确认 1497 passed / 0 failed（含 H-2 31 个 + H-3 34 个 + H-4 33 个 + I-2 12 个 + I-3 13 个新增用例）
+2. 确认 1625 passed / 0 failed（含 H-2 31 个 + H-3 34 个 + H-4 33 个 + I-2 12 个 + I-3 13 个 + I-4 ≥30 个新增用例）
 3. 生产环境执行 `alembic upgrade head` 创建 `review_disputes` 表（migration `c7e9a32d8b54`，down_revision `b5d8a91e3c47`）；H-4 / I-2 / I-3 不引入新 migration
 4. 如需补验证面，执行 `test_kg_e2e.py` 对 live `/api/analysis/kg/stats` 与 graph asset 输出做一次端到端确认
-5. 按 **Phase I-4** 顺序继续推进
+5. Phase I 全部完成，按下一阶段（Phase J 或专项治理）顺序继续推进
 
 ---
 

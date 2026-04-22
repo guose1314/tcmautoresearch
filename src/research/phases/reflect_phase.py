@@ -153,6 +153,29 @@ class ReflectPhaseMixin:
                 metadata["llm_cost_report"] = llm_reflection_entry.get("llm_cost_report")
             if llm_reflection_entry.get("fallback_path") is not None:
                 metadata["fallback_path"] = llm_reflection_entry.get("fallback_path")
+        # Phase I-4: 当未走 LLM 路径时（has_llm=False 或 LLM 调用失败未产生增强反思），
+        # 用 cycle_assessment.overall_cycle_score 作为 fallback 质量评分。
+        if not has_llm or not llm_enhanced:
+            from src.quality.quality_assessor import build_phase_fallback_metadata
+
+            cycle_score = float(cycle_assessment.get("overall_cycle_score") or 0.0)
+            action_label = "skip" if not has_llm else "retry_simplified"
+            reason_extra = "no_llm_engine" if not has_llm else "llm_did_not_enhance"
+            fallback_meta = build_phase_fallback_metadata(
+                action=action_label,
+                baseline_score=1.0,
+                optimized_score=cycle_score,
+                reason_extra=reason_extra,
+            )
+            metadata.setdefault("fallback_path", "rules_engine" if not has_llm else metadata.get("fallback_path") or "llm_partial")
+            metadata.update(
+                {
+                    "fallback_quality_score": fallback_meta["fallback_quality_score"],
+                    "fallback_acceptance": fallback_meta["fallback_acceptance"],
+                    "fallback_reason": fallback_meta["fallback_reason"],
+                    "fallback_quality_matrix": fallback_meta["fallback_quality_matrix"],
+                }
+            )
         if hasattr(self, "_reflect_tracker"):
             metadata["learning"] = self._reflect_tracker.to_metadata()
             self.pipeline.register_phase_learning_manifest(

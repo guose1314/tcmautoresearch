@@ -237,6 +237,26 @@ class PublishPhaseMixin:
             metadata["small_model_plan"] = dict(publish_section_plan_summary.get("summary") or {})
             metadata["publish_section_plans"] = publish_section_plan_summary
             metadata["fallback_path"] = "deterministic_paper_writer"
+            # Phase I-4: deterministic paper writer 是 LLM-skip 的 fallback 路径，
+            # 以章节计数 / 5 作为质量评分代理（5 节 IMRD 标准结构视为合格）。
+            from src.quality.quality_assessor import build_phase_fallback_metadata
+
+            section_count = int(metadata.get("paper_section_count") or 0)
+            fallback_quality = round(min(1.0, section_count / 5.0), 4)
+            fallback_meta = build_phase_fallback_metadata(
+                action="skip",
+                baseline_score=1.0,
+                optimized_score=fallback_quality,
+                reason_extra="deterministic_paper_writer",
+            )
+            metadata.update(
+                {
+                    "fallback_quality_score": fallback_meta["fallback_quality_score"],
+                    "fallback_acceptance": fallback_meta["fallback_acceptance"],
+                    "fallback_reason": fallback_meta["fallback_reason"],
+                    "fallback_quality_matrix": fallback_meta["fallback_quality_matrix"],
+                }
+            )
         report_errors = report_generation_result.get("errors", []) if isinstance(report_generation_result, dict) else []
         status = "degraded" if report_errors else "completed"
         evidence_protocol = build_phase_evidence_protocol(

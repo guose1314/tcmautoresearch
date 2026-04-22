@@ -94,6 +94,9 @@ class CostMetrics:
     cache_hits: int = 0
     retries: int = 0
     fallbacks_to_rules: int = 0
+    fallback_acceptances: int = 0
+    fallback_quality_sum: float = 0.0
+    fallback_samples: int = 0
 
     @property
     def effective_call_rate(self) -> float:
@@ -109,6 +112,18 @@ class CostMetrics:
             return 0.0
         return self.total_input_tokens / effective
 
+    @property
+    def fallback_acceptance_rate(self) -> float:
+        if self.fallback_samples == 0:
+            return 0.0
+        return self.fallback_acceptances / self.fallback_samples
+
+    @property
+    def avg_fallback_quality_score(self) -> float:
+        if self.fallback_samples == 0:
+            return 0.0
+        return self.fallback_quality_sum / self.fallback_samples
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "total_calls": self.total_calls,
@@ -119,6 +134,10 @@ class CostMetrics:
             "cache_hits": self.cache_hits,
             "retries": self.retries,
             "fallbacks_to_rules": self.fallbacks_to_rules,
+            "fallback_samples": self.fallback_samples,
+            "fallback_acceptances": self.fallback_acceptances,
+            "fallback_acceptance_rate": round(self.fallback_acceptance_rate, 4),
+            "avg_fallback_quality_score": round(self.avg_fallback_quality_score, 4),
             "effective_call_rate": round(self.effective_call_rate, 4),
             "avg_input_tokens": round(self.avg_input_tokens, 1),
         }
@@ -251,6 +270,23 @@ class DynamicInvocationStrategy:
         """返回成本报告。"""
         with self._lock:
             return self._metrics.to_dict()
+
+    def record_fallback_quality(self, quality_score: float, accepted: bool) -> None:
+        """记录一次 fallback 调用的质量评分（0..1）与是否被接受。
+
+        供 Phase I-4 fallback 质量评测体系回灌：每当某次 retry_simplified / decompose / skip
+        完成质量比对后，调用此方法以将命中情况累计到 CostMetrics。
+        """
+        try:
+            score = float(quality_score)
+        except (TypeError, ValueError):
+            score = 0.0
+        score = max(0.0, min(1.0, score))
+        with self._lock:
+            self._metrics.fallback_samples += 1
+            self._metrics.fallback_quality_sum += score
+            if accepted:
+                self._metrics.fallback_acceptances += 1
 
     def _handle_retry(self, task_type: str, input_tokens: int, retry_count: int) -> InvocationDecision:
         """处理重试降级逻辑。"""

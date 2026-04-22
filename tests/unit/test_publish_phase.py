@@ -717,5 +717,26 @@ class TestPublishLearningStrategy(unittest.TestCase):
         self.assertEqual(citation_records[0]["source_type"], "classical_text")
 
 
+class TestPublishFallbackQualityMetadata(unittest.TestCase):
+    """Phase I-4: deterministic_paper_writer 路径必须写入 fallback 质量元数据。"""
+
+    def test_metadata_contains_fallback_quality_keys(self):
+        handler = _make_handler()
+        cycle = _FakeCycle(phase_executions=_minimal_phase_executions())
+        md = handler.execute(cycle, {"citation_records": []})["metadata"]
+        for key in ("fallback_quality_score", "fallback_acceptance", "fallback_reason"):
+            self.assertIn(key, md, f"publish metadata missing fallback key: {key}")
+        self.assertEqual(md["fallback_path"], "deterministic_paper_writer")
+        self.assertIn("deterministic_paper_writer", md["fallback_reason"])
+
+    def test_fallback_quality_matrix_present(self):
+        handler = _make_handler()
+        cycle = _FakeCycle(phase_executions=_minimal_phase_executions())
+        md = handler.execute(cycle, {"citation_records": []})["metadata"]
+        matrix = md["fallback_quality_matrix"]
+        self.assertEqual(matrix["action"], "skip")
+        self.assertIn("delta", matrix)
+
+
 if __name__ == "__main__":
     unittest.main()

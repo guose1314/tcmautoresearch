@@ -281,5 +281,27 @@ class TestReflectFeedsSelfLearning(unittest.TestCase):
         self.assertIsNone(result["learning_summary"])
 
 
+class TestReflectFallbackQualityMetadata(unittest.TestCase):
+    """Phase I-4: 无 LLM 路径下必须写入 fallback 质量元数据。"""
+
+    def test_no_llm_writes_fallback_metadata_keys(self):
+        mixin = _ReflectMixin(_FakePipeline())
+        cycle = _FakeCycle(outcomes=[_full_outcome()])
+        md = mixin.execute_reflect_phase(cycle, {})["metadata"]
+        for key in ("fallback_quality_score", "fallback_acceptance", "fallback_reason"):
+            self.assertIn(key, md)
+        self.assertIsInstance(md["fallback_quality_score"], float)
+        self.assertIsInstance(md["fallback_acceptance"], bool)
+        self.assertIn("no_llm_engine", md["fallback_reason"])
+
+    def test_no_llm_records_fallback_quality_matrix(self):
+        mixin = _ReflectMixin(_FakePipeline())
+        cycle = _FakeCycle(outcomes=[_full_outcome()])
+        md = mixin.execute_reflect_phase(cycle, {})["metadata"]
+        matrix = md["fallback_quality_matrix"]
+        self.assertIn("delta", matrix)
+        self.assertIn("baseline_score", matrix)
+
+
 if __name__ == "__main__":
     unittest.main()

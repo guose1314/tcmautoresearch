@@ -722,5 +722,60 @@ class TestBuildResultSummaryForLlm(unittest.TestCase):
         self.assertIn("list[3 items]", summary)
 
 
+# ---------------------------------------------------------------------------
+# Phase I-4: fallback 质量原语
+# ---------------------------------------------------------------------------
+
+class TestPhaseI4FallbackQuality(unittest.TestCase):
+    def test_assess_fallback_quality_module_export(self):
+        from src.quality.quality_assessor import (
+            DEFAULT_FALLBACK_DELTA_THRESHOLD,
+            FALLBACK_ACTIONS,
+            assess_fallback_quality,
+            build_phase_fallback_metadata,
+        )
+        self.assertIsNotNone(assess_fallback_quality)
+        self.assertIsNotNone(build_phase_fallback_metadata)
+        self.assertGreater(DEFAULT_FALLBACK_DELTA_THRESHOLD, 0.0)
+        self.assertIn("skip", FALLBACK_ACTIONS)
+        self.assertIn("decompose", FALLBACK_ACTIONS)
+        self.assertIn("retry_simplified", FALLBACK_ACTIONS)
+
+    def test_proceed_action_marks_no_fallback(self):
+        from src.quality.quality_assessor import assess_fallback_quality
+        result = assess_fallback_quality(
+            action="proceed", baseline_score=1.0, optimized_score=0.4
+        )
+        self.assertTrue(result["fallback_acceptance"])
+        self.assertEqual(result["fallback_reason"], "no_fallback")
+
+    def test_skip_above_threshold_accepted(self):
+        from src.quality.quality_assessor import assess_fallback_quality
+        result = assess_fallback_quality(
+            action="skip", baseline_score=1.0, optimized_score=0.92
+        )
+        self.assertTrue(result["fallback_acceptance"])
+
+    def test_skip_below_threshold_rejected(self):
+        from src.quality.quality_assessor import assess_fallback_quality
+        result = assess_fallback_quality(
+            action="skip", baseline_score=1.0, optimized_score=0.5
+        )
+        self.assertFalse(result["fallback_acceptance"])
+
+    def test_build_phase_fallback_metadata_keys(self):
+        from src.quality.quality_assessor import build_phase_fallback_metadata
+        meta = build_phase_fallback_metadata(
+            action="decompose", baseline_score=0.9, optimized_score=0.85
+        )
+        for key in (
+            "fallback_quality_score",
+            "fallback_acceptance",
+            "fallback_reason",
+            "fallback_quality_matrix",
+        ):
+            self.assertIn(key, meta)
+
+
 if __name__ == "__main__":
     unittest.main()

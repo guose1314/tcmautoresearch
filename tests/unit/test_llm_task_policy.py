@@ -156,7 +156,11 @@ class TestPhaseI3PolicyAlignment(unittest.TestCase):
     """Phase I-3：每个 SUITABLE 任务都应该有可执行的 token / temperature 推荐。"""
 
     def test_suitable_tasks_have_recommendations(self):
-        from src.infra.llm_task_policy import TASK_POLICY, SuitabilityTier, evaluate_task
+        from src.infra.llm_task_policy import (
+            TASK_POLICY,
+            SuitabilityTier,
+            evaluate_task,
+        )
         for task_name, spec in TASK_POLICY.items():
             if spec.tier != SuitabilityTier.SUITABLE:
                 continue

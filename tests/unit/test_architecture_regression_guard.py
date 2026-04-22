@@ -2713,5 +2713,87 @@ class TestGuard38_ReviewQualityToolbar(unittest.TestCase):
             self.assertIn(token, source, f"ReviewQualitySummary 缺指标字段: {token}")
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# Guard #40 — Phase I-4 fallback 质量矩阵 + regression baseline
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestGuard40_FallbackQualityMatrix(unittest.TestCase):
+    """Guard #40: skip / decompose / retry_simplified / rules fallback 必须可测量。
+
+    保护不变式：
+      - quality_assessor.assess_fallback_quality / build_phase_fallback_metadata 必须导出
+      - dynamic_invocation_strategy.CostMetrics 必须暴露 fallback_acceptance_rate / avg_fallback_quality_score
+      - small_model_phase_benchmark 报告必须含 fallback_quality_matrix / fallback_acceptance_rate /
+        fallback_baseline_delta，并能导出 regression baseline
+      - hypothesis / reflect / publish / experiment_designer 必须在 fallback 触发时
+        写入 fallback_quality_score / fallback_acceptance / fallback_reason 三件套
+      - learning_recommendations 阈值表必须包含 fallback_acceptance_rate_target / fallback_baseline_delta_floor
+    """
+
+    def test_quality_assessor_exports_fallback_primitives(self):
+        source = (_SRC / "quality" / "quality_assessor.py").read_text(encoding="utf-8")
+        for token in (
+            "def assess_fallback_quality",
+            "def build_phase_fallback_metadata",
+            "DEFAULT_FALLBACK_DELTA_THRESHOLD",
+            "FALLBACK_ACTIONS",
+            "fallback_quality_score",
+            "fallback_acceptance",
+            "fallback_reason",
+        ):
+            self.assertIn(token, source, f"quality_assessor 缺 fallback 原语: {token}")
+
+    def test_dynamic_strategy_tracks_fallback_quality(self):
+        source = (_SRC / "infra" / "dynamic_invocation_strategy.py").read_text(encoding="utf-8")
+        for token in (
+            "fallback_acceptances",
+            "fallback_quality_sum",
+            "fallback_samples",
+            "def record_fallback_quality",
+            "fallback_acceptance_rate",
+            "avg_fallback_quality_score",
+        ):
+            self.assertIn(token, source, f"dynamic_invocation_strategy 缺 fallback tracking: {token}")
+
+    def test_benchmark_emits_fallback_matrix_and_baseline(self):
+        source = (_WORKSPACE / "tools" / "small_model_phase_benchmark.py").read_text(encoding="utf-8")
+        for token in (
+            "_build_fallback_quality_matrix",
+            "build_regression_baseline",
+            "export_regression_baseline",
+            "fallback_quality_matrix",
+            "fallback_acceptance_rate",
+            "fallback_baseline_delta",
+            "fallback_acceptance_rate_target",
+            "fallback_baseline_delta_floor",
+        ):
+            self.assertIn(token, source, f"small_model_phase_benchmark 缺 Phase I-4 接线: {token}")
+
+    def test_hypothesis_phase_writes_fallback_metadata(self):
+        source = (_SRC / "research" / "phases" / "hypothesis_phase.py").read_text(encoding="utf-8")
+        self.assertIn("build_phase_fallback_metadata", source)
+        self.assertIn("fallback_quality_score", source)
+        self.assertIn("fallback_acceptance", source)
+        self.assertIn("fallback_reason", source)
+
+    def test_reflect_phase_writes_fallback_metadata(self):
+        source = (_SRC / "research" / "phases" / "reflect_phase.py").read_text(encoding="utf-8")
+        self.assertIn("build_phase_fallback_metadata", source)
+        self.assertIn("fallback_quality_score", source)
+        self.assertIn("fallback_acceptance", source)
+
+    def test_publish_phase_writes_fallback_metadata(self):
+        source = (_SRC / "research" / "phases" / "publish_phase.py").read_text(encoding="utf-8")
+        self.assertIn("build_phase_fallback_metadata", source)
+        self.assertIn("fallback_quality_score", source)
+        self.assertIn("fallback_acceptance", source)
+
+    def test_experiment_designer_writes_fallback_metadata(self):
+        source = (_SRC / "research" / "experiment_designer.py").read_text(encoding="utf-8")
+        self.assertIn("build_phase_fallback_metadata", source)
+        self.assertIn('protocol_source == "template"', source)
+
+
 if __name__ == "__main__":
     unittest.main()

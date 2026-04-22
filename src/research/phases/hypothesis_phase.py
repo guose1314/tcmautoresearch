@@ -60,6 +60,30 @@ class HypothesisPhaseMixin:
         metadata.setdefault("used_llm_generation", any(item.get("generation_mode") == "llm" for item in hypotheses))
         metadata.setdefault("used_llm_closed_loop", False)
         metadata.setdefault("llm_iteration_count", 0)
+        # Phase I-4: 若没有任何 LLM 生成的假设（rules-only 或全部 fallback），写入 fallback 质量元数据
+        if not metadata.get("used_llm_generation"):
+            from src.quality.quality_assessor import build_phase_fallback_metadata
+
+            hypothesis_count = len(hypotheses)
+            # 经验阈值：3 条及以上规则推导假设视为质量充足
+            fallback_quality = round(min(1.0, hypothesis_count / 3.0), 4)
+            action_label = "skip" if hypothesis_count == 0 else "retry_simplified"
+            reason_extra = "rules_only_generation"
+            fallback_meta = build_phase_fallback_metadata(
+                action=action_label,
+                baseline_score=1.0,
+                optimized_score=fallback_quality,
+                reason_extra=reason_extra,
+            )
+            metadata.setdefault("fallback_path", "rules_engine")
+            metadata.update(
+                {
+                    "fallback_quality_score": fallback_meta["fallback_quality_score"],
+                    "fallback_acceptance": fallback_meta["fallback_acceptance"],
+                    "fallback_reason": fallback_meta["fallback_reason"],
+                    "fallback_quality_matrix": fallback_meta["fallback_quality_matrix"],
+                }
+            )
         # 记录推理框架选择
         reasoning_fw = hypothesis_context.get("reasoning_framework")
         if reasoning_fw is not None:

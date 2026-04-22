@@ -10,6 +10,11 @@ from typing import Any, Dict, List, Optional
 from src.infra.prompt_registry import export_prompt_registry_snapshot
 from src.infra.small_model_optimizer import SmallModelOptimizer
 from src.infra.token_budget_policy import estimate_text_tokens
+from src.quality.quality_assessor import (
+    DEFAULT_FALLBACK_DELTA_THRESHOLD,
+    FALLBACK_ACTIONS,
+    assess_fallback_quality,
+)
 from src.research.dossier_builder import build_benchmark_input_snapshot
 
 _FIXTURE_FILES: Dict[str, str] = {
@@ -147,6 +152,108 @@ def evaluate_case(case: Dict[str, Any], optimizer: SmallModelOptimizer) -> Dict[
     }
 
 
+def _baseline_score_for(results: List[Dict[str, Any]]) -> float:
+    """以同批次内 'proceed' 案例的平均质量分作为 fallback 比对基线。
+
+    若没有 proceed 案例，则退化为整体平均；若整体也为空则返回 1.0。
+    """
+    proceed_scores = [
+        float(item.get("quality_score") or 0.0)
+        for item in results
+        if str((item.get("optimized") or {}).get("action") or "") == "proceed"
+    ]
+    if proceed_scores:
+        return round(sum(proceed_scores) / len(proceed_scores), 4)
+    if results:
+        return round(
+            sum(float(item.get("quality_score") or 0.0) for item in results) / len(results),
+            4,
+        )
+    return 1.0
+
+
+def _build_fallback_quality_matrix(
+    results: List[Dict[str, Any]],
+    *,
+    delta_threshold: float = DEFAULT_FALLBACK_DELTA_THRESHOLD,
+) -> Dict[str, Any]:
+    """汇总 skip / decompose / retry_simplified 与 proceed 的质量分布与接受率。
+
+    返回结构::
+
+        {
+          "delta_threshold": float,
+          "baseline_score": float,
+          "by_action": {
+              action: {
+                  "count": int,
+                  "mean_quality": float,
+                  "mean_delta": float,
+                  "acceptance_rate": float,
+              }, ...
+          },
+          "fallback_count": int,
+          "fallback_acceptance_rate": float,
+          "fallback_baseline_delta": float,    # mean(optimized - baseline) over fallback cases
+        }
+    """
+    baseline = _baseline_score_for(results)
+    by_action: Dict[str, Dict[str, Any]] = {}
+    fallback_total = 0
+    fallback_accepted = 0
+    fallback_delta_sum = 0.0
+
+    for item in results:
+        action = str((item.get("optimized") or {}).get("action") or "unknown")
+        score = float(item.get("quality_score") or 0.0)
+        matrix = assess_fallback_quality(
+            action=action,
+            baseline_score=baseline,
+            optimized_score=score,
+            delta_threshold=delta_threshold,
+        )
+        bucket = by_action.setdefault(
+            action,
+            {"count": 0, "quality_sum": 0.0, "delta_sum": 0.0, "accepted": 0},
+        )
+        bucket["count"] += 1
+        bucket["quality_sum"] += score
+        bucket["delta_sum"] += matrix["delta"]
+        if matrix["fallback_acceptance"]:
+            bucket["accepted"] += 1
+        if action in FALLBACK_ACTIONS:
+            fallback_total += 1
+            fallback_delta_sum += matrix["delta"]
+            if matrix["fallback_acceptance"]:
+                fallback_accepted += 1
+
+    summarized: Dict[str, Dict[str, Any]] = {}
+    for action, bucket in by_action.items():
+        count = max(bucket["count"], 1)
+        summarized[action] = {
+            "count": bucket["count"],
+            "mean_quality": round(bucket["quality_sum"] / count, 4),
+            "mean_delta": round(bucket["delta_sum"] / count, 4),
+            "acceptance_rate": round(bucket["accepted"] / count, 4),
+        }
+
+    fallback_acceptance_rate = (
+        round(fallback_accepted / fallback_total, 4) if fallback_total else 1.0
+    )
+    fallback_baseline_delta = (
+        round(fallback_delta_sum / fallback_total, 4) if fallback_total else 0.0
+    )
+
+    return {
+        "delta_threshold": round(delta_threshold, 4),
+        "baseline_score": baseline,
+        "by_action": summarized,
+        "fallback_count": fallback_total,
+        "fallback_acceptance_rate": fallback_acceptance_rate,
+        "fallback_baseline_delta": fallback_baseline_delta,
+    }
+
+
 def _summarize_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     total = len(results)
     action_distribution = Counter(item["optimized"]["action"] for item in results)
@@ -168,10 +275,16 @@ def _summarize_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             "layer_top_hit_rate": 0.0,
             "decompose_rate": 0.0,
             "skip_rate": 0.0,
+            # Phase I-4 fallback quality
+            "fallback_quality_matrix": _build_fallback_quality_matrix([]),
+            "fallback_acceptance_rate": 1.0,
+            "fallback_baseline_delta": 0.0,
         }
 
     def _telemetry(item: Dict[str, Any], key: str, default: Any = False) -> Any:
         return (item.get("telemetry") or {}).get(key, default)
+
+    fallback_matrix = _build_fallback_quality_matrix(results)
 
     return {
         "case_count": total,
@@ -211,6 +324,10 @@ def _summarize_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
         "skip_rate": round(
             sum(1 for item in results if str(_telemetry(item, "action", "")) == "skip") / total, 4,
         ),
+        # Phase I-4：fallback 质量矩阵（按 action 切片）
+        "fallback_quality_matrix": fallback_matrix,
+        "fallback_acceptance_rate": fallback_matrix["fallback_acceptance_rate"],
+        "fallback_baseline_delta": fallback_matrix["fallback_baseline_delta"],
     }
 
 
@@ -222,6 +339,8 @@ def _load_benchmark_thresholds() -> Dict[str, float]:
         "layer_top_hit_rate_target": 0.5,
         "skip_rate_max": 0.3,
         "decompose_rate_max": 0.3,
+        "fallback_acceptance_rate_target": 0.7,
+        "fallback_baseline_delta_floor": -0.1,
     }
     try:
         from src.infrastructure.config_loader import load_settings_section
@@ -260,6 +379,8 @@ def build_learning_recommendations(
     layer_target = float(th.get("layer_top_hit_rate_target", 0.5))
     skip_max = float(th.get("skip_rate_max", 0.3))
     decompose_max = float(th.get("decompose_rate_max", 0.3))
+    fallback_acceptance_target = float(th.get("fallback_acceptance_rate_target", 0.7))
+    fallback_delta_floor = float(th.get("fallback_baseline_delta_floor", -0.1))
 
     # 阶段→默认框架的本地副本，避免对内部模块产生新的强依赖。
     phase_default_framework = {
@@ -284,6 +405,8 @@ def build_learning_recommendations(
         layer_rate = float(summary.get("layer_top_hit_rate", 0.0))
         skip_rate = float(summary.get("skip_rate", 0.0))
         decompose_rate = float(summary.get("decompose_rate", 0.0))
+        fallback_acceptance_rate = float(summary.get("fallback_acceptance_rate", 1.0))
+        fallback_baseline_delta = float(summary.get("fallback_baseline_delta", 0.0))
 
         signals: Dict[str, Any] = {
             "template_default_hit_rate": template_rate,
@@ -291,6 +414,8 @@ def build_learning_recommendations(
             "layer_top_hit_rate": layer_rate,
             "skip_rate": skip_rate,
             "decompose_rate": decompose_rate,
+            "fallback_acceptance_rate": fallback_acceptance_rate,
+            "fallback_baseline_delta": fallback_baseline_delta,
             "below_targets": [],
         }
 
@@ -317,6 +442,18 @@ def build_learning_recommendations(
         if skip_rate > skip_max:
             per_phase_thresholds["cache_likelihood_lower"] = round(skip_rate - skip_max, 4)
             signals["below_targets"].append("skip_rate")
+
+        # Phase I-4: fallback 质量信号
+        if fallback_acceptance_rate < fallback_acceptance_target:
+            per_phase_thresholds["fallback_acceptance_recover"] = round(
+                fallback_acceptance_target - fallback_acceptance_rate, 4
+            )
+            signals["below_targets"].append("fallback_acceptance_rate")
+        if fallback_baseline_delta < fallback_delta_floor:
+            per_phase_thresholds["fallback_quality_recover"] = round(
+                fallback_delta_floor - fallback_baseline_delta, 4
+            )
+            signals["below_targets"].append("fallback_baseline_delta")
 
         if per_phase_thresholds:
             phase_threshold_adjustments[phase] = per_phase_thresholds
@@ -380,6 +517,79 @@ def write_benchmark_report(report: Dict[str, Any], output_dir: Optional[Path] = 
     }
 
 
+def build_regression_baseline(
+    report: Dict[str, Any],
+    *,
+    delta_threshold: float = DEFAULT_FALLBACK_DELTA_THRESHOLD,
+) -> Dict[str, Any]:
+    """从基准报告派生 regression baseline：每个 phase 的最低质量与最大可接受 delta。
+
+    返回结构::
+
+        {
+          "delta_threshold": float,
+          "phase_baselines": {
+              phase: {
+                  "baseline_score": float,
+                  "min_acceptable_score": float,    # baseline - delta_threshold
+                  "fallback_acceptance_rate_floor": float,
+                  "fallback_baseline_delta_floor": float,
+              }, ...
+          },
+          "global": {同上结构},
+        }
+    """
+    phase_baselines: Dict[str, Dict[str, float]] = {}
+    for phase_name, phase_report in (report.get("phase_reports") or {}).items():
+        summary = phase_report.get("summary") or {}
+        matrix = summary.get("fallback_quality_matrix") or {}
+        baseline = float(matrix.get("baseline_score", summary.get("average_quality_score", 0.0)))
+        phase_baselines[phase_name] = {
+            "baseline_score": round(baseline, 4),
+            "min_acceptable_score": round(max(0.0, baseline - delta_threshold), 4),
+            "fallback_acceptance_rate_floor": round(
+                float(summary.get("fallback_acceptance_rate", 1.0)), 4
+            ),
+            "fallback_baseline_delta_floor": round(
+                float(summary.get("fallback_baseline_delta", 0.0)), 4
+            ),
+        }
+
+    global_summary = report.get("global_summary") or {}
+    global_matrix = global_summary.get("fallback_quality_matrix") or {}
+    global_baseline = float(global_matrix.get("baseline_score", global_summary.get("average_quality_score", 0.0)))
+    return {
+        "delta_threshold": round(delta_threshold, 4),
+        "phase_baselines": phase_baselines,
+        "global": {
+            "baseline_score": round(global_baseline, 4),
+            "min_acceptable_score": round(max(0.0, global_baseline - delta_threshold), 4),
+            "fallback_acceptance_rate_floor": round(
+                float(global_summary.get("fallback_acceptance_rate", 1.0)), 4
+            ),
+            "fallback_baseline_delta_floor": round(
+                float(global_summary.get("fallback_baseline_delta", 0.0)), 4
+            ),
+        },
+    }
+
+
+def export_regression_baseline(
+    report: Dict[str, Any],
+    output_dir: Optional[Path] = None,
+    *,
+    file_name: str = "phase_regression_baseline.json",
+    delta_threshold: float = DEFAULT_FALLBACK_DELTA_THRESHOLD,
+) -> str:
+    """将 regression baseline 写入 JSON 文件，返回写入路径。"""
+    payload = build_regression_baseline(report, delta_threshold=delta_threshold)
+    output_root = Path(output_dir or _default_output_dir())
+    output_root.mkdir(parents=True, exist_ok=True)
+    target = output_root / file_name
+    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(target)
+
+
 def run_phase_benchmark(
     fixtures_dir: Optional[Path] = None,
     output_dir: Optional[Path] = None,
@@ -417,8 +627,10 @@ def run_phase_benchmark(
         "prompt_registry_snapshot": export_prompt_registry_snapshot(),
         "learning_recommendations": build_learning_recommendations(phase_reports),
     }
+    report["regression_baseline"] = build_regression_baseline(report)
     if write_output:
         report["artifacts"] = write_benchmark_report(report, output_dir)
+        report["artifacts"]["regression_baseline"] = export_regression_baseline(report, output_dir)
     return report
 
 

@@ -686,6 +686,20 @@ class ExperimentDesigner(BaseModule):
             "llm_cost_report": self._last_llm_cost_report,
             "fallback_path": self._last_fallback_path,
         }
+        # Phase I-4: 当协议来自模板（fallback 路径）时附加质量评测元数据
+        if protocol.protocol_source == "template":
+            from src.quality.quality_assessor import build_phase_fallback_metadata
+
+            filled = protocol.filled_required_count()
+            required_total = max(1, len(protocol.REQUIRED_FIELDS))
+            fallback_quality = round(min(1.0, filled / required_total), 4)
+            fallback_meta = build_phase_fallback_metadata(
+                action="skip",
+                baseline_score=1.0,
+                optimized_score=fallback_quality,
+                reason_extra="protocol_source=template",
+            )
+            protocol.optimizer_metadata.update(fallback_meta)
 
         logger.info(
             "design_study: type=%s, protocol_source=%s, filled_required=%d, sample_size=%d",

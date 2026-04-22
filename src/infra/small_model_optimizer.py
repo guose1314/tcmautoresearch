@@ -33,10 +33,10 @@ from src.infra.dynamic_invocation_strategy import (
     InvocationDecision,
 )
 from src.infra.reasoning_template_selector import (
+    _PHASE_DEFAULT_FRAMEWORK,
     ReasoningFramework,
     ReasoningTemplateSelector,
     SelectionResult,
-    _PHASE_DEFAULT_FRAMEWORK,
 )
 
 logger = logging.getLogger(__name__)
