@@ -20,6 +20,24 @@ logger = logging.getLogger(__name__)
 
 # 默认模型路径（相对项目根）
 DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "qwen1_5-7b-chat-q8_0.gguf"
+# 项目根，用于把配置里写的相对路径（如 "./models/..."）锚定到仓库根，
+# 避免随启动 cwd 变化导致 FileNotFoundError。
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_model_path(path: str | None) -> str:
+    """把 model_path 解析成绝对路径。
+
+    - 为空 → 使用 DEFAULT_MODEL_PATH。
+    - 已是绝对路径 → 原样返回。
+    - 相对路径 → 锚定到项目根，避免依赖运行 cwd。
+    """
+    if not path:
+        return str(DEFAULT_MODEL_PATH)
+    p = Path(path)
+    if not p.is_absolute():
+        p = (_PROJECT_ROOT / p).resolve()
+    return str(p)
 
 
 def setup_cuda_dll_paths() -> bool:
@@ -93,7 +111,7 @@ class LLMEngine:
             max_tokens: 单次生成最大 token 数。
             verbose: 是否输出 llama.cpp 底层日志。
         """
-        self.model_path = str(model_path or DEFAULT_MODEL_PATH)
+        self.model_path = _resolve_model_path(model_path)
         self.n_gpu_layers = n_gpu_layers
         self.n_ctx = n_ctx
         self.temperature = temperature
