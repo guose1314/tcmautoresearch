@@ -90,6 +90,8 @@ def distill_one(
     file_path: Path,
     max_bytes: int,
     timeout: int,
+    username: str = "",
+    password: str = "",
 ) -> Dict[str, Any]:
     text = file_path.read_text(encoding="utf-8", errors="ignore")
     truncated = False
@@ -107,6 +109,22 @@ def distill_one(
         timeout=timeout,
     )
     elapsed = time.time() - t0
+    
+    # 令牌过期，尝试重新登录并重试（一次）
+    if r.status_code == 401 and username and password:
+        try:
+            new_token = login(base_url, username, password)
+            t0 = time.time()
+            r = requests.post(
+                f"{base_url}/api/analysis/distill",
+                json=payload,
+                headers={"Authorization": f"Bearer {new_token}"},
+                timeout=timeout,
+            )
+            elapsed = time.time() - t0
+        except Exception:
+            pass  # 重登失败，返回原始 401 响应
+    
     if r.status_code != 200:
         return {
             "ok": False,
@@ -200,7 +218,15 @@ def main() -> int:
     t_start = time.time()
     for i, p in enumerate(pending, 1):
         try:
-            res = distill_one(args.base_url, token, p, args.max_bytes, args.timeout)
+            res = distill_one(
+                args.base_url,
+                token,
+                p,
+                args.max_bytes,
+                args.timeout,
+                username=args.username,
+                password=args.password,
+            )
         except requests.exceptions.ReadTimeout:
             res = {"ok": False, "status": 0, "error": "read-timeout"}
         except Exception as exc:
