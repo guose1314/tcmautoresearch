@@ -451,8 +451,9 @@ _LLM_DISTILL_PROMPT = """\
 文本：{text}
 仅输出JSON。"""
 
-# 中文约 2 token/字；4096 上下文 - 1024 生成 - ~200 prompt ≈ 1400 字
-_DISTILL_TEXT_LIMIT = 1400
+# 中文约 2 token/字；4096 上下文 - 512 生成 - ~200 prompt ≈ 600 字 / 片，蒸馏速度优先
+_DISTILL_TEXT_LIMIT = 600
+_DISTILL_MAX_TOKENS = 512
 
 
 @router.post("/distill")
@@ -485,6 +486,13 @@ async def llm_distill(
         llm_entities: List[Dict[str, Any]] = []
         llm_relations: List[Dict[str, Any]] = []
 
+        # 临时收紧 max_tokens 以加速蒸馏（结束后恢复）
+        _saved_max_tokens = getattr(llm, "max_tokens", None)
+        try:
+            llm.max_tokens = _DISTILL_MAX_TOKENS
+        except Exception:
+            pass
+
         for idx, chunk in enumerate(chunks):
             try:
                 prompt = _LLM_DISTILL_PROMPT.format(text=chunk)
@@ -516,6 +524,13 @@ async def llm_distill(
                             llm_entities.append(item)
             except (_json.JSONDecodeError, Exception) as chunk_err:
                 logger.warning("LLM 蒸馏第 %d/%d 片段解析失败: %s", idx + 1, len(chunks), chunk_err)
+
+        # 恢复 max_tokens
+        if _saved_max_tokens is not None:
+            try:
+                llm.max_tokens = _saved_max_tokens
+            except Exception:
+                pass
 
         # 同时也走规则管线进行基础抽取
         preprocessor = _get_preprocessor()
