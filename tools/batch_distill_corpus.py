@@ -58,7 +58,7 @@ def login(base_url: str, username: str, password: str) -> str:
     r = requests.post(
         f"{base_url}/api/auth/login",
         json={"username": username, "password": password},
-        timeout=10,
+        timeout=60,
     )
     r.raise_for_status()
     return r.json()["access_token"]
