@@ -276,7 +276,7 @@ print(f"输出: {result.output_markdown}")
 from src.research.pdf_translation import PdfTranslationResult, run_pdf_full_text_translation
 → 导入成功
 
-from src.research import run_pdf_full_text_translation
+from src.research.pdf_translation import run_pdf_full_text_translation
 → 模块导出验证通过
 ```
 

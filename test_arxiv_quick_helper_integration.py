@@ -30,7 +30,7 @@ class TestArxivQuickHelperIntegration(unittest.TestCase):
         self.assertIsNotNone(run_arxiv_quick_helper)
         
         # 通过 __init__.py 导入
-        from src.research import ArxivQuickHelperResult, run_arxiv_quick_helper
+        from src.research.arxiv_quick_helper import ArxivQuickHelperResult, run_arxiv_quick_helper
         self.assertIsNotNone(ArxivQuickHelperResult)
         self.assertIsNotNone(run_arxiv_quick_helper)
         

@@ -23,9 +23,9 @@ database:
   type: "postgresql"
   host: "127.0.0.1"
   port: 5432
-  name: "tcm_autoresearch"
-  user: "tcm_user"
-  password: "Hgk1989225"
+  name: "tcmautoresearch"
+  user: "postgres"
+  password_env: "TCM_DB_PASSWORD"
 
 output:
   directory: "./output/development"
@@ -45,5 +45,5 @@ neo4j:
   enabled: true
   uri: "neo4j://127.0.0.1:7687"
   user: "neo4j"
-  password: "Hgk1989225"
+  password_env: "TCM_NEO4J_PASSWORD"
   database: "neo4j"

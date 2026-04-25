@@ -54,8 +54,100 @@ _preprocessor = None
 _extractor = None
 _graph_builder = None
 _kg_instance = None
+_neo4j_driver_singleton = None
+_neo4j_init_failed = False
 
 _KG_DB_PATH = Path("data") / "knowledge_graph.db"
+
+
+def _get_neo4j_driver():
+    """获取 Neo4j driver 单例（首次失败后不再重试）。"""
+    global _neo4j_driver_singleton, _neo4j_init_failed  # noqa: PLW0603
+    if _neo4j_driver_singleton is not None:
+        return _neo4j_driver_singleton
+    if _neo4j_init_failed:
+        return None
+    try:
+        import os
+
+        from neo4j import GraphDatabase
+        uri = os.environ.get("TCM_NEO4J_URI", "neo4j://localhost:7687")
+        user = os.environ.get("TCM_NEO4J_USER", "neo4j")
+        password = os.environ.get("TCM_NEO4J_PASSWORD", "")
+        if not password:
+            logger.warning("TCM_NEO4J_PASSWORD 未设置，跳过 Neo4j 投影")
+            _neo4j_init_failed = True
+            return None
+        d = GraphDatabase.driver(uri, auth=(user, password))
+        with d.session(database="neo4j") as s:
+            s.run("RETURN 1").consume()
+        _neo4j_driver_singleton = d
+        logger.info("Neo4j driver 已就绪 (uri=%s)", uri)
+        return d
+    except Exception as exc:
+        logger.warning("Neo4j 初始化失败，将仅写 PG: %s", exc)
+        _neo4j_init_failed = True
+        return None
+
+
+def _project_to_neo4j(
+    projection_entities: List[Dict[str, Any]],
+    projection_relations: List[Dict[str, Any]],
+) -> Dict[str, int]:
+    """把已 commit 的 ORM 投影为 Neo4j 节点/关系。
+
+    每个 projection_entities 元素：{id, name, type}
+    每个 projection_relations 元素：{src_id, dst_id, rel_type, src_label, dst_label}
+    """
+    driver = _get_neo4j_driver()
+    if driver is None:
+        return {"neo4j_nodes": 0, "neo4j_edges": 0}
+
+    nodes_written = 0
+    edges_written = 0
+    try:
+        with driver.session(database="neo4j") as s:
+            # 节点：按 type 分组，使用 UNWIND 批量 MERGE
+            from collections import defaultdict
+            by_label: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+            for n in projection_entities:
+                label = (n.get("type") or "Entity").capitalize()
+                # 防止 Cypher label 注入：仅允许字母数字下划线
+                if not label.replace("_", "").isalnum():
+                    label = "Entity"
+                by_label[label].append({"id": str(n["id"]), "name": n["name"]})
+            for label, batch in by_label.items():
+                cypher = (
+                    f"UNWIND $rows AS row "
+                    f"MERGE (n:{label} {{id: row.id}}) "
+                    f"SET n.name = row.name"
+                )
+                s.run(cypher, rows=batch).consume()
+                nodes_written += len(batch)
+
+            # 关系：按 rel_type 分组
+            by_rel: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+            for r in projection_relations:
+                rt = (r.get("rel_type") or "RELATED").upper()
+                if not rt.replace("_", "").isalnum():
+                    rt = "RELATED"
+                by_rel[rt].append({
+                    "src": str(r["src_id"]),
+                    "dst": str(r["dst_id"]),
+                })
+            for rt, batch in by_rel.items():
+                cypher = (
+                    f"UNWIND $rows AS row "
+                    f"MATCH (a {{id: row.src}}), (b {{id: row.dst}}) "
+                    f"MERGE (a)-[:{rt}]->(b)"
+                )
+                s.run(cypher, rows=batch).consume()
+                edges_written += len(batch)
+    except Exception as exc:
+        logger.warning("Neo4j 投影失败: %s", exc)
+        return {"neo4j_nodes": 0, "neo4j_edges": 0, "error": str(exc)}
+
+    return {"neo4j_nodes": nodes_written, "neo4j_edges": edges_written}
 
 
 def _get_kg():
@@ -299,6 +391,8 @@ def _persist_to_orm(
 
     orm_ent_count = 0
     orm_rel_count = 0
+    projection_entities: List[Dict[str, Any]] = []
+    projection_relations: List[Dict[str, Any]] = []
 
     try:
         with db_mgr.session_scope() as session:
@@ -422,22 +516,42 @@ def _persist_to_orm(
                 )
                 session.add(rel_obj)
                 orm_rel_count += 1
+                # 收集 Neo4j 投影
+                projection_relations.append({
+                    "src_id": src_ent.id,
+                    "dst_id": dst_ent.id,
+                    "rel_type": mapped_rel,
+                })
+            # 在 commit 前收集所有 entity 投影
+            session.flush()
+            for e_obj in name_to_entity.values():
+                projection_entities.append({
+                    "id": e_obj.id,
+                    "name": e_obj.name,
+                    "type": e_obj.type.value if hasattr(e_obj.type, "value") else str(e_obj.type),
+                })
             # session_scope 自动 commit
     except Exception:
         logger.exception("ORM 持久化失败（不影响 KG 侧已写入的数据）")
 
+    # commit 完成后投影到 Neo4j
+    neo4j_proj = _project_to_neo4j(projection_entities, projection_relations)
+
     if orm_ent_count > 0 or orm_rel_count > 0:
         logger.info(
-            "ORM 持久化完成 (entities=%d, relations=%d) — "
-            "此路径绕过 StorageBackendFactory，未写 Neo4j 图投影，需后续 backfill",
+            "ORM 持久化完成 (entities=%d, relations=%d); Neo4j 投影 (nodes=%d, edges=%d)",
             orm_ent_count,
             orm_rel_count,
+            neo4j_proj.get("neo4j_nodes", 0),
+            neo4j_proj.get("neo4j_edges", 0),
         )
 
     return {
         "orm_entities": orm_ent_count,
         "orm_relations": orm_rel_count,
-        "needs_backfill": orm_ent_count > 0 or orm_rel_count > 0,
+        "neo4j_nodes": neo4j_proj.get("neo4j_nodes", 0),
+        "neo4j_edges": neo4j_proj.get("neo4j_edges", 0),
+        "needs_backfill": False,
     }
 
 

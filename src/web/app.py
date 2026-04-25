@@ -105,6 +105,27 @@ def create_app(
         ).strip()
         if _db_type == "sqlite":
             _conn_str = f"sqlite:///{os.path.abspath(_db_path)}"
+        elif _db_type in ("postgresql", "postgres", "pg"):
+            _explicit = str(
+                _db_cfg.get("connection_string")
+                or _db_cfg.get("database_url")
+                or _db_cfg.get("url")
+                or ""
+            ).strip()
+            if _explicit:
+                _conn_str = _explicit
+            else:
+                _pg_host = str(_db_cfg.get("host", "localhost")).strip()
+                _pg_port = int(_db_cfg.get("port", 5432))
+                _pg_name = str(_db_cfg.get("name", "tcmautoresearch")).strip()
+                _pg_user = str(_db_cfg.get("user", "postgres")).strip()
+                _pg_pass_env = str(_db_cfg.get("password_env", "TCM_DB_PASSWORD")).strip()
+                _pg_pass = os.environ.get(_pg_pass_env, "")
+                from urllib.parse import quote_plus
+                _conn_str = (
+                    f"postgresql+psycopg2://{quote_plus(_pg_user)}:"
+                    f"{quote_plus(_pg_pass)}@{_pg_host}:{_pg_port}/{_pg_name}"
+                )
         else:
             _conn_str = str(
                 _db_cfg.get("connection_string")

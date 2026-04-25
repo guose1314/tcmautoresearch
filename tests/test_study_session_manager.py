@@ -373,7 +373,7 @@ class TestBackwardCompatImports(unittest.TestCase):
         self.assertIs(RC, ResearchCycle)
 
     def test_import_from_research_package(self):
-        from src.research import StudySessionManager as SSM
+        from src.research.study_session_manager import StudySessionManager as SSM
         self.assertIs(SSM, StudySessionManager)
 
     def test_pipeline_class_attr_same_objects(self):

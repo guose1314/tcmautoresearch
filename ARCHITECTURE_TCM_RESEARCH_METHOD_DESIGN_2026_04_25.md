@@ -157,6 +157,23 @@ flowchart LR
 ### 阶段 1：废弃剥离与瘦身止血（技术债清理，预计周 1-2）
 - **目标**：合并 System A (demo) 与 System B (orchestrator) 的管道分立乱象；清理 `src/research/` 残留约30个冗余包装层；修复Web端并发接口超时及 CloseWait 爆满现象。
 - **产出**：一个无断点、入口明确的高可用Python业务后库，主线可直接无缝流转测试用例。
+- **具体实施步骤**：
+  1. **冗余包装与死代码拔除 (清理 `src/research/`)**
+     - *操作*：将 `ctext_corpus_collector.py`、`literature_retriever.py` 等硬编码包装脚本彻底删除或收拢至 `src/collector/`；移除 `src/corpus/`、`src/preprocessor/` 等无实质逻辑仅做转发的残余目录，将调用链直连 `src/analysis/` 与 `src/collector/`。
+     - *理由*：消除无意义的代理层，缩短调用栈，降低理解成本与模块间的隐性耦合。
+     - *代价*：将波及全局大量 Import 路径，需承担短期内大量模块找不到的编译期错误修复成本。
+  2. **主科研架构收敛合并 (System A 迁入 System B)**
+     - *操作*：彻底废弃基于过程脚本的 `run_cycle_demo.py` (System A) 及旧版 `cycle_core_demo_handler.py`，提炼其中的有效实体识别与组方推演逻辑，将其编排进 `ResearchPipelineOrchestrator` 主链标准的 7 阶段（重点填充 `Analyze` 与 `Reflect` 阶段）。
+     - *理由*：保障所有的 LLM 资源拦截、PostgreSQL/Neo4j 双写、SelfLearning 策略都能在一套生命周期事件网被统一触发，避免出现“平台有底座但业务走后门”的架构跑偏。
+     - *代价*：旧有的“一键串行 Demo”短期内无法使用，旧业务流被迫经历打碎重组的阵痛期。
+  3. **并发治理与 CloseWait 泄漏修复**
+     - *操作*：针对分析 Web 服务（8765 端口）的挂死问题，彻查批量任务 API 里的死锁：1. 将 `requests` 替换为配置了连接池和严格 Timeout 的长连接客户端；2. 在大模型推演层接入基于 `asyncio` 的熔断超时；3. 强化 `StorageBackendFactory` 和 `Neo4jDriver` 的在异常时的 `try...finally` 析构/连接释放。
+     - *理由*：中医长文本抽取非常耗时，阻塞会导致 HTTP 连接耗尽并产生大量 CloseWait，必须切断这种雪崩效应才能做后续批处理。
+     - *代价*：需引入严格的异步上下文控制，对核心业务 I/O 阻塞处做并发改造。
+  4. **E2E测试流转固化**
+     - *操作*：针对合并后的 `PhaseOrchestrator`，构建注入最小测试文本集的冒烟测试，断定七阶段走通且 PG 与 Neo4j 预期落库无漂移。
+     - *理由*：作为重构“止血”的关键防线，确保瘦身没有误砍主动脉。
+     - *代价*：额外投入研发周期的 20% 用于编写、模拟（Mock）及维护集成测试环境。
 
 ### 阶段 2：GraphRAG 结合知识融合（双写图分析，预计周 3-5）
 - **目标**：强化 `SemanticModeler`，引入基于 Neo4j 提取全量古籍脉络数据做底座，结合本地 Qwen1.5 在生成输出前通过向量相似与节点相连，执行 Graph-RAG 召回补充，解决局部提取时的偏颇偏差。

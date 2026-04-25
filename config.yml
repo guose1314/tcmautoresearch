@@ -306,7 +306,7 @@ models:
 
 # Database configuration
 database:
-  type: "sqlite"                        # sqlite | postgresql
+  type: "postgresql"                    # sqlite | postgresql
   path: "./data/tcmautoresearch.db"     # SQLite path (when type=sqlite)
   connection_pool_size: 10
   connection_timeout: 30
@@ -315,16 +315,16 @@ database:
   backup_enabled: true
   backup_frequency: "daily"
   backup_retention_days: 30
-  # PostgreSQL settings (when type=postgresql):
-  # host: "localhost"
-  # port: 5432
-  # name: "tcmautoresearch"
-  # user: "tcm"
-  # password_env: "TCM_DB_PASSWORD"     # read from env var (secure)
+  # PostgreSQL settings (active)
+  host: "localhost"
+  port: 5432
+  name: "tcmautoresearch"
+  user: "postgres"
+  password_env: "TCM_DB_PASSWORD"       # read from env var (secure)
 
-# Neo4j graph database (optional)
+# Neo4j graph database (active)
 neo4j:
-  enabled: false                        # set true to activate
+  enabled: true                         # set true to activate
   uri: "neo4j://localhost:7687"
   user: "neo4j"
   password_env: "TCM_NEO4J_PASSWORD"
