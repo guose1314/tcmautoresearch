@@ -29,6 +29,7 @@ from urllib.parse import parse_qs, quote
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
+from starlette.concurrency import run_in_threadpool
 
 from src.api.research_utils import build_research_dashboard_payload
 from src.research.observe_philology import (

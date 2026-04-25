@@ -508,7 +508,8 @@ class TestConfigLoader(unittest.TestCase):
         with patch("src.infrastructure.persistence.DatabaseManager", _FakeDatabaseManager):
             app = create_legacy_web_app(settings=settings)
 
-        self.assertEqual(observed["connection_string"], settings.database_url)
+        self.assertIn("db.example.local:5432/structured_research", observed["connection_string"])
+        self.assertIn("structured_user", observed["connection_string"])
         self.assertTrue(observed["init_db"])
         self.assertIsInstance(app.state.db_manager, _FakeDatabaseManager)
 

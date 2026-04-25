@@ -27,6 +27,8 @@ from src.semantic_modeling.methods import (
     SummaryAnalysisEngine,
     SupramolecularPhysicochemicalAnalyzer,
 )
+from src.storage.graph_data_batch import GraphDataBatch
+from src.storage.neo4j_driver import Neo4jEdge, Neo4jNode
 
 
 class SemanticGraphBuilder(BaseModule):
@@ -106,8 +108,19 @@ class SemanticGraphBuilder(BaseModule):
             # 【新增】总结分析（统计/挖掘/建模）
             summary_analysis = SummaryAnalysisEngine.analyze(context)
             
+            graph_batch = GraphDataBatch()
+            for node_id, data in graph.nodes(data=True):
+                n_type = data.get("type", "Unknown").capitalize()
+                graph_batch.add_node(Neo4jNode(node_id, n_type, data))
+            for source, target, attrs in graph.edges(data=True):
+                rel_type = attrs.get("type", "RELATED_TO").upper()
+                s_type = graph.nodes[source].get("type", "Unknown").capitalize()
+                t_type = graph.nodes[target].get("type", "Unknown").capitalize()
+                graph_batch.add_edge(Neo4jEdge(source, target, rel_type, attrs), s_type, t_type)
+            
             # 构造输出
             output_data = {
+                "graph_batch": graph_batch,
                 "semantic_graph": {
                     "nodes": [
                         {

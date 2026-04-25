@@ -383,12 +383,6 @@ MODULE_MANIFEST: Dict[str, Dict[str, Any]] = {
     },
 
     # ━━━ DORMANT: 未接入活跃管线 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    "cycle_runner": {
-        "tier": TIER_DORMANT,
-        "path": "src/cycle/cycle_runner.py",
-        "description": "Demo 循环运行器（已被 ResearchRuntimeService 取代）",
-        "activation": "none — demo/legacy only",
-    },
     "cycle_research_session": {
         "tier": TIER_DORMANT,
         "path": "src/cycle/cycle_research_session.py",
@@ -399,12 +393,6 @@ MODULE_MANIFEST: Dict[str, Dict[str, Any]] = {
         "tier": TIER_DORMANT,
         "path": "src/cycle/cycle_cli.py",
         "description": "CLI Demo 工具",
-        "activation": "none — demo only",
-    },
-    "cycle_command_executor": {
-        "tier": TIER_DORMANT,
-        "path": "src/cycle/cycle_command_executor.py",
-        "description": "CLI 命令执行器",
         "activation": "none — demo only",
     },
     "research_orchestrator_deprecated": {

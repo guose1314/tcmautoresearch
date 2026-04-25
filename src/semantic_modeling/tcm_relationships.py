@@ -156,8 +156,8 @@ class TCMRelationshipDefinitions:
         },
     }
 
-    # 经典理论术语简释
-    THEORY_TERM_DEFINITIONS: Dict[str, str] = {
+    # 经典理论术语简释 (支持朝代多维释义)
+    THEORY_TERM_DEFINITIONS: Dict[str, Any] = {
         "君臣佐使": "方剂配伍的基本结构原则，君药治主症，臣药助君，佐药制约或兼治，使药调和引经",
         "四气五味": "药物的寒热温凉四气与辛甘酸苦咸五味，是中药药性理论的核心",
         "归经": "药物作用的靶向经络脏腑，指导临床用药定位",
@@ -166,6 +166,14 @@ class TCMRelationshipDefinitions:
         "正邪": "正气为人体抗病能力，邪气为致病因素，发病取决于正邪斗争",
         "升降浮沉": "药物作用的趋向性，升浮药向上向外，沉降药向下向内",
         "表里": "八纲辨证之一，病位在表为表证（外感初期），在里为里证（脏腑病变）",
+        "伤寒": [
+            {"dynasty_usage": "汉代", "definition": "狭义伤寒（汉代张仲景体系，外感风寒表证）"},
+            {"dynasty_usage": "明清", "definition": "广义外感热病（明清温病学派语境，且涵盖温热病）"},
+        ],
+        "风": [
+            {"dynasty_usage": "汉前", "definition": "自然界气候变化，六淫之首，百病之长"},
+            {"dynasty_usage": "宋金元", "definition": "内风（肝风内动，刘完素等倡导）"},
+        ],
     }
 
     
@@ -214,8 +222,8 @@ class TCMRelationshipDefinitions:
         return dict(cls.SYNDROME_DEFINITIONS.get(syndrome_name, {}))
 
     @classmethod
-    def get_theory_term_definition(cls, term: str) -> str:
-        """获取经典理论术语的简释文本。返回空字符串表示未收录。"""
+    def get_theory_term_definition(cls, term: str) -> Any:
+        """获取经典理论术语的简释文本或多维度释义列表。返回空字符串表示未收录。"""
         return cls.THEORY_TERM_DEFINITIONS.get(term, "")
     
     @classmethod

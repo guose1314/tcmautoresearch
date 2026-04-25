@@ -128,10 +128,37 @@ class Neo4jDriver:
                 self.uri, self._pool_config["max_connection_pool_size"],
             )
             self._bootstrap_schema()
+            self._setup_constraints_and_indexes()
             self._enforce_strict_schema_if_enabled()
         except Exception as e:
             logger.error(f"Neo4j 连接失败: {e}")
             raise
+
+    # ── Schema enforcement (Constraints & Indexes) ───────────────────
+
+    def _setup_constraints_and_indexes(self) -> None:
+        """Neo4j 约束与索引的自动化部署 (Schema Enforcement)
+        防止实体提取过程中出现大量重复节点。
+        """
+        try:
+            with self.driver.session(database=self.database) as session:
+                # 建立唯一性约束 (Unique Constraints)
+                session.run("CREATE CONSTRAINT herb_name_unique IF NOT EXISTS FOR (h:Herb) REQUIRE h.name IS UNIQUE")
+                session.run("CREATE CONSTRAINT literature_title_unique IF NOT EXISTS FOR (l:Literature) REQUIRE l.title IS UNIQUE")
+                session.run("CREATE CONSTRAINT prescription_name_unique IF NOT EXISTS FOR (p:Prescription) REQUIRE p.name IS UNIQUE")
+                session.run("CREATE CONSTRAINT symptom_name_unique IF NOT EXISTS FOR (s:Symptom) REQUIRE s.name IS UNIQUE")
+                session.run("CREATE CONSTRAINT pathogenesis_name_unique IF NOT EXISTS FOR (p:Pathogenesis) REQUIRE p.name IS UNIQUE")
+
+                # 建立全文索引 (Text Indexes)
+                # 为实体的 name、alias、title 属性建立全文索引，加速后续 Graph-RAG 多义词消歧与高频检索
+                session.run(
+                    "CREATE FULLTEXT INDEX entity_text_index IF NOT EXISTS "
+                    "FOR (n:Herb|Prescription|Symptom|Pathogenesis|Literature) "
+                    "ON EACH [n.name, n.alias, n.title]"
+                )
+            logger.info("Neo4j 约束与索引自动化部署完成: constraints & fulltext index (entity_text_index)")
+        except Exception as exc:
+            logger.warning("Neo4j 约束与索引部署失败: %s", exc)
 
     # ── Schema bootstrap / version ────────────────────────────────────
 
@@ -210,9 +237,14 @@ class Neo4jDriver:
     
     def close(self):
         """关闭连接"""
-        if self.driver:
-            self.driver.close()
-            logger.info("Neo4j 连接已关闭")
+        if hasattr(self, 'driver') and self.driver:
+            try:
+                self.driver.close()
+                logger.info("Neo4j 连接已关闭")
+            except Exception as e:
+                logger.error(f"关闭 Neo4j 连接时出错: {e}", exc_info=True)
+            finally:
+                self.driver = None
     
     def clear_database(self):
         """清空数据库（谨慎使用）"""

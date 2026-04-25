@@ -282,6 +282,10 @@ class DocumentPreprocessor(BaseModule):
         if "metadata" in input_data:
             metadata.update(input_data["metadata"])
         
+        # 强制扩充下传契约 (为 LLM 提供充足结构化元数据)
+        metadata.setdefault("dynasty", "未知")
+        metadata.setdefault("author", "未知")
+        
         return metadata
     
     def _detect_encoding(self, text: Any) -> str:

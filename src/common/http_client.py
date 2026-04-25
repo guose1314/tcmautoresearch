@@ -41,6 +41,13 @@ class HttpClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self._session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=200,
+            pool_maxsize=200,
+            max_retries=max_retries
+        )
+        self._session.mount("http://", adapter)
+        self._session.mount("https://", adapter)
         self._session.headers.update(
             {"User-Agent": user_agent or _DEFAULT_USER_AGENT}
         )

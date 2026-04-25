@@ -239,15 +239,20 @@ class StorageBackendFactory:
         from src.storage.transaction import TransactionCoordinator
 
         session = self._db_manager.get_session()
+        txn = None
         try:
-            with TransactionCoordinator(session, self._neo4j_driver, observer=observer) as txn:
+            txn = TransactionCoordinator(session, self._neo4j_driver, observer=observer)
+            with txn:
                 yield txn
             # commit 完成后记录观测（__exit__ 已执行 auto_commit）
             if txn.last_result is not None:
                 self._observability.record(txn.last_result)
                 self._degradation_governor.record_transaction_result(txn.last_result)
         finally:
-            session.close()
+            try:
+                session.close()
+            except Exception as e:
+                logger.error(f"关闭 session 失败: {e}", exc_info=True)
 
     @contextmanager
     def session_scope(self) -> Iterator[Any]:

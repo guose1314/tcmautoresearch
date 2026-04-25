@@ -42,9 +42,6 @@ class TestCoreAndArchitectureQuality(unittest.TestCase):
             exported,
             {
                 "build_cycle_demo_arg_parser",
-                "execute_cycle_demo_command",
-                "execute_real_module_pipeline",
-                "run_full_cycle_demo",
                 "run_research_session",
             },
         )

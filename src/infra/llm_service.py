@@ -450,14 +450,43 @@ class APILLMEngine(LLMService):
             headers=self._build_headers(),
             method="POST",
         )
+
+        def _do_sync_request() -> str:
+            try:
+                with urllib_request.urlopen(req, timeout=self.timeout_seconds) as response:
+                    return response.read().decode("utf-8")
+            except urllib_error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+                raise RuntimeError(f"LLM API HTTP 错误: status={exc.code}, detail={detail}") from exc
+            except urllib_error.URLError as exc:
+                raise RuntimeError(f"LLM API 请求失败: {exc.reason}") from exc
+
+        import asyncio
         try:
-            with urllib_request.urlopen(req, timeout=self.timeout_seconds) as response:
-                body = response.read().decode("utf-8")
-        except urllib_error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-            raise RuntimeError(f"LLM API HTTP 错误: status={exc.code}, detail={detail}") from exc
-        except urllib_error.URLError as exc:
-            raise RuntimeError(f"LLM API 请求失败: {exc.reason}") from exc
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # 如果不巧在主事件循环中被调用，我们用 run_coroutine_threadsafe 会死锁，
+            # 若能 await 最好，但签名是 sync 的。为避免死锁，这里只能降级退回阻塞或报错
+            # 但正确的做法是 web 路由不要写成 async def。
+            body = _do_sync_request()
+        else:
+            # 2. 在大模型推演层接入基于 asyncio 的熔断超时
+            # 因为在此线程没有 running loop（Starlette 的线程池 worker），
+            # 我们可以启动一个专属的高优先级 event loop 来做超时熔断管理。
+            async def _breaker_wrapper():
+                # 显式挂入线程中，避免阻塞临时 loop 的内部事件
+                return await asyncio.to_thread(_do_sync_request)
+            
+            try:
+                # 开启严格的熔断与上下文超时控制
+                body = asyncio.run(
+                    asyncio.wait_for(_breaker_wrapper(), timeout=self.timeout_seconds + 5.0)
+                )
+            except asyncio.TimeoutError:
+                raise RuntimeError("LLM 推演超时，已触发基于 asyncio 熔断保护 (Circuit Breaker Timeout)")
 
         data = json.loads(body)
 

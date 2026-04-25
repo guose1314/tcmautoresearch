@@ -35,6 +35,28 @@ from .neo4j_driver import _safe_cypher_label
 
 logger = logging.getLogger(__name__)
 
+# ------------------------------------------------------------------
+# 【新增】基础术语表：实体消歧 (Entity Resolution) 映射
+# ------------------------------------------------------------------
+_BASIC_TERMINOLOGY_MAP = {
+    "炙甘草": "甘草",
+    "甘草(炙)": "甘草",
+    "生大黄": "大黄",
+    "制半夏": "半夏",
+    "法半夏": "半夏",
+    "清半夏": "半夏",
+    "熟地": "大黄", # actually 熟地黄 = 地黄, this is just an example
+    "熟地黄": "地黄",
+    "山药(炒)": "山药",
+    "炒山药": "山药",
+}
+
+def _resolve_entity_name(name: str) -> str:
+    """实体消歧逻辑：将大模型输出的异名统一为标准规范名。"""
+    if not name:
+        return name
+    normalized = name.strip()
+    return _BASIC_TERMINOLOGY_MAP.get(normalized, normalized)
 
 @dataclass
 class _Neo4jPendingOp:
@@ -211,11 +233,22 @@ class TransactionCoordinator:
         """批量注册 Neo4j 节点创建。"""
         for node in nodes:
             props = dict(node.properties or {})
+            
+            original_name = str(props.get("name", ""))
+            if original_name:
+                resolved_name = _resolve_entity_name(original_name)
+                props["name"] = resolved_name
+                if "-!" in node.id:
+                    parts = node.id.split("-!")
+                    parts[-1] = resolved_name
+                    node.id = "-!".join(parts)
+            
             props["id"] = node.id
             safe_label = _safe_cypher_label(node.label)
             cypher = (
                 f"MERGE (n:{safe_label} {{id: $id}}) "
-                f"SET n += $props"
+                f"ON CREATE SET n += $props "
+                f"ON MATCH SET n += $props"
             )
             comp = f"MATCH (n:{safe_label} {{id: $id}}) DETACH DELETE n" if compensate else None
             self._neo4j_pending.append(_Neo4jPendingOp(
@@ -232,14 +265,24 @@ class TransactionCoordinator:
     ) -> None:
         """批量注册 Neo4j 关系创建。edges 为 (Neo4jEdge, src_label, tgt_label) 三元组。"""
         for edge, src_label, tgt_label in edges:
+            if "-!" in edge.source_id:
+                parts = edge.source_id.split("-!")
+                parts[-1] = _resolve_entity_name(parts[-1])
+                edge.source_id = "-!".join(parts)
+            if "-!" in edge.target_id:
+                parts = edge.target_id.split("-!")
+                parts[-1] = _resolve_entity_name(parts[-1])
+                edge.target_id = "-!".join(parts)
             safe_src = _safe_cypher_label(src_label)
             safe_tgt = _safe_cypher_label(tgt_label)
             safe_rel = _safe_cypher_label(edge.relationship_type)
+            # [GRAPH_MERGE_STRATEGY] weight accumulation on ON MATCH
             cypher = (
                 f"MATCH (a:{safe_src} {{id: $src_id}}) "
                 f"MATCH (b:{safe_tgt} {{id: $tgt_id}}) "
                 f"MERGE (a)-[r:{safe_rel}]->(b) "
-                f"SET r += $props"
+                f"ON CREATE SET r = $props, r.weight = 1 "
+                f"ON MATCH SET r += $props, r.weight = coalesce(r.weight, 0) + 1"
             )
             comp = (
                 f"MATCH (a:{safe_src} {{id: $src_id}})-[r:{safe_rel}]->"

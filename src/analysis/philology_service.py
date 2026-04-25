@@ -43,7 +43,7 @@ _DEFAULT_COLLATION_JUDGEMENTS = {
 _FORMULA_ROLE_LABELS = {"sovereign": "君药", "minister": "臣药", "assistant": "佐药", "envoy": "使药"}
 
 
-def _build_tcm_structured_definition(canonical: str, category: str, label: str) -> Dict[str, Any]:
+def _build_tcm_structured_definition(canonical: str, category: str, label: str, document_context: Dict[str, Any] = None) -> Dict[str, Any]:
     """从 TCMRelationshipDefinitions 构建结构化释义 (与 observe_philology 同源逻辑)。"""
     display_label = label or canonical
     if category == "herb":
@@ -90,10 +90,32 @@ def _build_tcm_structured_definition(canonical: str, category: str, label: str) 
         if pathogenesis:
             parts.append(f"病机：{pathogenesis}")
         return {"definition": "；".join(parts), "definition_source": "structured_tcm_knowledge", "source_refs": ["TCMRelationshipDefinitions.SYNDROME_DEFINITIONS"]}
-    if category == "theory":
+    if category == "theory" or canonical in TCMRelationshipDefinitions.THEORY_TERM_DEFINITIONS:
         theory_def = TCMRelationshipDefinitions.get_theory_term_definition(canonical)
         if not theory_def:
             return {}
+        
+        # 多维度释义：根据朝代上下文选择
+        if isinstance(theory_def, list):
+            doc_ctx = document_context or {}
+            target_dynasty = doc_ctx.get("dynasty", "")
+            
+            best_def = theory_def[0]["definition"]
+            best_dynasty = theory_def[0]["dynasty_usage"]
+            if target_dynasty and target_dynasty != "未知":
+                for d_info in theory_def:
+                    if d_info.get("dynasty_usage") in target_dynasty or target_dynasty in d_info.get("dynasty_usage", ""):
+                        best_def = d_info["definition"]
+                        best_dynasty = d_info["dynasty_usage"]
+                        break
+            
+            return {
+                "definition": f"{canonical}：{best_def}",
+                "definition_source": "structured_tcm_knowledge",
+                "source_refs": ["TCMRelationshipDefinitions.THEORY_TERM_DEFINITIONS"],
+                "dynasty_usage": best_dynasty
+            }
+            
         return {"definition": f"{canonical}：{theory_def}", "definition_source": "structured_tcm_knowledge", "source_refs": ["TCMRelationshipDefinitions.THEORY_TERM_DEFINITIONS"]}
     return {}
 
@@ -145,6 +167,7 @@ class PhilologyService(BaseModule):
             raw_text,
             normalized_text,
             normalization_result.term_mappings,
+            input_metadata,
         )
         version_collation = self._build_version_collation(raw_text, context, input_metadata)
         fragment_reconstruction = self._build_fragment_reconstruction(input_metadata, version_collation)
@@ -247,6 +270,7 @@ class PhilologyService(BaseModule):
         raw_text: str,
         normalized_text: str,
         term_mappings: Dict[str, str],
+        input_metadata: Dict[str, Any],
     ) -> Dict[str, Any]:
         applied_mappings = self._build_applied_mappings(raw_text, normalized_text, term_mappings)
         orthographic_variants = self._build_orthographic_variants(raw_text, normalized_text)
@@ -257,6 +281,7 @@ class PhilologyService(BaseModule):
             applied_mappings,
             orthographic_variants,
             glossary_notes,
+            input_metadata,
         )
 
         return {
@@ -404,6 +429,7 @@ class PhilologyService(BaseModule):
         applied_mappings: Sequence[Mapping[str, Any]],
         orthographic_variants: Sequence[Mapping[str, Any]],
         glossary_notes: Sequence[Mapping[str, Any]],
+        input_metadata: Dict[str, Any] = None,
     ) -> List[Dict[str, Any]]:
         table_index: Dict[str, Dict[str, Any]] = {}
 
@@ -500,9 +526,60 @@ class PhilologyService(BaseModule):
                 [str(item) for item in row.get("sources") or [] if str(item).strip()]
             )
             row["notes"] = [str(item) for item in row.get("notes") or [] if str(item).strip()]
+            
+            # 扩展行级别上下文以备消歧义
+            row["_document_context"] = {
+                "raw_text_window": raw_text[:200],  # 截取近 200 字窗口
+                "author": (input_metadata or {}).get("author", "未知"),
+                "dynasty": (input_metadata or {}).get("dynasty", "未知")
+            }
+            
             self._enrich_row_with_exegesis(row)
+            
+            # 清理临时字段
+            row.pop("_document_context", None)
+            
             rows.append(row)
         return rows
+
+    def _llm_disambiguate_polysemy(
+        self,
+        canonical: str,
+        category: str,
+        document_context: Dict[str, Any],
+        dictionaries: List[str]
+    ) -> Dict[str, Any]:
+        """使用 LLM Self-Discover/Self-Refine 推理结合上下文消歧义"""
+        
+        # 兜底旧版字典消歧义
+        payload = disambiguate_polysemy(canonical, category, dictionaries=dictionaries)
+        if payload.get("definition"):
+            # 如果已有结果，进一步补充朝代适用性
+            payload["dynasty_usage"] = document_context.get("dynasty", "未知")
+            return payload
+            
+        # 大模型推理消歧义启动
+        from src.llm.llm_service import CachedLLMService
+        prompt = f"""[任务] 术语训诂与消歧义
+[目标术语] {canonical}
+[类型分类] {category}
+[原文窗口] {document_context.get("raw_text_window", "")}
+[文献朝代] {document_context.get("dynasty", "未知")}
+[文献作者] {document_context.get("author", "未知")}
+
+请分析该术语在当前[原文窗口]和[文献朝代]下最准确的含义解释。
+要求纯文本输出："""
+        
+        try:
+            llm_res = CachedLLMService().generate(prompt)
+            return {
+                "definition": llm_res.strip(),
+                "definition_source": "llm_disambiguation",
+                "source_refs": ["llm_inference"],
+                "dynasty_usage": document_context.get("dynasty", "未知")
+            }
+        except Exception:
+            return {}
 
     def _enrich_row_with_exegesis(self, row: Dict[str, Any]) -> None:
         """为 terminology row 填充训诂字段 (definition / semantic_scope / dynasty_usage / disambiguation_basis)。"""
@@ -511,18 +588,21 @@ class PhilologyService(BaseModule):
         category = resolve_polysemy_category(row, label)
         notes = [str(n) for n in row.get("notes") or [] if str(n).strip()]
         sources = [str(s) for s in row.get("sources") or [] if str(s).strip()]
+        document_context = row.get("_document_context", {})
 
         definition = ""
         definition_source = ""
         source_refs: list[str] = []
+        dynasty_usage = document_context.get("dynasty", "")
 
-        # 1) 可配置字典注入 — 按注入顺序尝试
+        # 1) 大模型上下文感知 & 可配置字典注入
         if self.exegesis_dictionaries and category:
-            payload = disambiguate_polysemy(canonical, category, dictionaries=self.exegesis_dictionaries)
+            payload = self._llm_disambiguate_polysemy(canonical, category, document_context, self.exegesis_dictionaries)
             if payload.get("definition"):
                 definition = str(payload["definition"])
                 definition_source = str(payload.get("definition_source") or "external_dictionary")
                 source_refs = list(payload.get("source_refs") or [])
+                dynasty_usage = str(payload.get("dynasty_usage") or dynasty_usage)
 
         # 2) config_terminology_standard 优先
         if not definition and "config_terminology_standard" in sources:
@@ -534,11 +614,12 @@ class PhilologyService(BaseModule):
 
         # 3) 结构化知识库 (TCMRelationshipDefinitions)
         if not definition and category:
-            structured = _build_tcm_structured_definition(canonical, category, label)
+            structured = _build_tcm_structured_definition(canonical, category, label, document_context)
             if structured.get("definition"):
                 definition = str(structured["definition"])
                 definition_source = "structured_tcm_knowledge"
                 source_refs = list(structured.get("source_refs") or [])
+                dynasty_usage = str(structured.get("dynasty_usage") or dynasty_usage)
 
         # 4) 附注推导
         if not definition and notes:
@@ -560,7 +641,7 @@ class PhilologyService(BaseModule):
         row[FIELD_DEFINITION] = definition
         row[FIELD_DEFINITION_SOURCE] = definition_source
         row[FIELD_SEMANTIC_SCOPE] = label or CATEGORY_TO_LABEL.get(category, "术语")
-        row[FIELD_DYNASTY_USAGE] = []
+        row[FIELD_DYNASTY_USAGE] = [dynasty_usage] if dynasty_usage else []
         row[FIELD_DISAMBIGUATION_BASIS] = [
             b for b in [*source_refs, *sources[:1], *(row.get("observed_forms") or [])[:1]] if b
         ]

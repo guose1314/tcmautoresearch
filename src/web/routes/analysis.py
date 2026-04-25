@@ -203,7 +203,7 @@ def _get_graph_builder():
 
 
 @router.post("/formula")
-async def analyze_formula(
+def analyze_formula(
     body: FormulaAnalysisRequest,
     user: Dict[str, Any] = Depends(get_current_user),
 ):
@@ -226,7 +226,7 @@ async def analyze_formula(
 
 
 @router.post("/text")
-async def analyze_text(
+def analyze_text(
     request: Request,
     body: TextAnalysisRequest,
     user: Dict[str, Any] = Depends(get_current_user),
@@ -571,7 +571,7 @@ _DISTILL_MAX_TOKENS = 512
 
 
 @router.post("/distill")
-async def llm_distill(
+def llm_distill(
     request: Request,
     body: LLMDistillRequest,
     user: Dict[str, Any] = Depends(get_current_user),
@@ -762,7 +762,7 @@ def _get_graph_schema_info() -> Dict[str, Any]:
 
 
 @router.get("/kg/stats")
-async def kg_stats(
+def kg_stats(
     request: Request,
     user: Dict[str, Any] = Depends(get_current_user),
 ):
@@ -847,7 +847,7 @@ _GRAPH_TYPE_FILTERS: Dict[str, Dict[str, Any]] = {
 
 
 @router.get("/kg/subgraph")
-async def kg_subgraph(
+def kg_subgraph(
     graph_type: str = Query(
         ..., description="图谱类型: herb_relations | formula_composition | syndrome_treatment | literature_citation"
     ),
@@ -910,7 +910,7 @@ async def kg_subgraph(
 
 
 @router.get("/graph/{research_id}")
-async def get_knowledge_graph(
+def get_knowledge_graph(
     research_id: str,
     request: Request,
     user: Dict[str, Any] = Depends(get_current_user),
