@@ -542,45 +542,6 @@ class PhilologyService(BaseModule):
             rows.append(row)
         return rows
 
-    def _llm_disambiguate_polysemy(
-        self,
-        canonical: str,
-        category: str,
-        document_context: Dict[str, Any],
-        dictionaries: List[str]
-    ) -> Dict[str, Any]:
-        """使用 LLM Self-Discover/Self-Refine 推理结合上下文消歧义"""
-        
-        # 兜底旧版字典消歧义
-        payload = disambiguate_polysemy(canonical, category, dictionaries=dictionaries)
-        if payload.get("definition"):
-            # 如果已有结果，进一步补充朝代适用性
-            payload["dynasty_usage"] = document_context.get("dynasty", "未知")
-            return payload
-            
-        # 大模型推理消歧义启动
-        from src.llm.llm_service import CachedLLMService
-        prompt = f"""[任务] 术语训诂与消歧义
-[目标术语] {canonical}
-[类型分类] {category}
-[原文窗口] {document_context.get("raw_text_window", "")}
-[文献朝代] {document_context.get("dynasty", "未知")}
-[文献作者] {document_context.get("author", "未知")}
-
-请分析该术语在当前[原文窗口]和[文献朝代]下最准确的含义解释。
-要求纯文本输出："""
-        
-        try:
-            llm_res = CachedLLMService().generate(prompt)
-            return {
-                "definition": llm_res.strip(),
-                "definition_source": "llm_disambiguation",
-                "source_refs": ["llm_inference"],
-                "dynasty_usage": document_context.get("dynasty", "未知")
-            }
-        except Exception:
-            return {}
-
     def _enrich_row_with_exegesis(self, row: Dict[str, Any]) -> None:
         """为 terminology row 填充训诂字段 (definition / semantic_scope / dynasty_usage / disambiguation_basis)。"""
         canonical = str(row.get("canonical") or "").strip()
@@ -595,9 +556,14 @@ class PhilologyService(BaseModule):
         source_refs: list[str] = []
         dynasty_usage = document_context.get("dynasty", "")
 
-        # 1) 大模型上下文感知 & 可配置字典注入
+        # 1) LLM 智能增强 & 可配置字典注入
         if self.exegesis_dictionaries and category:
-            payload = self._llm_disambiguate_polysemy(canonical, category, document_context, self.exegesis_dictionaries)
+            payload = disambiguate_polysemy(
+                canonical, 
+                category, 
+                dictionaries=self.exegesis_dictionaries, 
+                document_context=document_context
+            )
             if payload.get("definition"):
                 definition = str(payload["definition"])
                 definition_source = str(payload.get("definition_source") or "external_dictionary")

@@ -131,22 +131,21 @@ def resolve_polysemy_category(
     return LABEL_TO_CATEGORY.get(label, "")
 
 
+HIGH_POLYSEMY_TERMS: frozenset[str] = frozenset({"风", "水", "伤寒", "白虎"})
+
 def disambiguate_polysemy(
     canonical: str,
     category: str,
     *,
     dictionaries: Sequence[ExegesisDictionary] = (),
     context_terms: Sequence[str] = (),
+    document_context: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
     """对多义术语执行义项判别，返回释义载荷。
 
-    按 dictionaries 注入顺序查词典，用评分机制选取最优匹配，
-    而非简单取首个命中结果。评分依据:
-      - definition_source 优先级 (rank 4..1)
-      - context_terms 中出现在释义里的关键词命中数
-      - category 精确匹配加分
-
-    若全部未命中则返回空字典。
+    按 dictionaries 注入顺序查词典，用评分机制选取最优匹配。
+    针对高频多义词（如“风”、“水”、“伤寒”、“白虎”），将会拦截请求，
+    结合上下文窗口 (document_context) 及预查候选列表，让大语言模型进行推演。
     """
     candidates: List[tuple[float, int, Dict[str, Any]]] = []
     for idx, dictionary in enumerate(dictionaries):
@@ -171,6 +170,45 @@ def disambiguate_polysemy(
         score += context_hits * 2.0
         # 字典注入顺序作为次要排序 (越靠前越优)
         candidates.append((score, -idx, payload))
+
+    # ==== [增强] 高频歧义词 LLM Context 推演 ====
+    if canonical in HIGH_POLYSEMY_TERMS and document_context:
+        # 如果命中了高频多义词，并且有附带的上下文，交由 LLM 判断
+        doc_ctx = document_context or {}
+        raw_window = doc_ctx.get("raw_text_window", "")
+        dynasty = doc_ctx.get("dynasty", "未知")
+        author = doc_ctx.get("author", "未知")
+
+        # 整理已有的字典候选提供给 LLM 参考
+        candidate_defs = [c[2].get("definition") for c in sorted(candidates, key=lambda t: (t[0], t[1]), reverse=True)]
+        candidates_str = "\n".join(f"- {d}" for d in candidate_defs) if candidate_defs else "无预设字典候选"
+
+        prompt = f"""[任务] 中医古籍高频多义词消歧义
+[目标术语] {canonical}
+[类型分类] {category}
+[原文窗口] {raw_window}
+[文献朝代] {dynasty}
+[文献作者] {author}
+
+[候选释义列表]
+{candidates_str}
+
+请根据[原文窗口]和[文献朝代]的历史厚度，在上述候选释义中选择最恰当的一项，或者给出你在当前语境下更为准确的总结性释义。
+要求仅输出结果的纯文本释义，不要任何额外的分析："""
+
+        from src.llm.llm_service import CachedLLMService
+        try:
+            llm_res = CachedLLMService().generate(prompt).strip()
+            if llm_res:
+                return {
+                    "definition": llm_res,
+                    "definition_source": "llm_disambiguation",
+                    "source_refs": ["llm_inference"],
+                    "dynasty_usage": dynasty,
+                    "disambiguation_basis": [f"LLM Reasoning ({dynasty})"]
+                }
+        except Exception:
+            pass # 回退到普通 O(1) 字典查找机制
 
     if not candidates:
         return {}
