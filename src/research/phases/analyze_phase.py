@@ -516,6 +516,32 @@ class AnalyzePhaseMixin:
         entities = self._merge_analyze_entities(explicit_entities, inferred_entities)
 
         if not entities or not isinstance(semantic_graph, dict) or not (semantic_graph.get("edges") or []):
+            raw_text = context.get("raw_text") or context.get("input_data", {}).get("raw_text")
+            if raw_text and isinstance(raw_text, str):
+                self.pipeline.logger.info("Analyze 阶段未获取到预处理实体与关系，启动内置 Fallback 抽取流程...")
+                try:
+                    preprocessor = self.pipeline.analysis_port.create_preprocessor(context.get("preprocessor_config"))
+                    extractor = self.pipeline.analysis_port.create_extractor(context.get("extractor_config"))
+                    semantic_builder = self.pipeline.analysis_port.create_semantic_builder(context.get("semantic_builder_config"))
+
+                    if preprocessor.initialize() and extractor.initialize() and semantic_builder.initialize():
+                        fallback_ctx = {"raw_text": raw_text}
+                        fallback_ctx = preprocessor.execute(fallback_ctx)
+                        fallback_ctx = extractor.execute(fallback_ctx)
+                        fallback_ctx = semantic_builder.execute(fallback_ctx)
+
+                        fb_entities = fallback_ctx.get("entities", [])
+                        fb_graph = fallback_ctx.get("semantic_graph", {})
+                        fb_rels = fb_graph.get("edges", []) if isinstance(fb_graph, dict) else []
+
+                        if fb_entities and fb_rels:
+                            entities = fb_entities
+                            semantic_graph = fb_graph
+                            self.pipeline.logger.info("Fallback 抽取成功：获取到 %d 个实体，%d 条关系", len(entities), len(fb_rels))
+                except Exception as exc:
+                    self.pipeline.logger.warning("Analyze 阶段 Fallback 降级抽取失败: %s", exc)
+
+        if not entities or not isinstance(semantic_graph, dict) or not (semantic_graph.get("edges") or []):
             return {}
 
         try:
