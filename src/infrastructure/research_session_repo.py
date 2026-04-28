@@ -10,7 +10,7 @@ import json
 import logging
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from sqlalchemy import text
@@ -260,6 +260,21 @@ class ResearchSessionRepository:
 
     def __init__(self, db_manager: DatabaseManager):
         self._db = db_manager
+        # T5.4: 供 ExpertFeedbackLoop 等评论裁决关闭后的订阅点。
+        # 每个 hook 签名：``hook(cycle_id: str, dispute: dict) -> None``。
+        self._dispute_resolution_hooks: List[Any] = []
+
+    def register_dispute_resolution_hook(self, hook: Any) -> None:
+        """T5.4: 订阅 ``resolve_review_dispute`` 关闭事件。"""
+        if callable(hook) and hook not in self._dispute_resolution_hooks:
+            self._dispute_resolution_hooks.append(hook)
+
+    def _emit_dispute_resolved(self, cycle_id: str, payload: Dict[str, Any]) -> None:
+        for hook in list(self._dispute_resolution_hooks):
+            try:
+                hook(cycle_id, payload)
+            except Exception:  # pragma: no cover - hook 不得中断主流程
+                logger.exception("dispute resolution hook failed")
 
     @contextmanager
     def _session_scope(self, session: Optional[Session] = None):
@@ -396,7 +411,7 @@ class ResearchSessionRepository:
     ) -> Optional[Dict[str, Any]]:
         return self.update_session(cycle_id, {
             "status": "active",
-            "started_at": datetime.utcnow().isoformat(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
         }, session=session)
 
     def complete_session(
@@ -407,7 +422,7 @@ class ResearchSessionRepository:
     ) -> Optional[Dict[str, Any]]:
         return self.update_session(cycle_id, {
             "status": "completed",
-            "completed_at": datetime.utcnow().isoformat(),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
         }, session=session)
 
     def fail_session(
@@ -626,9 +641,80 @@ class ResearchSessionRepository:
                         replay_feedback_json=_json_dumps(record.get("replay_feedback"), "{}"),
                         details_json=_json_dumps(record.get("details"), "{}"),
                         metadata_json=_json_dumps(metadata, "{}"),
+                        prompt_version=(str(record.get("prompt_version") or "").strip() or None),
+                        schema_version=(str(record.get("schema_version") or "").strip() or None),
                     )
                 )
 
+            db_session.flush()
+            stored_records = self._list_learning_feedback_records(db_session, cycle_id)
+            return self._build_learning_feedback_library_snapshot(stored_records)
+
+    def append_learning_feedback_record(
+        self,
+        cycle_id: str,
+        record: Mapping[str, Any],
+        *,
+        phase_execution_id: Optional[str] = None,
+        contract_version: Optional[str] = None,
+        session: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """T5.4: 追加单条 ``research_learning_feedback`` 记录。
+
+        与 :meth:`replace_learning_feedback_library` 互补：后者会清空再写，
+        本方法只在末尾插入一条，供 ExpertFeedbackLoop 等"事件驱动"路径使用。
+        """
+        with self._session_scope(session) as db_session:
+            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            if rs is None:
+                return None
+            normalized = normalize_learning_feedback_record(dict(record or {}))
+            metadata = dict(normalized.get("metadata") or {})
+            metadata.setdefault(
+                "contract_version",
+                str(contract_version or LEARNING_FEEDBACK_CONTRACT_VERSION),
+            )
+            record_phase_execution_id: Optional[uuid.UUID] = None
+            raw_phase_execution_id = normalized.get("phase_execution_id") or phase_execution_id
+            if raw_phase_execution_id:
+                record_phase_execution_id = uuid.UUID(str(raw_phase_execution_id))
+
+            db_session.add(
+                ResearchLearningFeedback(
+                    session_id=rs.id,
+                    cycle_id=cycle_id,
+                    phase_execution_id=record_phase_execution_id,
+                    feedback_scope=str(normalized.get("feedback_scope") or "phase_assessment"),
+                    source_phase=str(normalized.get("source_phase") or "reflect"),
+                    target_phase=str(normalized.get("target_phase") or "").strip() or None,
+                    feedback_status=str(normalized.get("feedback_status") or "tracked"),
+                    overall_score=normalized.get("overall_score"),
+                    grade_level=str(normalized.get("grade_level") or "").strip() or None,
+                    cycle_trend=str(normalized.get("cycle_trend") or "").strip() or None,
+                    issue_count=max(int(normalized.get("issue_count") or 0), 0),
+                    weakness_count=max(int(normalized.get("weakness_count") or 0), 0),
+                    strength_count=max(int(normalized.get("strength_count") or 0), 0),
+                    strategy_changed=bool(normalized.get("strategy_changed")),
+                    strategy_before_fingerprint=str(
+                        normalized.get("strategy_before_fingerprint") or ""
+                    ).strip() or None,
+                    strategy_after_fingerprint=str(
+                        normalized.get("strategy_after_fingerprint") or ""
+                    ).strip() or None,
+                    recorded_phase_names=list(normalized.get("recorded_phase_names") or []),
+                    weak_phase_names=list(normalized.get("weak_phase_names") or []),
+                    quality_dimensions_json=_json_dumps(normalized.get("quality_dimensions"), "{}"),
+                    issues_json=_json_dumps(normalized.get("issues"), "[]"),
+                    improvement_priorities_json=_json_dumps(
+                        normalized.get("improvement_priorities"), "[]"
+                    ),
+                    replay_feedback_json=_json_dumps(normalized.get("replay_feedback"), "{}"),
+                    details_json=_json_dumps(normalized.get("details"), "{}"),
+                    metadata_json=_json_dumps(metadata, "{}"),
+                    prompt_version=(str(normalized.get("prompt_version") or "").strip() or None),
+                    schema_version=(str(normalized.get("schema_version") or "").strip() or None),
+                )
+            )
             db_session.flush()
             stored_records = self._list_learning_feedback_records(db_session, cycle_id)
             return self._build_learning_feedback_library_snapshot(stored_records)
@@ -755,7 +841,7 @@ class ResearchSessionRepository:
                 return None
             row.assignee = None
             row.queue_status = "unassigned"
-            row.released_at = datetime.utcnow()
+            row.released_at = datetime.now(timezone.utc)
             if notes is not None:
                 row.notes = str(notes)
             if metadata is not None:
@@ -820,7 +906,7 @@ class ResearchSessionRepository:
             if row is None:
                 return None
             row.queue_status = "completed"
-            row.completed_at = datetime.utcnow()
+            row.completed_at = datetime.now(timezone.utc)
             if notes is not None:
                 row.notes = str(notes)
             if metadata is not None:
@@ -844,7 +930,7 @@ class ResearchSessionRepository:
     ) -> List[Dict[str, Any]]:
         """Return the review queue with the requested filters applied."""
 
-        reference_now = now or datetime.utcnow()
+        reference_now = now or datetime.now(timezone.utc)
         with self._session_scope(session) as db_session:
             query = db_session.query(ReviewAssignment)
             if cycle_id:
@@ -891,7 +977,7 @@ class ResearchSessionRepository:
     ) -> List[Dict[str, Any]]:
         """Aggregate workload per reviewer (including the unassigned bucket)."""
 
-        reference_now = now or datetime.utcnow()
+        reference_now = now or datetime.now(timezone.utc)
         rows = self.list_review_queue(cycle_id=cycle_id, now=reference_now, session=session)
         buckets: Dict[str, Dict[str, Any]] = {}
         for row in rows:
@@ -949,7 +1035,7 @@ class ResearchSessionRepository:
         # Local import keeps this module import-graph clean.
         from src.research.review_sampling import compute_review_quality_summary
 
-        reference_now = now or datetime.utcnow()
+        reference_now = now or datetime.now(timezone.utc)
         assignments = self.list_review_queue(
             cycle_id=cycle_id, now=reference_now, session=session,
         )
@@ -1017,7 +1103,7 @@ class ResearchSessionRepository:
                     due_at=_parse_datetime(due_at) if due_at is not None else None,
                 )
                 if mark_claimed_at:
-                    row.claimed_at = datetime.utcnow()
+                    row.claimed_at = datetime.now(timezone.utc)
                 db_session.add(row)
             else:
                 row.assignee = assignee
@@ -1031,7 +1117,7 @@ class ResearchSessionRepository:
                 if metadata is not None:
                     row.metadata_json = _json_dumps(dict(metadata), "{}")
                 if mark_claimed_at:
-                    row.claimed_at = datetime.utcnow()
+                    row.claimed_at = datetime.now(timezone.utc)
                     row.released_at = None
             db_session.flush()
             return self._review_assignment_to_dict(row)
@@ -1042,7 +1128,7 @@ class ResearchSessionRepository:
         *,
         now: Optional[datetime] = None,
     ) -> Dict[str, Any]:
-        reference_now = now or datetime.utcnow()
+        reference_now = now or datetime.now(timezone.utc)
         claimed_at = row.claimed_at
         backlog_age_seconds = None
         if claimed_at is not None:
@@ -1125,7 +1211,7 @@ class ResearchSessionRepository:
             resolved_case_id = (case_id or "").strip() or self._generate_dispute_case_id(
                 db_session, cycle_id
             )
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             arbitrator_value = (arbitrator or "").strip() or None
             initial_status = "assigned" if arbitrator_value else "open"
             opened_event = {
@@ -1182,7 +1268,7 @@ class ResearchSessionRepository:
                 raise ValueError(
                     f"dispute case {case_id} 已是终态 {row.dispute_status}, 不可改派"
                 )
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             row.arbitrator = normalized_arbitrator
             row.dispute_status = "assigned"
             row.assigned_at = now
@@ -1231,7 +1317,7 @@ class ResearchSessionRepository:
                 raise ValueError(
                     f"dispute case {case_id} 已是终态 {row.dispute_status}, 不可重复关闭"
                 )
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             row.dispute_status = "resolved"
             row.resolution = normalized_resolution
             row.resolved_at = now
@@ -1289,6 +1375,8 @@ class ResearchSessionRepository:
         else:
             payload["writeback_applied"] = False
             payload["writeback_review_status"] = None
+        # T5.4: 召唭订阅者（ExpertFeedbackLoop 会在这里往 research_learning_feedback 插行）
+        self._emit_dispute_resolved(cycle_id, payload)
         return payload
 
     def withdraw_review_dispute(
@@ -1311,7 +1399,7 @@ class ResearchSessionRepository:
                 raise ValueError(
                     f"dispute case {case_id} 已是终态 {row.dispute_status}, 不可撤销"
                 )
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             row.dispute_status = "withdrawn"
             row.resolved_at = now
             if notes is not None:
@@ -2256,6 +2344,8 @@ class ResearchSessionRepository:
             "replay_feedback": _json_loads(feedback.replay_feedback_json, {}),
             "details": details if isinstance(details, dict) else {},
             "metadata": _json_loads(feedback.metadata_json, {}),
+            "prompt_version": feedback.prompt_version or "unknown",
+            "schema_version": feedback.schema_version or "unknown",
             "created_at": feedback.created_at.isoformat() if feedback.created_at else None,
         }
         if isinstance(details, dict):
@@ -2466,7 +2556,7 @@ class ResearchSessionRepository:
             author=str(version_metadata.get("author") or "").strip() or None,
             edition=str(version_metadata.get("edition") or "").strip() or None,
             version_metadata_json=version_metadata,
-            processing_timestamp=_parse_datetime(payload.get("processing_timestamp")) or datetime.utcnow(),
+            processing_timestamp=_parse_datetime(payload.get("processing_timestamp")) or datetime.now(timezone.utc),
             objective=research_session.research_objective or research_session.description or None,
             raw_text_size=int(payload.get("raw_text_size") or 0),
             entities_extracted_count=int(payload.get("entity_count") or 0),

@@ -265,6 +265,14 @@ class AnalyzePhaseMixin:
                 {"phase": "analyze", **self._analyze_tracker.to_metadata()}
             )
 
+        # T5.5: 三档 GraphRAG 摘要 — 在 SelfRefineRunner 前先注入背景知识
+        try:
+            graph_rag_block = self._apply_graph_rag(context, cycle)
+            if graph_rag_block:
+                metadata["graph_rag"] = graph_rag_block
+        except Exception:
+            pass
+
         # T4.5: enable_self_refine=True 时，对 analyze 主结论文本调用 SelfRefineRunner
         try:
             from src.research._self_refine_t45 import (
@@ -324,6 +332,68 @@ class AnalyzePhaseMixin:
             metadata=metadata,
             error=evidence_grade_error,
         )
+
+    def _apply_graph_rag(
+        self,
+        context: Dict[str, Any],
+        cycle: "ResearchCycle",
+    ) -> Dict[str, Any]:
+        """T5.5: 在 SelfRefineRunner 之前先调 GraphRAG 三档检索。
+
+        触发条件（任一为真即启用）：
+          * ``context["enable_graph_rag"]`` 为真；
+          * pipeline.config 内 ``learning_strategy.enable_graph_rag`` 为真。
+
+        ``question_type`` 解析顺序：
+          1. ``context["graph_rag_question_type"]`` 显式覆盖；
+          2. 启发式：含 ``entity_ids`` → ``local``；含 ``topic_keys`` → ``community``；
+             否则 ``global``。
+        """
+        if not self._resolve_analyze_flag(context, "enable_graph_rag", default=False):
+            return {}
+        try:
+            from src.llm.graph_rag import GraphRAG, VALID_QUESTION_TYPES
+        except Exception:
+            return {}
+
+        rag: Any = context.get("graph_rag_runner")
+        if rag is None:
+            driver = (
+                getattr(self.pipeline, "neo4j_driver", None)
+                or context.get("neo4j_driver")
+            )
+            token_budget = int(context.get("graph_rag_token_budget", 8000))
+            rag = GraphRAG(neo4j_driver=driver, token_budget=token_budget)
+
+        topic_keys = list(context.get("graph_rag_topic_keys") or [])
+        entity_ids = list(context.get("graph_rag_entity_ids") or [])
+        question_type = (context.get("graph_rag_question_type") or "").strip().lower()
+        if question_type not in VALID_QUESTION_TYPES:
+            if entity_ids:
+                question_type = "local"
+            elif topic_keys:
+                question_type = "community"
+            else:
+                question_type = "global"
+
+        query = (
+            context.get("graph_rag_query")
+            or getattr(cycle, "research_objective", "")
+            or context.get("research_objective", "")
+        )
+        try:
+            result = rag.retrieve(
+                question_type,
+                query,
+                topic_keys=topic_keys or None,
+                entity_ids=entity_ids or None,
+            )
+        except Exception:
+            return {}
+        block = result.to_dict() if hasattr(result, "to_dict") else dict(result)
+        # 写回 context 让 SelfRefineRunner 在 inputs 里看到
+        context.setdefault("graph_rag_context", block)
+        return block
 
     def _resolve_analyze_modules(
         self,
