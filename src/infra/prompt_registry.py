@@ -21,7 +21,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class PromptTemplate:
-    """单条 prompt 规范定义。"""
+    """单条 prompt 规范定义。
+
+    版本字段说明（T2.1 引入）：
+
+    - ``version``：prompt 自身的语义版本号（默认 ``"v1"``）。
+    - ``parent_version``：本版本的上一版（用于追溯演化链；初版为 ``None``）。
+    - ``schema_version``：输出 schema 的语义版本号（默认 ``"v1"``）；schema 形态变更时
+      必须同时升级该字段，并由 ``call_registered_prompt`` 注入缓存键，避免旧缓存命中。
+    """
 
     name: str
     purpose: str
@@ -30,6 +38,9 @@ class PromptTemplate:
     user_template: str
     output_kind: str = "text"
     output_schema: Optional[Dict[str, Any]] = None
+    version: str = "v1"
+    parent_version: Optional[str] = None
+    schema_version: str = "v1"
 
 
 @dataclass(frozen=True)
@@ -43,6 +54,8 @@ class RenderedPrompt:
     user_prompt: str
     output_kind: str
     output_schema: Optional[Dict[str, Any]] = None
+    version: str = "v1"
+    schema_version: str = "v1"
 
 
 @dataclass(frozen=True)
@@ -295,7 +308,8 @@ PROMPT_REGISTRY: Dict[str, PromptTemplate] = {
             "知识缺口类型：{gap_type}\n"
             "核心实体：{entities}\n"
             "缺口描述：{description}\n"
-            "上下文摘要：{context_summary}"
+            "上下文摘要：{context_summary}\n\n"
+            "{dynamic_few_shot}"
         ),
         output_kind="json_array",
         output_schema=_HYPOTHESIS_ENGINE_SCHEMA,
@@ -316,6 +330,7 @@ PROMPT_REGISTRY: Dict[str, PromptTemplate] = {
             "{kg_structure_summary}\n\n"
             "## 研究上下文\n\n"
             "{context_summary}\n\n"
+            "{dynamic_few_shot}"
             "## 要求\n\n"
             "请基于上述图谱缺口和结构信息，生成 {num_hypotheses} 条可验证的中医科研假设。"
         ),
@@ -325,13 +340,72 @@ PROMPT_REGISTRY: Dict[str, PromptTemplate] = {
 }
 
 
-def get_prompt_template(name: str) -> PromptTemplate:
-    """获取注册表中的 prompt 定义。"""
+def _build_versioned_registry(
+    flat: Dict[str, PromptTemplate],
+) -> Dict[str, Dict[str, PromptTemplate]]:
+    """把扁平 ``name -> template`` 注册表展开为 ``name -> version -> template``。"""
 
+    versioned: Dict[str, Dict[str, PromptTemplate]] = {}
+    for name, spec in flat.items():
+        versioned.setdefault(name, {})[spec.version] = spec
+    return versioned
+
+
+# ``name -> version -> PromptTemplate``；``PROMPT_REGISTRY`` 始终指向每个 name 的 latest。
+_VERSIONED_PROMPT_REGISTRY: Dict[str, Dict[str, PromptTemplate]] = _build_versioned_registry(
+    PROMPT_REGISTRY
+)
+
+
+def _latest_version(name: str) -> str:
+    """返回某 prompt 的最新版本号（按字典序倒序，约定 ``vN`` 形式可比较）。"""
+
+    versions = _VERSIONED_PROMPT_REGISTRY.get(name)
+    if not versions:
+        raise KeyError(f"未注册的 prompt: {name}")
+    return sorted(versions.keys())[-1]
+
+
+def register_prompt_version(template: PromptTemplate) -> None:
+    """注册某 prompt 的新版本；同时更新扁平注册表为最新版。
+
+    主要用于运行时扩展或测试注入（如 T2.1 单测）。生产代码请直接在
+    ``PROMPT_REGISTRY`` 字面量中追加新版本。
+    """
+
+    bucket = _VERSIONED_PROMPT_REGISTRY.setdefault(template.name, {})
+    bucket[template.version] = template
+    PROMPT_REGISTRY[template.name] = bucket[_latest_version(template.name)]
+
+
+def get_prompt_template(name: str, version: str = "latest") -> PromptTemplate:
+    """获取注册表中的 prompt 定义。
+
+    - ``version="latest"``（默认）：返回该 name 当前最新版本，与历史调用兼容。
+    - 显式版本号：返回对应版本，找不到则抛 ``KeyError``。
+    """
+
+    versions = _VERSIONED_PROMPT_REGISTRY.get(name)
+    if not versions:
+        raise KeyError(f"未注册的 prompt: {name}")
+    if version == "latest":
+        return versions[_latest_version(name)]
     try:
-        return PROMPT_REGISTRY[name]
+        return versions[version]
     except KeyError as exc:
-        raise KeyError(f"未注册的 prompt: {name}") from exc
+        available = sorted(versions.keys())
+        raise KeyError(
+            f"prompt {name!r} 不存在版本 {version!r}，可选: {available}"
+        ) from exc
+
+
+def list_prompt_versions(name: str) -> list[str]:
+    """返回某 prompt 已注册的所有版本号（升序）。"""
+
+    versions = _VERSIONED_PROMPT_REGISTRY.get(name)
+    if not versions:
+        raise KeyError(f"未注册的 prompt: {name}")
+    return sorted(versions.keys())
 
 
 def list_prompt_names() -> list[str]:
@@ -377,9 +451,13 @@ def export_prompt_registry_snapshot() -> Dict[str, Any]:
                 "output_kind": spec.output_kind,
                 "has_schema": spec.output_schema is not None,
                 "fingerprint": digest,
+                "version": spec.version,
+                "schema_version": spec.schema_version,
             }
         )
-    aggregate = "\n".join(f"{e['name']}:{e['fingerprint']}" for e in entries)
+    aggregate = "\n".join(
+        f"{e['name']}@{e['version']}/{e['schema_version']}:{e['fingerprint']}" for e in entries
+    )
     return {
         "total_prompts": len(entries),
         "fingerprint": hashlib.sha256(aggregate.encode("utf-8")).hexdigest(),
@@ -448,6 +526,8 @@ def render_prompt(
         user_prompt=budgeted.user_prompt,
         output_kind=spec.output_kind,
         output_schema=spec.output_schema,
+        version=spec.version,
+        schema_version=spec.schema_version,
     )
 
 
@@ -475,6 +555,8 @@ def call_registered_prompt(
     cache_payload = {
         "cache_version": "prompt-cache-v1",
         "prompt_name": resolved_prompt.name,
+        "prompt_version": resolved_prompt.version,
+        "schema_version": resolved_prompt.schema_version,
         "purpose": resolved_prompt.purpose,
         "task": resolved_prompt.task,
         "output_kind": resolved_prompt.output_kind,
