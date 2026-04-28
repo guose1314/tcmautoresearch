@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pickle
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
 
@@ -468,7 +468,7 @@ def _normalize_timestamp(value: Any) -> str:
     text = str(value or "").strip()
     if text:
         return text
-    return datetime.utcnow().replace(microsecond=0).isoformat()
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 __all__ = [

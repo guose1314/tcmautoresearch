@@ -11,7 +11,7 @@
 
 import logging
 import warnings
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
@@ -498,7 +498,7 @@ class UnifiedStorageDriver:
                     'relationships': rel_count,
                 },
                 'neo4j': neo4j_stats,
-                'timestamp': datetime.utcnow().isoformat()
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
         except Exception as e:
             logger.error(f"获取统计信息失败: {e}")

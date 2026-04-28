@@ -6,7 +6,7 @@ import json
 import logging
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
 from src.extraction.base import (
@@ -143,7 +143,7 @@ class QualityChecker:
     def check(self, pipeline_result: PipelineResult, text_length: int = 0) -> QualityReport:
         report = QualityReport(
             document_id=pipeline_result.document_id,
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
         items = pipeline_result.all_items
         relations = pipeline_result.all_relations

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Sequence
 
 from src.research.catalog_contract import (
@@ -148,7 +148,7 @@ def _as_text(value: Any) -> str:
 
 
 def _utc_now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _normalize_count_mapping(value: Any) -> Dict[str, int]:

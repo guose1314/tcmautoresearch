@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Sequence
 
 OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT = "observe_philology_review_workbench"
@@ -88,7 +88,7 @@ def _normalize_asset_type(value: Any) -> str:
 
 
 def _utc_now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _resolve_needs_manual_review(
