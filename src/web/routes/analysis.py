@@ -524,15 +524,48 @@ def _persist_to_orm(
 
     try:
         with db_mgr.session_scope() as session:
-            # 1) 创建 Document 记录（source_file 需唯一）
+            # 1) 创建/复用 Document 记录
+            #    T2.3: source_file 不再叠加时间戳后缀；自然键变为
+            #    (source_file, content_hash)，以 SHA-256 内容指纹去重。
+            #    ingest_run_id 保留时间维度信息便于审计/回放。
+            import hashlib as _hashlib
             import time as _time
             import uuid as _uuid
-            uid = _uuid.uuid4().hex[:8]
             ts = _time.strftime('%Y%m%d_%H%M%S')
-            sf = f"{source_file or created_by}_{ts}_{uid}"
+            uid = _uuid.uuid4().hex[:8]
+            sf = (source_file or created_by or "").strip() or created_by
+            text_for_hash = raw_text or ""
+            content_hash = _hashlib.sha256(text_for_hash.encode("utf-8", errors="replace")).hexdigest()
+            ingest_run_id = f"{ts}_{uid}"
+            existing = (
+                session.query(Document)
+                .filter_by(source_file=sf, content_hash=content_hash)
+                .one_or_none()
+            )
+            if existing is not None:
+                # T2.3 dedup short-circuit: 同 source_file + 同内容 hash 已入库 → 返回 no-op，
+                # 避免重复 entities/relationships 写入。
+                logger.info(
+                    "documents dedup hit: source_file=%s content_hash=%s doc_id=%s — skip re-ingest",
+                    sf, content_hash[:12], existing.id,
+                )
+                return {
+                    "orm_entities": 0,
+                    "orm_relations": 0,
+                    "orm_statistics": 0,
+                    "orm_analyses": 0,
+                    "neo4j_nodes": 0,
+                    "neo4j_edges": 0,
+                    "needs_backfill": False,
+                    "deduplicated": True,
+                    "document_id": str(existing.id),
+                    "content_hash": content_hash,
+                }
             doc = Document(
                 source_file=sf,
-                raw_text_size=len(raw_text or "") or sum(len(e.get("name", "")) for e in entities),
+                content_hash=content_hash,
+                ingest_run_id=ingest_run_id,
+                raw_text_size=len(text_for_hash) or sum(len(e.get("name", "")) for e in entities),
                 entities_extracted_count=len(entities),
                 process_status=ProcessStatusEnum.COMPLETED,
                 notes=f"由 {created_by} 自动写入；已附加无监督科研增强信号",

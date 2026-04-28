@@ -177,6 +177,32 @@ POSTGRES_STRING_LIST_COLUMNS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+# T2.3: 旧 source_file 形如 '<original>_<YYYYMMDD_HHMMSS>_<8hex>'，
+# backfill 后想剥成 '<original>'，时间戳推到 ingest_run_id。
+import re as _re
+
+_LEGACY_SOURCE_SUFFIX_RE = _re.compile(r"_(?P<ts>\d{8}_\d{6})_(?P<uid>[0-9a-f]{8})$")
+
+
+def _split_legacy_source_file_suffix(source_file: str) -> tuple[str, Optional[str]]:
+    """剥离 '<original>_<YYYYMMDD_HHMMSS>_<8hex>' 后缀。
+
+    返回 (canonical_source_file, ingest_run_id_or_None)。
+    若不匹配遗留模式，原样返回。
+    """
+    m = _LEGACY_SOURCE_SUFFIX_RE.search(source_file)
+    if not m:
+        return source_file, None
+    return source_file[: m.start()], f"{m.group('ts')}_{m.group('uid')}"
+
+
+def _compute_text_sha256(text: str) -> str:
+    """SHA-256 of UTF-8 encoded text, lower-case hex."""
+    import hashlib
+
+    return hashlib.sha256((text or "").encode("utf-8", errors="replace")).hexdigest()
+
+
 def _enum_column(enum_cls: type[enum.Enum], **kwargs: Any) -> SQLEnum:
     return SQLEnum(
         enum_cls,
@@ -188,12 +214,19 @@ def _enum_column(enum_cls: type[enum.Enum], **kwargs: Any) -> SQLEnum:
 
 
 class Document(Base):
-    """文档表。"""
+    """文档表。
+
+    T2.3 dedup design: source_file 去掉时间戳后缀，content_hash 承担"内容指纹"
+    职责，UNIQUE (source_file, content_hash) 取代单列 source_file unique。
+    ingest_run_id 保留时间维度（来自旧的 _<ts>_<uid> 后缀或新批次 id）。
+    """
 
     __tablename__ = "documents"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    source_file = Column(String(500), nullable=False, unique=True)
+    source_file = Column(String(500), nullable=False)
+    content_hash = Column(CHAR(64), nullable=True)  # SHA-256 hex; backfill 后才能 NOT NULL
+    ingest_run_id = Column(String(64), nullable=True)
     document_urn = Column(String(500), nullable=True)
     document_title = Column(String(500), nullable=True)
     source_type = Column(String(64), nullable=True)
@@ -251,6 +284,9 @@ class Document(Base):
         Index("idx_documents_lineage", "version_lineage_key"),
         Index("idx_documents_work_fragment", "work_fragment_key"),
         Index("idx_documents_witness", "witness_key"),
+        Index("idx_documents_content_hash", "content_hash"),
+        Index("idx_documents_ingest_run", "ingest_run_id"),
+        UniqueConstraint("source_file", "content_hash", name="uq_documents_source_hash"),
         CheckConstraint("quality_score >= 0 AND quality_score <= 1", name="ck_documents_quality_score"),
     )
 
@@ -1589,6 +1625,7 @@ class PersistenceService(BaseModule):
         *,
         document_id: Optional[str] = None,
         source_file: Optional[str] = None,
+        content_hash: Optional[str] = None,
     ) -> Optional[Document]:
         if document_id:
             try:
@@ -1600,22 +1637,51 @@ class PersistenceService(BaseModule):
                 if document is not None:
                     return document
         if source_file:
-            return session.query(Document).filter_by(source_file=source_file).one_or_none()
+            query = session.query(Document).filter(Document.source_file == source_file)
+            if content_hash:
+                # T2.3: 自然键 (source_file, content_hash) — 同 hash 视为同一份内容
+                query = query.filter(Document.content_hash == content_hash)
+                hit = query.one_or_none()
+                if hit is not None:
+                    return hit
+                # 同 source_file 但 hash 没匹配：先尝试 content_hash 仍空的旧记录（backfill 前过渡）
+                fallback = (
+                    session.query(Document)
+                    .filter(Document.source_file == source_file, Document.content_hash.is_(None))
+                    .order_by(Document.created_at.asc())
+                    .first()
+                )
+                return fallback
+            return query.order_by(Document.created_at.asc()).first()
         return None
 
     def _upsert_document(self, session: Session, payload: Mapping[str, Any]) -> Document:
         source_file = str(payload.get("source_file") or payload.get("source_ref") or payload.get("path") or "").strip()
         if not source_file:
             raise ValueError("persist_document_graph 需要 source_file/document.source_file")
+        # T2.3: 剥离遗留 _<YYYYMMDD_HHMMSS>_<8hex> 后缀，把时间戳信息推到 ingest_run_id
+        normalized_sf, suffix_run_id = _split_legacy_source_file_suffix(source_file)
+        source_file = normalized_sf
 
+        content_hash = (str(payload.get("content_hash") or "").strip().lower() or None)
+        ingest_run_id = (str(payload.get("ingest_run_id") or suffix_run_id or "").strip() or None)
+
+        # T2.3: 自然键现在是 (source_file, content_hash)。同 hash → upsert 同一行；
+        # 不同 hash → 视为新版本（允许并存，由 UNIQUE 复合保证不重复）
         document = self._get_document(
             session,
             document_id=str(payload.get("id") or payload.get("document_id") or "").strip() or None,
             source_file=source_file,
+            content_hash=content_hash,
         )
         if document is None:
-            document = Document(source_file=source_file)
+            document = Document(source_file=source_file, content_hash=content_hash, ingest_run_id=ingest_run_id)
             session.add(document)
+        else:
+            if content_hash and document.content_hash is None:
+                document.content_hash = content_hash
+            if ingest_run_id and not document.ingest_run_id:
+                document.ingest_run_id = ingest_run_id
 
         document.processing_timestamp = self._parse_datetime(payload.get("processing_timestamp")) or datetime.now(timezone.utc)
         document.objective = self._optional_text(payload.get("objective"))

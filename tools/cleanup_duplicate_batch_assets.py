@@ -1,3 +1,16 @@
+"""[T2.3 follow-up] 历史兜底工具 — 常态下不再需要。
+
+自 T2.3 起，documents 表使用复合 UNIQUE (source_file, content_hash) 在写入端
+天然去重；正向迁移由 [tools/backfill_documents_content_hash.py](backfill_documents_content_hash.py)
+完成。本脚本仅在以下罕见场景使用：
+
+1. T2.3 之前的旧分支尚未升级，但运维需要紧急清理 PG + Neo4j 重复资产；
+2. 未来某次 ingest 链路绕过了 ON CONFLICT 防护，造成重复需要人工兜底。
+
+⚠️ 含有连接信息硬编码（PG_CONFIG/NEO4J_AUTH），运行前必须按需改写或外置；
+   不建议接入任何自动化流程。如需自动化去重，使用上面提到的迁移脚本。
+"""
+
 from __future__ import annotations
 
 import argparse
