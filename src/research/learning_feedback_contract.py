@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-CONTRACT_VERSION = "research-feedback-library.v1"
+CONTRACT_VERSION = "research-feedback-library.v2"
+CONTRACT_VERSION_V1 = "research-feedback-library.v1"
+# 历史版本到默认 prompt_version 的回填映射（v1 记录无该字段，统一标记 unknown）
+LEGACY_PROMPT_VERSION_DEFAULT = "unknown"
+LEGACY_SCHEMA_VERSION_DEFAULT = "unknown"
 
 
 def _normalize_string_list(value: Any) -> List[str]:
@@ -107,6 +111,14 @@ def normalize_learning_feedback_record(record: Mapping[str, Any]) -> Dict[str, A
         "quality_dimensions": normalized_quality_dimensions,
         "issues": _normalize_string_list(record.get("issues") or []),
         "improvement_priorities": _normalize_string_list(record.get("improvement_priorities") or []),
+        "prompt_version": str(
+            record.get("prompt_version") or LEGACY_PROMPT_VERSION_DEFAULT
+        ).strip()
+        or LEGACY_PROMPT_VERSION_DEFAULT,
+        "schema_version": str(
+            record.get("schema_version") or LEGACY_SCHEMA_VERSION_DEFAULT
+        ).strip()
+        or LEGACY_SCHEMA_VERSION_DEFAULT,
         "replay_feedback": (
             dict(record.get("replay_feedback") or {})
             if isinstance(record.get("replay_feedback"), Mapping)
@@ -126,7 +138,17 @@ def build_learning_feedback_library(
     improvement_plan: Optional[Sequence[str]] = None,
     learning_application_summary: Optional[Mapping[str, Any]] = None,
     replay_feedback: Optional[Mapping[str, Any]] = None,
+    prompt_version: Optional[str] = None,
+    schema_version: Optional[str] = None,
+    source_phase: str = "reflect",
 ) -> Dict[str, Any]:
+    normalized_prompt_version = (
+        str(prompt_version).strip() if prompt_version else LEGACY_PROMPT_VERSION_DEFAULT
+    ) or LEGACY_PROMPT_VERSION_DEFAULT
+    normalized_schema_version = (
+        str(schema_version).strip() if schema_version else LEGACY_SCHEMA_VERSION_DEFAULT
+    ) or LEGACY_SCHEMA_VERSION_DEFAULT
+    normalized_source_phase = (str(source_phase or "reflect").strip().lower()) or "reflect"
     normalized_learning_summary = dict(learning_summary or {})
     normalized_strategy_diff = dict(strategy_diff or {})
     normalized_learning_application_summary = dict(learning_application_summary or {})
@@ -197,7 +219,7 @@ def build_learning_feedback_library(
     cycle_record = normalize_learning_feedback_record(
         {
             "feedback_scope": "cycle_summary",
-            "source_phase": "reflect",
+            "source_phase": normalized_source_phase,
             "feedback_status": "summary",
             "overall_score": quality_assessment["overall_cycle_score"],
             "cycle_trend": normalized_learning_summary.get("cycle_trend"),
@@ -211,6 +233,8 @@ def build_learning_feedback_library(
             "weak_phase_names": weak_phase_names,
             "improvement_priorities": improvement_priorities,
             "replay_feedback": replay_payload,
+            "prompt_version": normalized_prompt_version,
+            "schema_version": normalized_schema_version,
             "details": {
                 "reflections": normalized_reflections,
                 "improvement_plan": normalized_improvement_plan,
@@ -220,7 +244,11 @@ def build_learning_feedback_library(
                 "tuned_parameters": dict(normalized_learning_summary.get("tuned_parameters") or {}),
                 "learning_application_summary": normalized_learning_application_summary,
             },
-            "metadata": {"contract_version": CONTRACT_VERSION},
+            "metadata": {
+                "contract_version": CONTRACT_VERSION,
+                "prompt_version": normalized_prompt_version,
+                "schema_version": normalized_schema_version,
+            },
         }
     )
 
@@ -242,7 +270,7 @@ def build_learning_feedback_library(
             normalize_learning_feedback_record(
                 {
                     "feedback_scope": "phase_assessment",
-                    "source_phase": "reflect",
+                    "source_phase": normalized_source_phase,
                     "target_phase": phase_name,
                     "feedback_status": feedback_status,
                     "overall_score": score_payload.get("overall_score"),
@@ -254,11 +282,17 @@ def build_learning_feedback_library(
                     "weak_phase_names": [phase_name] if weakness_payload else [],
                     "quality_dimensions": score_payload.get("quality_dimensions") or {},
                     "issues": weakness_payload.get("issues") or [],
+                    "prompt_version": normalized_prompt_version,
+                    "schema_version": normalized_schema_version,
                     "details": {
                         "weakness": weakness_payload,
                         "strength": strength_payload,
                     },
-                    "metadata": {"contract_version": CONTRACT_VERSION},
+                    "metadata": {
+                        "contract_version": CONTRACT_VERSION,
+                        "prompt_version": normalized_prompt_version,
+                        "schema_version": normalized_schema_version,
+                    },
                 }
             )
         )
@@ -283,6 +317,9 @@ def build_learning_feedback_library(
 
 __all__ = [
     "CONTRACT_VERSION",
+    "CONTRACT_VERSION_V1",
+    "LEGACY_PROMPT_VERSION_DEFAULT",
+    "LEGACY_SCHEMA_VERSION_DEFAULT",
     "build_learning_feedback_library",
     "build_learning_replay_feedback",
     "normalize_learning_feedback_record",

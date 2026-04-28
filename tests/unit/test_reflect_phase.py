@@ -112,7 +112,7 @@ class TestReflectPhaseContract(unittest.TestCase):
         result = mixin.execute_reflect_phase(_FakeCycle(outcomes=[_full_outcome()]), {})
 
         library = result["learning_feedback_library"]
-        self.assertEqual(library["contract_version"], "research-feedback-library.v1")
+        self.assertEqual(library["contract_version"], "research-feedback-library.v2")
         self.assertEqual(library["replay_feedback"]["iteration_number"], 4)
         self.assertGreaterEqual(library["summary"]["record_count"], 1)
 

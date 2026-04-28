@@ -195,6 +195,11 @@ class ReflectPhaseMixin:
             improvement_plan=improvement_plan,
             learning_application_summary=learning_application_summary,
             replay_feedback=replay_feedback,
+            # T2.2: reflect \u9636\u6bb5\u5f53\u524d\u672a\u8d70 prompt_registry\uff0c\u5360\u4f4d unknown\uff1b
+            # \u4e00\u65e6\u63a5\u5165 registry \u63a8\u7406\uff0c\u4ece resolved RenderedPrompt \u900f\u4f20 version \u5373\u53ef\u3002
+            prompt_version="unknown",
+            schema_version="unknown",
+            source_phase="reflect",
         )
         metadata["feedback_library_generated"] = True
         metadata["feedback_record_count"] = len(learning_feedback_library.get("records") or [])

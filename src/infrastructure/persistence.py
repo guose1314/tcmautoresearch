@@ -13,7 +13,7 @@ import os
 import uuid
 from contextlib import contextmanager
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence
 
 from sqlalchemy import (
@@ -207,7 +207,7 @@ class Document(Base):
     author = Column(String(255), nullable=True)
     edition = Column(String(255), nullable=True)
     version_metadata_json = Column(JSON, default=dict, nullable=False)
-    processing_timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    processing_timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     objective = Column(String(255), nullable=True)
     raw_text_size = Column(Integer, default=0, nullable=False)
     entities_extracted_count = Column(Integer, default=0, nullable=False)
@@ -218,8 +218,8 @@ class Document(Base):
     )
     quality_score = Column(Float, default=0.0, nullable=False)
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     entities = relationship("Entity", back_populates="document", cascade="all, delete-orphan")
     statistics = relationship(
@@ -270,8 +270,8 @@ class Entity(Base):
     alternative_names = Column(StringListType(), default=list, nullable=False)
     description = Column(Text, nullable=True)
     entity_metadata = Column(JSON, default=dict, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     document = relationship("Document", back_populates="entities")
     relationships_out = relationship(
@@ -318,7 +318,7 @@ class RelationshipType(Base):
     description = Column(Text, nullable=True)
     category = Column(_enum_column(RelationshipCategoryEnum, name="relationship_category_enum"), nullable=True)
     confidence_baseline = Column(Float, default=0.7, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     relationships = relationship("EntityRelationship", back_populates="type")
 
@@ -345,7 +345,7 @@ class EntityRelationship(Base):
     created_by_module = Column(String(100), nullable=True)
     evidence = Column(Text, nullable=True)
     relationship_metadata = Column(JSON, default=dict, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     source_entity = relationship("Entity", foreign_keys=[source_entity_id], back_populates="relationships_out")
     target_entity = relationship("Entity", foreign_keys=[target_entity_id], back_populates="relationships_in")
@@ -390,7 +390,7 @@ class ProcessingStatistics(Base):
     connected_components = Column(Integer, default=0, nullable=False)
     source_modules = Column(StringListType(), default=list, nullable=False)
     processing_time_ms = Column(Integer, default=0, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     document = relationship("Document", back_populates="statistics")
 
@@ -407,10 +407,10 @@ class QualityMetrics(Base):
     entity_precision = Column(Float, default=0.0, nullable=False)
     relationship_precision = Column(Float, default=0.0, nullable=False)
     graph_quality_score = Column(Float, default=0.0, nullable=False)
-    evaluation_timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    evaluation_timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     evaluator = Column(String(100), nullable=True)
     assessment_notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     document = relationship("Document", back_populates="quality")
 
@@ -432,8 +432,8 @@ class ResearchAnalysis(Base):
     complexity_dynamics = Column(JSON, default=dict, nullable=False)
     research_scoring_panel = Column(JSON, default=dict, nullable=False)
     summary_analysis = Column(JSON, default=dict, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     document = relationship("Document", back_populates="analyses")
 
@@ -450,7 +450,7 @@ class ProcessingLog(Base):
     message = Column(Text, nullable=True)
     error_details = Column(Text, nullable=True)
     execution_time_ms = Column(Integer, default=0, nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     document = relationship("Document", back_populates="logs")
 
@@ -564,8 +564,8 @@ class ResearchSession(Base):
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     duration = Column(Float, default=0.0, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     # 关系
     phase_executions = relationship(
@@ -619,7 +619,7 @@ class PhaseExecution(Base):
     input_json = Column(Text, nullable=False, default="{}")
     output_json = Column(Text, nullable=False, default="{}")
     error_detail = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     session = relationship("ResearchSession", back_populates="phase_executions")
     artifacts = relationship(
@@ -655,8 +655,8 @@ class ResearchArtifact(Base):
     mime_type = Column(String(128), nullable=True)
     size_bytes = Column(Integer, default=0, nullable=False)
     metadata_json = Column(Text, nullable=False, default="{}")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     session = relationship("ResearchSession", back_populates="artifacts")
     phase_execution = relationship("PhaseExecution", back_populates="artifacts")
@@ -697,7 +697,9 @@ class ResearchLearningFeedback(Base):
     replay_feedback_json = Column(Text, nullable=False, default="{}")
     details_json = Column(Text, nullable=False, default="{}")
     metadata_json = Column(Text, nullable=False, default="{}")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    prompt_version = Column(String(32), nullable=True)
+    schema_version = Column(String(32), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     session = relationship("ResearchSession", back_populates="learning_feedback_records")
     phase_execution = relationship("PhaseExecution", back_populates="learning_feedback_records")
@@ -736,9 +738,9 @@ class ReviewAssignment(Base):
     released_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     due_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False
     )
 
     session = relationship("ResearchSession", back_populates="review_assignments")
@@ -780,12 +782,12 @@ class ReviewDispute(Base):
     events_json = Column(Text, nullable=False, default="[]")
     metadata_json = Column(Text, nullable=False, default="{}")
 
-    opened_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    opened_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     assigned_at = Column(DateTime, nullable=True)
     resolved_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False
     )
 
     session = relationship("ResearchSession", back_populates="review_disputes")
@@ -889,9 +891,10 @@ class DatabaseManager:
         expected_tables = set(Base.metadata.tables.keys())
         actual_tables = set(sa_inspect(self.engine).get_table_names())
         missing = sorted(expected_tables - actual_tables)
+        import datetime as dt_module
         report: Dict[str, Any] = {
             "status": "ok" if not missing else "incomplete",
-            "checked_at": datetime.utcnow().isoformat(),
+            "checked_at": dt_module.datetime.now(dt_module.timezone.utc).isoformat(),
             "database_type": self.engine.dialect.name,
             "expected_table_count": len(expected_tables),
             "actual_table_count": len(actual_tables & expected_tables),
@@ -914,9 +917,10 @@ class DatabaseManager:
         return deepcopy(getattr(self, "_last_schema_completeness_report", {"status": "pending"}))
 
     def _normalize_legacy_postgres_enums(self) -> Dict[str, Any]:
+        import datetime as dt_module
         report: Dict[str, Any] = {
             "status": "skip",
-            "checked_at": datetime.utcnow().isoformat(),
+            "checked_at": dt_module.datetime.now(dt_module.timezone.utc).isoformat(),
             "database_type": self.engine.dialect.name if self.engine is not None else make_url(self.connection_string).get_backend_name(),
             "normalized_enum_count": 0,
             "normalized_label_count": 0,
@@ -984,7 +988,7 @@ class DatabaseManager:
         if backend_name != "postgresql":
             return {
                 "status": "skip",
-                "checked_at": datetime.utcnow().isoformat(),
+                "checked_at": datetime.now(timezone.utc).isoformat(),
                 "database_type": backend_name,
                 "legacy_enum_count": 0,
                 "incompatible_drift_count": 0,
@@ -1007,7 +1011,7 @@ class DatabaseManager:
         except Exception as exc:
             return {
                 "status": "error",
-                "checked_at": datetime.utcnow().isoformat(),
+                "checked_at": datetime.now(timezone.utc).isoformat(),
                 "database_type": backend_name,
                 "legacy_enum_count": 0,
                 "incompatible_drift_count": 1,
@@ -1028,7 +1032,8 @@ class DatabaseManager:
                 engine.dispose()
 
     def _inspect_postgres_schema_drift(self, connection: Any) -> Dict[str, Any]:
-        checked_at = datetime.utcnow().isoformat()
+        import datetime as dt_module
+        checked_at = dt_module.datetime.now(dt_module.timezone.utc).isoformat()
         issues: List[Dict[str, Any]] = []
         compatibility_variants: List[Dict[str, Any]] = []
         normalization_report = self.get_schema_normalization_report()
@@ -1366,7 +1371,7 @@ class DatabaseManager:
                         "description": desc,
                         "category": category.value.upper(),
                         "confidence_baseline": confidence_base,
-                        "created_at": datetime.utcnow(),
+                        "created_at": datetime.now(timezone.utc),
                     },
                 )
             else:
@@ -1612,13 +1617,13 @@ class PersistenceService(BaseModule):
             document = Document(source_file=source_file)
             session.add(document)
 
-        document.processing_timestamp = self._parse_datetime(payload.get("processing_timestamp")) or datetime.utcnow()
+        document.processing_timestamp = self._parse_datetime(payload.get("processing_timestamp")) or datetime.now(timezone.utc)
         document.objective = self._optional_text(payload.get("objective"))
         document.raw_text_size = int(payload.get("raw_text_size") or payload.get("text_size") or 0)
         document.process_status = self._coerce_process_status(payload.get("process_status") or payload.get("status"))
         document.quality_score = float(payload.get("quality_score") or document.quality_score or 0.0)
         document.notes = self._optional_text(payload.get("notes"))
-        document.updated_at = datetime.utcnow()
+        document.updated_at = datetime.now(timezone.utc)
         session.flush()
         return document
 
@@ -1696,7 +1701,7 @@ class PersistenceService(BaseModule):
                     message=self._optional_text(payload.get("message")),
                     error_details=self._optional_text(payload.get("error_details")),
                     execution_time_ms=int(payload.get("execution_time_ms") or 0),
-                    timestamp=self._parse_datetime(payload.get("timestamp")) or datetime.utcnow(),
+                    timestamp=self._parse_datetime(payload.get("timestamp")) or datetime.now(timezone.utc),
                 )
             )
         session.flush()
@@ -1729,7 +1734,7 @@ class PersistenceService(BaseModule):
         metrics.entity_precision = float(payload.get("entity_precision") or 0.0)
         metrics.relationship_precision = float(payload.get("relationship_precision") or 0.0)
         metrics.graph_quality_score = float(payload.get("graph_quality_score") or 0.0)
-        metrics.evaluation_timestamp = self._parse_datetime(payload.get("evaluation_timestamp")) or datetime.utcnow()
+        metrics.evaluation_timestamp = self._parse_datetime(payload.get("evaluation_timestamp")) or datetime.now(timezone.utc)
         metrics.evaluator = self._optional_text(payload.get("evaluator"))
         metrics.assessment_notes = self._optional_text(payload.get("assessment_notes"))
         session.flush()
@@ -1749,7 +1754,7 @@ class PersistenceService(BaseModule):
         analysis.complexity_dynamics = dict(payload.get("complexity_dynamics") or {})
         analysis.research_scoring_panel = dict(payload.get("research_scoring_panel") or {})
         analysis.summary_analysis = dict(payload.get("summary_analysis") or {})
-        analysis.updated_at = datetime.utcnow()
+        analysis.updated_at = datetime.now(timezone.utc)
         session.flush()
 
     def _relationship_type_cache(self, session: Session) -> Dict[str, RelationshipType]:

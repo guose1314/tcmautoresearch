@@ -105,7 +105,7 @@ def test_build_legacy_learning_feedback_library_aggregates_payload():
         source_file="data/learning_data.pkl",
     )
 
-    assert library["contract_version"] == "research-feedback-library.v1"
+    assert library["contract_version"] == "research-feedback-library.v2"
     assert library["summary"]["record_count"] == 3
     assert library["summary"]["cycle_trend"] == "improving"
     assert library["summary"]["weak_phase_names"] == ["analyze"]
