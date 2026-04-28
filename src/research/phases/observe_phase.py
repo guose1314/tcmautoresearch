@@ -12,6 +12,7 @@ from src.collector.corpus_bundle import (
     extract_text_entries,
     is_corpus_bundle,
 )
+from src.contexts.collation import CollationContext
 from src.research.evidence_contract import build_phase_evidence_protocol
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
@@ -52,6 +53,11 @@ class ObservePhaseMixin:
         self._append_ingestion_observe_updates(ingestion_result, observations, findings)
         self._append_literature_observe_updates(literature_result, observations, findings)
 
+        collation_result = self._run_observe_collation_if_enabled(
+            corpus_result, ingestion_result, context
+        )
+        self._append_collation_observe_updates(collation_result, observations, findings)
+
         metadata = self._build_observe_metadata(
             context,
             observations,
@@ -60,6 +66,13 @@ class ObservePhaseMixin:
             ingestion_result,
             literature_result,
         )
+        if isinstance(collation_result, dict):
+            metadata["collation_pipeline"] = {
+                "document_count": collation_result.get("document_count", 0),
+                "strategies_enabled": collation_result.get("strategies_enabled", []),
+                "succeeded_total": collation_result.get("succeeded_total", 0),
+                "failed_total": collation_result.get("failed_total", 0),
+            }
         artifacts = self._build_observe_philology_artifacts(ingestion_result)
         graph_assets = self._build_observe_graph_assets(cycle.cycle_id, ingestion_result)
         if graph_assets:
@@ -69,7 +82,7 @@ class ObservePhaseMixin:
             )
         status = "degraded" if any(
             isinstance(item, dict) and item.get("error")
-            for item in (corpus_result, ingestion_result, literature_result)
+            for item in (corpus_result, ingestion_result, literature_result, collation_result)
         ) else "completed"
         evidence_protocol = build_phase_evidence_protocol(
             "observe",
@@ -89,6 +102,7 @@ class ObservePhaseMixin:
                 "corpus_collection": corpus_result,
                 "ingestion_pipeline": ingestion_result,
                 "literature_pipeline": literature_result,
+                "collation_pipeline": collation_result,
                 "evidence_protocol": evidence_protocol,
                 "graph_assets": graph_assets,
             },
@@ -100,6 +114,7 @@ class ObservePhaseMixin:
                 "corpus_collection": corpus_result,
                 "ingestion_pipeline": ingestion_result,
                 "literature_pipeline": literature_result,
+                "collation_pipeline": collation_result,
             },
         )
 
@@ -505,6 +520,209 @@ class ObservePhaseMixin:
 
         observe_pipeline_config = self.pipeline.config.get("observe_pipeline", {})
         return bool(observe_pipeline_config.get("enabled", True))
+
+    # ------------------------------------------------------------------ #
+    # T4.2: CollationContext 接入
+    # ------------------------------------------------------------------ #
+
+    _ALL_COLLATION_STRATEGIES: tuple[str, ...] = ("cross", "intra", "external", "rational")
+
+    def _should_run_observe_collation(self, context: Dict[str, Any]) -> bool:
+        if "run_collation" in context:
+            return bool(context.get("run_collation"))
+        collation_config = self.pipeline.config.get("collation_context", {})
+        return bool(collation_config.get("enabled", True))
+
+    def _resolve_observe_collation_strategies(self, context: Dict[str, Any]) -> List[str]:
+        explicit = context.get("enable_collation_strategies")
+        if explicit is None:
+            collation_config = self.pipeline.config.get("collation_context", {})
+            explicit = collation_config.get("enable_collation_strategies")
+        if explicit is None:
+            strategies = list(self._ALL_COLLATION_STRATEGIES)
+        else:
+            allowed = {s for s in self._ALL_COLLATION_STRATEGIES}
+            strategies = [s for s in explicit if s in allowed]
+            if not strategies:
+                strategies = list(self._ALL_COLLATION_STRATEGIES)
+        # 向下兼容：run_philology=False 时移除 cross
+        if not self._should_run_observe_philology(context) and "cross" in strategies:
+            strategies = [s for s in strategies if s != "cross"]
+        return strategies
+
+    def _build_observe_collation_context(self, context: Dict[str, Any]) -> CollationContext | None:
+        # 允许测试通过 context["collation_context"] 注入 mock
+        injected = context.get("collation_context")
+        if injected is not None:
+            return injected if isinstance(injected, CollationContext) else None
+
+        philology_service = None
+        try:
+            if self._should_run_observe_philology(context):
+                philology_service = self.pipeline.analysis_port.create_philology_service(
+                    self._merge_observe_module_config(
+                        self.pipeline.config.get("philology_service", {}),
+                        context.get("philology_config") or {},
+                    )
+                )
+                if philology_service is not None and not philology_service.initialize():
+                    philology_service = None
+        except Exception:
+            self.pipeline.logger.exception("collation: philology service init failed; cross will be inert")
+            philology_service = None
+
+        neo4j_driver = getattr(self.pipeline, "neo4j_driver", None)
+        literature_retriever = None
+        try:
+            literature_retriever = self.pipeline.create_module(
+                "literature_retriever", self.pipeline.config.get("literature_retrieval", {})
+            )
+        except Exception:
+            literature_retriever = None
+        self_refine_runner = getattr(self.pipeline, "self_refine_runner", None)
+        db_session_factory = getattr(self.pipeline, "db_session_factory", None)
+
+        try:
+            return CollationContext(
+                philology_service=philology_service,
+                neo4j_driver=neo4j_driver,
+                literature_retriever=literature_retriever,
+                self_refine_runner=self_refine_runner,
+                db_session_factory=db_session_factory,
+            )
+        except Exception:
+            self.pipeline.logger.exception("collation: failed to build CollationContext")
+            return None
+
+    def _iter_observe_collation_documents(
+        self,
+        corpus_result: Dict[str, Any] | None,
+        ingestion_result: Dict[str, Any] | None,
+    ) -> List[Dict[str, Any]]:
+        documents: List[Dict[str, Any]] = []
+        if isinstance(ingestion_result, dict) and ingestion_result.get("documents"):
+            for doc in ingestion_result.get("documents") or []:
+                if not isinstance(doc, dict):
+                    continue
+                documents.append(
+                    {
+                        "document_id": str(doc.get("urn") or doc.get("title") or "doc"),
+                        "title": str(doc.get("title") or ""),
+                        "raw_text": str(doc.get("raw_text_preview") or ""),
+                        "metadata": doc.get("metadata") or {},
+                    }
+                )
+            return documents
+        # fallback: 从原始 corpus_result 取条目
+        if isinstance(corpus_result, dict) and not corpus_result.get("error"):
+            try:
+                entries = extract_text_entries(corpus_result) or []
+            except Exception:
+                entries = []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                documents.append(
+                    {
+                        "document_id": str(entry.get("urn") or entry.get("title") or "doc"),
+                        "title": str(entry.get("title") or ""),
+                        "raw_text": str(entry.get("text") or ""),
+                        "metadata": entry,
+                    }
+                )
+        return documents
+
+    def _run_observe_collation_if_enabled(
+        self,
+        corpus_result: Dict[str, Any] | None,
+        ingestion_result: Dict[str, Any] | None,
+        context: Dict[str, Any],
+    ) -> Dict[str, Any] | None:
+        if not self._should_run_observe_collation(context):
+            return None
+        strategies = self._resolve_observe_collation_strategies(context)
+        if not strategies:
+            return {
+                "document_count": 0,
+                "strategies_enabled": [],
+                "reports": [],
+                "succeeded_total": 0,
+                "failed_total": 0,
+            }
+        documents = self._iter_observe_collation_documents(corpus_result, ingestion_result)
+        if not documents:
+            return {
+                "document_count": 0,
+                "strategies_enabled": list(strategies),
+                "reports": [],
+                "succeeded_total": 0,
+                "failed_total": 0,
+            }
+        collation_context = self._build_observe_collation_context(context)
+        if collation_context is None:
+            return {"error": "collation context unavailable", "strategies_enabled": list(strategies)}
+
+        reports: List[Dict[str, Any]] = []
+        succeeded_total = 0
+        failed_total = 0
+        max_per_doc = int(context.get("collation_max_documents", 0) or 0)
+        for idx, doc in enumerate(documents):
+            if max_per_doc and idx >= max_per_doc:
+                break
+            ctx_payload = {
+                "raw_text": doc.get("raw_text", ""),
+                "parallel_versions": (doc.get("metadata") or {}).get("parallel_versions") or [],
+                "input_metadata": doc.get("metadata") or {},
+                "query": doc.get("title") or doc.get("document_id"),
+                "title": doc.get("title"),
+                **(context.get("collation_context_overrides") or {}),
+            }
+            try:
+                report = collation_context.collate(
+                    document_id=doc["document_id"],
+                    strategies=strategies,
+                    context=ctx_payload,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.pipeline.logger.exception("collation failed for %s", doc.get("document_id"))
+                reports.append(
+                    {
+                        "document_id": doc.get("document_id"),
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+                failed_total += len(strategies)
+                continue
+            payload = report.to_dict()
+            reports.append(payload)
+            succeeded_total += int(payload["summary"]["succeeded"])
+            failed_total += int(payload["summary"]["failed"])
+        return {
+            "document_count": len(reports),
+            "strategies_enabled": list(strategies),
+            "reports": reports,
+            "succeeded_total": succeeded_total,
+            "failed_total": failed_total,
+        }
+
+    def _append_collation_observe_updates(
+        self,
+        collation_result: Dict[str, Any] | None,
+        observations: list[str],
+        findings: list[str],
+    ) -> None:
+        if not collation_result:
+            return
+        if collation_result.get("error"):
+            findings.append(f"四校管线异常: {collation_result['error']}")
+            return
+        doc_count = int(collation_result.get("document_count") or 0)
+        strategies = collation_result.get("strategies_enabled") or []
+        if doc_count and strategies:
+            observations.append(
+                f"已对 {doc_count} 篇文档执行四校（{'/'.join(strategies)}），"
+                f"成功 {collation_result.get('succeeded_total', 0)} / 失败 {collation_result.get('failed_total', 0)}"
+            )
 
     def _should_run_observe_literature(self, context: Dict[str, Any]) -> bool:
         if "run_literature_retrieval" in context:
