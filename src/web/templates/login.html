@@ -3,860 +3,370 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
     <title>登录 — 中医智慧科研平台</title>
     <script src="/static/js/tailwind.min.js"></script>
+    <!-- 必须在 Alpine 之前注册 loginApp，避免 x-data 求值时函数尚未定义 -->
+    <script src="/static/js/login.js"></script>
     <script defer src="/static/js/alpine.min.js"></script>
-    <style>
-      :root {
-        --font-display: "STSong", "Songti SC", "Noto Serif SC", serif;
-        --font-sans:
-          "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
-        --ink-900: #0f2f2f;
-        --ink-700: #285f5f;
-        --emerald-900: #0e3b35;
-        --emerald-700: #156b60;
-        --emerald-500: #22a78a;
-        --mist: rgba(255, 255, 255, 0.72);
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      [x-cloak] {
-        display: none !important;
-      }
-
-      body {
-        font-family: var(--font-sans);
-        background:
-          radial-gradient(
-            circle at top left,
-            rgba(52, 211, 153, 0.2),
-            transparent 34%
-          ),
-          radial-gradient(
-            circle at bottom right,
-            rgba(13, 148, 136, 0.18),
-            transparent 28%
-          ),
-          linear-gradient(135deg, #f3fbf8 0%, #eef8f5 38%, #f8fcfb 100%);
-        color: var(--ink-900);
-      }
-
-      .brand-title {
-        font-family: var(--font-display);
-        letter-spacing: 0.08em;
-      }
-
-      .glass-panel {
-        background: var(--mist);
-        backdrop-filter: blur(18px);
-      }
-
-      .grain-overlay::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background-image:
-          linear-gradient(rgba(255, 255, 255, 0.28) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255, 255, 255, 0.2) 1px, transparent 1px);
-        background-size: 28px 28px;
-        opacity: 0.3;
-        pointer-events: none;
-      }
-
-      .hero-ring {
-        box-shadow:
-          0 30px 70px rgba(20, 83, 74, 0.18),
-          inset 0 1px 0 rgba(255, 255, 255, 0.6);
-      }
-
-      .auth-card {
-        box-shadow:
-          0 32px 60px rgba(15, 47, 47, 0.14),
-          0 1px 0 rgba(255, 255, 255, 0.9) inset;
-      }
-
-      .soft-input {
-        border: 1px solid rgba(16, 84, 74, 0.12);
-        background: rgba(255, 255, 255, 0.92);
-        transition:
-          border-color 0.2s ease,
-          box-shadow 0.2s ease,
-          transform 0.2s ease;
-      }
-
-      .soft-input:focus {
-        border-color: rgba(22, 163, 74, 0.45);
-        box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.16);
-        transform: translateY(-1px);
-      }
-
-      .mode-chip {
-        border: 1px solid rgba(16, 84, 74, 0.08);
-        background: rgba(255, 255, 255, 0.72);
-      }
-
-      .mode-chip-active {
-        background: linear-gradient(135deg, #0f766e 0%, #10b981 100%);
-        color: #fff;
-        border-color: transparent;
-        box-shadow: 0 12px 24px rgba(16, 185, 129, 0.2);
-      }
-
-      .feature-card {
-        border: 1px solid rgba(255, 255, 255, 0.32);
-        background: linear-gradient(
-          180deg,
-          rgba(255, 255, 255, 0.32),
-          rgba(255, 255, 255, 0.12)
-        );
-      }
-
-      .status-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 999px;
-        display: inline-block;
-      }
-
-      @media (max-width: 1024px) {
-        .grain-overlay::before {
-          opacity: 0.16;
-        }
-      }
-    </style>
+    <link rel="stylesheet" href="/static/css/login.css" />
     <noscript>
       <style>
-        [x-cloak] {
-          display: block !important;
-        }
+        [x-cloak]{display:block !important;}
+        #passwordForm,#apiKeyForm{display:block !important;}
       </style>
     </noscript>
+    <!-- 即使 Alpine 未加载，也保证账号密码表单首屏直接可见 -->
+    <style>
+      #passwordForm{display:block;}
+      #apiKeyForm{display:none;}
+    </style>
   </head>
   <body class="min-h-screen overflow-x-hidden">
-    <div class="relative isolate min-h-screen grain-overlay">
-      <div
-        class="mx-auto flex min-h-screen max-w-7xl items-center px-4 py-8 sm:px-6 lg:px-8"
-      >
-        <div
-          x-data="loginApp()"
-          x-cloak
-          class="grid w-full items-stretch gap-6 lg:grid-cols-[1.15fr,0.9fr]"
+    <main
+      class="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4 py-10 sm:px-6"
+    >
+      <header class="mb-8 text-center">
+        <p class="text-xs uppercase tracking-[0.32em] text-emerald-700/70">
+          TCM Research Operating System
+        </p>
+        <h1
+          class="brand-title mt-3 text-3xl font-semibold text-emerald-900 sm:text-4xl"
         >
-          <section
-            class="hero-ring relative overflow-hidden rounded-[32px] bg-gradient-to-br from-emerald-900 via-teal-800 to-emerald-700 p-8 text-white sm:p-10 lg:p-12"
-          >
-            <div
-              class="absolute -right-12 top-8 h-36 w-36 rounded-full bg-white/10 blur-2xl"
-            ></div>
-            <div
-              class="absolute -left-16 bottom-0 h-48 w-48 rounded-full bg-emerald-300/20 blur-3xl"
-            ></div>
+          中医智慧科研平台
+        </h1>
+        <p class="mt-2 text-sm text-slate-500">
+          从古籍观察到知识图谱与论文生成的一体化研究中枢
+        </p>
+      </header>
 
-            <div
-              class="relative z-10 flex h-full flex-col justify-between gap-10"
+      <section
+        x-data="loginApp()"
+        class="auth-card glass-panel rounded-3xl border border-white/60 p-6 sm:p-8"
+        aria-labelledby="loginHeading"
+      >
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h2
+              id="loginHeading"
+              class="brand-title text-xl font-semibold text-slate-900"
             >
-              <div class="space-y-6">
-                <div
-                  class="inline-flex items-center gap-3 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-sm text-emerald-50"
-                >
-                  <span class="status-dot bg-emerald-300"></span>
-                  <span x-text="statusHint">正在检测认证模式…</span>
-                </div>
-
-                <div class="space-y-4">
-                  <p
-                    class="text-sm uppercase tracking-[0.35em] text-emerald-100/80"
-                  >
-                    TCM Research Operating System
-                  </p>
-                  <h1
-                    class="brand-title max-w-3xl text-4xl font-semibold leading-tight sm:text-5xl"
-                  >
-                    中医智慧科研平台
-                    <span class="block text-2xl text-emerald-100/90 sm:text-3xl"
-                      >从古籍观察到知识图谱与论文生成的一体化研究中枢</span
-                    >
-                  </h1>
-                  <p
-                    class="max-w-2xl text-base leading-7 text-emerald-50/85 sm:text-lg"
-                  >
-                    把
-                    Observe、Hypothesis、Experiment、Analyze、Reflect、Publish
-                    全流程收束到统一管理台，直接连接研究任务、AI
-                    助手、知识图谱与阶段输出。
-                  </p>
-                </div>
-
-                <div class="grid gap-4 sm:grid-cols-3">
-                  <div class="feature-card rounded-2xl p-4">
-                    <p
-                      class="text-xs uppercase tracking-[0.24em] text-emerald-100/70"
-                    >
-                      Research Flow
-                    </p>
-                    <p class="mt-3 text-lg font-semibold">七阶段研究闭环</p>
-                    <p class="mt-2 text-sm leading-6 text-emerald-50/80">
-                      Observe 到 Reflect 的全过程追踪、执行与产出回看。
-                    </p>
-                  </div>
-                  <div class="feature-card rounded-2xl p-4">
-                    <p
-                      class="text-xs uppercase tracking-[0.24em] text-emerald-100/70"
-                    >
-                      Knowledge Layer
-                    </p>
-                    <p class="mt-3 text-lg font-semibold">知识图谱联动</p>
-                    <p class="mt-2 text-sm leading-6 text-emerald-50/80">
-                      方药、证候、文献引用与图谱统计统一进出管理。
-                    </p>
-                  </div>
-                  <div class="feature-card rounded-2xl p-4">
-                    <p
-                      class="text-xs uppercase tracking-[0.24em] text-emerald-100/70"
-                    >
-                      AI Workflow
-                    </p>
-                    <p class="mt-3 text-lg font-semibold">助手与任务协同</p>
-                    <p class="mt-2 text-sm leading-6 text-emerald-50/80">
-                      直接在管理台发起任务、调用 AI 助手、查看生成轨迹。
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                class="grid gap-4 rounded-[28px] border border-white/15 bg-black/10 p-5 sm:grid-cols-[1.2fr,0.8fr]"
-              >
-                <div>
-                  <p
-                    class="text-sm uppercase tracking-[0.28em] text-emerald-100/70"
-                  >
-                    模块矩阵
-                  </p>
-                  <div class="mt-4 grid gap-3 sm:grid-cols-2">
-                    <div class="rounded-2xl bg-white/10 p-4">
-                      <p class="text-sm font-semibold">研究任务编排</p>
-                      <p class="mt-1 text-sm leading-6 text-emerald-50/75">
-                        课题建立、阶段执行、实时进度广播与结果回看。
-                      </p>
-                    </div>
-                    <div class="rounded-2xl bg-white/10 p-4">
-                      <p class="text-sm font-semibold">AI 智能助手</p>
-                      <p class="mt-1 text-sm leading-6 text-emerald-50/75">
-                        问答、流式输出、历史回放与研究上下文联动。
-                      </p>
-                    </div>
-                    <div class="rounded-2xl bg-white/10 p-4">
-                      <p class="text-sm font-semibold">知识图谱洞察</p>
-                      <p class="mt-1 text-sm leading-6 text-emerald-50/75">
-                        按图谱类型过滤查看实体、关系与结构统计。
-                      </p>
-                    </div>
-                    <div class="rounded-2xl bg-white/10 p-4">
-                      <p class="text-sm font-semibold">质量与产出中心</p>
-                      <p class="mt-1 text-sm leading-6 text-emerald-50/75">
-                        质量评分、Smoke 健康度、论文与输出资产统一可见。
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div
-                  class="rounded-[24px] border border-white/15 bg-white/10 p-5"
-                >
-                  <p
-                    class="text-sm uppercase tracking-[0.28em] text-emerald-100/70"
-                  >
-                    进入后默认落点
-                  </p>
-                  <div class="mt-4 space-y-3">
-                    <button
-                      type="button"
-                      @click="destination = 'dashboard'"
-                      :class="destination === 'dashboard' ? 'bg-white text-emerald-900 shadow-lg' : 'bg-white/10 text-emerald-50 hover:bg-white/20'"
-                      class="flex w-full items-start justify-between rounded-2xl px-4 py-3 text-left transition"
-                    >
-                      <span>
-                        <span class="block text-sm font-semibold"
-                          >科研主控台</span
-                        >
-                        <span class="mt-1 block text-xs opacity-80"
-                          >查看流程、项目、质量、输出概览</span
-                        >
-                      </span>
-                      <span class="text-lg">↗</span>
-                    </button>
-                    <button
-                      type="button"
-                      @click="destination = 'console'"
-                      :class="destination === 'console' ? 'bg-white text-emerald-900 shadow-lg' : 'bg-white/10 text-emerald-50 hover:bg-white/20'"
-                      class="flex w-full items-start justify-between rounded-2xl px-4 py-3 text-left transition"
-                    >
-                      <span>
-                        <span class="block text-sm font-semibold"
-                          >研究控制台</span
-                        >
-                        <span class="mt-1 block text-xs opacity-80"
-                          >适合需要继续使用独立控制台入口的场景</span
-                        >
-                      </span>
-                      <span class="text-lg">↗</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section
-            class="auth-card glass-panel rounded-[32px] border border-white/60 p-6 sm:p-8 lg:p-10"
+              进入管理界面
+            </h2>
+            <p
+              class="mt-1 inline-flex items-center gap-2 text-xs text-slate-500"
+              aria-live="polite"
+            >
+              <span class="status-dot bg-emerald-500" aria-hidden="true"></span>
+              <span x-text="statusHint">正在检测认证模式…</span>
+            </p>
+          </div>
+          <span
+            class="rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-700"
+            x-text="authConfig.authMode || 'password'"
           >
-            <div class="space-y-6">
-              <div class="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <p
-                    class="text-sm uppercase tracking-[0.24em] text-emerald-700/80"
-                  >
-                    Secure Entry
-                  </p>
-                  <h2
-                    class="brand-title mt-2 text-3xl font-semibold text-slate-900"
-                  >
-                    进入管理界面
-                  </h2>
-                  <p class="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                    支持账号密码、管理 API Key
-                    与开放访客模式。认证成功后将直接进入对应管理界面并加载真实功能模块。
-                  </p>
-                </div>
-                <div
-                  class="rounded-2xl border border-emerald-100 bg-emerald-50/80 px-4 py-3 text-right"
-                >
-                  <p
-                    class="text-xs uppercase tracking-[0.24em] text-emerald-700/70"
-                  >
-                    Auth Mode
-                  </p>
-                  <p
-                    class="mt-1 text-sm font-semibold text-emerald-900"
-                    x-text="authConfig.authMode || 'password'"
-                  >
-                    password
-                  </p>
-                </div>
-              </div>
-
-              <div
-                x-show="errorMsg"
-                x-transition
-                class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
-              >
-                <div class="flex items-start gap-3">
-                  <span class="mt-0.5 text-base">!</span>
-                  <span x-text="errorMsg"></span>
-                </div>
-              </div>
-
-              <div class="grid gap-3 sm:grid-cols-3">
-                <div
-                  class="rounded-2xl border border-emerald-100 bg-white/80 px-4 py-3"
-                >
-                  <p class="text-xs uppercase tracking-[0.2em] text-slate-400">
-                    认证需求
-                  </p>
-                  <p
-                    class="mt-1 text-sm font-semibold text-slate-800"
-                    x-text="authConfig.authRequired ? '需要认证' : '开放访问'"
-                  >
-                    需要认证
-                  </p>
-                </div>
-                <div
-                  class="rounded-2xl border border-emerald-100 bg-white/80 px-4 py-3"
-                >
-                  <p class="text-xs uppercase tracking-[0.2em] text-slate-400">
-                    密码登录
-                  </p>
-                  <p
-                    class="mt-1 text-sm font-semibold text-slate-800"
-                    x-text="authConfig.supportsPassword ? '已启用' : '未启用'"
-                  >
-                    已启用
-                  </p>
-                </div>
-                <div
-                  class="rounded-2xl border border-emerald-100 bg-white/80 px-4 py-3"
-                >
-                  <p class="text-xs uppercase tracking-[0.2em] text-slate-400">
-                    API Key
-                  </p>
-                  <p
-                    class="mt-1 text-sm font-semibold text-slate-800"
-                    x-text="authConfig.supportsApiKey ? '已启用' : '未启用'"
-                  >
-                    未启用
-                  </p>
-                </div>
-              </div>
-
-              <div
-                x-show="authConfig.supportsPassword && authConfig.supportsApiKey"
-                class="grid grid-cols-2 gap-2 rounded-2xl bg-emerald-50/80 p-2"
-              >
-                <button
-                  type="button"
-                  @click="loginMode = 'password'"
-                  :class="loginMode === 'password' ? 'mode-chip-active' : 'mode-chip text-slate-600 hover:text-slate-900'"
-                  class="rounded-2xl px-4 py-3 text-sm font-semibold transition"
-                >
-                  账号密码
-                </button>
-                <button
-                  type="button"
-                  @click="loginMode = 'api_key'"
-                  :class="loginMode === 'api_key' ? 'mode-chip-active' : 'mode-chip text-slate-600 hover:text-slate-900'"
-                  class="rounded-2xl px-4 py-3 text-sm font-semibold transition"
-                >
-                  API Key
-                </button>
-              </div>
-
-              <form
-                x-show="loginMode === 'password'"
-                @submit.prevent="handlePasswordLogin"
-                class="space-y-5"
-              >
-                <div>
-                  <label
-                    for="username"
-                    class="mb-2 block text-sm font-medium text-slate-700"
-                    >用户名</label
-                  >
-                  <input
-                    id="username"
-                    type="text"
-                    x-model="username"
-                    required
-                    autocomplete="username"
-                    :disabled="loading"
-                    class="soft-input w-full rounded-2xl px-4 py-3 text-slate-800 outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                    placeholder="请输入用户名"
-                  />
-                </div>
-
-                <div>
-                  <div class="mb-2 flex items-center justify-between gap-3">
-                    <label
-                      for="password"
-                      class="block text-sm font-medium text-slate-700"
-                      >密码</label
-                    >
-                    <span class="text-xs text-slate-400"
-                      >支持 secrets.yml / 环境变量中的用户配置</span
-                    >
-                  </div>
-                  <div class="relative">
-                    <input
-                      id="password"
-                      :type="showPwd ? 'text' : 'password'"
-                      x-model="password"
-                      required
-                      autocomplete="current-password"
-                      :disabled="loading"
-                      class="soft-input w-full rounded-2xl px-4 py-3 pr-12 text-slate-800 outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                      placeholder="请输入密码"
-                    />
-                    <button
-                      type="button"
-                      tabindex="-1"
-                      @click="showPwd = !showPwd"
-                      class="absolute inset-y-0 right-3 flex items-center text-sm font-medium text-slate-400 transition hover:text-slate-700"
-                    >
-                      <span x-text="showPwd ? '隐藏' : '显示'"></span>
-                    </button>
-                  </div>
-                </div>
-
-                <div
-                  class="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500"
-                >
-                  <label class="flex cursor-pointer items-center gap-2">
-                    <input
-                      type="checkbox"
-                      x-model="remember"
-                      class="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                    />
-                    <span>记住登录状态</span>
-                  </label>
-                  <span>认证成功后进入所选管理界面</span>
-                </div>
-
-                <button
-                  type="submit"
-                  :disabled="loading"
-                  class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-700 via-emerald-600 to-teal-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-900/10 transition hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <svg
-                    x-show="loading"
-                    class="h-5 w-5 animate-spin"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      class="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      stroke-width="4"
-                    ></circle>
-                    <path
-                      class="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    ></path>
-                  </svg>
-                  <span x-text="loading ? '登录中…' : '进入科研主控台'"></span>
-                </button>
-              </form>
-
-              <form
-                x-show="loginMode === 'api_key'"
-                @submit.prevent="handleApiKeyLogin"
-                class="space-y-5"
-              >
-                <div>
-                  <label
-                    for="apiKeyName"
-                    class="mb-2 block text-sm font-medium text-slate-700"
-                  >
-                    显示名称
-                    <span class="font-normal text-slate-400">(可选)</span>
-                  </label>
-                  <input
-                    id="apiKeyName"
-                    type="text"
-                    x-model="apiKeyName"
-                    :disabled="loading"
-                    class="soft-input w-full rounded-2xl px-4 py-3 text-slate-800 outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                    placeholder="管理员"
-                  />
-                </div>
-
-                <div>
-                  <label
-                    for="apiKey"
-                    class="mb-2 block text-sm font-medium text-slate-700"
-                    >管理 API Key</label
-                  >
-                  <input
-                    id="apiKey"
-                    type="password"
-                    x-model="apiKey"
-                    required
-                    :disabled="loading"
-                    class="soft-input w-full rounded-2xl px-4 py-3 text-slate-800 outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                    placeholder="请输入管理 API Key"
-                  />
-                </div>
-
-                <div
-                  class="rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-3 text-sm leading-6 text-slate-600"
-                >
-                  适用于运维或管理入口，认证通过后可直接进入任务管理、系统设置与质量审阅界面。
-                </div>
-
-                <label
-                  class="flex cursor-pointer items-center gap-2 text-sm text-slate-500"
-                >
-                  <input
-                    type="checkbox"
-                    x-model="remember"
-                    class="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <span>记住登录状态</span>
-                </label>
-
-                <button
-                  type="submit"
-                  :disabled="loading"
-                  class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <svg
-                    x-show="loading"
-                    class="h-5 w-5 animate-spin"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      class="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      stroke-width="4"
-                    ></circle>
-                    <path
-                      class="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    ></path>
-                  </svg>
-                  <span
-                    x-text="loading ? '验证中…' : '验证并进入管理台'"
-                  ></span>
-                </button>
-              </form>
-
-              <button
-                x-show="authConfig.guestAllowed"
-                @click="handleGuestLogin"
-                :disabled="loading"
-                type="button"
-                class="inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                访客模式进入
-              </button>
-
-              <div
-                class="rounded-[28px] border border-slate-200 bg-white/75 p-5"
-              >
-                <div class="flex items-center justify-between gap-4">
-                  <div>
-                    <p class="text-sm font-semibold text-slate-800">
-                      进入后目标界面
-                    </p>
-                    <p class="mt-1 text-xs leading-5 text-slate-500">
-                      登录成功后可直接落到主控台或研究控制台
-                    </p>
-                  </div>
-                  <div
-                    class="hidden rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700 sm:block"
-                  >
-                    真实功能直连
-                  </div>
-                </div>
-
-                <div class="mt-4 grid gap-3 sm:grid-cols-2">
-                  <label
-                    :class="destination === 'dashboard' ? 'border-emerald-400 bg-emerald-50/70 shadow-sm' : 'border-slate-200 bg-white/90'"
-                    class="cursor-pointer rounded-2xl border px-4 py-3 transition"
-                  >
-                    <div class="flex items-start justify-between gap-3">
-                      <div>
-                        <span class="block text-sm font-semibold text-slate-800"
-                          >科研主控台</span
-                        >
-                        <span
-                          class="mt-1 block text-xs leading-5 text-slate-500"
-                          >适合查看流程总览、最近研究任务、质量概览与各模块入口</span
-                        >
-                      </div>
-                      <input
-                        type="radio"
-                        x-model="destination"
-                        value="dashboard"
-                        class="mt-1 h-4 w-4 text-emerald-600 focus:ring-emerald-500"
-                      />
-                    </div>
-                  </label>
-
-                  <label
-                    :class="destination === 'console' ? 'border-emerald-400 bg-emerald-50/70 shadow-sm' : 'border-slate-200 bg-white/90'"
-                    class="cursor-pointer rounded-2xl border px-4 py-3 transition"
-                  >
-                    <div class="flex items-start justify-between gap-3">
-                      <div>
-                        <span class="block text-sm font-semibold text-slate-800"
-                          >研究控制台</span
-                        >
-                        <span
-                          class="mt-1 block text-xs leading-5 text-slate-500"
-                          >适合保留旧工作流或直接进入控制台视图</span
-                        >
-                      </div>
-                      <input
-                        type="radio"
-                        x-model="destination"
-                        value="console"
-                        class="mt-1 h-4 w-4 text-emerald-600 focus:ring-emerald-500"
-                      />
-                    </div>
-                  </label>
-                </div>
-              </div>
-            </div>
-          </section>
+            password
+          </span>
         </div>
-      </div>
 
-      <footer
-        class="pointer-events-none absolute inset-x-0 bottom-4 px-4 text-center text-xs text-slate-400 sm:text-sm"
-      >
-        <span
-          class="rounded-full border border-white/50 bg-white/70 px-4 py-2 shadow-sm"
+        <!-- 错误提示 -->
+        <div
+          x-show="errorMsg"
+          x-transition
+          role="alert"
+          aria-live="assertive"
+          class="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
         >
-          2026 中医智慧科研平台 · 认证后进入可执行任务、AI
-          助手、知识图谱与输出管理界面
-        </span>
+          <div class="flex items-start gap-2">
+            <span aria-hidden="true" class="mt-0.5 font-semibold">!</span>
+            <span x-text="errorMsg"></span>
+          </div>
+        </div>
+
+        <!-- 模式切换：仅当后端同时支持密码与 API Key 时出现 -->
+        <div
+          x-show="authConfig.supportsPassword && authConfig.supportsApiKey"
+          class="mt-5 grid grid-cols-2 gap-2 rounded-2xl bg-emerald-50/70 p-1.5"
+          role="tablist"
+          aria-label="登录方式"
+        >
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="loginMode === 'password'"
+            @click="loginMode = 'password'; errorMsg = ''"
+            :class="loginMode === 'password' ? 'mode-chip-active' : 'mode-chip text-slate-600 hover:text-slate-900'"
+            class="rounded-xl px-4 py-2 text-sm font-semibold transition"
+          >
+            账号密码
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="loginMode === 'api_key'"
+            @click="loginMode = 'api_key'; errorMsg = ''"
+            :class="loginMode === 'api_key' ? 'mode-chip-active' : 'mode-chip text-slate-600 hover:text-slate-900'"
+            class="rounded-xl px-4 py-2 text-sm font-semibold transition"
+          >
+            管理 API Key
+          </button>
+        </div>
+
+        <!-- 账号密码表单 -->
+        <form
+          x-show="loginMode === 'password'"
+          x-transition.opacity
+          @submit.prevent="handlePasswordLogin"
+          class="mt-6 space-y-4"
+          :aria-busy="loading"
+          novalidate
+          id="passwordForm"
+        >
+          <div>
+            <label
+              for="username"
+              class="mb-1.5 block text-sm font-medium text-slate-700"
+            >
+              用户名
+            </label>
+            <input
+              id="username"
+              name="username"
+              type="text"
+              x-model="username"
+              required
+              autocomplete="username"
+              autocapitalize="off"
+              spellcheck="false"
+              :disabled="loading"
+              class="soft-input w-full rounded-xl px-4 py-2.5 text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              placeholder="请输入用户名"
+            />
+          </div>
+
+          <div>
+            <div class="mb-1.5 flex items-baseline justify-between gap-3">
+              <label
+                for="password"
+                class="block text-sm font-medium text-slate-700"
+              >
+                密码
+              </label>
+              <span class="text-[11px] text-slate-400">
+                来源：secrets.yml › security.console_auth.users
+              </span>
+            </div>
+            <div class="relative">
+              <input
+                id="password"
+                name="password"
+                :type="showPwd ? 'text' : 'password'"
+                x-model="password"
+                required
+                autocomplete="current-password"
+                :disabled="loading"
+                class="soft-input w-full rounded-xl px-4 py-2.5 pr-14 text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                placeholder="请输入密码"
+              />
+              <button
+                type="button"
+                tabindex="0"
+                @click="showPwd = !showPwd"
+                :aria-pressed="showPwd"
+                :aria-label="showPwd ? '隐藏密码' : '显示密码'"
+                class="absolute inset-y-0 right-3 flex items-center text-xs font-medium text-slate-400 transition hover:text-slate-700"
+              >
+                <span x-text="showPwd ? '隐藏' : '显示'"></span>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between text-sm text-slate-500">
+            <label class="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                x-model="remember"
+                class="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <span>记住登录状态</span>
+            </label>
+          </div>
+
+          <button
+            type="submit"
+            :disabled="loading"
+            class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-700 via-emerald-600 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:-translate-y-0.5 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <svg
+              x-show="loading"
+              class="h-5 w-5 animate-spin"
+              fill="none"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <circle
+                class="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                stroke-width="4"
+              ></circle>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+              ></path>
+            </svg>
+            <span x-text="loading ? '登录中…' : '登录并进入管理界面'"></span>
+          </button>
+        </form>
+
+        <!-- API Key 表单 -->
+        <form
+          x-show="loginMode === 'api_key'"
+          x-transition.opacity
+          @submit.prevent="handleApiKeyLogin"
+          class="mt-6 space-y-4"
+          :aria-busy="loading"
+          novalidate
+          id="apiKeyForm"
+        >
+          <div>
+            <label
+              for="apiKeyName"
+              class="mb-1.5 block text-sm font-medium text-slate-700"
+            >
+              显示名称
+              <span class="font-normal text-slate-400">（可选）</span>
+            </label>
+            <input
+              id="apiKeyName"
+              type="text"
+              x-model="apiKeyName"
+              :disabled="loading"
+              autocomplete="username"
+              class="soft-input w-full rounded-xl px-4 py-2.5 text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              placeholder="例如：管理员"
+            />
+          </div>
+
+          <div>
+            <label
+              for="apiKey"
+              class="mb-1.5 block text-sm font-medium text-slate-700"
+            >
+              管理 API Key
+            </label>
+            <input
+              id="apiKey"
+              type="password"
+              x-model="apiKey"
+              required
+              autocomplete="current-password"
+              :disabled="loading"
+              class="soft-input w-full rounded-xl px-4 py-2.5 text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              placeholder="请输入管理 API Key"
+            />
+          </div>
+
+          <button
+            type="submit"
+            :disabled="loading"
+            class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <svg
+              x-show="loading"
+              class="h-5 w-5 animate-spin"
+              fill="none"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <circle
+                class="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                stroke-width="4"
+              ></circle>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+              ></path>
+            </svg>
+            <span x-text="loading ? '验证中…' : '验证并进入管理台'"></span>
+          </button>
+        </form>
+
+        <!-- 访客入口（仅在后端允许时展示） -->
+        <button
+          x-show="authConfig.guestAllowed"
+          @click="handleGuestLogin"
+          :disabled="loading"
+          type="button"
+          class="mt-4 inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white/80 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          以访客身份进入
+        </button>
+
+        <!-- 进入后落点（统一仅一份） -->
+        <fieldset
+          class="mt-6 rounded-2xl border border-slate-200 bg-white/70 p-4"
+        >
+          <legend class="px-2 text-xs font-semibold text-slate-500">
+            登录后跳转
+          </legend>
+          <div class="mt-2 grid gap-2 sm:grid-cols-2">
+            <label
+              :class="destination === 'dashboard' ? 'border-emerald-400 bg-emerald-50/70' : 'border-slate-200 bg-white'"
+              class="cursor-pointer rounded-xl border px-3 py-2.5 transition"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-sm font-semibold text-slate-800"
+                  >科研主控台</span
+                >
+                <input
+                  type="radio"
+                  x-model="destination"
+                  value="dashboard"
+                  name="destination"
+                  class="h-4 w-4 text-emerald-600 focus:ring-emerald-500"
+                />
+              </div>
+              <p class="mt-1 text-[11px] leading-5 text-slate-500">
+                流程总览、任务管理、AI 助手、知识图谱
+              </p>
+            </label>
+
+            <label
+              :class="destination === 'console' ? 'border-emerald-400 bg-emerald-50/70' : 'border-slate-200 bg-white'"
+              class="cursor-pointer rounded-xl border px-3 py-2.5 transition"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-sm font-semibold text-slate-800"
+                  >研究控制台</span
+                >
+                <input
+                  type="radio"
+                  x-model="destination"
+                  value="console"
+                  name="destination"
+                  class="h-4 w-4 text-emerald-600 focus:ring-emerald-500"
+                />
+              </div>
+              <p class="mt-1 text-[11px] leading-5 text-slate-500">
+                旧版控制台视图（兼容工作流）
+              </p>
+            </label>
+          </div>
+        </fieldset>
+      </section>
+
+      <footer class="mt-8 text-center text-xs text-slate-400">
+        © 2026 中医智慧科研平台 · 认证后进入可执行任务、AI 助手、知识图谱与输出管理界面
       </footer>
-    </div>
-
-    <script>
-      function loginApp() {
-        return {
-          username: "",
-          password: "",
-          apiKey: "",
-          apiKeyName: "",
-          errorMsg: "",
-          loading: false,
-          showPwd: false,
-          remember: false,
-          loginMode: "password",
-          destination: "dashboard",
-          statusHint: "正在检测认证模式…",
-          authConfig: {
-            authRequired: true,
-            authMode: "password",
-            supportsPassword: true,
-            supportsApiKey: false,
-            guestAllowed: false,
-          },
-
-          async init() {
-            const existingToken = localStorage.getItem("access_token");
-            if (existingToken) {
-              try {
-                const resp = await fetch("/api/auth/me", {
-                  headers: { Authorization: "Bearer " + existingToken },
-                });
-                if (resp.ok) {
-                  this.redirectAfterLogin();
-                  return;
-                }
-              } catch (e) {
-                /* ignore */
-              }
-              localStorage.removeItem("access_token");
-              localStorage.removeItem("token_type");
-            }
-
-            try {
-              const resp = await fetch("/api/auth/status");
-              if (resp.ok) {
-                const data = await resp.json();
-                this.authConfig = {
-                  authRequired: data.auth_required,
-                  authMode: data.auth_mode,
-                  supportsPassword: data.supports_password_login,
-                  supportsApiKey: data.supports_api_key_login,
-                  guestAllowed: data.guest_allowed,
-                };
-
-                if (
-                  !this.authConfig.supportsPassword &&
-                  this.authConfig.supportsApiKey
-                ) {
-                  this.loginMode = "api_key";
-                }
-
-                if (this.authConfig.authMode === "password") {
-                  this.statusHint =
-                    "当前启用账号密码认证，登录后进入科研主控台。";
-                } else if (this.authConfig.authMode === "management_api_key") {
-                  this.statusHint =
-                    "当前启用管理 API Key 认证，适合管理与运维入口。";
-                } else if (this.authConfig.guestAllowed) {
-                  this.statusHint =
-                    "当前允许访客进入，仍可切换到认证模式访问完整管理功能。";
-                } else {
-                  this.statusHint = "请完成认证后继续。";
-                }
-              }
-            } catch (e) {
-              this.statusHint = "认证状态读取失败，请手动登录。";
-            }
-
-            const params = new URLSearchParams(window.location.search);
-            if (params.get("next") === "console") {
-              this.destination = "console";
-            }
-          },
-
-          redirectAfterLogin() {
-            if (this.destination === "console") {
-              window.location.href = "/console";
-            } else {
-              window.location.href = "/dashboard";
-            }
-          },
-
-          async doLogin(payload) {
-            this.errorMsg = "";
-            this.loading = true;
-            try {
-              const resp = await fetch("/api/auth/login", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-              });
-
-              const data = await resp.json();
-              if (!resp.ok) {
-                this.errorMsg =
-                  data.detail || data.message || "登录失败，请重试";
-                return;
-              }
-
-              const token = data.access_token || data.token;
-              if (token) {
-                localStorage.setItem("access_token", token);
-                localStorage.setItem("token_type", data.token_type || "bearer");
-                if (data.display_name) {
-                  localStorage.setItem("display_name", data.display_name);
-                }
-              }
-
-              this.redirectAfterLogin();
-            } catch (e) {
-              this.errorMsg = "网络错误，请检查连接后重试";
-            } finally {
-              this.loading = false;
-            }
-          },
-
-          handlePasswordLogin() {
-            if (!this.username.trim() || !this.password) {
-              this.errorMsg = "请输入用户名和密码";
-              return;
-            }
-            this.doLogin({
-              username: this.username.trim(),
-              password: this.password,
-            });
-          },
-
-          handleApiKeyLogin() {
-            if (!this.apiKey.trim()) {
-              this.errorMsg = "请输入管理 API Key";
-              return;
-            }
-            this.doLogin({
-              username: this.apiKeyName.trim(),
-              api_key: this.apiKey.trim(),
-            });
-          },
-
-          handleGuestLogin() {
-            localStorage.setItem("display_name", "访客");
-            this.redirectAfterLogin();
-          },
-        };
-      }
-    </script>
+    </main>
   </body>
 </html>
