@@ -1,0 +1,125 @@
+# T4.4: 中医医学合规底线（Constitutional Guard）
+# 每条规则结构: id / severity / pattern_type / target / body / message
+# - severity: critical | high | medium | low
+# - pattern_type: regex (Python 正则，作用于 target 字段全文) | llm_judge (预留)
+# - target: output 字典中要检查的字段路径，使用 dot path（例如 "answer" / "treatment.formula"）
+#           特殊值 "*" 表示遍历所有 string 叶子节点。
+# - body: regex 表达式或 llm_judge prompt
+# - require: 反向规则；当 target 出现且未匹配 body 时违规
+# 仅在 severity=critical 时 enforce() 抛 ConstitutionalViolation。
+
+rules:
+  # ---------------------------------------------------------------- 剂量/计量类
+  - id: DOSAGE.fabricated_unit
+    severity: critical
+    pattern_type: regex
+    target: "*"
+    body: "(?:\\d+(?:\\.\\d+)?)\\s*(?:克|g|mg|ml)\\s*[/／]\\s*(?:kg体重|公斤体重)"
+    message: "禁止给出按体重换算的精确剂量（疑似伪造剂量）"
+
+  - id: DOSAGE.exceeds_pharmacopoeia
+    severity: critical
+    pattern_type: regex
+    target: "*"
+    # 单味药超过 100g 通常为伪造（除非明确"煎汤外用"，此处按保守严格）
+    body: "(?:附子|生川乌|生草乌|马钱子|生半夏|雄黄|朱砂|斑蝥)\\s*\\d{3,}\\s*(?:克|g)"
+    message: "毒性药材剂量超出药典限量，疑似伪造剂量"
+
+  - id: DOSAGE.no_unit
+    severity: medium
+    pattern_type: regex
+    target: "*"
+    body: "(?:服用|内服|口服)\\s*\\d+(?!\\s*(?:克|g|mg|ml|片|粒|袋|次|日|天))"
+    message: "剂量描述缺少单位"
+
+  # ---------------------------------------------------------------- 跨证候推荐
+  - id: SYNDROME.cross_recommendation
+    severity: critical
+    pattern_type: regex
+    target: "*"
+    # 形如 "无论寒热虚实/任何证型/所有患者均可服用" → 跨证候推荐
+    body: "(?:无论寒热虚实|无论何种证(?:型|候)|任何证(?:型|候)|所有(?:患者|人群)(?:均|都)(?:可|适合)(?:服用|使用|应用))"
+    message: "出现跨证候推荐表述，违反辨证论治原则"
+
+  - id: SYNDROME.universal_panacea
+    severity: critical
+    pattern_type: regex
+    target: "*"
+    body: "(?:包治百病|万能(?:方剂|配方)|根治所有)"
+    message: "夸大疗效/万能方剂表述"
+
+  - id: SYNDROME.missing_pattern
+    severity: high
+    pattern_type: regex
+    target: "treatment.formula"
+    body: "^(?!.*(?:证|候|型|寒|热|虚|实|气|血|阴|阳)).+$"
+    message: "处方未指明适用证候"
+
+  # ---------------------------------------------------------------- 文献引用
+  - id: CITATION.formula_without_source
+    severity: critical
+    pattern_type: require
+    target: "formula_recommendations"
+    # require 模式：target 字段是数组时，每个元素必须含 citation/source/reference
+    body: "citation|source|reference|出处"
+    message: "推荐方剂缺少文献出处"
+
+  - id: CITATION.fabricated_doi
+    severity: high
+    pattern_type: regex
+    target: "*"
+    # 伪造 DOI（10.xxxx/abcd 但 prefix 不在常见医学期刊段）
+    body: "10\\.0000/|10\\.9999/|doi:\\s*N/A|doi:\\s*未知"
+    message: "疑似伪造 DOI"
+
+  - id: CITATION.placeholder_source
+    severity: high
+    pattern_type: regex
+    target: "*"
+    body: "(?:某(?:文献|研究|论文|期刊)|XXX(?:文献|研究)|占位文献|TODO[_\\s-]*(?:cite|reference))"
+    message: "出现占位/未填实的文献引用"
+
+  # ---------------------------------------------------------------- 安全/伦理
+  - id: SAFETY.toxic_combination
+    severity: critical
+    pattern_type: regex
+    target: "*"
+    # 十八反/十九畏代表性组合
+    body: "(?:甘草.{0,4}(?:甘遂|大戟|海藻|芫花)|乌头.{0,4}(?:半夏|瓜蒌|贝母|白蔹|白及)|藜芦.{0,4}(?:人参|沙参|丹参|玄参|细辛|芍药))"
+    message: "出现十八反配伍禁忌"
+
+  - id: SAFETY.pregnancy_taboo
+    severity: critical
+    pattern_type: regex
+    target: "*"
+    body: "孕妇.{0,8}(?:可服|可用|建议服用|推荐).{0,12}(?:麝香|红花|桃仁|大黄|附子|川乌|草乌|斑蝥|水蛭|虻虫)"
+    message: "孕妇推荐妊娠禁忌药"
+
+  - id: SAFETY.replace_modern_treatment
+    severity: high
+    pattern_type: regex
+    target: "*"
+    body: "(?:停用|不需要|无需)(?:化疗|放疗|手术|胰岛素|降压药|抗生素)"
+    message: "建议停用现代医学必要治疗，违反医学伦理"
+
+  - id: SAFETY.diagnose_disease_explicit
+    severity: high
+    pattern_type: regex
+    target: "*"
+    body: "(?:确诊|诊断为)\\s*(?:癌症|肿瘤|糖尿病|高血压|冠心病)"
+    message: "AI 不应直接给出现代医学疾病确诊结论"
+
+  # ---------------------------------------------------------------- 输出结构
+  - id: STRUCTURE.empty_recommendation
+    severity: medium
+    pattern_type: require
+    target: "recommendations"
+    body: "."
+    message: "recommendations 字段不能为空"
+
+  - id: STRUCTURE.unsafe_disclaimer_missing
+    severity: low
+    pattern_type: require
+    target: "answer"
+    body: "(?:咨询|遵医嘱|就诊|执业医师|临床医师)"
+    message: "答复缺少就医/咨询提示"
