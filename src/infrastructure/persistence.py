@@ -225,7 +225,9 @@ class Document(Base):
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     source_file = Column(String(500), nullable=False)
-    content_hash = Column(CHAR(64), nullable=True)  # SHA-256 hex; backfill 后才能 NOT NULL
+    content_hash = Column(
+        CHAR(64), nullable=True
+    )  # SHA-256 hex; backfill 后才能 NOT NULL
     ingest_run_id = Column(String(64), nullable=True)
     document_urn = Column(String(500), nullable=True)
     document_title = Column(String(500), nullable=True)
@@ -240,7 +242,9 @@ class Document(Base):
     author = Column(String(255), nullable=True)
     edition = Column(String(255), nullable=True)
     version_metadata_json = Column(JSON, default=dict, nullable=False)
-    processing_timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    processing_timestamp = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
     objective = Column(String(255), nullable=True)
     raw_text_size = Column(Integer, default=0, nullable=False)
     entities_extracted_count = Column(Integer, default=0, nullable=False)
@@ -251,10 +255,19 @@ class Document(Base):
     )
     quality_score = Column(Float, default=0.0, nullable=False)
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
-    entities = relationship("Entity", back_populates="document", cascade="all, delete-orphan")
+    entities = relationship(
+        "Entity", back_populates="document", cascade="all, delete-orphan"
+    )
     statistics = relationship(
         "ProcessingStatistics",
         back_populates="document",
@@ -273,7 +286,9 @@ class Document(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
-    logs = relationship("ProcessingLog", back_populates="document", cascade="all, delete-orphan")
+    logs = relationship(
+        "ProcessingLog", back_populates="document", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("idx_documents_status", "process_status"),
@@ -286,8 +301,13 @@ class Document(Base):
         Index("idx_documents_witness", "witness_key"),
         Index("idx_documents_content_hash", "content_hash"),
         Index("idx_documents_ingest_run", "ingest_run_id"),
-        UniqueConstraint("source_file", "content_hash", name="uq_documents_source_hash"),
-        CheckConstraint("quality_score >= 0 AND quality_score <= 1", name="ck_documents_quality_score"),
+        UniqueConstraint(
+            "source_file", "content_hash", name="uq_documents_source_hash"
+        ),
+        CheckConstraint(
+            "quality_score >= 0 AND quality_score <= 1",
+            name="ck_documents_quality_score",
+        ),
     )
 
 
@@ -297,7 +317,9 @@ class Entity(Base):
     __tablename__ = "entities"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    document_id = Column(GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(
+        GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
     name = Column(String(255), nullable=False)
     type = Column(_enum_column(EntityTypeEnum, name="entity_type_enum"), nullable=False)
     confidence = Column(Float, default=0.5, nullable=False)
@@ -306,8 +328,15 @@ class Entity(Base):
     alternative_names = Column(StringListType(), default=list, nullable=False)
     description = Column(Text, nullable=True)
     entity_metadata = Column(JSON, default=dict, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
     document = relationship("Document", back_populates="entities")
     relationships_out = relationship(
@@ -325,7 +354,9 @@ class Entity(Base):
         Index("idx_entities_document", "document_id"),
         Index("idx_entities_type", "type"),
         Index("idx_entities_name", "name"),
-        CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_entities_confidence"),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1", name="ck_entities_confidence"
+        ),
     )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -352,9 +383,14 @@ class RelationshipType(Base):
     relationship_name = Column(String(100), nullable=False, unique=True)
     relationship_type = Column(String(100), nullable=False, unique=True)
     description = Column(Text, nullable=True)
-    category = Column(_enum_column(RelationshipCategoryEnum, name="relationship_category_enum"), nullable=True)
+    category = Column(
+        _enum_column(RelationshipCategoryEnum, name="relationship_category_enum"),
+        nullable=True,
+    )
     confidence_baseline = Column(Float, default=0.7, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
 
     relationships = relationship("EntityRelationship", back_populates="type")
 
@@ -374,24 +410,39 @@ class EntityRelationship(Base):
     __tablename__ = "entity_relationships"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    source_entity_id = Column(GUID(), ForeignKey("entities.id", ondelete="CASCADE"), nullable=False)
-    target_entity_id = Column(GUID(), ForeignKey("entities.id", ondelete="CASCADE"), nullable=False)
-    relationship_type_id = Column(GUID(), ForeignKey("relationship_types.id"), nullable=False)
+    source_entity_id = Column(
+        GUID(), ForeignKey("entities.id", ondelete="CASCADE"), nullable=False
+    )
+    target_entity_id = Column(
+        GUID(), ForeignKey("entities.id", ondelete="CASCADE"), nullable=False
+    )
+    relationship_type_id = Column(
+        GUID(), ForeignKey("relationship_types.id"), nullable=False
+    )
     confidence = Column(Float, default=0.5, nullable=False)
     created_by_module = Column(String(100), nullable=True)
     evidence = Column(Text, nullable=True)
     relationship_metadata = Column(JSON, default=dict, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
 
-    source_entity = relationship("Entity", foreign_keys=[source_entity_id], back_populates="relationships_out")
-    target_entity = relationship("Entity", foreign_keys=[target_entity_id], back_populates="relationships_in")
+    source_entity = relationship(
+        "Entity", foreign_keys=[source_entity_id], back_populates="relationships_out"
+    )
+    target_entity = relationship(
+        "Entity", foreign_keys=[target_entity_id], back_populates="relationships_in"
+    )
     type = relationship("RelationshipType", back_populates="relationships")
 
     __table_args__ = (
         Index("idx_rel_source", "source_entity_id"),
         Index("idx_rel_target", "target_entity_id"),
         Index("idx_rel_type", "relationship_type_id"),
-        CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_entity_relationships_confidence"),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_entity_relationships_confidence",
+        ),
     )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -414,7 +465,12 @@ class ProcessingStatistics(Base):
     __tablename__ = "processing_statistics"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    document_id = Column(GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, unique=True)
+    document_id = Column(
+        GUID(),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
     formulas_count = Column(Integer, default=0, nullable=False)
     herbs_count = Column(Integer, default=0, nullable=False)
     syndromes_count = Column(Integer, default=0, nullable=False)
@@ -426,7 +482,9 @@ class ProcessingStatistics(Base):
     connected_components = Column(Integer, default=0, nullable=False)
     source_modules = Column(StringListType(), default=list, nullable=False)
     processing_time_ms = Column(Integer, default=0, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
 
     document = relationship("Document", back_populates="statistics")
 
@@ -437,16 +495,25 @@ class QualityMetrics(Base):
     __tablename__ = "quality_metrics"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    document_id = Column(GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, unique=True)
+    document_id = Column(
+        GUID(),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
     confidence_score = Column(Float, default=0.0, nullable=False)
     completeness = Column(Float, default=0.0, nullable=False)
     entity_precision = Column(Float, default=0.0, nullable=False)
     relationship_precision = Column(Float, default=0.0, nullable=False)
     graph_quality_score = Column(Float, default=0.0, nullable=False)
-    evaluation_timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    evaluation_timestamp = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
     evaluator = Column(String(100), nullable=True)
     assessment_notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
 
     document = relationship("Document", back_populates="quality")
 
@@ -457,7 +524,12 @@ class ResearchAnalysis(Base):
     __tablename__ = "research_analyses"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    document_id = Column(GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, unique=True)
+    document_id = Column(
+        GUID(),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
     research_perspectives = Column(JSON, default=dict, nullable=False)
     formula_comparisons = Column(JSON, default=dict, nullable=False)
     herb_properties_analysis = Column(JSON, default=dict, nullable=False)
@@ -468,8 +540,15 @@ class ResearchAnalysis(Base):
     complexity_dynamics = Column(JSON, default=dict, nullable=False)
     research_scoring_panel = Column(JSON, default=dict, nullable=False)
     summary_analysis = Column(JSON, default=dict, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
     document = relationship("Document", back_populates="analyses")
 
@@ -480,13 +559,17 @@ class ProcessingLog(Base):
     __tablename__ = "processing_logs"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    document_id = Column(GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(
+        GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
     module_name = Column(String(100), nullable=False)
     status = Column(_enum_column(LogStatusEnum, name="log_status_enum"), nullable=False)
     message = Column(Text, nullable=True)
     error_details = Column(Text, nullable=True)
     execution_time_ms = Column(Integer, default=0, nullable=False)
-    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    timestamp = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
 
     document = relationship("Document", back_populates="logs")
 
@@ -600,15 +683,28 @@ class ResearchSession(Base):
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     duration = Column(Float, default=0.0, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
     # 关系
     phase_executions = relationship(
-        "PhaseExecution", back_populates="session", cascade="all, delete-orphan", order_by="PhaseExecution.created_at",
+        "PhaseExecution",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="PhaseExecution.created_at",
     )
     artifacts = relationship(
-        "ResearchArtifact", back_populates="session", cascade="all, delete-orphan", order_by="ResearchArtifact.created_at",
+        "ResearchArtifact",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="ResearchArtifact.created_at",
     )
     learning_feedback_records = relationship(
         "ResearchLearningFeedback",
@@ -641,7 +737,9 @@ class PhaseExecution(Base):
     __tablename__ = "phase_executions"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    session_id = Column(GUID(), ForeignKey("research_sessions.id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(
+        GUID(), ForeignKey("research_sessions.id", ondelete="CASCADE"), nullable=False
+    )
     phase = Column(String(64), nullable=False)
     status = Column(
         _enum_column(PhaseStatusEnum, name="phase_status_enum"),
@@ -655,20 +753,22 @@ class PhaseExecution(Base):
     input_json = Column(Text, nullable=False, default="{}")
     output_json = Column(Text, nullable=False, default="{}")
     error_detail = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
 
     session = relationship("ResearchSession", back_populates="phase_executions")
     artifacts = relationship(
-        "ResearchArtifact", back_populates="phase_execution", cascade="all, delete-orphan",
+        "ResearchArtifact",
+        back_populates="phase_execution",
+        cascade="all, delete-orphan",
     )
     learning_feedback_records = relationship(
         "ResearchLearningFeedback",
         back_populates="phase_execution",
     )
 
-    __table_args__ = (
-        Index("idx_pe_session_phase", "session_id", "phase"),
-    )
+    __table_args__ = (Index("idx_pe_session_phase", "session_id", "phase"),)
 
 
 class ResearchArtifact(Base):
@@ -677,8 +777,12 @@ class ResearchArtifact(Base):
     __tablename__ = "research_artifacts"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    session_id = Column(GUID(), ForeignKey("research_sessions.id", ondelete="CASCADE"), nullable=False)
-    phase_execution_id = Column(GUID(), ForeignKey("phase_executions.id", ondelete="SET NULL"), nullable=True)
+    session_id = Column(
+        GUID(), ForeignKey("research_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    phase_execution_id = Column(
+        GUID(), ForeignKey("phase_executions.id", ondelete="SET NULL"), nullable=True
+    )
     artifact_type = Column(
         _enum_column(ArtifactTypeEnum, name="artifact_type_enum"),
         default=ArtifactTypeEnum.OTHER,
@@ -691,8 +795,15 @@ class ResearchArtifact(Base):
     mime_type = Column(String(128), nullable=True)
     size_bytes = Column(Integer, default=0, nullable=False)
     metadata_json = Column(Text, nullable=False, default="{}")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
     # T2.4: methodology + hypothesis-level evidence grading
     methodology_tag = Column(String(32), nullable=True)
@@ -708,15 +819,57 @@ class ResearchArtifact(Base):
     )
 
 
+class ExternalEvidence(Base):
+    """T4.1 external collation 抓取结果。
+
+    用于落地 LiteratureRetriever 在 ``CollationContext.external`` 阶段返回的
+    arxiv / google_scholar 命中条目，提供后续溯源、对照与检索基础。
+    """
+
+    __tablename__ = "external_evidence"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    document_id = Column(
+        GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    source = Column(String(64), nullable=False)  # arxiv | google_scholar | ...
+    external_id = Column(String(255), nullable=True)
+    title = Column(Text, nullable=True)
+    authors_json = Column(JSON, default=list, nullable=False)
+    year = Column(Integer, nullable=True)
+    doi = Column(String(255), nullable=True)
+    url = Column(String(1000), nullable=True)
+    abstract = Column(Text, nullable=True)
+    citation_count = Column(Integer, nullable=True)
+    query = Column(Text, nullable=True)
+    relevance_score = Column(Float, nullable=True)
+    payload_json = Column(JSON, default=dict, nullable=False)
+    fetched_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_ext_evidence_document", "document_id"),
+        Index("idx_ext_evidence_source", "source"),
+        UniqueConstraint(
+            "document_id", "source", "external_id",
+            name="uq_external_evidence_doc_source_extid",
+        ),
+    )
+
 class ResearchLearningFeedback(Base):
     """Research feedback library entries for replay and long-term querying."""
 
     __tablename__ = "research_learning_feedback"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    session_id = Column(GUID(), ForeignKey("research_sessions.id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(
+        GUID(), ForeignKey("research_sessions.id", ondelete="CASCADE"), nullable=False
+    )
     cycle_id = Column(String(128), nullable=False)
-    phase_execution_id = Column(GUID(), ForeignKey("phase_executions.id", ondelete="SET NULL"), nullable=True)
+    phase_execution_id = Column(
+        GUID(), ForeignKey("phase_executions.id", ondelete="SET NULL"), nullable=True
+    )
     feedback_scope = Column(String(64), nullable=False)
     source_phase = Column(String(64), nullable=False, default="reflect")
     target_phase = Column(String(64), nullable=True)
@@ -740,10 +893,16 @@ class ResearchLearningFeedback(Base):
     metadata_json = Column(Text, nullable=False, default="{}")
     prompt_version = Column(String(32), nullable=True)
     schema_version = Column(String(32), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
 
-    session = relationship("ResearchSession", back_populates="learning_feedback_records")
-    phase_execution = relationship("PhaseExecution", back_populates="learning_feedback_records")
+    session = relationship(
+        "ResearchSession", back_populates="learning_feedback_records"
+    )
+    phase_execution = relationship(
+        "PhaseExecution", back_populates="learning_feedback_records"
+    )
 
     __table_args__ = (
         Index("idx_rlf_cycle", "cycle_id"),
@@ -779,9 +938,14 @@ class ReviewAssignment(Base):
     released_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     due_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
     updated_at = Column(
-        DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
     )
 
     session = relationship("ResearchSession", back_populates="review_assignments")
@@ -823,12 +987,19 @@ class ReviewDispute(Base):
     events_json = Column(Text, nullable=False, default="[]")
     metadata_json = Column(Text, nullable=False, default="{}")
 
-    opened_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    opened_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
     assigned_at = Column(DateTime, nullable=True)
     resolved_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
     updated_at = Column(
-        DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
     )
 
     session = relationship("ResearchSession", back_populates="review_disputes")
@@ -914,10 +1085,14 @@ class DatabaseManager:
         return kwargs
 
     def init_db(self) -> None:
-        self.engine = create_engine(self.connection_string, **self._build_engine_kwargs())
+        self.engine = create_engine(
+            self.connection_string, **self._build_engine_kwargs()
+        )
         if self.connection_string.startswith("sqlite"):
             event.listen(self.engine, "connect", _enable_sqlite_foreign_keys)
-        session_factory = sessionmaker(bind=self.engine, autoflush=False, expire_on_commit=False)
+        session_factory = sessionmaker(
+            bind=self.engine, autoflush=False, expire_on_commit=False
+        )
         self.Session = scoped_session(session_factory)
         Base.metadata.create_all(self.engine)
         self._last_schema_completeness_report = self._verify_schema_completeness()
@@ -933,6 +1108,7 @@ class DatabaseManager:
         actual_tables = set(sa_inspect(self.engine).get_table_names())
         missing = sorted(expected_tables - actual_tables)
         import datetime as dt_module
+
         report: Dict[str, Any] = {
             "status": "ok" if not missing else "incomplete",
             "checked_at": dt_module.datetime.now(dt_module.timezone.utc).isoformat(),
@@ -955,14 +1131,19 @@ class DatabaseManager:
         return report
 
     def get_schema_completeness_report(self) -> Dict[str, Any]:
-        return deepcopy(getattr(self, "_last_schema_completeness_report", {"status": "pending"}))
+        return deepcopy(
+            getattr(self, "_last_schema_completeness_report", {"status": "pending"})
+        )
 
     def _normalize_legacy_postgres_enums(self) -> Dict[str, Any]:
         import datetime as dt_module
+
         report: Dict[str, Any] = {
             "status": "skip",
             "checked_at": dt_module.datetime.now(dt_module.timezone.utc).isoformat(),
-            "database_type": self.engine.dialect.name if self.engine is not None else make_url(self.connection_string).get_backend_name(),
+            "database_type": self.engine.dialect.name
+            if self.engine is not None
+            else make_url(self.connection_string).get_backend_name(),
             "normalized_enum_count": 0,
             "normalized_label_count": 0,
             "normalized_enums": [],
@@ -974,20 +1155,30 @@ class DatabaseManager:
         normalized_enum_names: set[str] = set()
         normalized_entries: List[Dict[str, Any]] = []
         with self.engine.begin() as connection:
-            for table_name, column_name, expected_labels in LEGACY_POSTGRES_ENUM_COLUMNS:
-                enum_name = self._resolve_postgres_enum_name(connection, table_name, column_name)
+            for (
+                table_name,
+                column_name,
+                expected_labels,
+            ) in LEGACY_POSTGRES_ENUM_COLUMNS:
+                enum_name = self._resolve_postgres_enum_name(
+                    connection, table_name, column_name
+                )
                 if not enum_name or enum_name in normalized_enum_names:
                     continue
 
                 enum_labels = self._fetch_postgres_enum_labels(connection, enum_name)
-                rename_map = self._build_legacy_enum_label_map(enum_labels, expected_labels)
+                rename_map = self._build_legacy_enum_label_map(
+                    enum_labels, expected_labels
+                )
                 if not rename_map:
                     continue
 
                 quoted_enum_name = self._quote_postgres_identifier(enum_name)
                 for old_label, new_label in rename_map.items():
                     connection.execute(
-                        text(f"ALTER TYPE {quoted_enum_name} RENAME VALUE :old_label TO :new_label"),
+                        text(
+                            f"ALTER TYPE {quoted_enum_name} RENAME VALUE :old_label TO :new_label"
+                        ),
                         {"old_label": old_label, "new_label": new_label},
                     )
                 normalized_enum_names.add(enum_name)
@@ -1015,7 +1206,9 @@ class DatabaseManager:
         )
         if normalized_entries:
             report["status"] = "normalized"
-            report["message"] = f"已规范 {len(normalized_entries)} 个 PostgreSQL 旧枚举定义"
+            report["message"] = (
+                f"已规范 {len(normalized_entries)} 个 PostgreSQL 旧枚举定义"
+            )
         else:
             report["status"] = "ok"
             report["message"] = "未检测到需要规范化的 PostgreSQL 旧枚举标签"
@@ -1043,7 +1236,9 @@ class DatabaseManager:
         engine = self.engine
         owns_engine = False
         if engine is None:
-            engine = create_engine(self.connection_string, **self._build_engine_kwargs())
+            engine = create_engine(
+                self.connection_string, **self._build_engine_kwargs()
+            )
             owns_engine = True
 
         try:
@@ -1074,13 +1269,16 @@ class DatabaseManager:
 
     def _inspect_postgres_schema_drift(self, connection: Any) -> Dict[str, Any]:
         import datetime as dt_module
+
         checked_at = dt_module.datetime.now(dt_module.timezone.utc).isoformat()
         issues: List[Dict[str, Any]] = []
         compatibility_variants: List[Dict[str, Any]] = []
         normalization_report = self.get_schema_normalization_report()
 
         for table_name, column_name, expected_labels in LEGACY_POSTGRES_ENUM_COLUMNS:
-            column = self._fetch_postgres_column_metadata(connection, table_name, column_name)
+            column = self._fetch_postgres_column_metadata(
+                connection, table_name, column_name
+            )
             if column is None:
                 issues.append(
                     {
@@ -1103,20 +1301,25 @@ class DatabaseManager:
                     (
                         entry
                         for entry in normalization_report.get("normalized_enums") or []
-                        if entry.get("table") == table_name and entry.get("column") == column_name
+                        if entry.get("table") == table_name
+                        and entry.get("column") == column_name
                     ),
                     None,
                 )
                 issues.append(
                     {
                         "kind": "legacy_enum",
-                        "status": "degraded" if label_lower == expected_lower else "fail",
+                        "status": "degraded"
+                        if label_lower == expected_lower
+                        else "fail",
                         "table": table_name,
                         "column": column_name,
                         "enum_name": udt_name,
                         "expected_labels": list(expected_labels),
                         "actual_labels": enum_labels,
-                        "compatibility": "auto_normalized" if normalization_entry else "legacy_compatible",
+                        "compatibility": "auto_normalized"
+                        if normalization_entry
+                        else "legacy_compatible",
                         "message": "检测到 PostgreSQL 原生枚举列，仍处于 legacy schema 兼容模式"
                         if label_lower == expected_lower
                         else "PostgreSQL 原生枚举标签与当前运行时契约不兼容",
@@ -1137,7 +1340,9 @@ class DatabaseManager:
                 )
 
         for table_name, column_name, display_type in POSTGRES_STRING_LIST_COLUMNS:
-            column = self._fetch_postgres_column_metadata(connection, table_name, column_name)
+            column = self._fetch_postgres_column_metadata(
+                connection, table_name, column_name
+            )
             if column is None:
                 issues.append(
                     {
@@ -1178,8 +1383,12 @@ class DatabaseManager:
                 }
             )
 
-        legacy_enum_count = sum(1 for item in issues if item.get("kind") == "legacy_enum")
-        incompatible_drift_count = sum(1 for item in issues if item.get("status") == "fail")
+        legacy_enum_count = sum(
+            1 for item in issues if item.get("kind") == "legacy_enum"
+        )
+        incompatible_drift_count = sum(
+            1 for item in issues if item.get("status") == "fail"
+        )
         compatibility_variant_count = len(compatibility_variants)
 
         if incompatible_drift_count > 0:
@@ -1187,7 +1396,9 @@ class DatabaseManager:
             message = f"检测到 {incompatible_drift_count} 个不兼容 schema drift"
         elif legacy_enum_count > 0:
             status = "degraded"
-            message = f"检测到 {legacy_enum_count} 个 legacy enum drift，当前依赖兼容层运行"
+            message = (
+                f"检测到 {legacy_enum_count} 个 legacy enum drift，当前依赖兼容层运行"
+            )
         elif compatibility_variant_count > 0:
             status = "ok"
             message = f"未检测到不兼容 drift；发现 {compatibility_variant_count} 个 PostgreSQL 列存储兼容变体"
@@ -1209,7 +1420,9 @@ class DatabaseManager:
         }
 
     @staticmethod
-    def _fetch_postgres_column_metadata(connection: Any, table_name: str, column_name: str) -> Optional[tuple[Any, Any]]:
+    def _fetch_postgres_column_metadata(
+        connection: Any, table_name: str, column_name: str
+    ) -> Optional[tuple[Any, Any]]:
         row = connection.execute(
             text(
                 """
@@ -1227,7 +1440,9 @@ class DatabaseManager:
         return row[0], row[1]
 
     @staticmethod
-    def _resolve_postgres_enum_name(connection: Any, table_name: str, column_name: str) -> Optional[str]:
+    def _resolve_postgres_enum_name(
+        connection: Any, table_name: str, column_name: str
+    ) -> Optional[str]:
         column = connection.execute(
             text(
                 """
@@ -1271,7 +1486,9 @@ class DatabaseManager:
         if not enum_labels:
             return {}
 
-        expected_by_lower = {str(label).lower(): str(label) for label in expected_labels}
+        expected_by_lower = {
+            str(label).lower(): str(label) for label in expected_labels
+        }
         if {str(label).lower() for label in enum_labels} != set(expected_by_lower):
             return {}
 
@@ -1283,13 +1500,20 @@ class DatabaseManager:
         return rename_map
 
     @staticmethod
-    def _is_expected_postgres_string_list_column(column: Optional[tuple[Any, Any]]) -> bool:
+    def _is_expected_postgres_string_list_column(
+        column: Optional[tuple[Any, Any]],
+    ) -> bool:
         if column is None:
             return False
-        return str(column[0]).upper() == "ARRAY" and str(column[1] or "").strip() == "_varchar"
+        return (
+            str(column[0]).upper() == "ARRAY"
+            and str(column[1] or "").strip() == "_varchar"
+        )
 
     @staticmethod
-    def _is_legacy_postgres_json_string_list_column(column: Optional[tuple[Any, Any]]) -> bool:
+    def _is_legacy_postgres_json_string_list_column(
+        column: Optional[tuple[Any, Any]],
+    ) -> bool:
         if column is None:
             return False
         return str(column[0]).upper() in {"JSON", "JSONB"}
@@ -1324,7 +1548,9 @@ class DatabaseManager:
         engine = self.engine
         owns_engine = False
         if engine is None:
-            engine = create_engine(self.connection_string, **self._build_engine_kwargs())
+            engine = create_engine(
+                self.connection_string, **self._build_engine_kwargs()
+            )
             owns_engine = True
         try:
             with engine.connect() as connection:
@@ -1345,21 +1571,71 @@ class DatabaseManager:
     @staticmethod
     def create_default_relationships(session: Session) -> None:
         default_rels = [
-            ("君", "SOVEREIGN", "方剂中的主要成分，发挥主要治疗作用", RelationshipCategoryEnum.COMPOSITION, 0.95),
-            ("臣", "MINISTER", "方剂中的辅助成分，协助君药发挥作用", RelationshipCategoryEnum.COMPOSITION, 0.92),
-            ("佐", "ASSISTANT", "方剂中的配合成分，起支持或对抗作用", RelationshipCategoryEnum.COMPOSITION, 0.90),
-            ("使", "ENVOY", "方剂中的调和成分，促进诸药的协调", RelationshipCategoryEnum.COMPOSITION, 0.88),
-            ("治疗", "TREATS", "中药/方剂治疗特定症候", RelationshipCategoryEnum.THERAPEUTIC, 0.75),
-            ("功效", "HAS_EFFICACY", "中药具有特定功效", RelationshipCategoryEnum.PROPERTY, 0.82),
-            ("类似", "SIMILAR_TO", "两个方剂或中药成分相似", RelationshipCategoryEnum.SIMILARITY, 0.70),
-            ("包含", "CONTAINS", "方剂包含特定中药", RelationshipCategoryEnum.COMPOSITION, 0.99),
+            (
+                "君",
+                "SOVEREIGN",
+                "方剂中的主要成分，发挥主要治疗作用",
+                RelationshipCategoryEnum.COMPOSITION,
+                0.95,
+            ),
+            (
+                "臣",
+                "MINISTER",
+                "方剂中的辅助成分，协助君药发挥作用",
+                RelationshipCategoryEnum.COMPOSITION,
+                0.92,
+            ),
+            (
+                "佐",
+                "ASSISTANT",
+                "方剂中的配合成分，起支持或对抗作用",
+                RelationshipCategoryEnum.COMPOSITION,
+                0.90,
+            ),
+            (
+                "使",
+                "ENVOY",
+                "方剂中的调和成分，促进诸药的协调",
+                RelationshipCategoryEnum.COMPOSITION,
+                0.88,
+            ),
+            (
+                "治疗",
+                "TREATS",
+                "中药/方剂治疗特定症候",
+                RelationshipCategoryEnum.THERAPEUTIC,
+                0.75,
+            ),
+            (
+                "功效",
+                "HAS_EFFICACY",
+                "中药具有特定功效",
+                RelationshipCategoryEnum.PROPERTY,
+                0.82,
+            ),
+            (
+                "类似",
+                "SIMILAR_TO",
+                "两个方剂或中药成分相似",
+                RelationshipCategoryEnum.SIMILARITY,
+                0.70,
+            ),
+            (
+                "包含",
+                "CONTAINS",
+                "方剂包含特定中药",
+                RelationshipCategoryEnum.COMPOSITION,
+                0.99,
+            ),
         ]
         # Legacy PostgreSQL deployments may still store this column as a native enum
         # with uppercase labels. Avoid ORM materialization for existing rows so startup
         # remains compatible with both legacy and current schemas.
         existing = {
             str(row[0]): True
-            for row in session.execute(text("SELECT relationship_type FROM relationship_types"))
+            for row in session.execute(
+                text("SELECT relationship_type FROM relationship_types")
+            )
         }
         legacy_uppercase_pg_enum = False
         bind = session.get_bind()
@@ -1391,7 +1667,9 @@ class DatabaseManager:
                         {"enum_name": str(category_column[1])},
                     ).fetchall()
                 ]
-                legacy_uppercase_pg_enum = bool(enum_labels) and all(label == label.upper() for label in enum_labels)
+                legacy_uppercase_pg_enum = bool(enum_labels) and all(
+                    label == label.upper() for label in enum_labels
+                )
         for name, rel_type, desc, category, confidence_base in default_rels:
             if rel_type in existing:
                 continue
@@ -1442,9 +1720,15 @@ class PersistenceService(BaseModule):
         self.database_manager = DatabaseManager(
             self.connection_string,
             echo=bool(database_cfg.get("echo", self.config.get("echo", False))),
-            connection_timeout=database_cfg.get("connection_timeout", self.config.get("connection_timeout")),
-            pool_size=database_cfg.get("connection_pool_size", self.config.get("connection_pool_size")),
-            max_overflow=database_cfg.get("max_overflow", self.config.get("max_overflow")),
+            connection_timeout=database_cfg.get(
+                "connection_timeout", self.config.get("connection_timeout")
+            ),
+            pool_size=database_cfg.get(
+                "connection_pool_size", self.config.get("connection_pool_size")
+            ),
+            max_overflow=database_cfg.get(
+                "max_overflow", self.config.get("max_overflow")
+            ),
         )
         self.database_manager.init_db()
         with self.database_manager.session_scope() as session:
@@ -1460,9 +1744,13 @@ class PersistenceService(BaseModule):
 
         if entity_type in {"document_graph", "knowledge_store", "document"}:
             if operation == "get":
-                document_id = str(data.get("document_id") or data.get("id") or "").strip()
+                document_id = str(
+                    data.get("document_id") or data.get("id") or ""
+                ).strip()
                 source_file = str(data.get("source_file") or "").strip() or None
-                return self.get_document_snapshot(document_id=document_id or None, source_file=source_file)
+                return self.get_document_snapshot(
+                    document_id=document_id or None, source_file=source_file
+                )
             return self.persist_document_graph(data)
 
         if entity_type in {"research_record", "research_results"}:
@@ -1474,7 +1762,9 @@ class PersistenceService(BaseModule):
         if entity_type in {"storage_overview", "overview", "stats"}:
             return self.get_storage_overview()
 
-        raise ValueError(f"不支持的持久化命令: entity_type={entity_type}, operation={operation}")
+        raise ValueError(
+            f"不支持的持久化命令: entity_type={entity_type}, operation={operation}"
+        )
 
     def _do_cleanup(self) -> bool:
         if self.database_manager is not None:
@@ -1492,7 +1782,9 @@ class PersistenceService(BaseModule):
             if replace_children:
                 self._delete_document_graph_details(session, document.id)
 
-            entities = self._persist_entities(session, document.id, payload.get("entities") or [])
+            entities = self._persist_entities(
+                session, document.id, payload.get("entities") or []
+            )
             entity_lookup = self._build_entity_lookup(entities)
             relationships = self._persist_relationships(
                 session,
@@ -1501,7 +1793,9 @@ class PersistenceService(BaseModule):
             )
 
             if "statistics" in payload:
-                self._upsert_processing_statistics(session, document.id, payload.get("statistics") or {})
+                self._upsert_processing_statistics(
+                    session, document.id, payload.get("statistics") or {}
+                )
             if "quality_metrics" in payload or "quality" in payload:
                 self._upsert_quality_metrics(
                     session,
@@ -1519,10 +1813,14 @@ class PersistenceService(BaseModule):
 
             document.entities_extracted_count = len(entities)
             if "quality_score" in document_payload:
-                document.quality_score = float(document_payload.get("quality_score") or 0.0)
+                document.quality_score = float(
+                    document_payload.get("quality_score") or 0.0
+                )
 
             session.flush()
-            return self._build_document_snapshot(session, document.id, len(relationships))
+            return self._build_document_snapshot(
+                session, document.id, len(relationships)
+            )
 
     def get_document_snapshot(
         self,
@@ -1532,11 +1830,17 @@ class PersistenceService(BaseModule):
     ) -> Dict[str, Any]:
         manager = self._require_manager()
         with manager.session_scope() as session:
-            document = self._get_document(session, document_id=document_id, source_file=source_file)
+            document = self._get_document(
+                session, document_id=document_id, source_file=source_file
+            )
             if document is None:
                 return {"found": False}
-            relationship_count = self._count_document_relationships(session, document.id)
-            return self._build_document_snapshot(session, document.id, relationship_count)
+            relationship_count = self._count_document_relationships(
+                session, document.id
+            )
+            return self._build_document_snapshot(
+                session, document.id, relationship_count
+            )
 
     def persist_research_record(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
         cycle_id = str(payload.get("cycle_id") or payload.get("id") or "").strip()
@@ -1545,25 +1849,44 @@ class PersistenceService(BaseModule):
 
         manager = self._require_manager()
         with manager.session_scope() as session:
-            record = session.query(ResearchRecord).filter_by(cycle_id=cycle_id).one_or_none()
+            record = (
+                session.query(ResearchRecord).filter_by(cycle_id=cycle_id).one_or_none()
+            )
             if record is None:
-                record = ResearchRecord(cycle_id=cycle_id, cycle_name=str(payload.get("cycle_name") or cycle_id), status="pending", persisted_at="")
+                record = ResearchRecord(
+                    cycle_id=cycle_id,
+                    cycle_name=str(payload.get("cycle_name") or cycle_id),
+                    status="pending",
+                    persisted_at="",
+                )
                 session.add(record)
 
-            record.cycle_name = str(payload.get("cycle_name") or record.cycle_name or cycle_id)
+            record.cycle_name = str(
+                payload.get("cycle_name") or record.cycle_name or cycle_id
+            )
             record.description = self._optional_text(payload.get("description"))
             record.status = self._enum_value(payload.get("status")) or record.status
-            record.current_phase = self._enum_value(payload.get("current_phase")) or self._optional_text(payload.get("current_phase"))
+            record.current_phase = self._enum_value(
+                payload.get("current_phase")
+            ) or self._optional_text(payload.get("current_phase"))
             record.started_at = self._optional_text(payload.get("started_at"))
             record.completed_at = self._optional_text(payload.get("completed_at"))
             record.duration = float(payload.get("duration") or 0.0)
-            record.research_objective = self._optional_text(payload.get("research_objective"))
+            record.research_objective = self._optional_text(
+                payload.get("research_objective")
+            )
             record.research_scope = self._optional_text(payload.get("research_scope"))
             record.target_audience = self._optional_text(payload.get("target_audience"))
             record.outcomes_json = _json_dumps(payload.get("outcomes") or [], "[]")
-            record.deliverables_json = _json_dumps(payload.get("deliverables") or [], "[]")
-            record.quality_metrics_json = _json_dumps(payload.get("quality_metrics") or {}, "{}")
-            record.risk_assessment_json = _json_dumps(payload.get("risk_assessment") or {}, "{}")
+            record.deliverables_json = _json_dumps(
+                payload.get("deliverables") or [], "[]"
+            )
+            record.quality_metrics_json = _json_dumps(
+                payload.get("quality_metrics") or {}, "{}"
+            )
+            record.risk_assessment_json = _json_dumps(
+                payload.get("risk_assessment") or {}, "{}"
+            )
             record.metadata_json = _json_dumps(payload.get("metadata") or {}, "{}")
             record.persisted_at = datetime.now().isoformat()
             session.flush()
@@ -1572,7 +1895,9 @@ class PersistenceService(BaseModule):
     def get_research_record(self, cycle_id: str) -> Dict[str, Any]:
         manager = self._require_manager()
         with manager.session_scope() as session:
-            record = session.query(ResearchRecord).filter_by(cycle_id=cycle_id).one_or_none()
+            record = (
+                session.query(ResearchRecord).filter_by(cycle_id=cycle_id).one_or_none()
+            )
             if record is None:
                 return {"found": False, "cycle_id": cycle_id}
             return self._research_record_to_dict(record)
@@ -1591,12 +1916,20 @@ class PersistenceService(BaseModule):
             }
 
     def _resolve_connection_string(self, config: Mapping[str, Any]) -> str:
-        direct = config.get("connection_string") or config.get("database_url") or config.get("url")
+        direct = (
+            config.get("connection_string")
+            or config.get("database_url")
+            or config.get("url")
+        )
         if isinstance(direct, str) and direct.strip():
             return direct.strip()
 
         database_cfg = config.get("database") or {}
-        db_type = str(database_cfg.get("type") or config.get("database_type") or "sqlite").strip().lower()
+        db_type = (
+            str(database_cfg.get("type") or config.get("database_type") or "sqlite")
+            .strip()
+            .lower()
+        )
         db_path = str(
             database_cfg.get("path")
             or config.get("db_path")
@@ -1606,13 +1939,31 @@ class PersistenceService(BaseModule):
         if db_type == "sqlite":
             absolute = os.path.abspath(db_path)
             return f"sqlite:///{absolute}"
-        return str(database_cfg.get("connection_string") or config.get("connection_string") or "").strip()
+        return str(
+            database_cfg.get("connection_string")
+            or config.get("connection_string")
+            or ""
+        ).strip()
 
     def _normalize_command(self, context: Mapping[str, Any]) -> Dict[str, Any]:
-        command = context.get("command") if isinstance(context.get("command"), Mapping) else context
-        data = command.get("data") if isinstance(command.get("data"), Mapping) else command
-        entity_type = str(command.get("entity_type") or command.get("model") or "document_graph").strip().lower()
-        operation = str(command.get("operation") or command.get("action") or "upsert").strip().lower()
+        command = (
+            context.get("command")
+            if isinstance(context.get("command"), Mapping)
+            else context
+        )
+        data = (
+            command.get("data") if isinstance(command.get("data"), Mapping) else command
+        )
+        entity_type = (
+            str(command.get("entity_type") or command.get("model") or "document_graph")
+            .strip()
+            .lower()
+        )
+        operation = (
+            str(command.get("operation") or command.get("action") or "upsert")
+            .strip()
+            .lower()
+        )
         return {
             "entity_type": entity_type,
             "operation": operation,
@@ -1652,7 +2003,10 @@ class PersistenceService(BaseModule):
                 # 同 source_file 但 hash 没匹配：先尝试 content_hash 仍空的旧记录（backfill 前过渡）
                 fallback = (
                     session.query(Document)
-                    .filter(Document.source_file == source_file, Document.content_hash.is_(None))
+                    .filter(
+                        Document.source_file == source_file,
+                        Document.content_hash.is_(None),
+                    )
                     .order_by(Document.created_at.asc())
                     .first()
                 )
@@ -1660,27 +2014,45 @@ class PersistenceService(BaseModule):
             return query.order_by(Document.created_at.asc()).first()
         return None
 
-    def _upsert_document(self, session: Session, payload: Mapping[str, Any]) -> Document:
-        source_file = str(payload.get("source_file") or payload.get("source_ref") or payload.get("path") or "").strip()
+    def _upsert_document(
+        self, session: Session, payload: Mapping[str, Any]
+    ) -> Document:
+        source_file = str(
+            payload.get("source_file")
+            or payload.get("source_ref")
+            or payload.get("path")
+            or ""
+        ).strip()
         if not source_file:
-            raise ValueError("persist_document_graph 需要 source_file/document.source_file")
+            raise ValueError(
+                "persist_document_graph 需要 source_file/document.source_file"
+            )
         # T2.3: 剥离遗留 _<YYYYMMDD_HHMMSS>_<8hex> 后缀，把时间戳信息推到 ingest_run_id
         normalized_sf, suffix_run_id = _split_legacy_source_file_suffix(source_file)
         source_file = normalized_sf
 
-        content_hash = (str(payload.get("content_hash") or "").strip().lower() or None)
-        ingest_run_id = (str(payload.get("ingest_run_id") or suffix_run_id or "").strip() or None)
+        content_hash = str(payload.get("content_hash") or "").strip().lower() or None
+        ingest_run_id = (
+            str(payload.get("ingest_run_id") or suffix_run_id or "").strip() or None
+        )
 
         # T2.3: 自然键现在是 (source_file, content_hash)。同 hash → upsert 同一行；
         # 不同 hash → 视为新版本（允许并存，由 UNIQUE 复合保证不重复）
         document = self._get_document(
             session,
-            document_id=str(payload.get("id") or payload.get("document_id") or "").strip() or None,
+            document_id=str(
+                payload.get("id") or payload.get("document_id") or ""
+            ).strip()
+            or None,
             source_file=source_file,
             content_hash=content_hash,
         )
         if document is None:
-            document = Document(source_file=source_file, content_hash=content_hash, ingest_run_id=ingest_run_id)
+            document = Document(
+                source_file=source_file,
+                content_hash=content_hash,
+                ingest_run_id=ingest_run_id,
+            )
             session.add(document)
         else:
             if content_hash and document.content_hash is None:
@@ -1688,18 +2060,31 @@ class PersistenceService(BaseModule):
             if ingest_run_id and not document.ingest_run_id:
                 document.ingest_run_id = ingest_run_id
 
-        document.processing_timestamp = self._parse_datetime(payload.get("processing_timestamp")) or datetime.now(timezone.utc)
+        document.processing_timestamp = self._parse_datetime(
+            payload.get("processing_timestamp")
+        ) or datetime.now(timezone.utc)
         document.objective = self._optional_text(payload.get("objective"))
-        document.raw_text_size = int(payload.get("raw_text_size") or payload.get("text_size") or 0)
-        document.process_status = self._coerce_process_status(payload.get("process_status") or payload.get("status"))
-        document.quality_score = float(payload.get("quality_score") or document.quality_score or 0.0)
+        document.raw_text_size = int(
+            payload.get("raw_text_size") or payload.get("text_size") or 0
+        )
+        document.process_status = self._coerce_process_status(
+            payload.get("process_status") or payload.get("status")
+        )
+        document.quality_score = float(
+            payload.get("quality_score") or document.quality_score or 0.0
+        )
         document.notes = self._optional_text(payload.get("notes"))
         document.updated_at = datetime.now(timezone.utc)
         session.flush()
         return document
 
-    def _delete_document_graph_details(self, session: Session, document_id: uuid.UUID) -> None:
-        entity_ids = [row[0] for row in session.query(Entity.id).filter_by(document_id=document_id).all()]
+    def _delete_document_graph_details(
+        self, session: Session, document_id: uuid.UUID
+    ) -> None:
+        entity_ids = [
+            row[0]
+            for row in session.query(Entity.id).filter_by(document_id=document_id).all()
+        ]
         if entity_ids:
             session.query(EntityRelationship).filter(
                 or_(
@@ -1707,22 +2092,37 @@ class PersistenceService(BaseModule):
                     EntityRelationship.target_entity_id.in_(entity_ids),
                 )
             ).delete(synchronize_session=False)
-        session.query(Entity).filter_by(document_id=document_id).delete(synchronize_session=False)
-        session.query(ProcessingLog).filter_by(document_id=document_id).delete(synchronize_session=False)
+        session.query(Entity).filter_by(document_id=document_id).delete(
+            synchronize_session=False
+        )
+        session.query(ProcessingLog).filter_by(document_id=document_id).delete(
+            synchronize_session=False
+        )
 
-    def _persist_entities(self, session: Session, document_id: uuid.UUID, payloads: Sequence[Mapping[str, Any]]) -> List[Entity]:
+    def _persist_entities(
+        self,
+        session: Session,
+        document_id: uuid.UUID,
+        payloads: Sequence[Mapping[str, Any]],
+    ) -> List[Entity]:
         entities: List[Entity] = []
         for payload in payloads:
             entity = Entity(
                 document_id=document_id,
                 name=str(payload.get("name") or "").strip(),
-                type=self._coerce_entity_type(payload.get("type") or payload.get("entity_type")),
+                type=self._coerce_entity_type(
+                    payload.get("type") or payload.get("entity_type")
+                ),
                 confidence=float(payload.get("confidence") or 0.5),
                 position=int(payload.get("position") or 0),
                 length=int(payload.get("length") or 0),
-                alternative_names=list(payload.get("alternative_names") or payload.get("aliases") or []),
+                alternative_names=list(
+                    payload.get("alternative_names") or payload.get("aliases") or []
+                ),
                 description=self._optional_text(payload.get("description")),
-                entity_metadata=dict(payload.get("metadata") or payload.get("entity_metadata") or {}),
+                entity_metadata=dict(
+                    payload.get("metadata") or payload.get("entity_metadata") or {}
+                ),
             )
             session.add(entity)
             entities.append(entity)
@@ -1746,39 +2146,63 @@ class PersistenceService(BaseModule):
             relationship_type = self._resolve_relationship_type(
                 session,
                 type_cache,
-                str(payload.get("relationship_type") or payload.get("type") or payload.get("relationship_name") or "").strip(),
+                str(
+                    payload.get("relationship_type")
+                    or payload.get("type")
+                    or payload.get("relationship_name")
+                    or ""
+                ).strip(),
             )
             relationship = EntityRelationship(
                 source_entity_id=source.id,
                 target_entity_id=target.id,
                 relationship_type_id=relationship_type.id,
                 confidence=float(payload.get("confidence") or 0.5),
-                created_by_module=self._optional_text(payload.get("created_by_module")) or "persistence_service",
+                created_by_module=self._optional_text(payload.get("created_by_module"))
+                or "persistence_service",
                 evidence=self._optional_text(payload.get("evidence")),
-                relationship_metadata=dict(payload.get("metadata") or payload.get("relationship_metadata") or {}),
+                relationship_metadata=dict(
+                    payload.get("metadata")
+                    or payload.get("relationship_metadata")
+                    or {}
+                ),
             )
             session.add(relationship)
             relationships.append(relationship)
         session.flush()
         return relationships
 
-    def _persist_logs(self, session: Session, document_id: uuid.UUID, payloads: Sequence[Mapping[str, Any]]) -> None:
+    def _persist_logs(
+        self,
+        session: Session,
+        document_id: uuid.UUID,
+        payloads: Sequence[Mapping[str, Any]],
+    ) -> None:
         for payload in payloads:
             session.add(
                 ProcessingLog(
                     document_id=document_id,
-                    module_name=str(payload.get("module_name") or payload.get("module") or "unknown").strip(),
+                    module_name=str(
+                        payload.get("module_name") or payload.get("module") or "unknown"
+                    ).strip(),
                     status=self._coerce_log_status(payload.get("status")),
                     message=self._optional_text(payload.get("message")),
                     error_details=self._optional_text(payload.get("error_details")),
                     execution_time_ms=int(payload.get("execution_time_ms") or 0),
-                    timestamp=self._parse_datetime(payload.get("timestamp")) or datetime.now(timezone.utc),
+                    timestamp=self._parse_datetime(payload.get("timestamp"))
+                    or datetime.now(timezone.utc),
                 )
             )
         session.flush()
 
-    def _upsert_processing_statistics(self, session: Session, document_id: uuid.UUID, payload: Mapping[str, Any]) -> None:
-        stats = session.query(ProcessingStatistics).filter_by(document_id=document_id).one_or_none()
+    def _upsert_processing_statistics(
+        self, session: Session, document_id: uuid.UUID, payload: Mapping[str, Any]
+    ) -> None:
+        stats = (
+            session.query(ProcessingStatistics)
+            .filter_by(document_id=document_id)
+            .one_or_none()
+        )
         if stats is None:
             stats = ProcessingStatistics(document_id=document_id)
             session.add(stats)
@@ -1795,35 +2219,63 @@ class PersistenceService(BaseModule):
         stats.processing_time_ms = int(payload.get("processing_time_ms") or 0)
         session.flush()
 
-    def _upsert_quality_metrics(self, session: Session, document_id: uuid.UUID, payload: Mapping[str, Any]) -> None:
-        metrics = session.query(QualityMetrics).filter_by(document_id=document_id).one_or_none()
+    def _upsert_quality_metrics(
+        self, session: Session, document_id: uuid.UUID, payload: Mapping[str, Any]
+    ) -> None:
+        metrics = (
+            session.query(QualityMetrics)
+            .filter_by(document_id=document_id)
+            .one_or_none()
+        )
         if metrics is None:
             metrics = QualityMetrics(document_id=document_id)
             session.add(metrics)
         metrics.confidence_score = float(payload.get("confidence_score") or 0.0)
         metrics.completeness = float(payload.get("completeness") or 0.0)
         metrics.entity_precision = float(payload.get("entity_precision") or 0.0)
-        metrics.relationship_precision = float(payload.get("relationship_precision") or 0.0)
+        metrics.relationship_precision = float(
+            payload.get("relationship_precision") or 0.0
+        )
         metrics.graph_quality_score = float(payload.get("graph_quality_score") or 0.0)
-        metrics.evaluation_timestamp = self._parse_datetime(payload.get("evaluation_timestamp")) or datetime.now(timezone.utc)
+        metrics.evaluation_timestamp = self._parse_datetime(
+            payload.get("evaluation_timestamp")
+        ) or datetime.now(timezone.utc)
         metrics.evaluator = self._optional_text(payload.get("evaluator"))
         metrics.assessment_notes = self._optional_text(payload.get("assessment_notes"))
         session.flush()
 
-    def _upsert_research_analysis(self, session: Session, document_id: uuid.UUID, payload: Mapping[str, Any]) -> None:
-        analysis = session.query(ResearchAnalysis).filter_by(document_id=document_id).one_or_none()
+    def _upsert_research_analysis(
+        self, session: Session, document_id: uuid.UUID, payload: Mapping[str, Any]
+    ) -> None:
+        analysis = (
+            session.query(ResearchAnalysis)
+            .filter_by(document_id=document_id)
+            .one_or_none()
+        )
         if analysis is None:
             analysis = ResearchAnalysis(document_id=document_id)
             session.add(analysis)
-        analysis.research_perspectives = dict(payload.get("research_perspectives") or {})
+        analysis.research_perspectives = dict(
+            payload.get("research_perspectives") or {}
+        )
         analysis.formula_comparisons = dict(payload.get("formula_comparisons") or {})
-        analysis.herb_properties_analysis = dict(payload.get("herb_properties_analysis") or {})
-        analysis.pharmacology_integration = dict(payload.get("pharmacology_integration") or {})
+        analysis.herb_properties_analysis = dict(
+            payload.get("herb_properties_analysis") or {}
+        )
+        analysis.pharmacology_integration = dict(
+            payload.get("pharmacology_integration") or {}
+        )
         analysis.network_pharmacology = dict(payload.get("network_pharmacology") or {})
-        analysis.supramolecular_physicochemistry = dict(payload.get("supramolecular_physicochemistry") or {})
-        analysis.knowledge_archaeology = dict(payload.get("knowledge_archaeology") or {})
+        analysis.supramolecular_physicochemistry = dict(
+            payload.get("supramolecular_physicochemistry") or {}
+        )
+        analysis.knowledge_archaeology = dict(
+            payload.get("knowledge_archaeology") or {}
+        )
         analysis.complexity_dynamics = dict(payload.get("complexity_dynamics") or {})
-        analysis.research_scoring_panel = dict(payload.get("research_scoring_panel") or {})
+        analysis.research_scoring_panel = dict(
+            payload.get("research_scoring_panel") or {}
+        )
         analysis.summary_analysis = dict(payload.get("summary_analysis") or {})
         analysis.updated_at = datetime.now(timezone.utc)
         session.flush()
@@ -1867,8 +2319,12 @@ class PersistenceService(BaseModule):
             lookup[entity.name] = entity
         return lookup
 
-    def _resolve_entity(self, payload: Mapping[str, Any], lookup: Mapping[str, Entity], prefix: str) -> Optional[Entity]:
-        direct_id = str(payload.get(f"{prefix}_entity_id") or payload.get(f"{prefix}_id") or "").strip()
+    def _resolve_entity(
+        self, payload: Mapping[str, Any], lookup: Mapping[str, Entity], prefix: str
+    ) -> Optional[Entity]:
+        direct_id = str(
+            payload.get(f"{prefix}_entity_id") or payload.get(f"{prefix}_id") or ""
+        ).strip()
         if direct_id and direct_id in lookup:
             return lookup[direct_id]
         by_name = str(
@@ -1881,17 +2337,29 @@ class PersistenceService(BaseModule):
             return lookup.get(by_name)
         return None
 
-    def _count_document_relationships(self, session: Session, document_id: uuid.UUID) -> int:
-        entity_ids = [row[0] for row in session.query(Entity.id).filter_by(document_id=document_id).all()]
+    def _count_document_relationships(
+        self, session: Session, document_id: uuid.UUID
+    ) -> int:
+        entity_ids = [
+            row[0]
+            for row in session.query(Entity.id).filter_by(document_id=document_id).all()
+        ]
         if not entity_ids:
             return 0
-        return session.query(EntityRelationship).filter(
-            EntityRelationship.source_entity_id.in_(entity_ids)
-        ).count()
+        return (
+            session.query(EntityRelationship)
+            .filter(EntityRelationship.source_entity_id.in_(entity_ids))
+            .count()
+        )
 
-    def _build_document_snapshot(self, session: Session, document_id: uuid.UUID, relationship_count: int) -> Dict[str, Any]:
+    def _build_document_snapshot(
+        self, session: Session, document_id: uuid.UUID, relationship_count: int
+    ) -> Dict[str, Any]:
         document = session.query(Document).filter_by(id=document_id).one()
-        entities = [entity.to_dict() for entity in session.query(Entity).filter_by(document_id=document_id).all()]
+        entities = [
+            entity.to_dict()
+            for entity in session.query(Entity).filter_by(document_id=document_id).all()
+        ]
         logs = [
             {
                 "module_name": log.module_name,
@@ -1901,11 +2369,26 @@ class PersistenceService(BaseModule):
                 "execution_time_ms": log.execution_time_ms,
                 "timestamp": log.timestamp.isoformat(),
             }
-            for log in session.query(ProcessingLog).filter_by(document_id=document_id).order_by(ProcessingLog.timestamp.asc()).all()
+            for log in session.query(ProcessingLog)
+            .filter_by(document_id=document_id)
+            .order_by(ProcessingLog.timestamp.asc())
+            .all()
         ]
-        stats = session.query(ProcessingStatistics).filter_by(document_id=document_id).one_or_none()
-        quality = session.query(QualityMetrics).filter_by(document_id=document_id).one_or_none()
-        analysis = session.query(ResearchAnalysis).filter_by(document_id=document_id).one_or_none()
+        stats = (
+            session.query(ProcessingStatistics)
+            .filter_by(document_id=document_id)
+            .one_or_none()
+        )
+        quality = (
+            session.query(QualityMetrics)
+            .filter_by(document_id=document_id)
+            .one_or_none()
+        )
+        analysis = (
+            session.query(ResearchAnalysis)
+            .filter_by(document_id=document_id)
+            .one_or_none()
+        )
         return {
             "found": True,
             "document": {
@@ -1922,7 +2405,9 @@ class PersistenceService(BaseModule):
             "entities": entities,
             "entity_count": len(entities),
             "relationship_count": relationship_count,
-            "statistics": None if stats is None else {
+            "statistics": None
+            if stats is None
+            else {
                 "formulas_count": stats.formulas_count,
                 "herbs_count": stats.herbs_count,
                 "syndromes_count": stats.syndromes_count,
@@ -1935,7 +2420,9 @@ class PersistenceService(BaseModule):
                 "source_modules": list(stats.source_modules or []),
                 "processing_time_ms": stats.processing_time_ms,
             },
-            "quality_metrics": None if quality is None else {
+            "quality_metrics": None
+            if quality is None
+            else {
                 "confidence_score": quality.confidence_score,
                 "completeness": quality.completeness,
                 "entity_precision": quality.entity_precision,
@@ -1945,13 +2432,21 @@ class PersistenceService(BaseModule):
                 "evaluator": quality.evaluator,
                 "assessment_notes": quality.assessment_notes,
             },
-            "research_analysis": None if analysis is None else {
+            "research_analysis": None
+            if analysis is None
+            else {
                 "research_perspectives": dict(analysis.research_perspectives or {}),
                 "formula_comparisons": dict(analysis.formula_comparisons or {}),
-                "herb_properties_analysis": dict(analysis.herb_properties_analysis or {}),
-                "pharmacology_integration": dict(analysis.pharmacology_integration or {}),
+                "herb_properties_analysis": dict(
+                    analysis.herb_properties_analysis or {}
+                ),
+                "pharmacology_integration": dict(
+                    analysis.pharmacology_integration or {}
+                ),
                 "network_pharmacology": dict(analysis.network_pharmacology or {}),
-                "supramolecular_physicochemistry": dict(analysis.supramolecular_physicochemistry or {}),
+                "supramolecular_physicochemistry": dict(
+                    analysis.supramolecular_physicochemistry or {}
+                ),
                 "knowledge_archaeology": dict(analysis.knowledge_archaeology or {}),
                 "complexity_dynamics": dict(analysis.complexity_dynamics or {}),
                 "research_scoring_panel": dict(analysis.research_scoring_panel or {}),
