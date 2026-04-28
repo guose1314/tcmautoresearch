@@ -1285,14 +1285,37 @@ def kg_subgraph(
             for u, v, d in graph.edges(data=True)
         ]
 
+    total_nodes = len(nodes)
+    total_edges = len(edges)
+
+    # 优先保留与边相连的节点；若存在边，仅渲染连通节点以避免大量孤儿点污染画布
+    NODE_CAP = 500
+    EDGE_CAP = 1000
+    edges_capped = edges[:EDGE_CAP]
+    connected_ids = set()
+    for e in edges_capped:
+        connected_ids.add(e["source"])
+        connected_ids.add(e["target"])
+    connected_nodes = [n for n in nodes if n["id"] in connected_ids]
+    isolated_nodes = [n for n in nodes if n["id"] not in connected_ids]
+    if edges_capped:
+        nodes_out = connected_nodes[:NODE_CAP]
+    else:
+        # 无边：仅展示少量孤立节点作为概览
+        nodes_out = isolated_nodes[:min(NODE_CAP, 80)]
+
     return {
         "graph_type": graph_type,
         "label": filt["label"],
-        "nodes": nodes[:500],
-        "edges": edges[:1000],
+        "nodes": nodes_out,
+        "edges": edges_capped,
         "statistics": {
-            "nodes_count": len(nodes),
-            "edges_count": len(edges),
+            "nodes_count": total_nodes,
+            "edges_count": total_edges,
+            "rendered_nodes": len(nodes_out),
+            "rendered_edges": len(edges_capped),
+            "connected_nodes": len(connected_nodes),
+            "isolated_nodes_total": len(isolated_nodes),
         },
     }
 

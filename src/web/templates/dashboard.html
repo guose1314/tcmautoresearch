@@ -151,6 +151,7 @@
 
       #kg-network {
         min-height: 460px;
+        height: 560px;
         background:
           radial-gradient(
             circle at top left,
@@ -2261,6 +2262,20 @@
             return protocol + "//" + window.location.host + path;
           },
 
+          resolveFetchErrorMessage(error, fallback) {
+            var message = error && error.message ? String(error.message) : "";
+            if (
+              message === "Failed to fetch" ||
+              message === "Load failed" ||
+              message === "NetworkError when attempting to fetch resource."
+            ) {
+              return (
+                fallback + "：接口不可达，请确认 Web 服务仍在运行后再刷新。"
+              );
+            }
+            return message || fallback;
+          },
+
           humanizePhase(phase) {
             var map = {
               observe: "Observe / 文献观察",
@@ -3036,7 +3051,10 @@
               }
               this.knowledgeGraph.stats = await resp.json();
             } catch (e) {
-              this.knowledgeGraph.error = e.message || "图谱统计加载失败";
+              this.knowledgeGraph.error = this.resolveFetchErrorMessage(
+                e,
+                "图谱统计加载失败",
+              );
             }
           },
 
@@ -3075,7 +3093,10 @@
               };
               this.renderKnowledgeGraph(data.nodes || [], data.edges || []);
             } catch (e) {
-              this.knowledgeGraph.error = e.message || "图谱加载失败";
+              this.knowledgeGraph.error = this.resolveFetchErrorMessage(
+                e,
+                "图谱加载失败",
+              );
             } finally {
               this.knowledgeGraph.loading = false;
             }
@@ -3122,7 +3143,10 @@
                 true,
               );
             } catch (e) {
-              this.knowledgeGraph.error = e.message || "课题图谱加载失败";
+              this.knowledgeGraph.error = this.resolveFetchErrorMessage(
+                e,
+                "课题图谱加载失败",
+              );
             } finally {
               this.knowledgeGraph.loading = false;
             }
@@ -3217,6 +3241,18 @@
               });
               this.knowledgeGraph.selectedNode = selected || null;
             });
+
+            network.once("stabilizationIterationsDone", function () {
+              try {
+                network.fit({ animation: { duration: 400, easingFunction: "easeInOutQuad" } });
+              } catch (e) {
+                /* ignore fit errors */
+              }
+            });
+            // 兜底：若稳定回调未触发（极小图或物理已禁用），1.2s 后强制 fit 一次
+            setTimeout(function () {
+              try { network.fit(); } catch (e) { /* ignore */ }
+            }, 1200);
 
             this.knowledgeGraphNetwork = network;
           },
