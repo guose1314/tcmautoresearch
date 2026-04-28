@@ -482,6 +482,16 @@ def _build_neo4j_projection(
     entity_annotations: Mapping[str, Mapping[str, Any]],
     community_assignments: Mapping[str, str],
 ) -> Dict[str, Any]:
+    # T3.2: ResearchTopic / HAS_LATENT_TOPIC / HAS_TOPIC_MEMBER 已迁移到
+    # CatalogContext (Topic / BELONGS_TO_TOPIC)。本函数保留旧投影仅为过渡兼容，
+    # 下个版本（T3.x 收尾）将整体删除。
+    import warnings as _warnings
+    _warnings.warn(
+        "_build_neo4j_projection emits legacy ResearchTopic/HAS_LATENT_TOPIC/HAS_TOPIC_MEMBER; "
+        "use CatalogContext.upsert_topic_membership instead (will be removed in next minor).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     doc_id = str(document_signature.get("document_key") or _stable_id("document", "unknown"))
     doc_name = str(document_signature.get("source_file") or doc_id)
     nodes: List[Dict[str, Any]] = [

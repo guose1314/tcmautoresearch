@@ -58,7 +58,10 @@ class CatalogContext:
             for ddl in catalog_cypher.CATALOG_CONSTRAINTS:
                 session.run(ddl)
         self._constraints_ensured = True
-        logger.info("CatalogContext: constraints ensured (%d)", len(catalog_cypher.CATALOG_CONSTRAINTS))
+        logger.info(
+            "CatalogContext: constraints ensured (%d)",
+            len(catalog_cypher.CATALOG_CONSTRAINTS),
+        )
 
     # ------------------------------------------------------------------ #
     # 视图重建
@@ -170,6 +173,72 @@ class CatalogContext:
         return written
 
     # ------------------------------------------------------------------ #
+    # 单文档增量写入（T3.2 入口）
+    # ------------------------------------------------------------------ #
+
+    def upsert_topic_membership(
+        self,
+        document_id: str,
+        topics: Sequence[Mapping[str, Any]],
+    ) -> int:
+        """把单个 Document 与若干 Topic 建立 BELONGS_TO_TOPIC 关系。
+
+        ``topics`` 项支持 ``key`` / ``label`` / ``description`` / ``weight``。
+        返回写入的关系数。
+        """
+        if not document_id:
+            raise CatalogContextError("upsert_topic_membership requires document_id")
+        self._ensure_constraints_once()
+        written = 0
+        with self._session() as session:
+            for topic in topics or ():
+                key = self._require(topic, "key")
+                session.run(
+                    catalog_cypher.MERGE_TOPIC,
+                    key=key,
+                    label=topic.get("label"),
+                    description=topic.get("description"),
+                )
+                session.run(
+                    catalog_cypher.LINK_DOCUMENT_TO_TOPIC,
+                    document_id=document_id,
+                    key=key,
+                    weight=topic.get("weight"),
+                )
+                written += 1
+        return written
+
+    # ------------------------------------------------------------------ #
+    # 视图列表（API 用）
+    # ------------------------------------------------------------------ #
+
+    def list_view(
+        self,
+        view: str,
+        *,
+        page: int = 1,
+        size: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """分页列出某视图所有节点（含 document_count）。"""
+        view_key = (view or "").strip().lower()
+        if view_key not in VALID_VIEWS:
+            raise CatalogContextError(
+                f"unsupported view={view!r}; allowed={VALID_VIEWS}"
+            )
+        page = max(int(page or 1), 1)
+        size = min(max(int(size or 20), 1), 200)
+        skip = (page - 1) * size
+        if view_key == "topic":
+            query = catalog_cypher.LIST_TOPIC_VIEW
+        elif view_key == "subject":
+            query = catalog_cypher.LIST_SUBJECT_VIEW
+        else:
+            query = catalog_cypher.LIST_DYNASTY_VIEW
+        with self._session() as session:
+            result = session.run(query, skip=skip, limit=size)
+            return [self._record_to_dict(record) for record in result]
+
+    # ------------------------------------------------------------------ #
     # 查询
     # ------------------------------------------------------------------ #
 
@@ -190,13 +259,22 @@ class CatalogContext:
 
         if view_key == "topic":
             key = self._require(criteria, "key")
-            query, params = catalog_cypher.QUERY_TOPIC_DOCUMENTS, {"key": key, "limit": limit}
+            query, params = (
+                catalog_cypher.QUERY_TOPIC_DOCUMENTS,
+                {"key": key, "limit": limit},
+            )
         elif view_key == "subject":
             code = self._require(criteria, "code")
-            query, params = catalog_cypher.QUERY_SUBJECT_DOCUMENTS, {"code": code, "limit": limit}
+            query, params = (
+                catalog_cypher.QUERY_SUBJECT_DOCUMENTS,
+                {"code": code, "limit": limit},
+            )
         else:  # dynasty
             dynasty = self._require(criteria, "dynasty")
-            query, params = catalog_cypher.QUERY_DYNASTY_DOCUMENTS, {"dynasty": dynasty, "limit": limit}
+            query, params = (
+                catalog_cypher.QUERY_DYNASTY_DOCUMENTS,
+                {"dynasty": dynasty, "limit": limit},
+            )
 
         with self._session() as session:
             result = session.run(query, **params)
@@ -214,7 +292,9 @@ class CatalogContext:
         try:
             session = ctx.__enter__()
         except AttributeError as exc:  # pragma: no cover - defensive
-            raise CatalogContextError(f"driver.session() did not return a context manager: {exc}") from exc
+            raise CatalogContextError(
+                f"driver.session() did not return a context manager: {exc}"
+            ) from exc
         try:
             yield session
         finally:
@@ -243,7 +323,9 @@ class CatalogContext:
     def _require(payload: Mapping[str, Any], field: str) -> Any:
         value = payload.get(field) if isinstance(payload, Mapping) else None
         if value is None or value == "":
-            raise CatalogContextError(f"missing required field {field!r} in {payload!r}")
+            raise CatalogContextError(
+                f"missing required field {field!r} in {payload!r}"
+            )
         return value
 
     @staticmethod

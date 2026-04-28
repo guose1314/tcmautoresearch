@@ -60,8 +60,12 @@ class TestCatalogConstraints(unittest.TestCase):
         executed = [call.args[0] for call in session.run.call_args_list]
         self.assertEqual(len(executed), 3)
         self.assertTrue(any("Topic" in q and "t.key IS UNIQUE" in q for q in executed))
-        self.assertTrue(any("SubjectClass" in q and "s.code IS UNIQUE" in q for q in executed))
-        self.assertTrue(any("DynastySlice" in q and "d.dynasty IS UNIQUE" in q for q in executed))
+        self.assertTrue(
+            any("SubjectClass" in q and "s.code IS UNIQUE" in q for q in executed)
+        )
+        self.assertTrue(
+            any("DynastySlice" in q and "d.dynasty IS UNIQUE" in q for q in executed)
+        )
 
     def test_constraints_constants_are_idempotent_form(self) -> None:
         for ddl in catalog_cypher.CATALOG_CONSTRAINTS:
@@ -76,16 +80,18 @@ class TestCatalogRebuildTopic(unittest.TestCase):
     def test_rebuild_topic_view_runs_constraints_then_merges(self) -> None:
         driver, session, _ = _make_session_mock()
         ctx = CatalogContext(driver)
-        written = ctx.rebuild_topic_view([
-            {
-                "key": "spleen_qi_def",
-                "label": "脾气虚",
-                "documents": [
-                    {"document_id": "doc-1", "weight": 0.9},
-                    {"document_id": "doc-2"},
-                ],
-            }
-        ])
+        written = ctx.rebuild_topic_view(
+            [
+                {
+                    "key": "spleen_qi_def",
+                    "label": "脾气虚",
+                    "documents": [
+                        {"document_id": "doc-1", "weight": 0.9},
+                        {"document_id": "doc-2"},
+                    ],
+                }
+            ]
+        )
         self.assertEqual(written, 1)
         statements = [call.args[0] for call in session.run.call_args_list]
         # 3 个约束 + 1 个 MERGE Topic + 2 个关系
@@ -104,18 +110,22 @@ class TestCatalogRebuildSubject(unittest.TestCase):
     def test_rebuild_subject_view_links_documents(self) -> None:
         driver, session, _ = _make_session_mock()
         ctx = CatalogContext(driver)
-        written = ctx.rebuild_subject_view([
-            {
-                "code": "R29",
-                "name": "中医基础理论",
-                "documents": [{"document_id": "doc-1"}, {"document_id": "doc-2"}],
-            },
-            {"code": "R28", "documents": []},
-        ])
+        written = ctx.rebuild_subject_view(
+            [
+                {
+                    "code": "R29",
+                    "name": "中医基础理论",
+                    "documents": [{"document_id": "doc-1"}, {"document_id": "doc-2"}],
+                },
+                {"code": "R28", "documents": []},
+            ]
+        )
         self.assertEqual(written, 2)
         statements = [call.args[0] for call in session.run.call_args_list]
         # MERGE_SUBJECT_CLASS 与 LINK 都包含 'MERGE (s:SubjectClass'；用起始词区分独立 MERGE 调用。
-        standalone_merge = sum(1 for s in statements if s.startswith("MERGE (s:SubjectClass"))
+        standalone_merge = sum(
+            1 for s in statements if s.startswith("MERGE (s:SubjectClass")
+        )
         self.assertEqual(standalone_merge, 2)
         self.assertEqual(sum(1 for s in statements if "IN_SUBJECT" in s), 2)
 
@@ -124,7 +134,8 @@ class TestCatalogRebuildSubject(unittest.TestCase):
         ctx = CatalogContext(driver)
         ctx.rebuild_subject_view([{"code": "R28", "documents": []}])
         merge_calls = [
-            call for call in session.run.call_args_list
+            call
+            for call in session.run.call_args_list
             if call.args[0].startswith("MERGE (s:SubjectClass")
         ]
         self.assertEqual(merge_calls[0].kwargs.get("scheme"), "CLC")
@@ -134,17 +145,20 @@ class TestCatalogRebuildDynasty(unittest.TestCase):
     def test_rebuild_dynasty_view_passes_year_range(self) -> None:
         driver, session, _ = _make_session_mock()
         ctx = CatalogContext(driver)
-        written = ctx.rebuild_dynasty_view([
-            {
-                "dynasty": "Tang",
-                "start_year": 618,
-                "end_year": 907,
-                "documents": [{"document_id": "doc-tang"}],
-            }
-        ])
+        written = ctx.rebuild_dynasty_view(
+            [
+                {
+                    "dynasty": "Tang",
+                    "start_year": 618,
+                    "end_year": 907,
+                    "documents": [{"document_id": "doc-tang"}],
+                }
+            ]
+        )
         self.assertEqual(written, 1)
         merge_calls = [
-            call for call in session.run.call_args_list
+            call
+            for call in session.run.call_args_list
             if call.args[0].startswith("MERGE (d:DynastySlice")
         ]
         self.assertEqual(len(merge_calls), 1)
@@ -171,7 +185,9 @@ class TestCatalogQuery(unittest.TestCase):
 
     def test_query_subject_uses_code(self) -> None:
         driver, session, _ = _make_session_mock(
-            query_results={"IN_SUBJECT": [_FakeRecord(document_id="doc-x", source_file="x.txt")]}
+            query_results={
+                "IN_SUBJECT": [_FakeRecord(document_id="doc-x", source_file="x.txt")]
+            }
         )
         ctx = CatalogContext(driver)
         results = ctx.query("subject", {"code": "R29", "limit": 50})
@@ -182,7 +198,9 @@ class TestCatalogQuery(unittest.TestCase):
 
     def test_query_dynasty_uses_dynasty(self) -> None:
         driver, session, _ = _make_session_mock(
-            query_results={"IN_DYNASTY": [_FakeRecord(document_id="doc-d", source_file="d.txt")]}
+            query_results={
+                "IN_DYNASTY": [_FakeRecord(document_id="doc-d", source_file="d.txt")]
+            }
         )
         ctx = CatalogContext(driver)
         results = ctx.query("dynasty", {"dynasty": "Tang"})
@@ -216,6 +234,64 @@ class TestCatalogViewModels(unittest.TestCase):
         v = DynastySliceView(dynasty="Tang")
         self.assertIsNone(v.start_year)
         self.assertIsNone(v.end_year)
+
+
+class TestUpsertTopicMembership(unittest.TestCase):
+    def test_upsert_runs_merge_topic_then_link(self) -> None:
+        driver, session, _ = _make_session_mock()
+        ctx = CatalogContext(driver)
+        written = ctx.upsert_topic_membership(
+            "doc-42",
+            [
+                {"key": "spleen_qi_def", "label": "脾气虚", "weight": 0.8},
+                {"key": "dampness", "label": "湿阻", "weight": 0.4},
+            ],
+        )
+        self.assertEqual(written, 2)
+        statements = [call.args[0] for call in session.run.call_args_list]
+        # 3 个 constraint DDL + 2 个 MERGE Topic + 2 个 LINK
+        self.assertEqual(len(statements), 7)
+        merges = [s for s in statements if s.startswith("MERGE (t:Topic")]
+        links = [s for s in statements if "BELONGS_TO_TOPIC" in s]
+        self.assertEqual(len(merges), 2)
+        self.assertEqual(len(links), 2)
+
+    def test_upsert_requires_document_id(self) -> None:
+        driver, _session, _ = _make_session_mock()
+        ctx = CatalogContext(driver)
+        with self.assertRaises(CatalogContextError):
+            ctx.upsert_topic_membership("", [{"key": "x"}])
+
+    def test_upsert_requires_key(self) -> None:
+        driver, _session, _ = _make_session_mock()
+        ctx = CatalogContext(driver)
+        with self.assertRaises(CatalogContextError):
+            ctx.upsert_topic_membership("doc-1", [{"label": "no key"}])
+
+
+class TestListView(unittest.TestCase):
+    def test_list_topic_view_returns_records(self) -> None:
+        driver, _session, _ = _make_session_mock(
+            {
+                "MATCH (t:Topic)": [
+                    _FakeRecord(
+                        key="spleen_qi", label="脾气虚",
+                        description="", document_count=5,
+                    ),
+                ]
+            }
+        )
+        ctx = CatalogContext(driver)
+        items = ctx.list_view("topic", page=1, size=10)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["key"], "spleen_qi")
+        self.assertEqual(items[0]["document_count"], 5)
+
+    def test_list_view_rejects_unknown(self) -> None:
+        driver, _session, _ = _make_session_mock()
+        ctx = CatalogContext(driver)
+        with self.assertRaises(CatalogContextError):
+            ctx.list_view("garbage")
 
 
 if __name__ == "__main__":

@@ -76,6 +76,7 @@ def _get_neo4j_driver():
         import os
 
         from neo4j import GraphDatabase
+
         uri = os.environ.get("TCM_NEO4J_URI", "neo4j://localhost:7687")
         user = os.environ.get("TCM_NEO4J_USER", "neo4j")
         password = os.environ.get("TCM_NEO4J_PASSWORD", "")
@@ -129,11 +130,13 @@ def _project_to_neo4j(
             by_label: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
             for n in projection_entities:
                 label = _cypher_label(str(n.get("type") or "Entity"))
-                by_label[label].append({
-                    "id": str(n["id"]),
-                    "name": n["name"],
-                    "props": dict(n.get("props") or {}),
-                })
+                by_label[label].append(
+                    {
+                        "id": str(n["id"]),
+                        "name": n["name"],
+                        "props": dict(n.get("props") or {}),
+                    }
+                )
             for label, batch in by_label.items():
                 cypher = (
                     f"UNWIND $rows AS row "
@@ -150,11 +153,13 @@ def _project_to_neo4j(
                 rt = (r.get("rel_type") or "RELATED").upper()
                 if not rt.replace("_", "").isalnum():
                     rt = "RELATED"
-                by_rel[rt].append({
-                    "src": str(r["src_id"]),
-                    "dst": str(r["dst_id"]),
-                    "props": dict(r.get("props") or {}),
-                })
+                by_rel[rt].append(
+                    {
+                        "src": str(r["src_id"]),
+                        "dst": str(r["dst_id"]),
+                        "props": dict(r.get("props") or {}),
+                    }
+                )
             for rt, batch in by_rel.items():
                 cypher = (
                     f"UNWIND $rows AS row "
@@ -176,8 +181,10 @@ def _get_kg():
     global _kg_instance  # noqa: PLW0603
     if _kg_instance is None:
         from src.knowledge.tcm_knowledge_graph import TCMKnowledgeGraph
+
         _kg_instance = TCMKnowledgeGraph(
-            db_path=_KG_DB_PATH, preload_formulas=True,
+            db_path=_KG_DB_PATH,
+            preload_formulas=True,
         )
         logger.info(
             "知识图谱已加载: %d 实体, %d 关系 (db=%s)",
@@ -192,6 +199,7 @@ def _get_preprocessor():
     global _preprocessor  # noqa: PLW0603
     if _preprocessor is None:
         from src.analysis.preprocessor import DocumentPreprocessor
+
         inst = DocumentPreprocessor()
         inst.initialize()
         _preprocessor = inst
@@ -202,6 +210,7 @@ def _get_extractor():
     global _extractor  # noqa: PLW0603
     if _extractor is None:
         from src.analysis.entity_extractor import AdvancedEntityExtractor
+
         inst = AdvancedEntityExtractor()
         inst.initialize()
         _extractor = inst
@@ -212,6 +221,7 @@ def _get_graph_builder():
     global _graph_builder  # noqa: PLW0603
     if _graph_builder is None:
         from src.analysis.semantic_graph import SemanticGraphBuilder
+
         inst = SemanticGraphBuilder()
         inst.initialize()
         _graph_builder = inst
@@ -226,7 +236,9 @@ def _json_ready(value: Any) -> Any:
         return [_json_ready(item) for item in value]
     if isinstance(value, (tuple, set)):
         return [_json_ready(item) for item in value]
-    if hasattr(value, "value") and not isinstance(value, (str, bytes, int, float, bool)):
+    if hasattr(value, "value") and not isinstance(
+        value, (str, bytes, int, float, bool)
+    ):
         return _json_ready(value.value)
     return value
 
@@ -273,13 +285,25 @@ def _build_unsupervised_research_assets(
     return enriched_entities, enriched_graph, research_view
 
 
-def _build_research_response_summary(research_view: Mapping[str, Any]) -> Dict[str, Any]:
+def _build_research_response_summary(
+    research_view: Mapping[str, Any],
+) -> Dict[str, Any]:
     return {
-        "document_signature": _json_ready(research_view.get("document_signature") or {}),
-        "community_topics": _json_ready(list(research_view.get("community_topics") or [])[:5]),
-        "bridge_entities": _json_ready(list(research_view.get("bridge_entities") or [])[:5]),
-        "novelty_candidates": _json_ready(list(research_view.get("novelty_candidates") or [])[:5]),
-        "literature_alignment": _json_ready(list(research_view.get("literature_alignment") or [])),
+        "document_signature": _json_ready(
+            research_view.get("document_signature") or {}
+        ),
+        "community_topics": _json_ready(
+            list(research_view.get("community_topics") or [])[:5]
+        ),
+        "bridge_entities": _json_ready(
+            list(research_view.get("bridge_entities") or [])[:5]
+        ),
+        "novelty_candidates": _json_ready(
+            list(research_view.get("novelty_candidates") or [])[:5]
+        ),
+        "literature_alignment": _json_ready(
+            list(research_view.get("literature_alignment") or [])
+        ),
     }
 
 
@@ -290,13 +314,25 @@ def _build_summary_analysis(
     summary = dict(_json_ready((semantic_result or {}).get("summary_analysis") or {}))
     research_view = research_view or {}
     summary["unsupervised_learning"] = {
-        "document_signature": _json_ready(research_view.get("document_signature") or {}),
-        "community_topics": _json_ready(list(research_view.get("community_topics") or [])[:8]),
-        "bridge_entities": _json_ready(list(research_view.get("bridge_entities") or [])[:10]),
-        "salient_relations": _json_ready(list(research_view.get("salient_relations") or [])[:10]),
-        "novelty_candidates": _json_ready(list(research_view.get("novelty_candidates") or [])[:10]),
+        "document_signature": _json_ready(
+            research_view.get("document_signature") or {}
+        ),
+        "community_topics": _json_ready(
+            list(research_view.get("community_topics") or [])[:8]
+        ),
+        "bridge_entities": _json_ready(
+            list(research_view.get("bridge_entities") or [])[:10]
+        ),
+        "salient_relations": _json_ready(
+            list(research_view.get("salient_relations") or [])[:10]
+        ),
+        "novelty_candidates": _json_ready(
+            list(research_view.get("novelty_candidates") or [])[:10]
+        ),
     }
-    summary["literature_alignment"] = _json_ready(list(research_view.get("literature_alignment") or []))
+    summary["literature_alignment"] = _json_ready(
+        list(research_view.get("literature_alignment") or [])
+    )
     return summary
 
 
@@ -429,7 +465,9 @@ def _persist_to_kg(
         if not name:
             continue
         etype = ent.get("type") or ent.get("entity_type") or "generic"
-        meta = {k: v for k, v in ent.items() if k not in ("name", "type", "entity_type")}
+        meta = {
+            k: v for k, v in ent.items() if k not in ("name", "type", "entity_type")
+        }
         ent_rows.append({"name": name, "type": etype, **meta})
     if ent_rows:
         kg.bulk_add_entities(ent_rows)
@@ -442,8 +480,20 @@ def _persist_to_kg(
         dst = e.get("target") or e.get("to", "")
         rel = e.get("relation") or e.get("rel_type") or e.get("label") or "related"
         if src and dst:
-            meta = {k: v for k, v in e.items()
-                    if k not in ("source", "target", "from", "to", "relation", "rel_type", "label")}
+            meta = {
+                k: v
+                for k, v in e.items()
+                if k
+                not in (
+                    "source",
+                    "target",
+                    "from",
+                    "to",
+                    "relation",
+                    "rel_type",
+                    "label",
+                )
+            }
             rel_rows.append((src, rel, dst, meta))
     if rel_rows:
         kg.bulk_add_relations(rel_rows)
@@ -460,21 +510,88 @@ def _persist_to_kg(
 
 # 实体类型映射：KG 域名 → ORM EntityTypeEnum
 _TYPE_MAP = {
-    "herb": "herb", "formula": "formula", "syndrome": "syndrome",
-    "efficacy": "efficacy", "property": "property", "taste": "taste",
-    "meridian": "meridian", "symptom": "other", "theory": "other",
+    "herb": "herb",
+    "formula": "formula",
+    "syndrome": "syndrome",
+    "efficacy": "efficacy",
+    "property": "property",
+    "taste": "taste",
+    "meridian": "meridian",
+    "symptom": "other",
+    "theory": "other",
     "generic": "other",
 }
 
 # 关系名 → ORM RelationshipType.relationship_type 映射
 _REL_TYPE_MAP = {
-    "君": "SOVEREIGN", "臣": "MINISTER", "佐": "ASSISTANT", "使": "ENVOY",
-    "治疗": "TREATS", "treats": "TREATS",
-    "功效": "HAS_EFFICACY", "has_efficacy": "HAS_EFFICACY", "efficacy": "HAS_EFFICACY",
-    "类似": "SIMILAR_TO", "similar_to": "SIMILAR_TO",
-    "包含": "CONTAINS", "contains": "CONTAINS", "composition": "CONTAINS",
+    "君": "SOVEREIGN",
+    "臣": "MINISTER",
+    "佐": "ASSISTANT",
+    "使": "ENVOY",
+    "治疗": "TREATS",
+    "treats": "TREATS",
+    "功效": "HAS_EFFICACY",
+    "has_efficacy": "HAS_EFFICACY",
+    "efficacy": "HAS_EFFICACY",
+    "类似": "SIMILAR_TO",
+    "similar_to": "SIMILAR_TO",
+    "包含": "CONTAINS",
+    "contains": "CONTAINS",
+    "composition": "CONTAINS",
     "related": "CONTAINS",
 }
+
+
+def _slugify_topic_key(value: str) -> str:
+    """把任意 community label / id 收敛成稳定 Topic.key（ASCII 优先，空格/标点变 _）。"""
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    cleaned = []
+    for ch in raw:
+        if ch.isalnum() or "\u4e00" <= ch <= "\u9fff":
+            cleaned.append(ch)
+        elif ch in "-_":
+            cleaned.append(ch)
+        else:
+            cleaned.append("_")
+    key = "".join(cleaned).strip("_")
+    return key[:128] if key else ""
+
+
+def _sync_community_topics_to_catalog(
+    document_id: str,
+    community_topics: List[Dict[str, Any]],
+) -> int:
+    """T3.2: community_topics → CatalogContext.upsert_topic_membership。
+
+    要求 ``_get_neo4j_driver()`` 可用；driver 不可用时直接返回 0。
+    """
+    if not document_id or not community_topics:
+        return 0
+    driver = _get_neo4j_driver()
+    if driver is None:
+        return 0
+    payload: List[Dict[str, Any]] = []
+    for topic in community_topics:
+        if not isinstance(topic, Mapping):
+            continue
+        label = str(topic.get("label") or topic.get("name") or topic.get("topic_id") or "")
+        key = _slugify_topic_key(label or str(topic.get("community_id") or ""))
+        if not key:
+            continue
+        payload.append({
+            "key": key,
+            "label": label or key,
+            "description": str(topic.get("description") or "")[:500],
+            "weight": float(topic.get("cohesion") or topic.get("size") or 1.0),
+        })
+    if not payload:
+        return 0
+    from src.contexts.catalog import CatalogContext
+
+    catalog = CatalogContext(driver, database="neo4j")
+    return catalog.upsert_topic_membership(document_id, payload)
 
 
 def _persist_to_orm(
@@ -531,11 +648,14 @@ def _persist_to_orm(
             import hashlib as _hashlib
             import time as _time
             import uuid as _uuid
-            ts = _time.strftime('%Y%m%d_%H%M%S')
+
+            ts = _time.strftime("%Y%m%d_%H%M%S")
             uid = _uuid.uuid4().hex[:8]
             sf = (source_file or created_by or "").strip() or created_by
             text_for_hash = raw_text or ""
-            content_hash = _hashlib.sha256(text_for_hash.encode("utf-8", errors="replace")).hexdigest()
+            content_hash = _hashlib.sha256(
+                text_for_hash.encode("utf-8", errors="replace")
+            ).hexdigest()
             ingest_run_id = f"{ts}_{uid}"
             existing = (
                 session.query(Document)
@@ -547,7 +667,9 @@ def _persist_to_orm(
                 # 避免重复 entities/relationships 写入。
                 logger.info(
                     "documents dedup hit: source_file=%s content_hash=%s doc_id=%s — skip re-ingest",
-                    sf, content_hash[:12], existing.id,
+                    sf,
+                    content_hash[:12],
+                    existing.id,
                 )
                 return {
                     "orm_entities": 0,
@@ -565,7 +687,8 @@ def _persist_to_orm(
                 source_file=sf,
                 content_hash=content_hash,
                 ingest_run_id=ingest_run_id,
-                raw_text_size=len(text_for_hash) or sum(len(e.get("name", "")) for e in entities),
+                raw_text_size=len(text_for_hash)
+                or sum(len(e.get("name", "")) for e in entities),
                 entities_extracted_count=len(entities),
                 process_status=ProcessStatusEnum.COMPLETED,
                 notes=f"由 {created_by} 自动写入；已附加无监督科研增强信号",
@@ -575,8 +698,7 @@ def _persist_to_orm(
 
             # 2) 预加载 RelationshipType 映射
             rel_types = {
-                rt.relationship_type: rt
-                for rt in session.query(RelationshipType).all()
+                rt.relationship_type: rt for rt in session.query(RelationshipType).all()
             }
 
             # 3) 写入实体，同时建 name → Entity 映射
@@ -586,7 +708,9 @@ def _persist_to_orm(
                 name = ent.get("name") or ent.get("text") or ent.get("value", "")
                 if not name or name in name_to_entity:
                     continue
-                raw_type = (ent.get("type") or ent.get("entity_type") or "generic").lower()
+                raw_type = (
+                    ent.get("type") or ent.get("entity_type") or "generic"
+                ).lower()
                 mapped = _TYPE_MAP.get(raw_type, "other")
                 try:
                     etype = EntityTypeEnum(mapped)
@@ -597,10 +721,13 @@ def _persist_to_orm(
                     name=name,
                     type=etype,
                     confidence=float(ent.get("confidence", 0.6)),
-                    entity_metadata=_json_ready({
-                        k: v for k, v in ent.items()
-                        if k not in ("name", "type", "entity_type", "confidence")
-                    }),
+                    entity_metadata=_json_ready(
+                        {
+                            k: v
+                            for k, v in ent.items()
+                            if k not in ("name", "type", "entity_type", "confidence")
+                        }
+                    ),
                 )
                 session.add(entity_obj)
                 name_to_entity[name] = entity_obj
@@ -634,20 +761,30 @@ def _persist_to_orm(
                 dst_ent = _resolve_entity(dst_name)
                 # 若目标实体不在本批实体中，自动补录
                 if dst_ent is None and dst_name:
-                    plain_dst = dst_name.split(":", 1)[-1] if ":" in dst_name else dst_name
-                    prefix_type = dst_name.split(":", 1)[0] if ":" in dst_name else "other"
+                    plain_dst = (
+                        dst_name.split(":", 1)[-1] if ":" in dst_name else dst_name
+                    )
+                    prefix_type = (
+                        dst_name.split(":", 1)[0] if ":" in dst_name else "other"
+                    )
                     mapped = _TYPE_MAP.get(prefix_type, "other")
                     try:
                         etype = EntityTypeEnum(mapped)
                     except ValueError:
                         etype = EntityTypeEnum.OTHER
                     dst_ent = Entity(
-                        document_id=doc.id, name=plain_dst,
-                        type=etype, confidence=0.4,
-                        entity_metadata=_json_ready({
-                            "auto_created_from_relation": True,
-                            "unsupervised_learning": (research_view.get("entity_annotations") or {}).get(plain_dst, {}),
-                        }),
+                        document_id=doc.id,
+                        name=plain_dst,
+                        type=etype,
+                        confidence=0.4,
+                        entity_metadata=_json_ready(
+                            {
+                                "auto_created_from_relation": True,
+                                "unsupervised_learning": (
+                                    research_view.get("entity_annotations") or {}
+                                ).get(plain_dst, {}),
+                            }
+                        ),
                     )
                     session.add(dst_ent)
                     session.flush()
@@ -655,7 +792,9 @@ def _persist_to_orm(
                     entity_payload_by_name[plain_dst] = {
                         "name": plain_dst,
                         "type": prefix_type,
-                        "unsupervised_learning": (research_view.get("entity_annotations") or {}).get(plain_dst, {}),
+                        "unsupervised_learning": (
+                            research_view.get("entity_annotations") or {}
+                        ).get(plain_dst, {}),
                     }
                     orm_ent_count += 1
                 if src_ent is None or dst_ent is None:
@@ -677,11 +816,20 @@ def _persist_to_orm(
                     e.get("confidence") or attrs.get("confidence", 0.5)
                 )
                 relationship_metadata = {
-                    k: v for k, v in e.items()
-                    if k not in (
-                        "source", "target", "from", "to",
-                        "relation", "rel_type", "label",
-                        "confidence", "evidence", "attributes",
+                    k: v
+                    for k, v in e.items()
+                    if k
+                    not in (
+                        "source",
+                        "target",
+                        "from",
+                        "to",
+                        "relation",
+                        "rel_type",
+                        "label",
+                        "confidence",
+                        "evidence",
+                        "attributes",
                     )
                 }
                 if attrs:
@@ -700,26 +848,34 @@ def _persist_to_orm(
                 # 收集 Neo4j 投影
                 salience = attrs.get("salience") or {}
                 novelty = attrs.get("novelty") or {}
-                projection_relations.append({
-                    "src_id": src_ent.id,
-                    "dst_id": dst_ent.id,
-                    "rel_type": mapped_rel,
-                    "props": _flat_neo4j_props({
-                        "confidence": edge_confidence,
-                        "created_by": created_by,
-                        "association_score": salience.get("association_score"),
-                        "cross_community": salience.get("cross_community"),
-                        "novelty_score": novelty.get("novelty_score"),
-                        "novelty_reason": novelty.get("reason"),
-                    }),
-                })
+                projection_relations.append(
+                    {
+                        "src_id": src_ent.id,
+                        "dst_id": dst_ent.id,
+                        "rel_type": mapped_rel,
+                        "props": _flat_neo4j_props(
+                            {
+                                "confidence": edge_confidence,
+                                "created_by": created_by,
+                                "association_score": salience.get("association_score"),
+                                "cross_community": salience.get("cross_community"),
+                                "novelty_score": novelty.get("novelty_score"),
+                                "novelty_reason": novelty.get("reason"),
+                            }
+                        ),
+                    }
+                )
 
             entity_type_counts = Counter(
                 e_obj.type.value if hasattr(e_obj.type, "value") else str(e_obj.type)
                 for e_obj in name_to_entity.values()
             )
             doc_signature = dict(research_view.get("document_signature") or {})
-            source_modules = [created_by, "semantic_graph", "unsupervised_research_enhancer"]
+            source_modules = [
+                created_by,
+                "semantic_graph",
+                "unsupervised_research_enhancer",
+            ]
             processing_stats = ProcessingStatistics(
                 document_id=doc.id,
                 formulas_count=int(entity_type_counts.get("formula", 0)),
@@ -727,7 +883,9 @@ def _persist_to_orm(
                 syndromes_count=int(entity_type_counts.get("syndrome", 0)),
                 efficacies_count=int(entity_type_counts.get("efficacy", 0)),
                 relationships_count=orm_rel_count,
-                graph_nodes_count=int(doc_signature.get("entity_count", len(name_to_entity))),
+                graph_nodes_count=int(
+                    doc_signature.get("entity_count", len(name_to_entity))
+                ),
                 graph_edges_count=int(doc_signature.get("relation_count", len(edges))),
                 graph_density=float(doc_signature.get("graph_density", 0.0)),
                 connected_components=int(doc_signature.get("connected_components", 0)),
@@ -739,18 +897,29 @@ def _persist_to_orm(
 
             research_analysis = ResearchAnalysis(
                 document_id=doc.id,
-                research_perspectives=_json_ready({
-                    **_mapping_payload(semantic_result.get("research_perspectives")),
-                    "latent_topics": list(research_view.get("community_topics") or []),
-                    "document_signature": research_view.get("document_signature") or {},
-                }),
-                formula_comparisons=_json_ready(semantic_result.get("formula_comparisons") or {}),
+                research_perspectives=_json_ready(
+                    {
+                        **_mapping_payload(
+                            semantic_result.get("research_perspectives")
+                        ),
+                        "latent_topics": list(
+                            research_view.get("community_topics") or []
+                        ),
+                        "document_signature": research_view.get("document_signature")
+                        or {},
+                    }
+                ),
+                formula_comparisons=_json_ready(
+                    semantic_result.get("formula_comparisons") or {}
+                ),
                 herb_properties_analysis=_json_ready(
                     semantic_result.get("herb_properties_analysis")
                     or semantic_result.get("herb_properties")
                     or {}
                 ),
-                pharmacology_integration=_json_ready(semantic_result.get("pharmacology_integration") or {}),
+                pharmacology_integration=_json_ready(
+                    semantic_result.get("pharmacology_integration") or {}
+                ),
                 network_pharmacology=_json_ready(
                     semantic_result.get("network_pharmacology")
                     or semantic_result.get("network_pharmacology_systems_biology")
@@ -759,21 +928,39 @@ def _persist_to_orm(
                 supramolecular_physicochemistry=_json_ready(
                     semantic_result.get("supramolecular_physicochemistry") or {}
                 ),
-                knowledge_archaeology=_json_ready({
-                    **_mapping_payload(semantic_result.get("knowledge_archaeology")),
-                    "bridge_entities": list(research_view.get("bridge_entities") or []),
-                    "literature_alignment": list(research_view.get("literature_alignment") or []),
-                }),
-                complexity_dynamics=_json_ready({
-                    **_mapping_payload(
-                        semantic_result.get("complexity_dynamics")
-                        or semantic_result.get("complexity_nonlinear_dynamics")
-                    ),
-                    "salient_relations": list(research_view.get("salient_relations") or []),
-                    "novelty_candidates": list(research_view.get("novelty_candidates") or []),
-                }),
-                research_scoring_panel=_json_ready(semantic_result.get("research_scoring_panel") or {}),
-                summary_analysis=_json_ready(_build_summary_analysis(semantic_result, research_view)),
+                knowledge_archaeology=_json_ready(
+                    {
+                        **_mapping_payload(
+                            semantic_result.get("knowledge_archaeology")
+                        ),
+                        "bridge_entities": list(
+                            research_view.get("bridge_entities") or []
+                        ),
+                        "literature_alignment": list(
+                            research_view.get("literature_alignment") or []
+                        ),
+                    }
+                ),
+                complexity_dynamics=_json_ready(
+                    {
+                        **_mapping_payload(
+                            semantic_result.get("complexity_dynamics")
+                            or semantic_result.get("complexity_nonlinear_dynamics")
+                        ),
+                        "salient_relations": list(
+                            research_view.get("salient_relations") or []
+                        ),
+                        "novelty_candidates": list(
+                            research_view.get("novelty_candidates") or []
+                        ),
+                    }
+                ),
+                research_scoring_panel=_json_ready(
+                    semantic_result.get("research_scoring_panel") or {}
+                ),
+                summary_analysis=_json_ready(
+                    _build_summary_analysis(semantic_result, research_view)
+                ),
             )
             session.add(research_analysis)
             orm_analysis_count = 1
@@ -784,36 +971,60 @@ def _persist_to_orm(
                 entity_payload = entity_payload_by_name.get(e_obj.name, {})
                 unsupervised_meta = (
                     entity_payload.get("unsupervised_learning")
-                    or ((entity_payload.get("metadata") or {}).get("unsupervised_learning") if isinstance(entity_payload.get("metadata"), dict) else {})
+                    or (
+                        (entity_payload.get("metadata") or {}).get(
+                            "unsupervised_learning"
+                        )
+                        if isinstance(entity_payload.get("metadata"), dict)
+                        else {}
+                    )
                     or {}
                 )
-                projection_entities.append({
-                    "id": e_obj.id,
-                    "name": e_obj.name,
-                    "type": e_obj.type.value if hasattr(e_obj.type, "value") else str(e_obj.type),
-                    "props": _flat_neo4j_props({
-                        "confidence": float(e_obj.confidence or 0.0),
-                        "community_id": unsupervised_meta.get("community_id"),
-                        "topic_label": unsupervised_meta.get("topic_label"),
-                        "topic_size": unsupervised_meta.get("topic_size"),
-                        "pagerank": unsupervised_meta.get("pagerank"),
-                        "bridge_score": unsupervised_meta.get("bridge_score"),
-                    }),
-                })
+                projection_entities.append(
+                    {
+                        "id": e_obj.id,
+                        "name": e_obj.name,
+                        "type": e_obj.type.value
+                        if hasattr(e_obj.type, "value")
+                        else str(e_obj.type),
+                        "props": _flat_neo4j_props(
+                            {
+                                "confidence": float(e_obj.confidence or 0.0),
+                                "community_id": unsupervised_meta.get("community_id"),
+                                "topic_label": unsupervised_meta.get("topic_label"),
+                                "topic_size": unsupervised_meta.get("topic_size"),
+                                "pagerank": unsupervised_meta.get("pagerank"),
+                                "bridge_score": unsupervised_meta.get("bridge_score"),
+                            }
+                        ),
+                    }
+                )
 
             document_projection_key = str(doc_signature.get("document_key") or "")
-            for node in list(research_view.get("neo4j_projection", {}).get("nodes") or []):
+            for node in list(
+                research_view.get("neo4j_projection", {}).get("nodes") or []
+            ):
                 projection_node = dict(node)
                 if projection_node.get("type") == "research_document":
                     projection_node["id"] = str(doc.id)
                     projection_node["name"] = doc.source_file
-                projection_node["props"] = _flat_neo4j_props(projection_node.get("props") or {})
+                projection_node["props"] = _flat_neo4j_props(
+                    projection_node.get("props") or {}
+                )
                 projection_entities.append(projection_node)
-            for relation in list(research_view.get("neo4j_projection", {}).get("edges") or []):
+            for relation in list(
+                research_view.get("neo4j_projection", {}).get("edges") or []
+            ):
                 projection_relation = dict(relation)
-                if str(projection_relation.get("src_id") or "") == document_projection_key:
+                if (
+                    str(projection_relation.get("src_id") or "")
+                    == document_projection_key
+                ):
                     projection_relation["src_id"] = str(doc.id)
-                if str(projection_relation.get("dst_id") or "") == document_projection_key:
+                if (
+                    str(projection_relation.get("dst_id") or "")
+                    == document_projection_key
+                ):
                     projection_relation["dst_id"] = str(doc.id)
                 member_name = str(projection_relation.get("dst_id") or "")
                 if member_name in name_to_entity:
@@ -821,7 +1032,9 @@ def _persist_to_orm(
                 src_name = str(projection_relation.get("src_id") or "")
                 if src_name in name_to_entity:
                     projection_relation["src_id"] = name_to_entity[src_name].id
-                projection_relation["props"] = _flat_neo4j_props(projection_relation.get("props") or {})
+                projection_relation["props"] = _flat_neo4j_props(
+                    projection_relation.get("props") or {}
+                )
                 projection_relations.append(projection_relation)
             # session_scope 自动 commit
     except Exception:
@@ -830,15 +1043,35 @@ def _persist_to_orm(
     # commit 完成后投影到 Neo4j
     neo4j_proj = _project_to_neo4j(projection_entities, projection_relations)
 
+    # T3.2: 把 community_topics 同步到 Catalog (Topic / BELONGS_TO_TOPIC)。
+    # 旧 ResearchTopic / HAS_LATENT_TOPIC / HAS_TOPIC_MEMBER 边由 _build_neo4j_projection
+    # 继续生成（已发 DeprecationWarning），后续版本删除。
+    catalog_topic_count = 0
+    try:
+        document_id_for_catalog = ""
+        # 从 projection_entities 取出 research_document 节点（其 id 已替换为 ORM doc.id）
+        for node in projection_entities:
+            if str(node.get("type")) == "research_document":
+                document_id_for_catalog = str(node.get("id") or "")
+                break
+        if document_id_for_catalog and research_view:
+            catalog_topic_count = _sync_community_topics_to_catalog(
+                document_id_for_catalog,
+                research_view.get("community_topics") or [],
+            )
+    except Exception:
+        logger.warning("CatalogContext sync failed (non-fatal)", exc_info=True)
+
     if orm_ent_count > 0 or orm_rel_count > 0:
         logger.info(
-            "ORM 持久化完成 (entities=%d, relations=%d, statistics=%d, analyses=%d); Neo4j 投影 (nodes=%d, edges=%d)",
+            "ORM 持久化完成 (entities=%d, relations=%d, statistics=%d, analyses=%d); Neo4j 投影 (nodes=%d, edges=%d); Catalog topics=%d",
             orm_ent_count,
             orm_rel_count,
             orm_stats_count,
             orm_analysis_count,
             neo4j_proj.get("neo4j_nodes", 0),
             neo4j_proj.get("neo4j_edges", 0),
+            catalog_topic_count,
         )
 
     return {
@@ -848,6 +1081,7 @@ def _persist_to_orm(
         "orm_analyses": orm_analysis_count,
         "neo4j_nodes": neo4j_proj.get("neo4j_nodes", 0),
         "neo4j_edges": neo4j_proj.get("neo4j_edges", 0),
+        "catalog_topics": catalog_topic_count,
         "needs_backfill": False,
     }
 
@@ -877,21 +1111,57 @@ _DISTILL_TEXT_LIMIT = 900
 _DISTILL_MAX_TOKENS = 640
 
 # 用于后处理：实体名合法性验证
-_ENTITY_NOISE_RE = _re.compile(
-    r"[，。、；：！？,\.;:?!（）()\[\]「」\"'""''\s]"
-)
+_ENTITY_NOISE_RE = _re.compile(r"[，。、；：！？,\.;:?!（）()\[\]「」\"'" "''\s]")
 _ENTITY_NOISE_PREFIXES = (
-    "加", "各", "每", "或", "若", "用", "以", "再", "另", "将", "兼", "并",
-    "如", "且", "即", "是", "此", "故", "则", "凡", "宜", "当",
+    "加",
+    "各",
+    "每",
+    "或",
+    "若",
+    "用",
+    "以",
+    "再",
+    "另",
+    "将",
+    "兼",
+    "并",
+    "如",
+    "且",
+    "即",
+    "是",
+    "此",
+    "故",
+    "则",
+    "凡",
+    "宜",
+    "当",
 )
 _ENTITY_NOISE_EXACT = {
-    "小儿", "妇人", "男子", "病人", "病者", "诸药", "上药", "服药", "共享",
-    "以上", "上述", "主治", "功效", "方药", "治法", "疗法",
+    "小儿",
+    "妇人",
+    "男子",
+    "病人",
+    "病者",
+    "诸药",
+    "上药",
+    "服药",
+    "共享",
+    "以上",
+    "上述",
+    "主治",
+    "功效",
+    "方药",
+    "治法",
+    "疗法",
 }
 _RELATION_CN_TO_EN = {
-    "含有": "contains", "主治": "treats", "功效": "has_efficacy",
-    "药性": "has_property", "禁忌": "contraindicated_with",
-    "属于": "belongs_to_formula", "转化": "transforms_to",
+    "含有": "contains",
+    "主治": "treats",
+    "功效": "has_efficacy",
+    "药性": "has_property",
+    "禁忌": "contraindicated_with",
+    "属于": "belongs_to_formula",
+    "转化": "transforms_to",
     "related": "related",
 }
 
@@ -949,10 +1219,14 @@ def llm_distill(
     try:
         # 获取 LLM 引擎（复用 assistant 路由的单例）
         from src.web.routes.assistant import _get_engine
+
         assistant = _get_engine()
         llm = assistant._get_llm()
         if llm is None:
-            reason = getattr(assistant, "_last_llm_load_error", "") or "未知原因，请检查模型文件是否存在与 llm 配置"
+            reason = (
+                getattr(assistant, "_last_llm_load_error", "")
+                or "未知原因，请检查模型文件是否存在与 llm 配置"
+            )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"本地 LLM 引擎未加载，无法进行知识蒸馏：{reason}",
@@ -961,7 +1235,7 @@ def llm_distill(
         # 分片蒸馏 — 长文本按 _DISTILL_TEXT_LIMIT 切片逐段调用 LLM
         full_text = body.raw_text
         chunks = [
-            full_text[i:i + _DISTILL_TEXT_LIMIT]
+            full_text[i : i + _DISTILL_TEXT_LIMIT]
             for i in range(0, len(full_text), _DISTILL_TEXT_LIMIT)
         ]
         llm_entities: List[Dict[str, Any]] = []
@@ -1010,7 +1284,9 @@ def llm_distill(
                         name = name[0] if name else ""
                     name = str(name).strip()
                     if _validate_entity_name(name):
-                        llm_entities.append({"name": name, "type": ent.get("type", "generic")})
+                        llm_entities.append(
+                            {"name": name, "type": ent.get("type", "generic")}
+                        )
 
                 # 验证并清洗关系
                 for rel in chunk_rels:
@@ -1018,16 +1294,22 @@ def llm_distill(
                         continue
                     src = rel.get("source", "")
                     tgt = rel.get("target", "")
-                    if isinstance(src, list): src = src[0] if src else ""
-                    if isinstance(tgt, list): tgt = tgt[0] if tgt else ""
+                    if isinstance(src, list):
+                        src = src[0] if src else ""
+                    if isinstance(tgt, list):
+                        tgt = tgt[0] if tgt else ""
                     src = str(src).strip()
                     tgt = str(tgt).strip()
                     if _validate_entity_name(src) and _validate_entity_name(tgt):
                         rel_type = _normalize_relation(rel.get("relation", "related"))
-                        llm_relations.append({"source": src, "relation": rel_type, "target": tgt})
+                        llm_relations.append(
+                            {"source": src, "relation": rel_type, "target": tgt}
+                        )
 
             except (_json.JSONDecodeError, Exception) as chunk_err:
-                logger.warning("LLM 蒸馏第 %d/%d 片段解析失败: %s", idx + 1, len(chunks), chunk_err)
+                logger.warning(
+                    "LLM 蒸馏第 %d/%d 片段解析失败: %s", idx + 1, len(chunks), chunk_err
+                )
 
         # 恢复 max_tokens
         if _saved_max_tokens is not None:
@@ -1061,19 +1343,18 @@ def llm_distill(
             elif not isinstance(name, str):
                 name = str(name)
             if name and name not in seen_names:
-                merged_entities.append({
-                    "name": name,
-                    "type": ent.get("type", "generic"),
-                    "source": "llm_distill",
-                })
+                merged_entities.append(
+                    {
+                        "name": name,
+                        "type": ent.get("type", "generic"),
+                        "source": "llm_distill",
+                    }
+                )
                 seen_names.add(name)
 
         # 合并 LLM 关系
         rule_edges = rule_graph.get("edges", [])
-        seen_edges = {
-            (e.get("source", ""), e.get("target", ""))
-            for e in rule_edges
-        }
+        seen_edges = {(e.get("source", ""), e.get("target", "")) for e in rule_edges}
         merged_edges = list(rule_edges)
         for rel in llm_relations:
             src = rel.get("source", "")
@@ -1086,23 +1367,27 @@ def llm_distill(
                 tgt = tgt[0] if tgt else ""
             elif not isinstance(tgt, str):
                 tgt = str(tgt)
-                
+
             key = (src, tgt)
             if key[0] and key[1] and key not in seen_edges:
-                merged_edges.append({
-                    "source": src,
-                    "target": tgt,
-                    "relation": rel.get("relation", "related"),
-                    "source_method": "llm_distill",
-                })
+                merged_edges.append(
+                    {
+                        "source": src,
+                        "target": tgt,
+                        "relation": rel.get("relation", "related"),
+                        "source_method": "llm_distill",
+                    }
+                )
                 seen_edges.add(key)
 
         merged_graph = {**rule_graph, "edges": merged_edges}
-        merged_entities, merged_graph, research_view = _build_unsupervised_research_assets(
-            body.raw_text,
-            body.source_file,
-            merged_entities,
-            merged_graph,
+        merged_entities, merged_graph, research_view = (
+            _build_unsupervised_research_assets(
+                body.raw_text,
+                body.source_file,
+                merged_entities,
+                merged_graph,
+            )
         )
 
         # 持久化到知识图谱
@@ -1149,7 +1434,10 @@ def llm_distill(
             },
             "entities": {"items": merged_entities},
             "semantic_graph": {
-                "graph": {"nodes": merged_graph.get("nodes", []), "edges": merged_graph.get("edges", [])},
+                "graph": {
+                    "nodes": merged_graph.get("nodes", []),
+                    "edges": merged_graph.get("edges", []),
+                },
             },
             "research_enhancement": _build_research_response_summary(research_view),
         }
@@ -1172,6 +1460,7 @@ def _get_graph_schema_info() -> Dict[str, Any]:
     """返回 graph_schema 版本与 drift 信息（不依赖 Neo4j 连接）。"""
     try:
         from src.storage.graph_schema import GRAPH_SCHEMA_VERSION, get_schema_summary
+
         summary = get_schema_summary()
         return {
             "schema_version": GRAPH_SCHEMA_VERSION,
@@ -1219,12 +1508,26 @@ def kg_stats(
                 Entity,
                 EntityRelationship,
             )
+
             with db_mgr.session_scope() as sess:
-                orm_stats["orm_entities"] = sess.query(sa_func.count(Entity.id)).scalar() or 0
-                orm_stats["orm_relations"] = sess.query(sa_func.count(EntityRelationship.id)).scalar() or 0
-                orm_stats["orm_documents"] = sess.query(sa_func.count(Document.id)).scalar() or 0
-                rows = sess.query(Entity.type, sa_func.count(Entity.id)).group_by(Entity.type).all()
-                orm_stats["orm_entity_types"] = {str(r[0].value if hasattr(r[0], 'value') else r[0]): r[1] for r in rows}
+                orm_stats["orm_entities"] = (
+                    sess.query(sa_func.count(Entity.id)).scalar() or 0
+                )
+                orm_stats["orm_relations"] = (
+                    sess.query(sa_func.count(EntityRelationship.id)).scalar() or 0
+                )
+                orm_stats["orm_documents"] = (
+                    sess.query(sa_func.count(Document.id)).scalar() or 0
+                )
+                rows = (
+                    sess.query(Entity.type, sa_func.count(Entity.id))
+                    .group_by(Entity.type)
+                    .all()
+                )
+                orm_stats["orm_entity_types"] = {
+                    str(r[0].value if hasattr(r[0], "value") else r[0]): r[1]
+                    for r in rows
+                }
         except Exception as exc:
             logger.warning("ORM 统计查询失败: %s", exc)
 
@@ -1242,21 +1545,53 @@ def kg_stats(
 _GRAPH_TYPE_FILTERS: Dict[str, Dict[str, Any]] = {
     "herb_relations": {
         "node_types": {"herb", "efficacy", "中药", "功效", "药性"},
-        "rel_types": {"efficacy", "synergy", "antagonism", "related",
-                      "配伍", "功效", "归经", "性味"},
+        "rel_types": {
+            "efficacy",
+            "synergy",
+            "antagonism",
+            "related",
+            "配伍",
+            "功效",
+            "归经",
+            "性味",
+        },
         "label": "药物关系图",
     },
     "formula_composition": {
         "node_types": {"formula", "herb", "方剂", "中药"},
-        "rel_types": {"sovereign", "minister", "assistant", "envoy",
-                      "contains", "组成", "君", "臣", "佐", "使"},
+        "rel_types": {
+            "sovereign",
+            "minister",
+            "assistant",
+            "envoy",
+            "contains",
+            "组成",
+            "君",
+            "臣",
+            "佐",
+            "使",
+        },
         "label": "方剂组成图",
     },
     "syndrome_treatment": {
-        "node_types": {"syndrome", "formula", "symptom", "method",
-                       "证候", "方剂", "症状", "治法"},
-        "rel_types": {"treats", "indicates", "associated_target",
-                      "主治", "适应", "治疗"},
+        "node_types": {
+            "syndrome",
+            "formula",
+            "symptom",
+            "method",
+            "证候",
+            "方剂",
+            "症状",
+            "治法",
+        },
+        "rel_types": {
+            "treats",
+            "indicates",
+            "associated_target",
+            "主治",
+            "适应",
+            "治疗",
+        },
         "label": "证治关系图",
     },
     "literature_citation": {
@@ -1270,7 +1605,8 @@ _GRAPH_TYPE_FILTERS: Dict[str, Dict[str, Any]] = {
 @router.get("/kg/subgraph")
 def kg_subgraph(
     graph_type: str = Query(
-        ..., description="图谱类型: herb_relations | formula_composition | syndrome_treatment | literature_citation"
+        ...,
+        description="图谱类型: herb_relations | formula_composition | syndrome_treatment | literature_citation",
     ),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
@@ -1302,10 +1638,13 @@ def kg_subgraph(
         rt = data.get("rel_type", "unknown")
         if u in node_ids and v in node_ids:
             if allowed_rel_types is None or rt in allowed_rel_types:
-                edges.append({
-                    "source": u, "target": v,
-                    "relation": rt,
-                })
+                edges.append(
+                    {
+                        "source": u,
+                        "target": v,
+                        "relation": rt,
+                    }
+                )
 
     # 若 literature_citation 类型但无专有文献边，回退显示全图
     if graph_type == "literature_citation" and not edges:
@@ -1335,7 +1674,7 @@ def kg_subgraph(
         nodes_out = connected_nodes[:NODE_CAP]
     else:
         # 无边：仅展示少量孤立节点作为概览
-        nodes_out = isolated_nodes[:min(NODE_CAP, 80)]
+        nodes_out = isolated_nodes[: min(NODE_CAP, 80)]
 
     return {
         "graph_type": graph_type,
@@ -1367,7 +1706,11 @@ def get_knowledge_graph(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"未找到研究课题: {research_id}",
             )
-        graph_data = get_research_observe_graph(request.app, research_id) or {"nodes": [], "edges": [], "statistics": {}}
+        graph_data = get_research_observe_graph(request.app, research_id) or {
+            "nodes": [],
+            "edges": [],
+            "statistics": {},
+        }
 
         return {
             "research_id": research_id,

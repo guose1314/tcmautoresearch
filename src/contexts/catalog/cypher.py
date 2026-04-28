@@ -13,8 +13,7 @@ from typing import Tuple
 # ---------------------------------------------------------------------------
 
 CONSTRAINT_TOPIC_KEY = (
-    "CREATE CONSTRAINT topic_key IF NOT EXISTS "
-    "FOR (t:Topic) REQUIRE t.key IS UNIQUE"
+    "CREATE CONSTRAINT topic_key IF NOT EXISTS FOR (t:Topic) REQUIRE t.key IS UNIQUE"
 )
 CONSTRAINT_SUBJECT_CODE = (
     "CREATE CONSTRAINT subject_class_code IF NOT EXISTS "
@@ -122,3 +121,90 @@ RETURN doc.id AS document_id,
        doc.source_file AS source_file
 LIMIT $limit
 """.strip()
+
+# ---------------------------------------------------------------------------
+# 视图列表（含文档计数 + 分页）
+# ---------------------------------------------------------------------------
+
+LIST_TOPIC_VIEW = """
+MATCH (t:Topic)
+OPTIONAL MATCH (doc:Document)-[:BELONGS_TO_TOPIC]->(t)
+WITH t, count(DISTINCT doc) AS document_count
+RETURN t.key AS key,
+       coalesce(t.label, t.key) AS label,
+       coalesce(t.description, '') AS description,
+       document_count
+ORDER BY document_count DESC, key ASC
+SKIP $skip LIMIT $limit
+""".strip()
+
+LIST_SUBJECT_VIEW = """
+MATCH (s:SubjectClass)
+OPTIONAL MATCH (doc:Document)-[:IN_SUBJECT]->(s)
+WITH s, count(DISTINCT doc) AS document_count
+RETURN s.code AS code,
+       coalesce(s.name, s.code) AS name,
+       coalesce(s.scheme, 'CLC') AS scheme,
+       document_count
+ORDER BY document_count DESC, code ASC
+SKIP $skip LIMIT $limit
+""".strip()
+
+LIST_DYNASTY_VIEW = """
+MATCH (d:DynastySlice)
+OPTIONAL MATCH (doc:Document)-[:IN_DYNASTY]->(d)
+WITH d, count(DISTINCT doc) AS document_count
+RETURN d.dynasty AS dynasty,
+       d.start_year AS start_year,
+       d.end_year AS end_year,
+       document_count
+ORDER BY document_count DESC, dynasty ASC
+SKIP $skip LIMIT $limit
+""".strip()
+
+# ---------------------------------------------------------------------------
+# T3.2 迁移：ResearchTopic → Topic
+# ---------------------------------------------------------------------------
+
+MIGRATE_RESEARCH_TOPIC_TO_TOPIC = """
+MATCH (rt:ResearchTopic)
+WITH rt, coalesce(rt.name, rt.label, rt.community_id, rt.id) AS topic_key
+WHERE topic_key IS NOT NULL AND topic_key <> ''
+MERGE (t:Topic {key: topic_key})
+ON CREATE SET t.created_at = timestamp(),
+              t.label = coalesce(rt.label, rt.name, topic_key),
+              t.description = coalesce(rt.description, ''),
+              t.legacy_id = coalesce(rt.id, rt.community_id)
+ON MATCH  SET t.updated_at = timestamp(),
+              t.label = coalesce(t.label, rt.label, rt.name, topic_key),
+              t.legacy_id = coalesce(t.legacy_id, rt.id, rt.community_id)
+RETURN count(t) AS topic_count
+""".strip()
+
+MIGRATE_HAS_LATENT_TOPIC_TO_BELONGS = """
+MATCH (doc)-[r:HAS_LATENT_TOPIC]->(rt:ResearchTopic)
+WITH doc, rt, r,
+     coalesce(rt.name, rt.label, rt.community_id, rt.id) AS topic_key,
+     coalesce(r.weight, r.cohesion, r.size * 1.0, 1.0) AS weight
+WHERE topic_key IS NOT NULL AND topic_key <> ''
+MATCH (t:Topic {key: topic_key})
+MERGE (doc)-[bt:BELONGS_TO_TOPIC]->(t)
+ON CREATE SET bt.weight = weight,
+              bt.created_at = timestamp(),
+              bt.legacy_rel = 'HAS_LATENT_TOPIC'
+ON MATCH  SET bt.weight = coalesce(bt.weight, weight),
+              bt.updated_at = timestamp()
+RETURN count(bt) AS edge_count
+""".strip()
+
+COUNT_RESEARCH_TOPIC = "MATCH (rt:ResearchTopic) RETURN count(rt) AS legacy_count"
+COUNT_TOPIC = "MATCH (t:Topic) RETURN count(t) AS topic_count"
+COUNT_HAS_LATENT_TOPIC = (
+    "MATCH ()-[r:HAS_LATENT_TOPIC]->() RETURN count(r) AS legacy_edge_count"
+)
+COUNT_BELONGS_TO_TOPIC = (
+    "MATCH ()-[r:BELONGS_TO_TOPIC]->() RETURN count(r) AS edge_count"
+)
+COUNT_HAS_TOPIC_MEMBER = (
+    "MATCH ()-[r:HAS_TOPIC_MEMBER]->() RETURN count(r) AS legacy_member_count"
+)
