@@ -155,6 +155,7 @@ def create_app(
     # ---- 业务路由 ----
     from src.web.routes.analysis import router as analysis_router
     from src.web.routes.assistant import router as assistant_router
+    from src.web.routes.catalog import router as catalog_router
     from src.web.routes.dashboard import router as dashboard_router
     from src.web.routes.research import router as research_router
 
@@ -162,6 +163,7 @@ def create_app(
     app.include_router(analysis_router)
     app.include_router(assistant_router)
     app.include_router(dashboard_router)
+    app.include_router(catalog_router)
 
     # ---- 健康检查 ----
     @app.get("/health", tags=["system"])

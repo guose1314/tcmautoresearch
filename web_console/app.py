@@ -41,7 +41,27 @@ def create_app(
         entrypoint="web",
     )
     resolved_settings = runtime_assembly.settings
-    app = FastAPI(title=resolved_settings.web_console_title, version=resolved_settings.web_console_version)
+    import contextlib
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        monitoring_service = getattr(app.state, "monitoring_service", None)
+        if monitoring_service is not None:
+            factory = getattr(monitoring_service, "_storage_factory", None)
+            if factory is not None:
+                try:
+                    factory.close()
+                except Exception:
+                    pass
+                monitoring_service.unbind_storage_factory()
+        if hasattr(app.state, "db_manager") and app.state.db_manager:
+            app.state.db_manager.close()
+        # manager variable should be accessible since Python's nested scoping is lexically bound
+        if "manager" in locals() and manager is not None:
+            manager.close()
+
+    app = FastAPI(title=resolved_settings.web_console_title, version=resolved_settings.web_console_version, lifespan=lifespan)
     manager = configure_api_services(
         app,
         job_manager=job_manager,
@@ -89,21 +109,6 @@ def create_app(
         monitoring_service: MonitoringService = app.state.monitoring_service
         return _probe_response(response, monitoring_service.get_readiness_report())
 
-    @app.on_event("shutdown")
-    def shutdown_job_manager() -> None:
-        # Close storage factory (Neo4j driver) via monitoring service
-        monitoring_service = getattr(app.state, "monitoring_service", None)
-        if monitoring_service is not None:
-            factory = getattr(monitoring_service, "_storage_factory", None)
-            if factory is not None:
-                try:
-                    factory.close()
-                except Exception:
-                    pass
-                monitoring_service.unbind_storage_factory()
-        if hasattr(app.state, "db_manager") and app.state.db_manager:
-            app.state.db_manager.close()
-        manager.close()
 
     # ---- 控制台 SPA ----
     @app.get("/console", response_class=FileResponse)
@@ -118,6 +123,7 @@ def create_app(
     # ---- 仪表盘 & 业务页面路由 (HTMX 端点) ----
     from src.web.routes.analysis import router as analysis_router
     from src.web.routes.assistant import router as assistant_router
+    from src.web.routes.catalog import router as catalog_router
     from src.web.routes.dashboard import router as dashboard_router
     from src.web.routes.research import router as research_router
 
@@ -125,6 +131,7 @@ def create_app(
     app.include_router(analysis_router)
     app.include_router(assistant_router)
     app.include_router(research_router)
+    app.include_router(catalog_router)
 
     # ---- Jinja2 模板支持 (统一登录页) ----
     if _WEB_TEMPLATES_DIR.is_dir():
