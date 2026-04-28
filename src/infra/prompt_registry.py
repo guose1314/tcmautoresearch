@@ -249,9 +249,7 @@ PROMPT_REGISTRY: Dict[str, PromptTemplate] = {
             "生成 2-3 条可检验的科研假说，不得编造证据。"
         ),
         user_template=(
-            "【研究主题】\n{topic}\n"
-            "{literature_section}"
-            "请生成 2-3 条可检验的科研假说。"
+            "【研究主题】\n{topic}\n{literature_section}请生成 2-3 条可检验的科研假说。"
         ),
         output_kind="json_array",
         output_schema=_RESEARCH_ADVISOR_HYPOTHESIS_SCHEMA,
@@ -264,10 +262,7 @@ PROMPT_REGISTRY: Dict[str, PromptTemplate] = {
             "你是一位中医药临床与实验研究设计专家。"
             "请围绕给定假说设计完整、可执行、可复核的实验方案。"
         ),
-        user_template=(
-            "【研究假说】\n{hypothesis}\n\n"
-            "请设计完整的实验方案。"
-        ),
+        user_template=("【研究假说】\n{hypothesis}\n\n请设计完整的实验方案。"),
         output_kind="json_object",
         output_schema=_RESEARCH_ADVISOR_EXPERIMENT_SCHEMA,
     ),
@@ -280,9 +275,7 @@ PROMPT_REGISTRY: Dict[str, PromptTemplate] = {
             "结论必须有文献摘要支撑。"
         ),
         user_template=(
-            "【研究假说】\n{hypothesis}\n"
-            "{literature_section}"
-            "请评估该假说的创新性。"
+            "【研究假说】\n{hypothesis}\n{literature_section}请评估该假说的创新性。"
         ),
         output_kind="json_object",
         output_schema=_RESEARCH_ADVISOR_NOVELTY_SCHEMA,
@@ -346,6 +339,72 @@ PROMPT_REGISTRY: Dict[str, PromptTemplate] = {
         output_kind="json_array",
         output_schema=_HYPOTHESIS_ENGINE_SCHEMA,
     ),
+    # ------------------------------------------------------------------ #
+    # T4.3 Self-Refine 通用模板：<purpose>.draft / .critique / .refine
+    # ``purpose`` 字段在此处仅用于注册表分桶；运行时由 SelfRefineRunner 按
+    # 实际业务 purpose 动态选择不同 prompt name 前缀（如 "self_refine.draft"
+    # 即默认通用模板，业务方亦可注册 "<purpose>.draft" 覆盖之）。
+    # ------------------------------------------------------------------ #
+    "self_refine.draft": PromptTemplate(
+        name="self_refine.draft",
+        purpose="self_refine",
+        task="draft",
+        system_prompt=(
+            "你是该任务的领域专家。请根据用户输入产出高质量初稿，"
+            "结构化、有据可依，避免空泛与编造。"
+        ),
+        user_template=(
+            "【任务】\n{task_description}\n\n"
+            "【输入】\n{input_payload}\n\n"
+            "请输出初稿。"
+        ),
+        output_kind="text",
+    ),
+    "self_refine.critique": PromptTemplate(
+        name="self_refine.critique",
+        purpose="self_refine",
+        task="critique",
+        system_prompt=(
+            "你是严格的同行评审。请对给定初稿做逐条批判，"
+            "聚焦事实准确性、字段完整性、医学合规性与逻辑一致性。"
+            "只指出问题，不要重写答案。"
+        ),
+        user_template=(
+            "【任务】\n{task_description}\n\n"
+            "【初稿】\n{draft}\n\n"
+            "请逐条列出 issues（每条包含 field 与 issue 描述），"
+            "按严重度从高到低排序，使用 JSON 数组输出。"
+        ),
+        output_kind="json_array",
+        output_schema={
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["field", "issue"],
+                "properties": {
+                    "field": {"type": "string"},
+                    "issue": {"type": "string"},
+                    "severity": {"type": "string"},
+                },
+            },
+        },
+    ),
+    "self_refine.refine": PromptTemplate(
+        name="self_refine.refine",
+        purpose="self_refine",
+        task="refine",
+        system_prompt=(
+            "你是任务的最终交付者。请基于初稿与同行评审 issues 给出修订版，"
+            "必须显式覆盖 issues 中提到的每个 field，并保持其余部分不退化。"
+        ),
+        user_template=(
+            "【任务】\n{task_description}\n\n"
+            "【初稿】\n{draft}\n\n"
+            "【同行评审 Issues（必须逐条解决）】\n{issues}\n\n"
+            "请输出修订后的最终版本。"
+        ),
+        output_kind="text",
+    ),
 }
 
 
@@ -361,8 +420,8 @@ def _build_versioned_registry(
 
 
 # ``name -> version -> PromptTemplate``；``PROMPT_REGISTRY`` 始终指向每个 name 的 latest。
-_VERSIONED_PROMPT_REGISTRY: Dict[str, Dict[str, PromptTemplate]] = _build_versioned_registry(
-    PROMPT_REGISTRY
+_VERSIONED_PROMPT_REGISTRY: Dict[str, Dict[str, PromptTemplate]] = (
+    _build_versioned_registry(PROMPT_REGISTRY)
 )
 
 
@@ -465,7 +524,8 @@ def export_prompt_registry_snapshot() -> Dict[str, Any]:
             }
         )
     aggregate = "\n".join(
-        f"{e['name']}@{e['version']}/{e['schema_version']}:{e['fingerprint']}" for e in entries
+        f"{e['name']}@{e['version']}/{e['schema_version']}:{e['fingerprint']}"
+        for e in entries
     )
     return {
         "total_prompts": len(entries),
@@ -506,8 +566,12 @@ def render_prompt(
     """渲染注册 prompt，并在需要时自动追加 JSON Schema 约束。"""
 
     spec = get_prompt_template(name)
-    system_prompt = spec.system_prompt if system_prompt_override is None else system_prompt_override
-    user_template = spec.user_template if user_template_override is None else user_template_override
+    system_prompt = (
+        spec.system_prompt if system_prompt_override is None else system_prompt_override
+    )
+    user_template = (
+        spec.user_template if user_template_override is None else user_template_override
+    )
     user_prompt = user_template.format(**variables).rstrip()
     schema_instruction = ""
 
@@ -517,7 +581,9 @@ def render_prompt(
         and settings.get("include_schema_in_prompt", True)
         and spec.output_schema
     ):
-        schema_instruction = _build_schema_instruction(spec.output_kind, spec.output_schema, settings)
+        schema_instruction = _build_schema_instruction(
+            spec.output_kind, spec.output_schema, settings
+        )
 
     budgeted = apply_token_budget_to_prompt(
         user_prompt,
@@ -552,7 +618,9 @@ def call_registered_prompt(
     """使用注册 prompt 调用任意支持 generate() 的 LLM 引擎。"""
 
     if llm_engine is None or not hasattr(llm_engine, "generate"):
-        raise RuntimeError("Prompt Registry 需要支持 generate(prompt, system_prompt) 的 llm_engine")
+        raise RuntimeError(
+            "Prompt Registry 需要支持 generate(prompt, system_prompt) 的 llm_engine"
+        )
 
     resolved_prompt = rendered or render_prompt(
         name,
@@ -580,7 +648,11 @@ def call_registered_prompt(
     if cached is not None:
         return cached
 
-    response = str(llm_engine.generate(resolved_prompt.user_prompt, system_prompt=resolved_prompt.system_prompt))
+    response = str(
+        llm_engine.generate(
+            resolved_prompt.user_prompt, system_prompt=resolved_prompt.system_prompt
+        )
+    )
     task_cache.put_text(
         "prompt",
         resolved_prompt.name,
@@ -609,10 +681,14 @@ def parse_registered_output(name: str, raw: Any) -> PromptValidationResult:
     parsed = _extract_json_payload(raw, expected_root=expected_root)
     if parsed is None:
         errors = ("未提取到合法 JSON",)
-        return PromptValidationResult(name=name, parsed=None, schema_valid=False, errors=errors)
+        return PromptValidationResult(
+            name=name, parsed=None, schema_valid=False, errors=errors
+        )
 
     if not spec.output_schema:
-        return PromptValidationResult(name=name, parsed=parsed, schema_valid=True, errors=())
+        return PromptValidationResult(
+            name=name, parsed=parsed, schema_valid=True, errors=()
+        )
 
     errors = tuple(_validate_schema(parsed, spec.output_schema))
     if errors:
@@ -625,7 +701,9 @@ def parse_registered_output(name: str, raw: Any) -> PromptValidationResult:
     )
 
 
-def _build_schema_instruction(output_kind: str, schema: Dict[str, Any], settings: Dict[str, Any]) -> str:
+def _build_schema_instruction(
+    output_kind: str, schema: Dict[str, Any], settings: Dict[str, Any]
+) -> str:
     root_name = {
         "json_object": "JSON 对象",
         "json_array": "JSON 数组",
@@ -668,10 +746,14 @@ def _extract_json_payload(raw: Any, *, expected_root: Optional[str] = None) -> A
     return None
 
 
-def _candidate_json_texts(text: str, *, expected_root: Optional[str] = None) -> Iterable[str]:
+def _candidate_json_texts(
+    text: str, *, expected_root: Optional[str] = None
+) -> Iterable[str]:
     candidates: list[str] = [text]
 
-    for match in re.finditer(r"```(?:json)?\s*(.*?)\s*```", text, re.IGNORECASE | re.DOTALL):
+    for match in re.finditer(
+        r"```(?:json)?\s*(.*?)\s*```", text, re.IGNORECASE | re.DOTALL
+    ):
         fenced = str(match.group(1) or "").strip()
         if fenced:
             candidates.append(fenced)
