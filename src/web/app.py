@@ -79,6 +79,16 @@ def create_app(
 
     app = FastAPI(title=resolved_title, version=resolved_version)
 
+    # ---- T6.2: API 速率限制（GPU 保护）----
+    try:
+        from src.web.middleware.ratelimit import install_rate_limiter
+
+        install_rate_limiter(app)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "rate limiter 初始化失败，跳过速率限制中间件", exc_info=True
+        )
+
     # ---- CORS 中间件 ----
     app.add_middleware(
         CORSMiddleware,
