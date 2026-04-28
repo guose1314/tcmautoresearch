@@ -9,6 +9,11 @@ from src.research.graph_assets import (
     build_evidence_subgraph,
     build_graph_assets_payload,
 )
+from src.research.hypothesis_engine import (
+    DEFAULT_HYPOTHESIS_EVIDENCE_GRADE,
+    HYPOTHESIS_EVIDENCE_GRADES,
+    METHODOLOGY_TAGS,
+)
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
     has_learning_strategy,
@@ -31,6 +36,58 @@ except Exception:
 _HERB_DRIVEN_SYNDROME_PREFERENCES: tuple[tuple[str, str], ...] = (
     ("火麻仁", "中风"),
 )
+
+
+def _resolve_analyze_methodology(
+    context: Dict[str, Any],
+    cycle: "ResearchCycle",
+) -> Dict[str, str]:
+    """T2.4: 推断 analyze 阶段的 methodology_tag 与 evidence_grade。
+
+    优先取 context 显式覆盖；缺省按研究目标启发式选择 methodology_tag，
+    evidence_grade 默认 ``DEFAULT_HYPOTHESIS_EVIDENCE_GRADE``。
+    """
+
+    explicit_tag = (context.get("methodology_tag") or "").strip().lower()
+    if explicit_tag in METHODOLOGY_TAGS:
+        tag = explicit_tag
+    else:
+        objective = str(getattr(cycle, "research_objective", "") or context.get("research_objective") or "").lower()
+        if any(token in objective for token in ("校勘", "训诂", "philolog", "version", "异文")):
+            tag = "philology"
+        elif any(token in objective for token in ("分类", "本草", "classification", "taxonomy", "category")):
+            tag = "classification"
+        else:
+            tag = "evidence_based"
+
+    explicit_grade = context.get("methodology_evidence_grade") or context.get("hypothesis_evidence_grade")
+    if explicit_grade in HYPOTHESIS_EVIDENCE_GRADES:
+        grade = explicit_grade
+    else:
+        grade = DEFAULT_HYPOTHESIS_EVIDENCE_GRADE
+    return {"methodology_tag": tag, "evidence_grade": grade}
+
+
+def _validate_analyze_methodology_contract(methodology: Dict[str, Any]) -> None:
+    """T2.4 契约校验：analyze 输出的 methodology 块必须合法。失败时让 phase 退出码非 0。"""
+
+    if not isinstance(methodology, dict):
+        raise ValueError(
+            f"analyze.methodology must be a dict, got {type(methodology).__name__}"
+        )
+    tag = methodology.get("methodology_tag")
+    if tag not in METHODOLOGY_TAGS:
+        raise ValueError(
+            f"analyze.methodology.methodology_tag invalid={tag!r}; allowed={METHODOLOGY_TAGS}"
+        )
+    grade = methodology.get("evidence_grade")
+    if grade is None or grade == "":
+        return
+    if grade not in HYPOTHESIS_EVIDENCE_GRADES:
+        raise ValueError(
+            f"analyze.methodology.evidence_grade invalid={grade!r}; allowed={HYPOTHESIS_EVIDENCE_GRADES}"
+        )
+
 
 class AnalyzePhaseMixin:
     """Mixin: analyze 阶段处理方法。
@@ -90,6 +147,11 @@ class AnalyzePhaseMixin:
         textual_evidence_summary = self._extract_textual_evidence_summary(cycle)
         if textual_evidence_summary:
             analysis_results["textual_evidence_summary"] = textual_evidence_summary
+
+        # T2.4: methodology contract — methodology_tag 必填 + evidence_grade 默认 'C'
+        methodology = _resolve_analyze_methodology(context, cycle)
+        _validate_analyze_methodology_contract(methodology)
+        analysis_results["methodology"] = methodology
 
         cycle_id = str(getattr(cycle, "cycle_id", "") or "analyze-cycle")
         evidence_subgraph = build_evidence_subgraph(

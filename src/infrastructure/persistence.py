@@ -694,12 +694,17 @@ class ResearchArtifact(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
+    # T2.4: methodology + hypothesis-level evidence grading
+    methodology_tag = Column(String(32), nullable=True)
+    evidence_grade = Column(String(2), nullable=True)
+
     session = relationship("ResearchSession", back_populates="artifacts")
     phase_execution = relationship("PhaseExecution", back_populates="artifacts")
 
     __table_args__ = (
         Index("idx_ra_session", "session_id"),
         Index("idx_ra_type", "artifact_type"),
+        Index("idx_ra_methodology_tag", "methodology_tag"),
     )
 
 

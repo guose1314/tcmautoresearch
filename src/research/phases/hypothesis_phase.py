@@ -10,6 +10,11 @@ from src.research.graph_assets import (
     build_graph_assets_payload,
     build_hypothesis_subgraph,
 )
+from src.research.hypothesis_engine import (
+    DEFAULT_HYPOTHESIS_EVIDENCE_GRADE,
+    HYPOTHESIS_EVIDENCE_GRADES,
+    METHODOLOGY_TAGS,
+)
 from src.research.learning_strategy import (
     StrategyApplicationTracker,
     resolve_learning_strategy,
@@ -32,6 +37,42 @@ except Exception:
     ResearchHypothesis = None
     TheoreticalFramework = None
 
+
+def _validate_hypothesis_methodology_contract(hypotheses: List[Dict[str, Any]]) -> None:
+    """T2.4 契约校验：每条 hypothesis 必须带合法的 methodology_tag 与 evidence_grade。
+
+    methodology_tag 为必填且必须落在 ``METHODOLOGY_TAGS`` 中。
+    evidence_grade 允许 None（视作 ``DEFAULT_HYPOTHESIS_EVIDENCE_GRADE``），
+    但若提供则必须落在 ``HYPOTHESIS_EVIDENCE_GRADES`` 中。
+    任何违规都会抛 ValueError 让 phase 退出码非 0。
+    """
+
+    for index, item in enumerate(hypotheses or []):
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"hypothesis[{index}] must be a dict for methodology validation, got {type(item).__name__}"
+            )
+        tag = item.get("methodology_tag")
+        if tag is None or tag == "":
+            raise ValueError(
+                f"hypothesis[{index}] missing required methodology_tag; "
+                f"allowed values: {METHODOLOGY_TAGS}"
+            )
+        if tag not in METHODOLOGY_TAGS:
+            raise ValueError(
+                f"hypothesis[{index}] invalid methodology_tag={tag!r}; "
+                f"allowed values: {METHODOLOGY_TAGS}"
+            )
+        grade = item.get("evidence_grade", DEFAULT_HYPOTHESIS_EVIDENCE_GRADE)
+        if grade is None or grade == "":
+            continue
+        if grade not in HYPOTHESIS_EVIDENCE_GRADES:
+            raise ValueError(
+                f"hypothesis[{index}] invalid evidence_grade={grade!r}; "
+                f"allowed values: {HYPOTHESIS_EVIDENCE_GRADES}"
+            )
+
+
 class HypothesisPhaseMixin:
     """Mixin: hypothesis 阶段处理方法。
 
@@ -47,6 +88,8 @@ class HypothesisPhaseMixin:
         hypothesis_context = self._build_hypothesis_context(cycle, context)
         result = self.pipeline.hypothesis_engine.execute(hypothesis_context)
         hypotheses = result.get("hypotheses") or []
+        # T2.4: methodology_tag 必填 + evidence_grade 校验，失败立即抛错（phase 退出码非 0）
+        _validate_hypothesis_methodology_contract(hypotheses)
         metadata = result.setdefault("metadata", {})
         result["phase"] = "hypothesis"
         result.setdefault("validation_iterations", [])
@@ -200,6 +243,10 @@ class HypothesisPhaseMixin:
             },
             force_framework=context.get("force_reasoning_framework"),
         )
+        
+        dynamic_few_shot = ""
+        if hasattr(self.pipeline, "self_learning_engine") and self.pipeline.self_learning_engine:
+            dynamic_few_shot = self.pipeline.self_learning_engine.get_dynamic_few_shot_examples(limit=3)
 
         return {
             "research_objective": cycle.research_objective or context.get("research_objective") or cycle.description,
@@ -223,6 +270,7 @@ class HypothesisPhaseMixin:
             "learning_strategy": learning_strategy,
             "reasoning_framework": reasoning_framework,
             "reasoning_guidance": reasoning_framework.hypothesis_guidance,
+            "dynamic_few_shot": dynamic_few_shot,
         }
 
     def _resolve_hypothesis_use_llm_generation(

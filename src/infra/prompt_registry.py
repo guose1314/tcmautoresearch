@@ -165,6 +165,15 @@ _HYPOTHESIS_ENGINE_SCHEMA = {
             "keywords": {"type": "array", "items": {"type": "string"}, "minItems": 1},
             "source_gap_type": {"type": "string"},
             "source_entities": {"type": "array", "items": {"type": "string"}},
+            # T2.4: methodology + hypothesis-level evidence grade
+            "methodology_tag": {
+                "type": "string",
+                "enum": ["philology", "classification", "evidence_based"],
+            },
+            "evidence_grade": {
+                "type": ["string", "null"],
+                "enum": ["A", "B", "C", "D", None],
+            },
         },
     },
 }

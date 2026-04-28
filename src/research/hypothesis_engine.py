@@ -27,6 +27,28 @@ from src.storage.neo4j_driver import create_knowledge_graph
 logger = logging.getLogger(__name__)
 
 
+# T2.4: methodology / hypothesis-level evidence grading vocabulary
+METHODOLOGY_TAGS = ("philology", "classification", "evidence_based")
+HYPOTHESIS_EVIDENCE_GRADES = ("A", "B", "C", "D")
+DEFAULT_HYPOTHESIS_EVIDENCE_GRADE = "C"
+
+
+def infer_methodology_tag(source_gap_type: str) -> str:
+	"""根据 gap_type 启发式推断 methodology_tag。
+
+	未匹配时回落到 ``evidence_based``（最常见的循证场景）。
+	"""
+
+	gap = (source_gap_type or "").strip().lower()
+	if not gap:
+		return "evidence_based"
+	if any(token in gap for token in ("version", "variant", "witness", "lineage", "philolog")):
+		return "philology"
+	if any(token in gap for token in ("composition", "classification", "taxonomy", "category")):
+		return "classification"
+	return "evidence_based"
+
+
 @dataclass
 class Hypothesis:
 	"""单条研究假设。"""
@@ -50,6 +72,9 @@ class Hypothesis:
 	contradiction_signals: List[str] = field(default_factory=list)
 	final_score: float = 0.0
 	scores: Dict[str, float] = field(default_factory=dict)
+	# T2.4: methodology + hypothesis-level evidence grade
+	methodology_tag: str = "evidence_based"
+	evidence_grade: Optional[str] = DEFAULT_HYPOTHESIS_EVIDENCE_GRADE
 
 	def to_dict(self) -> Dict[str, Any]:
 		return {
@@ -72,6 +97,8 @@ class Hypothesis:
 			"contradiction_signals": self.contradiction_signals,
 			"final_score": self.final_score,
 			"scores": self.scores,
+			"methodology_tag": self.methodology_tag,
+			"evidence_grade": self.evidence_grade,
 		}
 
 
@@ -411,6 +438,7 @@ class HypothesisEngine(BaseModule):
 			entities="、".join(gap["entities"]) or gap["entity"],
 			description=gap["description"],
 			context_summary=self._build_context_summary(context),
+			dynamic_few_shot=context.get("dynamic_few_shot", ""),
 		)
 		try:
 			raw = call_registered_prompt(
@@ -556,6 +584,7 @@ class HypothesisEngine(BaseModule):
 			gap_details=gap_details,
 			kg_structure_summary=kg_summary,
 			context_summary=context_summary,
+			dynamic_few_shot=context.get("dynamic_few_shot", ""),
 			num_hypotheses=min(self.max_hypotheses, max(3, len(kg_gaps))),
 		)
 
@@ -1065,6 +1094,8 @@ class HypothesisEngine(BaseModule):
 				"feasibility": round(feasibility, 4),
 				"evidence_support": round(evidence_support, 4),
 			},
+			methodology_tag=infer_methodology_tag(source_gap_type),
+			evidence_grade=DEFAULT_HYPOTHESIS_EVIDENCE_GRADE,
 		)
 
 	def _build_backfill_hypothesis(

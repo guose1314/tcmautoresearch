@@ -67,6 +67,8 @@ class _FakeHypothesisEngine:
                     "source_entities": ["黄芪", "补气"],
                     "supporting_signals": ["古籍多处记载补气"],
                     "contradiction_signals": ["现代证据有限"],
+                    "methodology_tag": "evidence_based",
+                    "evidence_grade": "C",
                 }
             ],
             "metadata": {},
