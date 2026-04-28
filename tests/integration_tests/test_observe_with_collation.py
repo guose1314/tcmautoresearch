@@ -75,7 +75,9 @@ class TestObserveWithCollation(unittest.TestCase):
                     "title": "金匮要略·湿病脉证治",
                     "raw_text_preview": "湿家病身上疼痛...",
                     "metadata": {
-                        "parallel_versions": [{"title": "校本", "text": "湿家病身体疼痛..."}],
+                        "parallel_versions": [
+                            {"title": "校本", "text": "湿家病身体疼痛..."}
+                        ],
                     },
                 },
                 {
@@ -106,7 +108,9 @@ class TestObserveWithCollation(unittest.TestCase):
         self.assertEqual(len(result["reports"]), 2)
         # collate called once per document
         self.assertEqual(fake_collate.call_count, 2)
-        called_ids = sorted(call.kwargs["document_id"] for call in fake_collate.call_args_list)
+        called_ids = sorted(
+            call.kwargs["document_id"] for call in fake_collate.call_args_list
+        )
         self.assertEqual(called_ids, ["doc-A", "doc-B"])
 
     # ------------------------------------------------------------------ #
@@ -121,7 +125,12 @@ class TestObserveWithCollation(unittest.TestCase):
             corpus_result=None,
             ingestion_result={
                 "documents": [
-                    {"urn": "doc-X", "title": "t", "raw_text_preview": "x", "metadata": {}}
+                    {
+                        "urn": "doc-X",
+                        "title": "t",
+                        "raw_text_preview": "x",
+                        "metadata": {},
+                    }
                 ]
             },
             context={"collation_context": ctx, "run_philology": False},
@@ -148,7 +157,12 @@ class TestObserveWithCollation(unittest.TestCase):
             corpus_result=None,
             ingestion_result={
                 "documents": [
-                    {"urn": "doc-Y", "title": "t", "raw_text_preview": "x", "metadata": {}}
+                    {
+                        "urn": "doc-Y",
+                        "title": "t",
+                        "raw_text_preview": "x",
+                        "metadata": {},
+                    }
                 ]
             },
             context={
@@ -166,9 +180,7 @@ class TestObserveWithCollation(unittest.TestCase):
     # 顶层开关关闭 → 跳过整段
     # ------------------------------------------------------------------ #
     def test_collation_disabled_returns_none(self) -> None:
-        pipeline = _StubPipeline(
-            config={"collation_context": {"enabled": False}}
-        )
+        pipeline = _StubPipeline(config={"collation_context": {"enabled": False}})
         harness = _ObserveHarness(pipeline)
         result = harness._run_observe_collation_if_enabled(
             corpus_result={"documents": []},

@@ -83,6 +83,7 @@ CYPHER_LOCAL_NEIGHBORS = (
 # 主类
 # ---------------------------------------------------------------------------
 
+
 class GraphRAG:
     """三档摘要检索器。"""
 
@@ -154,9 +155,7 @@ class GraphRAG:
             return RetrievalResult(scope=scope)
 
     # ------------------------------------------------------------------ #
-    def _render_summaries(
-        self, scope: str, rows: Iterable[Any]
-    ) -> RetrievalResult:
+    def _render_summaries(self, scope: str, rows: Iterable[Any]) -> RetrievalResult:
         body_parts: List[str] = []
         citations: List[Dict[str, Any]] = []
         truncated = False
@@ -183,9 +182,7 @@ class GraphRAG:
             truncated=truncated,
         )
 
-    def _render_local(
-        self, scope: str, rows: Iterable[Any]
-    ) -> RetrievalResult:
+    def _render_local(self, scope: str, rows: Iterable[Any]) -> RetrievalResult:
         body_parts: List[str] = []
         citations: List[Dict[str, Any]] = []
         truncated = False
@@ -266,4 +263,9 @@ class GraphRAG:
             return None
 
 
-__all__ = ["GraphRAG", "RetrievalResult", "DEFAULT_TOKEN_BUDGET", "VALID_QUESTION_TYPES"]
+__all__ = [
+    "GraphRAG",
+    "RetrievalResult",
+    "DEFAULT_TOKEN_BUDGET",
+    "VALID_QUESTION_TYPES",
+]

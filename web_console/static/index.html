@@ -3501,6 +3501,37 @@
             const width = Math.max(Number(options.width) || 0, stageNode.clientWidth || 0, large ? 940 : 620);
             const height = Math.max(Number(options.height) || 0, large ? 520 : 260);
             const layout = computeKnowledgeGraphLayout(nodes, width, height, large);
+            const labelFontSize = large ? 12 : 10;
+            const labelGap = 6;
+            const fitPaddingX = large ? 40 : 24;
+            const fitPaddingY = large ? 42 : 24;
+
+            let minX = Infinity;
+            let maxX = -Infinity;
+            let minY = Infinity;
+            let maxY = -Infinity;
+            layout.forEach((position) => {
+                minX = Math.min(minX, position.x - position.r);
+                maxX = Math.max(maxX, position.x + position.r);
+                minY = Math.min(minY, position.y - position.r - labelGap - labelFontSize);
+                maxY = Math.max(maxY, position.y + position.r);
+            });
+
+            if (Number.isFinite(minX) && Number.isFinite(maxX) && Number.isFinite(minY) && Number.isFinite(maxY)) {
+                const contentWidth = Math.max(1, maxX - minX);
+                const contentHeight = Math.max(1, maxY - minY);
+                const availableWidth = Math.max(1, width - fitPaddingX * 2);
+                const availableHeight = Math.max(1, height - fitPaddingY * 2);
+                const scale = Math.min(availableWidth / contentWidth, availableHeight / contentHeight);
+                const offsetX = (width - contentWidth * scale) / 2 - minX * scale;
+                const offsetY = (height - contentHeight * scale) / 2 - minY * scale;
+
+                layout.forEach((position) => {
+                    position.x = position.x * scale + offsetX;
+                    position.y = position.y * scale + offsetY;
+                    position.r = Math.max(8, position.r * Math.min(scale, 1.22));
+                });
+            }
 
             const svgNs = "http://www.w3.org/2000/svg";
             const svg = document.createElementNS(svgNs, "svg");
@@ -3578,7 +3609,7 @@
                 const label = document.createElementNS(svgNs, "text");
                 label.setAttribute("x", position.x.toFixed(2));
                 label.setAttribute("y", (position.y - position.r - 6).toFixed(2));
-                label.setAttribute("font-size", large ? "12" : "10");
+                label.setAttribute("font-size", String(labelFontSize));
                 label.setAttribute("fill", "rgba(30, 37, 34, 0.92)");
                 label.setAttribute("text-anchor", "middle");
                 label.textContent = truncateGraphLabel(node.label, large ? 14 : 10);

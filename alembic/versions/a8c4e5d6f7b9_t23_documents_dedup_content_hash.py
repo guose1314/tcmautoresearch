@@ -12,11 +12,12 @@ Revision ID: a8c4e5d6f7b9
 Revises: f1a2b3c4d5e6
 Create Date: 2026-04-28
 """
+
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "a8c4e5d6f7b9"
@@ -79,9 +80,7 @@ def downgrade() -> None:
         )
     else:
         with op.batch_alter_table("documents") as batch:
-            batch.create_unique_constraint(
-                "documents_source_file_key", ["source_file"]
-            )
+            batch.create_unique_constraint("documents_source_file_key", ["source_file"])
 
     with op.batch_alter_table("documents") as batch:
         batch.drop_column("ingest_run_id")

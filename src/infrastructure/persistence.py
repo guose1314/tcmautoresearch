@@ -852,10 +852,13 @@ class ExternalEvidence(Base):
         Index("idx_ext_evidence_document", "document_id"),
         Index("idx_ext_evidence_source", "source"),
         UniqueConstraint(
-            "document_id", "source", "external_id",
+            "document_id",
+            "source",
+            "external_id",
             name="uq_external_evidence_doc_source_extid",
         ),
     )
+
 
 class ResearchLearningFeedback(Base):
     """Research feedback library entries for replay and long-term querying."""

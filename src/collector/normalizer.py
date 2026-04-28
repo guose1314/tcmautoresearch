@@ -50,6 +50,22 @@ _DEFAULT_TERM_MAPPINGS = {
     "方證": "方证",
     "炮炙": "炮制",
 }
+
+# 中医古籍常见通假字/异体字映射字典，仅做提示而不强制替换
+TCM_LOAN_CHAR_MAP: Dict[str, List[str]] = {
+    "内": ["纳"],
+    "说": ["悦"],
+    "知": ["智"],
+    "大": ["太"],
+    "当": ["挡"],
+    "反": ["返"],
+    "已": ["以", "矣"],
+    "无": ["毋"],
+    "齐": ["剂"],
+    "气": ["炁"],
+    "毒": ["督"],
+}
+
 _DEFAULT_METADATA_ALIASES = {
     "title": ["title", "name", "document_title"],
     "authors": ["authors", "author", "creator", "creator_name"],

@@ -89,10 +89,14 @@ class TestSelfRefineV2Hypothesis(unittest.TestCase):
         # runner 被以 purpose='hypothesis' 调用
         runner.run.assert_called_once()
         kwargs = runner.run.call_args.kwargs
-        self.assertEqual(kwargs.get("purpose") or runner.run.call_args.args[0], "hypothesis")
+        self.assertEqual(
+            kwargs.get("purpose") or runner.run.call_args.args[0], "hypothesis"
+        )
 
     def test_hypothesis_self_refine_v2_disabled_returns_no_metadata(self) -> None:
-        pipeline = _StubPipeline(runner=_make_fake_runner(refined_text="x"), enable=False)
+        pipeline = _StubPipeline(
+            runner=_make_fake_runner(refined_text="x"), enable=False
+        )
         self.assertFalse(resolve_enable_self_refine({}, pipeline.config))
 
 
@@ -177,9 +181,7 @@ class TestSelfRefineV2RunnerMissingFallback(unittest.TestCase):
     """runner 缺失时优雅降级，不抛错。"""
 
     def test_apply_returns_error_marker_when_runner_none(self) -> None:
-        meta = apply_self_refine_v2(
-            runner=None, purpose="hypothesis", draft_text="x"
-        )
+        meta = apply_self_refine_v2(runner=None, purpose="hypothesis", draft_text="x")
         self.assertIn("self_refine_v2_error", meta)
 
     def test_apply_returns_error_marker_when_draft_empty(self) -> None:

@@ -63,7 +63,7 @@ def load_successful_files(log_path: Path) -> list[str]:
 
 
 def chunked(values: list[str], size: int) -> list[list[str]]:
-    return [values[i:i + size] for i in range(0, len(values), size)]
+    return [values[i : i + size] for i in range(0, len(values), size)]
 
 
 def build_plan() -> dict[str, Any]:
@@ -93,42 +93,49 @@ def build_plan() -> dict[str, Any]:
         matches = [doc for doc in docs if doc.source_file.startswith(base)]
         matches.sort(key=lambda doc: (doc.created_at, doc.processing_timestamp, doc.id))
         if not matches:
-            groups.append({
-                "base": base,
-                "count": 0,
-                "keep": None,
-                "delete": [],
-                "docs": [],
-            })
+            groups.append(
+                {
+                    "base": base,
+                    "count": 0,
+                    "keep": None,
+                    "delete": [],
+                    "docs": [],
+                }
+            )
             continue
 
         keep = matches[0]
         delete = matches[1:]
         keep_doc_ids.append(keep.id)
         delete_doc_ids.extend(doc.id for doc in delete)
-        groups.append({
-            "base": base,
-            "count": len(matches),
-            "keep": keep.id,
-            "delete": [doc.id for doc in delete],
-            "docs": [
-                {
-                    "id": doc.id,
-                    "source_file": doc.source_file,
-                    "created_at": doc.created_at.isoformat() if doc.created_at else None,
-                    "processing_timestamp": (
-                        doc.processing_timestamp.isoformat()
-                        if doc.processing_timestamp else None
-                    ),
-                    "entity_count": doc.entity_count,
-                }
-                for doc in matches
-            ],
-        })
+        groups.append(
+            {
+                "base": base,
+                "count": len(matches),
+                "keep": keep.id,
+                "delete": [doc.id for doc in delete],
+                "docs": [
+                    {
+                        "id": doc.id,
+                        "source_file": doc.source_file,
+                        "created_at": doc.created_at.isoformat()
+                        if doc.created_at
+                        else None,
+                        "processing_timestamp": (
+                            doc.processing_timestamp.isoformat()
+                            if doc.processing_timestamp
+                            else None
+                        ),
+                        "entity_count": doc.entity_count,
+                    }
+                    for doc in matches
+                ],
+            }
+        )
 
     delete_doc_param = delete_doc_ids or ["00000000-0000-0000-0000-000000000000"]
     cur.execute(
-        'SELECT id::text, document_id::text FROM entities WHERE document_id = ANY(%s::uuid[])',
+        "SELECT id::text, document_id::text FROM entities WHERE document_id = ANY(%s::uuid[])",
         (delete_doc_param,),
     )
     entity_rows = cur.fetchall()
@@ -154,7 +161,7 @@ def build_plan() -> dict[str, Any]:
         "processing_logs",
     ):
         cur.execute(
-            f'SELECT COUNT(*) FROM {table} WHERE document_id = ANY(%s::uuid[])',
+            f"SELECT COUNT(*) FROM {table} WHERE document_id = ANY(%s::uuid[])",
             (delete_doc_param,),
         )
         child_tables[table] = cur.fetchone()[0]
@@ -168,11 +175,11 @@ def build_plan() -> dict[str, Any]:
         neo = GraphDatabase.driver(NEO4J_URI, auth=NEO4J_AUTH)
         with neo.session(database=NEO4J_DB) as session:
             neo_node_count = session.run(
-                'MATCH (n) WHERE n.id IN $ids RETURN count(n) AS c',
+                "MATCH (n) WHERE n.id IN $ids RETURN count(n) AS c",
                 ids=delete_entity_ids,
             ).single()["c"]
             neo_edge_count = session.run(
-                'MATCH (n)-[r]-() WHERE n.id IN $ids RETURN count(r) AS c',
+                "MATCH (n)-[r]-() WHERE n.id IN $ids RETURN count(r) AS c",
                 ids=delete_entity_ids,
             ).single()["c"]
         neo.close()
@@ -222,7 +229,7 @@ def delete_from_postgres(doc_ids: list[str]) -> int:
     pg.autocommit = False
     cur = pg.cursor()
     cur.execute(
-        'DELETE FROM documents WHERE id = ANY(%s::uuid[])',
+        "DELETE FROM documents WHERE id = ANY(%s::uuid[])",
         (doc_ids,),
     )
     deleted = cur.rowcount
@@ -260,7 +267,11 @@ def main() -> int:
     args = parser.parse_args()
 
     plan = build_plan()
-    print(json.dumps({"dry_run": not args.apply, **summarize(plan)}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {"dry_run": not args.apply, **summarize(plan)}, ensure_ascii=False, indent=2
+        )
+    )
 
     if not args.apply:
         return 0

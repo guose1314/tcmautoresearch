@@ -78,6 +78,7 @@ class ConstitutionalViolation(RuntimeError):
 # 加载
 # ---------------------------------------------------------------------------
 
+
 def _load_yaml(path: Path) -> dict:
     try:
         import yaml  # type: ignore
@@ -89,7 +90,7 @@ def _load_yaml(path: Path) -> dict:
 
 def _build_rules(spec: Mapping[str, Any]) -> List[ConstitutionalRule]:
     rules: List[ConstitutionalRule] = []
-    for raw in (spec.get("rules") or []):
+    for raw in spec.get("rules") or []:
         if not isinstance(raw, Mapping):
             continue
         rules.append(
@@ -109,6 +110,7 @@ def _build_rules(spec: Mapping[str, Any]) -> List[ConstitutionalRule]:
 # Path / 字段遍历
 # ---------------------------------------------------------------------------
 
+
 def _resolve_path(payload: Any, path: str) -> List[tuple[str, Any]]:
     """根据 dot path 取值。返回 (具体路径, 值) 列表（支持数组展开）。"""
     if path == "*":
@@ -119,14 +121,14 @@ def _resolve_path(payload: Any, path: str) -> List[tuple[str, Any]]:
         next_nodes: List[tuple[str, Any]] = []
         for prefix, node in nodes:
             if isinstance(node, Mapping) and part in node:
-                next_nodes.append(
-                    (f"{prefix}.{part}" if prefix else part, node[part])
-                )
+                next_nodes.append((f"{prefix}.{part}" if prefix else part, node[part]))
             elif isinstance(node, list):
                 # 中间允许直接对每个元素继续按 part 取
                 for idx, item in enumerate(node):
                     if isinstance(item, Mapping) and part in item:
-                        new_prefix = f"{prefix}[{idx}].{part}" if prefix else f"[{idx}].{part}"
+                        new_prefix = (
+                            f"{prefix}[{idx}].{part}" if prefix else f"[{idx}].{part}"
+                        )
                         next_nodes.append((new_prefix, item[part]))
         nodes = next_nodes
         if not nodes:
@@ -277,7 +279,11 @@ class ConstitutionalGuard:
         for path, value in nodes:
             if isinstance(value, list):
                 for idx, item in enumerate(value):
-                    text = _stringify(item) if not isinstance(item, Mapping) else _serialize_mapping(item)
+                    text = (
+                        _stringify(item)
+                        if not isinstance(item, Mapping)
+                        else _serialize_mapping(item)
+                    )
                     if not pattern.search(text):
                         results.append(
                             Violation(
@@ -289,7 +295,11 @@ class ConstitutionalGuard:
                             )
                         )
             else:
-                text = _stringify(value) if not isinstance(value, Mapping) else _serialize_mapping(value)
+                text = (
+                    _stringify(value)
+                    if not isinstance(value, Mapping)
+                    else _serialize_mapping(value)
+                )
                 if not text or not pattern.search(text):
                     results.append(
                         Violation(

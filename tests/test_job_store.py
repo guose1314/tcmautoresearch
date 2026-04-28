@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 
-from web_console.job_store import PersistentJobStore
+from src.web.ops.job_store import PersistentJobStore
 
 
 class TestPersistentJobStore(unittest.TestCase):

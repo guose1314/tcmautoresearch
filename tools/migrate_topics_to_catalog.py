@@ -56,30 +56,54 @@ def migrate(driver, *, database: str, apply: bool) -> dict:
     catalog.ensure_constraints()
 
     with driver.session(database=database) as session:
-        legacy_topic = _run_scalar(session, catalog_cypher.COUNT_RESEARCH_TOPIC, "legacy_count")
+        legacy_topic = _run_scalar(
+            session, catalog_cypher.COUNT_RESEARCH_TOPIC, "legacy_count"
+        )
         topic_before = _run_scalar(session, catalog_cypher.COUNT_TOPIC, "topic_count")
-        legacy_edge = _run_scalar(session, catalog_cypher.COUNT_HAS_LATENT_TOPIC, "legacy_edge_count")
-        belongs_before = _run_scalar(session, catalog_cypher.COUNT_BELONGS_TO_TOPIC, "edge_count")
-        legacy_member = _run_scalar(session, catalog_cypher.COUNT_HAS_TOPIC_MEMBER, "legacy_member_count")
+        legacy_edge = _run_scalar(
+            session, catalog_cypher.COUNT_HAS_LATENT_TOPIC, "legacy_edge_count"
+        )
+        belongs_before = _run_scalar(
+            session, catalog_cypher.COUNT_BELONGS_TO_TOPIC, "edge_count"
+        )
+        legacy_member = _run_scalar(
+            session, catalog_cypher.COUNT_HAS_TOPIC_MEMBER, "legacy_member_count"
+        )
 
         logger.info(
             "[before] ResearchTopic=%d Topic=%d HAS_LATENT_TOPIC=%d BELONGS_TO_TOPIC=%d HAS_TOPIC_MEMBER=%d",
-            legacy_topic, topic_before, legacy_edge, belongs_before, legacy_member,
+            legacy_topic,
+            topic_before,
+            legacy_edge,
+            belongs_before,
+            legacy_member,
         )
 
         migrated_topics = 0
         migrated_edges = 0
         if apply:
-            t_record = session.run(catalog_cypher.MIGRATE_RESEARCH_TOPIC_TO_TOPIC).single()
-            migrated_topics = int(t_record["topic_count"]) if t_record is not None else 0
-            e_record = session.run(catalog_cypher.MIGRATE_HAS_LATENT_TOPIC_TO_BELONGS).single()
+            t_record = session.run(
+                catalog_cypher.MIGRATE_RESEARCH_TOPIC_TO_TOPIC
+            ).single()
+            migrated_topics = (
+                int(t_record["topic_count"]) if t_record is not None else 0
+            )
+            e_record = session.run(
+                catalog_cypher.MIGRATE_HAS_LATENT_TOPIC_TO_BELONGS
+            ).single()
             migrated_edges = int(e_record["edge_count"]) if e_record is not None else 0
-            logger.info("[applied] migrated_topics=%d migrated_edges=%d", migrated_topics, migrated_edges)
+            logger.info(
+                "[applied] migrated_topics=%d migrated_edges=%d",
+                migrated_topics,
+                migrated_edges,
+            )
         else:
             logger.info("[dry-run] no writes performed; pass --apply to execute")
 
         topic_after = _run_scalar(session, catalog_cypher.COUNT_TOPIC, "topic_count")
-        belongs_after = _run_scalar(session, catalog_cypher.COUNT_BELONGS_TO_TOPIC, "edge_count")
+        belongs_after = _run_scalar(
+            session, catalog_cypher.COUNT_BELONGS_TO_TOPIC, "edge_count"
+        )
 
     summary = {
         "legacy_topic": legacy_topic,
@@ -109,10 +133,14 @@ def migrate(driver, *, database: str, apply: bool) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--uri", default=os.environ.get("TCM_NEO4J_URI", "neo4j://localhost:7687"))
+    parser.add_argument(
+        "--uri", default=os.environ.get("TCM_NEO4J_URI", "neo4j://localhost:7687")
+    )
     parser.add_argument("--user", default=os.environ.get("TCM_NEO4J_USER", "neo4j"))
     parser.add_argument("--password", default=os.environ.get("TCM_NEO4J_PASSWORD", ""))
-    parser.add_argument("--database", default=os.environ.get("TCM_NEO4J_DATABASE", "neo4j"))
+    parser.add_argument(
+        "--database", default=os.environ.get("TCM_NEO4J_DATABASE", "neo4j")
+    )
     parser.add_argument("--apply", action="store_true", help="执行迁移；缺省仅 dry-run")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)

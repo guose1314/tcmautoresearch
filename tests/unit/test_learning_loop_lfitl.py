@@ -84,9 +84,7 @@ class TestLearningLoopLFITLIntegration(unittest.TestCase):
         self.assertIn("证候", ctx2["prompt_bias_blocks"]["hypothesis"]["bias_text"])
         # lfitl_plan 也应附带在 cycle context 里
         self.assertIn("lfitl_plan", ctx2)
-        self.assertGreaterEqual(
-            ctx2["lfitl_plan"]["summary"]["prompt_bias_count"], 1
-        )
+        self.assertGreaterEqual(ctx2["lfitl_plan"]["summary"]["prompt_bias_count"], 1)
 
     def test_missing_repo_disables_lfitl_silently(self) -> None:
         llo = LearningLoopOrchestrator()  # 没有 feedback_repo

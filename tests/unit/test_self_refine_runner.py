@@ -53,7 +53,9 @@ class TestSelfRefineRunner(unittest.TestCase):
         #   draft 输出："标题: 初稿，剂量: 未填"
         #   critique 输出 issues = [{"field": "剂量", "issue": "缺失"}]
         #   refine 输出："标题: 初稿，剂量: 6克 (修订)"
-        critique_issues = [{"field": "剂量", "issue": "缺失剂量信息", "severity": "high"}]
+        critique_issues = [
+            {"field": "剂量", "issue": "缺失剂量信息", "severity": "high"}
+        ]
         fake = _FakeLLM(
             responses=[
                 "标题: 初稿，剂量: 未填",
@@ -174,7 +176,9 @@ class TestSelfRefineRunner(unittest.TestCase):
         self.assertFalse(result.succeeded)
         self.assertEqual(len(result.rounds), 1)
         self.assertEqual(len(fake.calls), 3)  # 不再走第二轮
-        self.assertTrue(any(v["rule_id"] == "TEST.critical" for v in result.last_violations))
+        self.assertTrue(
+            any(v["rule_id"] == "TEST.critical" for v in result.last_violations)
+        )
 
     def test_purpose_override_falls_back_to_self_refine(self) -> None:
         # 未注册 myproj.draft → 应回退 self_refine.draft

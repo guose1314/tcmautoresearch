@@ -352,15 +352,14 @@ class AnalyzePhaseMixin:
         if not self._resolve_analyze_flag(context, "enable_graph_rag", default=False):
             return {}
         try:
-            from src.llm.graph_rag import GraphRAG, VALID_QUESTION_TYPES
+            from src.llm.graph_rag import VALID_QUESTION_TYPES, GraphRAG
         except Exception:
             return {}
 
         rag: Any = context.get("graph_rag_runner")
         if rag is None:
-            driver = (
-                getattr(self.pipeline, "neo4j_driver", None)
-                or context.get("neo4j_driver")
+            driver = getattr(self.pipeline, "neo4j_driver", None) or context.get(
+                "neo4j_driver"
             )
             token_budget = int(context.get("graph_rag_token_budget", 8000))
             rag = GraphRAG(neo4j_driver=driver, token_budget=token_budget)

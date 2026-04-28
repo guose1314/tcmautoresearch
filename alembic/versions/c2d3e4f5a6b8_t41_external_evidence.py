@@ -44,9 +44,7 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("CURRENT_TIMESTAMP"),
         ),
-        sa.ForeignKeyConstraint(
-            ["document_id"], ["documents.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["document_id"], ["documents.id"], ondelete="CASCADE"),
         sa.UniqueConstraint(
             "document_id",
             "source",
@@ -54,12 +52,8 @@ def upgrade() -> None:
             name="uq_external_evidence_doc_source_extid",
         ),
     )
-    op.create_index(
-        "idx_ext_evidence_document", "external_evidence", ["document_id"]
-    )
-    op.create_index(
-        "idx_ext_evidence_source", "external_evidence", ["source"]
-    )
+    op.create_index("idx_ext_evidence_document", "external_evidence", ["document_id"])
+    op.create_index("idx_ext_evidence_source", "external_evidence", ["source"])
 
 
 def downgrade() -> None:

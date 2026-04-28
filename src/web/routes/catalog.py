@@ -48,6 +48,7 @@ except Exception:  # noqa: BLE001
 # Driver 依赖：复用 analysis 路由内部的 _get_neo4j_driver；测试可 monkeypatch
 # ---------------------------------------------------------------------------
 
+
 def _resolve_driver():
     from src.web.routes.analysis import _get_neo4j_driver
 
@@ -126,7 +127,9 @@ async def query_catalog_view(
         criteria["code"] = code
     else:
         if not dynasty:
-            raise HTTPException(status_code=400, detail="dynasty view requires 'dynasty'")
+            raise HTTPException(
+                status_code=400, detail="dynasty view requires 'dynasty'"
+            )
         criteria["dynasty"] = dynasty
     try:
         items = catalog.query(view_key, criteria)

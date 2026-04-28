@@ -7,7 +7,6 @@
 
 from src.infra.cache_service import LLMDiskCache
 
-
 _PROMPT = "请分析《伤寒论》太阳病提纲。"
 _SYS = "你是一位中医文献研究助手。"
 _MODEL = "local:./models/qwen.gguf"

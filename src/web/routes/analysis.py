@@ -576,16 +576,20 @@ def _sync_community_topics_to_catalog(
     for topic in community_topics:
         if not isinstance(topic, Mapping):
             continue
-        label = str(topic.get("label") or topic.get("name") or topic.get("topic_id") or "")
+        label = str(
+            topic.get("label") or topic.get("name") or topic.get("topic_id") or ""
+        )
         key = _slugify_topic_key(label or str(topic.get("community_id") or ""))
         if not key:
             continue
-        payload.append({
-            "key": key,
-            "label": label or key,
-            "description": str(topic.get("description") or "")[:500],
-            "weight": float(topic.get("cohesion") or topic.get("size") or 1.0),
-        })
+        payload.append(
+            {
+                "key": key,
+                "label": label or key,
+                "description": str(topic.get("description") or "")[:500],
+                "weight": float(topic.get("cohesion") or topic.get("size") or 1.0),
+            }
+        )
     if not payload:
         return 0
     from src.contexts.catalog import CatalogContext

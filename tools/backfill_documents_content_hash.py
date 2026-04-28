@@ -20,6 +20,7 @@
 CI 兜底场景已被 [tools/cleanup_duplicate_batch_assets.py](cleanup_duplicate_batch_assets.py)
 取代，本脚本是其唯一的"正向迁移"形态。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -66,7 +67,7 @@ def _resolve_disk_path(canonical_name: str) -> Optional[Path]:
     raw = canonical_name.strip()
     if not raw:
         return None
-    direct = (DATA_DIR / raw)
+    direct = DATA_DIR / raw
     if direct.exists():
         return direct
     if not raw.endswith(".txt"):
@@ -145,7 +146,8 @@ def main() -> int:
                 # Sentinel hash: deterministic per canonical name; later UNIQUE
                 # collisions still collapse like-for-like.
                 canonical_to_hash[canonical] = (
-                    "missing_" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:56]
+                    "missing_"
+                    + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:56]
                 )
             else:
                 canonical_to_hash[canonical] = _hash_disk(disk)
@@ -177,11 +179,17 @@ def main() -> int:
 
     logger.info(
         "plan: rows=%d unique_keys=%d keep=%d delete=%d disk_missing=%d",
-        len(plan), len(grouped), len(keep_ids), len(delete_ids), len(missing),
+        len(plan),
+        len(grouped),
+        len(keep_ids),
+        len(delete_ids),
+        len(missing),
     )
     if missing:
         sample = ", ".join(sorted(set(missing))[:5])
-        logger.warning("disk-missing canonical names (%d total) sample: %s", len(missing), sample)
+        logger.warning(
+            "disk-missing canonical names (%d total) sample: %s", len(missing), sample
+        )
 
     if not args.apply:
         logger.info("dry-run only; rerun with --apply to persist")

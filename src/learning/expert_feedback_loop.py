@@ -218,16 +218,21 @@ class ExpertFeedbackLoop:
             )
             with self.neo4j.driver.session(database=self.neo4j.database) as session:
                 return [
-                    {"task_id": r["tid"], "data": r["data"]} for r in session.run(cypher)
+                    {"task_id": r["tid"], "data": r["data"]}
+                    for r in session.run(cypher)
                 ]
         except Exception:
             return []
 
     def expert_review(self, task_id: str, action: str) -> bool:
         try:
-            engine_info = ModuleRegistry.get_instance().get_module("self_learning_engine")
+            engine_info = ModuleRegistry.get_instance().get_module(
+                "self_learning_engine"
+            )
             if not engine_info or not getattr(engine_info, "instance", None):
-                logger.error("SelfLearningEngine not found, cannot apply expert feedback.")
+                logger.error(
+                    "SelfLearningEngine not found, cannot apply expert feedback."
+                )
                 return False
             engine = engine_info.instance
             if action == "approve":

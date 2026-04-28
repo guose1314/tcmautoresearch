@@ -5,12 +5,14 @@
   - 同 source_file + 不同内容 → 新增一行（视为版本演化）
   - 旧 source_file 时间戳后缀剥离 + ingest_run_id 回填
 """
+
 from __future__ import annotations
 
 import unittest
 import uuid
 
 from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from src.infrastructure.persistence import (
     Base,
@@ -19,7 +21,6 @@ from src.infrastructure.persistence import (
     ProcessStatusEnum,
     _split_legacy_source_file_suffix,
 )
-from sqlalchemy.orm import sessionmaker
 
 
 class SplitLegacySuffixTests(unittest.TestCase):
@@ -56,9 +57,13 @@ class DocumentDedupTests(unittest.TestCase):
 
     def test_same_source_same_hash_collides(self) -> None:
         with self.Session() as session:
-            session.add(self._new_doc(source_file="data/foo.txt", content_hash="a" * 64))
+            session.add(
+                self._new_doc(source_file="data/foo.txt", content_hash="a" * 64)
+            )
             session.commit()
-            session.add(self._new_doc(source_file="data/foo.txt", content_hash="a" * 64))
+            session.add(
+                self._new_doc(source_file="data/foo.txt", content_hash="a" * 64)
+            )
             from sqlalchemy.exc import IntegrityError
 
             with self.assertRaises(IntegrityError):
@@ -66,10 +71,16 @@ class DocumentDedupTests(unittest.TestCase):
 
     def test_same_source_different_hash_allowed(self) -> None:
         with self.Session() as session:
-            session.add(self._new_doc(source_file="data/foo.txt", content_hash="a" * 64))
-            session.add(self._new_doc(source_file="data/foo.txt", content_hash="b" * 64))
+            session.add(
+                self._new_doc(source_file="data/foo.txt", content_hash="a" * 64)
+            )
+            session.add(
+                self._new_doc(source_file="data/foo.txt", content_hash="b" * 64)
+            )
             session.commit()
-            count = session.query(Document).filter_by(source_file="data/foo.txt").count()
+            count = (
+                session.query(Document).filter_by(source_file="data/foo.txt").count()
+            )
             self.assertEqual(count, 2)
 
 
@@ -110,7 +121,11 @@ class UpsertDocumentTests(unittest.TestCase):
         }
         result = self.svc.persist_document_graph(payload)
         with self.db.session_scope() as session:
-            doc = session.query(Document).filter_by(id=uuid.UUID(result["document"]["id"])).one()
+            doc = (
+                session.query(Document)
+                .filter_by(id=uuid.UUID(result["document"]["id"]))
+                .one()
+            )
             self.assertEqual(doc.source_file, "data/foo.txt")
             self.assertEqual(doc.ingest_run_id, "20240101_123456_abcdef01")
 

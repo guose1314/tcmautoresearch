@@ -119,7 +119,9 @@ class GraphPatternMiner:
             logger.warning("graph pattern miner: cannot open session (%s)", exc)
             return []
 
-        ts_clause = "AND coalesce(a.last_updated_ts, 0) >= $since_ts " if since_ts else ""
+        ts_clause = (
+            "AND coalesce(a.last_updated_ts, 0) >= $since_ts " if since_ts else ""
+        )
         cypher = _CYPHER_NEGATIVE.format(ts_clause=ts_clause)
         params: Dict[str, Any] = {
             "min_support": self._min_support,

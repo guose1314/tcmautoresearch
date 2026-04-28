@@ -6,10 +6,10 @@ import unittest
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
-
 # ---------------------------------------------------------------------------
 # cross
 # ---------------------------------------------------------------------------
+
 
 class TestCrossCollationStrategy(unittest.TestCase):
     def test_cross_uses_philology_service_version_collation(self) -> None:
@@ -52,6 +52,7 @@ class TestCrossCollationStrategy(unittest.TestCase):
 # intra
 # ---------------------------------------------------------------------------
 
+
 class _FakeRecord(dict):
     def data(self) -> Dict[str, Any]:
         return dict(self)
@@ -78,18 +79,24 @@ class TestIntraCollationStrategy(unittest.TestCase):
 
         records = [
             _FakeRecord(
-                entity_a="脾气虚", type_a="syndrome",
-                entity_b="四君子汤", type_b="formula",
+                entity_a="脾气虚",
+                type_a="syndrome",
+                entity_b="四君子汤",
+                type_b="formula",
                 rel_types=["SUPPORTS"],
             ),
             _FakeRecord(
-                entity_a="附子", type_a="herb",
-                entity_b="半夏", type_b="herb",
+                entity_a="附子",
+                type_a="herb",
+                entity_b="半夏",
+                type_b="herb",
                 rel_types=["CONTRADICTS"],
             ),
             _FakeRecord(
-                entity_a="人参", type_a="herb",
-                entity_b="脾气虚", type_b="syndrome",
+                entity_a="人参",
+                type_a="herb",
+                entity_b="脾气虚",
+                type_b="syndrome",
                 rel_types=[],
             ),
         ]
@@ -112,6 +119,7 @@ class TestIntraCollationStrategy(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # external
 # ---------------------------------------------------------------------------
+
 
 class _FakeLitRecord:
     def __init__(self, **kwargs):
@@ -201,6 +209,7 @@ class TestExternalCollationStrategy(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # rational
 # ---------------------------------------------------------------------------
+
 
 class TestRationalCollationStrategy(unittest.TestCase):
     def test_rational_invokes_self_refine_runner(self) -> None:

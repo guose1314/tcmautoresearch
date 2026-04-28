@@ -24,7 +24,9 @@ from web_console.job_manager import ResearchJobManager
 
 STATIC_DIR = Path(__file__).with_name("static")
 INDEX_FILE = STATIC_DIR / "index.html"
-_WEB_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "src" / "web" / "templates"
+_WEB_TEMPLATES_DIR = (
+    Path(__file__).resolve().parent.parent / "src" / "web" / "templates"
+)
 _WEB_STATIC_DIR = Path(__file__).resolve().parent.parent / "src" / "web" / "static"
 
 
@@ -61,7 +63,11 @@ def create_app(
         if "manager" in locals() and manager is not None:
             manager.close()
 
-    app = FastAPI(title=resolved_settings.web_console_title, version=resolved_settings.web_console_version, lifespan=lifespan)
+    app = FastAPI(
+        title=resolved_settings.web_console_title,
+        version=resolved_settings.web_console_version,
+        lifespan=lifespan,
+    )
     manager = configure_api_services(
         app,
         job_manager=job_manager,
@@ -79,6 +85,7 @@ def create_app(
 
     # ---- 主数据库初始化 ----
     from src.infrastructure.persistence import DatabaseManager
+
     db_manager = DatabaseManager(
         connection_string=resolved_settings.database_url,
         echo=resolved_settings.database_config.get("echo", False),
@@ -109,7 +116,6 @@ def create_app(
         monitoring_service: MonitoringService = app.state.monitoring_service
         return _probe_response(response, monitoring_service.get_readiness_report())
 
-
     # ---- 控制台 SPA ----
     @app.get("/console", response_class=FileResponse)
     def console_page() -> FileResponse:
@@ -139,12 +145,16 @@ def create_app(
 
     # ---- 静态资源 (本地 JS/CSS，避免依赖外部 CDN) ----
     if _WEB_STATIC_DIR.is_dir():
-        app.mount("/static", StaticFiles(directory=str(_WEB_STATIC_DIR)), name="web_static")
+        app.mount(
+            "/static", StaticFiles(directory=str(_WEB_STATIC_DIR)), name="web_static"
+        )
 
     @app.get("/api/console/auth/status")
     @app.get("/api/v1/console/auth/status")
     def console_auth_status() -> dict[str, Any]:
-        console_auth_service = get_console_auth_service_from_state(app.state, resolved_settings)
+        console_auth_service = get_console_auth_service_from_state(
+            app.state, resolved_settings
+        )
         return {
             "app_title": resolved_settings.web_console_title,
             "environment": resolved_settings.environment,
@@ -153,8 +163,12 @@ def create_app(
 
     @app.post("/api/console/auth/login")
     @app.post("/api/v1/console/auth/login")
-    def console_auth_login(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
-        console_auth_service = get_console_auth_service_from_state(app.state, resolved_settings)
+    def console_auth_login(
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        console_auth_service = get_console_auth_service_from_state(
+            app.state, resolved_settings
+        )
         username = str(payload.get("username", "") or "").strip()
         password = str(payload.get("password", "") or "")
         presented_key = str(payload.get("api_key", "") or "").strip()
@@ -232,9 +246,15 @@ def create_app(
 
     @app.post("/api/console/auth/logout")
     @app.post("/api/v1/console/auth/logout")
-    def console_auth_logout(request: Request, payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
-        console_auth_service = get_console_auth_service_from_state(app.state, resolved_settings)
-        session_token = str(payload.get("session_token", "") or "").strip() or extract_presented_auth_credential(
+    def console_auth_logout(
+        request: Request, payload: dict[str, Any] = Body(default_factory=dict)
+    ) -> dict[str, Any]:
+        console_auth_service = get_console_auth_service_from_state(
+            app.state, resolved_settings
+        )
+        session_token = str(
+            payload.get("session_token", "") or ""
+        ).strip() or extract_presented_auth_credential(
             request.headers,
             request.query_params,
         )

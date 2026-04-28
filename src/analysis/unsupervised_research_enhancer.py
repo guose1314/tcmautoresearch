@@ -79,7 +79,11 @@ def build_unsupervised_research_view(
         }
 
     pagerank = _safe_pagerank(graph)
-    degree_centrality = nx.degree_centrality(graph) if graph.number_of_nodes() > 1 else {n: 1.0 for n in graph.nodes}
+    degree_centrality = (
+        nx.degree_centrality(graph)
+        if graph.number_of_nodes() > 1
+        else {n: 1.0 for n in graph.nodes}
+    )
     betweenness = (
         nx.betweenness_centrality(graph, weight=None, normalized=True)
         if graph.number_of_nodes() > 2
@@ -158,21 +162,33 @@ def apply_unsupervised_annotations(
 
     annotations = {
         str(name): dict(payload)
-        for name, payload in dict(unsupervised_view.get("entity_annotations") or {}).items()
+        for name, payload in dict(
+            unsupervised_view.get("entity_annotations") or {}
+        ).items()
     }
     salient_lookup = {
-        (str(item.get("source") or ""), str(item.get("target") or ""), str(item.get("relation") or "")): dict(item)
+        (
+            str(item.get("source") or ""),
+            str(item.get("target") or ""),
+            str(item.get("relation") or ""),
+        ): dict(item)
         for item in list(unsupervised_view.get("salient_relations") or [])
     }
     novelty_lookup = {
-        (str(item.get("source") or ""), str(item.get("target") or ""), str(item.get("relation") or "")): dict(item)
+        (
+            str(item.get("source") or ""),
+            str(item.get("target") or ""),
+            str(item.get("relation") or ""),
+        ): dict(item)
         for item in list(unsupervised_view.get("novelty_candidates") or [])
     }
 
     enriched_entities: List[Dict[str, Any]] = []
     for entity in entities:
         item = dict(entity)
-        name = str(item.get("name") or item.get("text") or item.get("value") or "").strip()
+        name = str(
+            item.get("name") or item.get("text") or item.get("value") or ""
+        ).strip()
         if name and name in annotations:
             meta = dict(item.get("metadata") or {})
             meta["unsupervised_learning"] = annotations[name]
@@ -186,7 +202,12 @@ def apply_unsupervised_annotations(
         item = dict(edge)
         source = str(item.get("source") or item.get("from") or "").strip()
         target = str(item.get("target") or item.get("to") or "").strip()
-        relation = str(item.get("relation") or item.get("rel_type") or item.get("label") or "related").strip()
+        relation = str(
+            item.get("relation")
+            or item.get("rel_type")
+            or item.get("label")
+            or "related"
+        ).strip()
         key = (source, target, relation)
         relation_meta = dict(item.get("attributes") or {})
         if key in salient_lookup:
@@ -210,13 +231,20 @@ def apply_unsupervised_annotations(
 def _normalize_entities(entities: Iterable[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     normalized: List[Dict[str, Any]] = []
     for entity in entities:
-        name = str(entity.get("name") or entity.get("text") or entity.get("value") or "").strip()
+        name = str(
+            entity.get("name") or entity.get("text") or entity.get("value") or ""
+        ).strip()
         if not name:
             continue
         normalized.append(
             {
                 "name": name,
-                "type": str(entity.get("type") or entity.get("entity_type") or "generic").strip().lower() or "generic",
+                "type": str(
+                    entity.get("type") or entity.get("entity_type") or "generic"
+                )
+                .strip()
+                .lower()
+                or "generic",
                 "confidence": float(entity.get("confidence", 0.5) or 0.5),
             }
         )
@@ -229,18 +257,35 @@ def _build_entity_graph(
 ) -> nx.Graph:
     graph = nx.Graph()
     for entity in entities:
-        graph.add_node(entity["name"], name=entity["name"], type=entity["type"], confidence=entity["confidence"])
+        graph.add_node(
+            entity["name"],
+            name=entity["name"],
+            type=entity["type"],
+            confidence=entity["confidence"],
+        )
 
     edge_weights: Counter[Tuple[str, str]] = Counter()
     edge_relations: Dict[Tuple[str, str], set[str]] = defaultdict(set)
     for edge in list(graph_data.get("edges") or []):
         source = str(edge.get("source") or edge.get("from") or "").strip()
         target = str(edge.get("target") or edge.get("to") or "").strip()
-        relation = str(edge.get("relation") or edge.get("rel_type") or edge.get("label") or "related").strip() or "related"
+        relation = (
+            str(
+                edge.get("relation")
+                or edge.get("rel_type")
+                or edge.get("label")
+                or "related"
+            ).strip()
+            or "related"
+        )
         if not source or not target or source == target:
             continue
-        graph.add_node(source, name=source, type=str(edge.get("source_type") or "generic"))
-        graph.add_node(target, name=target, type=str(edge.get("target_type") or "generic"))
+        graph.add_node(
+            source, name=source, type=str(edge.get("source_type") or "generic")
+        )
+        graph.add_node(
+            target, name=target, type=str(edge.get("target_type") or "generic")
+        )
         pair = tuple(sorted((source, target)))
         edge_weights[pair] += 1
         edge_relations[pair].add(relation)
@@ -252,7 +297,9 @@ def _build_entity_graph(
             target,
             weight=float(weight),
             relation_types=sorted(edge_relations[pair]),
-            relation_type=sorted(edge_relations[pair])[0] if edge_relations[pair] else "related",
+            relation_type=sorted(edge_relations[pair])[0]
+            if edge_relations[pair]
+            else "related",
         )
     return graph
 
@@ -272,7 +319,9 @@ def _detect_communities(graph: nx.Graph) -> List[set[str]]:
         return []
     if graph.number_of_edges() == 0:
         return [{node} for node in graph.nodes]
-    communities = list(nx.algorithms.community.greedy_modularity_communities(graph, weight="weight"))
+    communities = list(
+        nx.algorithms.community.greedy_modularity_communities(graph, weight="weight")
+    )
     if not communities:
         return [{node} for node in graph.nodes]
     return [set(group) for group in communities]
@@ -302,13 +351,23 @@ def _build_community_topics(
         subgraph = graph.subgraph(group)
         ordered_nodes = sorted(
             group,
-            key=lambda node: (pagerank.get(node, 0.0), degree_centrality.get(node, 0.0), node),
+            key=lambda node: (
+                pagerank.get(node, 0.0),
+                degree_centrality.get(node, 0.0),
+                node,
+            ),
             reverse=True,
         )
-        dominant_types = Counter(str(graph.nodes[node].get("type") or "generic") for node in group)
+        dominant_types = Counter(
+            str(graph.nodes[node].get("type") or "generic") for node in group
+        )
         label = " / ".join(ordered_nodes[:2]) if ordered_nodes else cid
         possible_edges = len(group) * (len(group) - 1) / 2
-        cohesion = round(subgraph.number_of_edges() / possible_edges, 4) if possible_edges > 0 else 0.0
+        cohesion = (
+            round(subgraph.number_of_edges() / possible_edges, 4)
+            if possible_edges > 0
+            else 0.0
+        )
         topics.append(
             {
                 "topic_id": _stable_id(source_file or "document", cid, label),
@@ -342,7 +401,12 @@ def _build_bridge_entities(
         }
         community_span = len(neighbour_communities)
         bridge_score = round(
-            min(1.0, betweenness.get(node, 0.0) * 0.6 + degree_centrality.get(node, 0.0) * 0.25 + max(0, community_span - 1) * 0.15),
+            min(
+                1.0,
+                betweenness.get(node, 0.0) * 0.6
+                + degree_centrality.get(node, 0.0) * 0.25
+                + max(0, community_span - 1) * 0.15,
+            ),
             4,
         )
         if bridge_score < 0.08 and community_span < 2:
@@ -361,7 +425,10 @@ def _build_bridge_entities(
                 "bridge_score": bridge_score,
             }
         )
-    bridges.sort(key=lambda item: (item["bridge_score"], item["betweenness"], item["pagerank"]), reverse=True)
+    bridges.sort(
+        key=lambda item: (item["bridge_score"], item["betweenness"], item["pagerank"]),
+        reverse=True,
+    )
     return bridges[:10]
 
 
@@ -373,11 +440,16 @@ def _score_relations(
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     salient_relations: List[Dict[str, Any]] = []
     novelty_candidates: List[Dict[str, Any]] = []
-    max_weight = max((float(data.get("weight", 1.0)) for _, _, data in graph.edges(data=True)), default=1.0)
+    max_weight = max(
+        (float(data.get("weight", 1.0)) for _, _, data in graph.edges(data=True)),
+        default=1.0,
+    )
     for source, target, data in graph.edges(data=True):
         relation = str(data.get("relation_type") or "related")
         weight = float(data.get("weight", 1.0))
-        cross_community = community_assignments.get(source) != community_assignments.get(target)
+        cross_community = community_assignments.get(
+            source
+        ) != community_assignments.get(target)
         association_score = round(
             min(
                 1.0,
@@ -401,7 +473,8 @@ def _score_relations(
             min(
                 1.0,
                 (0.55 if cross_community else 0.1)
-                + ((betweenness.get(source, 0.0) + betweenness.get(target, 0.0)) / 2) * 0.45,
+                + ((betweenness.get(source, 0.0) + betweenness.get(target, 0.0)) / 2)
+                * 0.45,
             ),
             4,
         )
@@ -412,7 +485,9 @@ def _score_relations(
                     "target": target,
                     "relation": relation,
                     "novelty_score": novelty_score,
-                    "reason": "cross_community_bridge" if cross_community else "high_bridge_centrality",
+                    "reason": "cross_community_bridge"
+                    if cross_community
+                    else "high_bridge_centrality",
                 }
             )
     salient_relations.sort(key=lambda item: item["association_score"], reverse=True)
@@ -442,7 +517,9 @@ def _build_entity_annotations(
             "pagerank": round(pagerank.get(node, 0.0), 4),
             "degree_centrality": round(degree_centrality.get(node, 0.0), 4),
             "betweenness": round(betweenness.get(node, 0.0), 4),
-            "bridge_score": round(float(bridge.get("bridge_score", 0.0)) if bridge else 0.0, 4),
+            "bridge_score": round(
+                float(bridge.get("bridge_score", 0.0)) if bridge else 0.0, 4
+            ),
         }
     return annotations
 
@@ -459,7 +536,9 @@ def _build_document_signature(
 ) -> Dict[str, Any]:
     entity_type_counts = Counter(item["type"] for item in entities)
     return {
-        "document_key": _stable_id(source_file or "document", str(len(raw_text)), str(graph.number_of_nodes())),
+        "document_key": _stable_id(
+            source_file or "document", str(len(raw_text)), str(graph.number_of_nodes())
+        ),
         "source_file": source_file,
         "raw_text_length": len(raw_text or ""),
         "entity_count": graph.number_of_nodes(),
@@ -469,8 +548,12 @@ def _build_document_signature(
         "topic_count": len(community_topics),
         "topic_entropy": topic_entropy,
         "bridge_entity_count": len(bridge_entities),
-        "graph_density": round(nx.density(graph), 6) if graph.number_of_nodes() > 1 else 0.0,
-        "connected_components": nx.number_connected_components(graph) if graph.number_of_nodes() else 0,
+        "graph_density": round(nx.density(graph), 6)
+        if graph.number_of_nodes() > 1
+        else 0.0,
+        "connected_components": nx.number_connected_components(graph)
+        if graph.number_of_nodes()
+        else 0,
         "top_topics": [topic["label"] for topic in community_topics[:3]],
     }
 
@@ -486,13 +569,16 @@ def _build_neo4j_projection(
     # CatalogContext (Topic / BELONGS_TO_TOPIC)。本函数保留旧投影仅为过渡兼容，
     # 下个版本（T3.x 收尾）将整体删除。
     import warnings as _warnings
+
     _warnings.warn(
         "_build_neo4j_projection emits legacy ResearchTopic/HAS_LATENT_TOPIC/HAS_TOPIC_MEMBER; "
         "use CatalogContext.upsert_topic_membership instead (will be removed in next minor).",
         DeprecationWarning,
         stacklevel=2,
     )
-    doc_id = str(document_signature.get("document_key") or _stable_id("document", "unknown"))
+    doc_id = str(
+        document_signature.get("document_key") or _stable_id("document", "unknown")
+    )
     doc_name = str(document_signature.get("source_file") or doc_id)
     nodes: List[Dict[str, Any]] = [
         {
@@ -501,7 +587,9 @@ def _build_neo4j_projection(
             "type": "research_document",
             "props": {
                 "topic_count": int(document_signature.get("topic_count", 0)),
-                "bridge_entity_count": int(document_signature.get("bridge_entity_count", 0)),
+                "bridge_entity_count": int(
+                    document_signature.get("bridge_entity_count", 0)
+                ),
                 "graph_density": float(document_signature.get("graph_density", 0.0)),
                 "topic_entropy": float(document_signature.get("topic_entropy", 0.0)),
             },
@@ -556,7 +644,14 @@ def _build_neo4j_projection(
         community_id = community_assignments.get(entity_name)
         if not community_id:
             continue
-        topic = next((item for item in community_topics if item.get("community_id") == community_id), None)
+        topic = next(
+            (
+                item
+                for item in community_topics
+                if item.get("community_id") == community_id
+            ),
+            None,
+        )
         if not topic:
             continue
         edges.append(

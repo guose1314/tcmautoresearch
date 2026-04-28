@@ -1,0 +1,114 @@
+# 中医文献本体定义 (Ontology Definition)
+# 与 src/storage/schema/ontology.py 的 Pydantic 定义对齐
+
+nodes:
+  Literature:
+    description: "文献（指代具体的中医古籍、医案、论文等）"
+    properties:
+      id:
+        type: string
+        description: "唯一标识"
+      title:
+        type: string
+        description: "文献名称"
+      author:
+        type: string
+        description: "作者"
+      dynasty:
+        type: string
+        description: "成书朝代"
+      chapter:
+        type: string
+        description: "篇章/卷数"
+
+  Prescription:
+    description: "方剂（中医经典或自创药方）"
+    properties:
+      id:
+        type: string
+        description: "唯一标识"
+      name:
+        type: string
+        description: "方名"
+      alias:
+        type: string
+        description: "别名"
+      source:
+        type: string
+        description: "直接提及的字面出处"
+
+  Herb:
+    description: "中药（具体的一味药材）"
+    properties:
+      id:
+        type: string
+        description: "唯一标识"
+      name:
+        type: string
+        description: "药名"
+      nature:
+        type: string
+        description: "四气(寒、热、温、凉、平)"
+      flavor:
+        type: string
+        description: "五味(酸、苦、甘、辛、咸)"
+
+  Symptom:
+    description: "证候/症状（具体表象或病理描述）"
+    properties:
+      id:
+        type: string
+        description: "唯一标识"
+      name:
+        type: string
+        description: "证候名称"
+      description:
+        type: string
+        description: "详细表征"
+
+  Pathogenesis:
+    description: "病机（内在疾病机制）"
+    properties:
+      id:
+        type: string
+        description: "唯一标识"
+      name:
+        type: string
+        description: "病机名"
+      mechanism:
+        type: string
+        description: "病理变化流转说明"
+
+relationships:
+  APPEARS_IN:
+    description: "出自某文献"
+    source: Prescription
+    target: Literature
+
+  CONTAINS:
+    description: "方剂包含某药味及剂量"
+    source: Prescription
+    target: Herb
+    properties:
+      dosage:
+        type: string
+        description: "包含剂量或比例说明"
+
+  TREATS:
+    description: "方剂主治"
+    source: Prescription
+    target: Symptom
+
+  MODULATES:
+    description: "中药调节/针对某病机"
+    source: Herb
+    target: Pathogenesis
+
+  REFERENCES:
+    description: "文献间的沿袭与引用"
+    source: Literature
+    target: Literature
+    properties:
+      confidence:
+        type: float
+        description: "置信度 (0-1)"

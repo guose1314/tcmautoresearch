@@ -180,7 +180,11 @@ class FeedbackTranslator:
 
         # T5.3: 生成 plan 前先调 miner 拿高频负反馈模式
         patterns = list(mined_patterns) if mined_patterns is not None else []
-        if not patterns and self._pattern_miner is not None and self._neo4j_driver is not None:
+        if (
+            not patterns
+            and self._pattern_miner is not None
+            and self._neo4j_driver is not None
+        ):
             try:
                 patterns = list(
                     self._pattern_miner.mine(self._neo4j_driver, since_ts=since_ts)

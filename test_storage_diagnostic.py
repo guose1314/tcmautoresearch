@@ -19,7 +19,7 @@ try:
         Document,
         Entity,
         EntityRelationship,
-        UnifiedStorageDriver,
+        StorageBackendFactory,
     )
     print("✅ 所有模块导入成功")
 except ImportError as e:
@@ -53,14 +53,20 @@ print(f"Neo4j Auth: ('neo4j', '{neo4j_password}')")
 # 测试4: 初始化存储驱动(可选)
 print("\n[测试4] 存储驱动初始化...")
 try:
-    storage = UnifiedStorageDriver(pg_url, neo4j_uri, neo4j_auth)
+    config = {'database': {'url': pg_url, 'type': 'postgres'}, 'neo4j': {'uri': neo4j_uri, 'user': neo4j_auth[0], 'password': neo4j_auth[1]}}; storage = StorageBackendFactory(config)
     print("⏱️  正在连接数据库...")
     storage.initialize()
     print("✅ 存储驱动初始化成功")
     
     # 测试基本功能
     print("\n[测试5] 基本功能...")
-    doc_id = storage.save_document("test_doc", "diagnostic_test", 1000)
+    import uuid
+
+    from src.storage.db_models import Document
+    doc_id = str(uuid.uuid4())
+    doc = Document(id=doc_id, source_file="test_doc_" + doc_id, raw_text_size=1000)
+    with storage.transaction() as tx:
+        tx.pg_session.add(doc)
     print(f"✅ 文档创建成功: {doc_id}")
     
     # 清理

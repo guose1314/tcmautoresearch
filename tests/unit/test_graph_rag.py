@@ -18,7 +18,6 @@ from src.llm.graph_rag import (
 )
 from tools.build_community_summaries import build_community_summaries
 
-
 # ---------------------------------------------------------------------------
 # Mock helpers
 # ---------------------------------------------------------------------------

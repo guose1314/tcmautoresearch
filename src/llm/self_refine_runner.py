@@ -89,7 +89,9 @@ class SelfRefineRunner:
     ) -> None:
         if llm_service is None or not hasattr(llm_service, "generate"):
             raise ValueError("SelfRefineRunner requires an LLMService with generate()")
-        if prompt_registry is None or not hasattr(prompt_registry, "call_registered_prompt"):
+        if prompt_registry is None or not hasattr(
+            prompt_registry, "call_registered_prompt"
+        ):
             raise ValueError(
                 "SelfRefineRunner requires the prompt_registry module "
                 "(must expose call_registered_prompt + get_prompt_template)"
@@ -134,7 +136,9 @@ class SelfRefineRunner:
             issues = self._parse_issues(critique_raw)
 
             refine_name = self._resolve_prompt(purpose, "refine")
-            issues_text = json.dumps(issues, ensure_ascii=False, indent=2) if issues else "[]"
+            issues_text = (
+                json.dumps(issues, ensure_ascii=False, indent=2) if issues else "[]"
+            )
             refined_text, refine_versions = self._call(
                 refine_name,
                 {**inputs, "draft": current_output, "issues": issues_text},
@@ -216,7 +220,9 @@ class SelfRefineRunner:
         except KeyError:
             return f"self_refine.{stage}"
 
-    def _call(self, prompt_name: str, variables: Dict[str, Any]) -> tuple[str, Dict[str, str]]:
+    def _call(
+        self, prompt_name: str, variables: Dict[str, Any]
+    ) -> tuple[str, Dict[str, str]]:
         template = self.registry.get_prompt_template(prompt_name)
         text = self.registry.call_registered_prompt(self.llm, prompt_name, **variables)
         return str(text or ""), {
@@ -259,15 +265,15 @@ class SelfRefineRunner:
         violations: List[Dict[str, Any]],
         prompt_versions: Dict[str, Optional[Dict[str, str]]],
     ) -> Dict[str, Any]:
-        clean_versions = {
-            k: v for k, v in prompt_versions.items() if v is not None
-        }
+        clean_versions = {k: v for k, v in prompt_versions.items() if v is not None}
         return {
             "source_phase": purpose,
             "feedback_scope": "self_refine",
             "round_index": round_idx,
             "issues_count": len(issues),
-            "issue_fields": sorted({str(it.get("field") or "") for it in issues if it.get("field")}),
+            "issue_fields": sorted(
+                {str(it.get("field") or "") for it in issues if it.get("field")}
+            ),
             "violations": violations,
             "prompt_versions": {
                 name: {

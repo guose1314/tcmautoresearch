@@ -60,10 +60,20 @@ def create_app(
             environment=environment,
             entrypoint="web",
         )
-    resolved_settings = runtime_assembly.settings if runtime_assembly is not None else None
-    resolved_title = title or (resolved_settings.api_title if resolved_settings is not None else "TCMAutoResearch")
-    resolved_version = version or (resolved_settings.api_version if resolved_settings is not None else "2.0.0")
-    resolved_extra_config = dict(runtime_assembly.runtime_config) if runtime_assembly is not None else {}
+    resolved_settings = (
+        runtime_assembly.settings if runtime_assembly is not None else None
+    )
+    resolved_title = title or (
+        resolved_settings.api_title
+        if resolved_settings is not None
+        else "TCMAutoResearch"
+    )
+    resolved_version = version or (
+        resolved_settings.api_version if resolved_settings is not None else "2.0.0"
+    )
+    resolved_extra_config = (
+        dict(runtime_assembly.runtime_config) if runtime_assembly is not None else {}
+    )
     if extra_config:
         resolved_extra_config.update(extra_config)
 
@@ -72,7 +82,12 @@ def create_app(
     # ---- CORS 中间件 ----
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cors_origins or (resolved_settings.web_console_cors_origins if resolved_settings is not None else _DEFAULT_CORS_ORIGINS),
+        allow_origins=cors_origins
+        or (
+            resolved_settings.web_console_cors_origins
+            if resolved_settings is not None
+            else _DEFAULT_CORS_ORIGINS
+        ),
         allow_credentials=True,
         allow_methods=resolved_extra_config.get("cors_methods", ["*"]),
         allow_headers=resolved_extra_config.get("cors_headers", ["*"]),
@@ -97,11 +112,12 @@ def create_app(
     try:
         from src.infrastructure.persistence import DatabaseManager
 
-        _db_cfg = resolved_extra_config.get("database", {}) if resolved_extra_config else {}
+        _db_cfg = (
+            resolved_extra_config.get("database", {}) if resolved_extra_config else {}
+        )
         _db_type = str(_db_cfg.get("type", "sqlite")).strip().lower()
         _db_path = str(
-            _db_cfg.get("path")
-            or os.path.join("data", "tcmautoresearch.db")
+            _db_cfg.get("path") or os.path.join("data", "tcmautoresearch.db")
         ).strip()
         if _db_type == "sqlite":
             _conn_str = f"sqlite:///{os.path.abspath(_db_path)}"
@@ -119,9 +135,12 @@ def create_app(
                 _pg_port = int(_db_cfg.get("port", 5432))
                 _pg_name = str(_db_cfg.get("name", "tcmautoresearch")).strip()
                 _pg_user = str(_db_cfg.get("user", "postgres")).strip()
-                _pg_pass_env = str(_db_cfg.get("password_env", "TCM_DB_PASSWORD")).strip()
+                _pg_pass_env = str(
+                    _db_cfg.get("password_env", "TCM_DB_PASSWORD")
+                ).strip()
                 _pg_pass = os.environ.get(_pg_pass_env, "")
                 from urllib.parse import quote_plus
+
                 _conn_str = (
                     f"postgresql+psycopg2://{quote_plus(_pg_user)}:"
                     f"{quote_plus(_pg_pass)}@{_pg_host}:{_pg_port}/{_pg_name}"
@@ -131,7 +150,11 @@ def create_app(
                 _db_cfg.get("connection_string")
                 or _db_cfg.get("database_url")
                 or _db_cfg.get("url")
-                or (resolved_settings.database_url if resolved_settings is not None else "")
+                or (
+                    resolved_settings.database_url
+                    if resolved_settings is not None
+                    else ""
+                )
             ).strip()
 
         if _conn_str:
@@ -145,7 +168,9 @@ def create_app(
             app.state.db_manager = db_manager
             logging.getLogger(__name__).info("数据库已连接: %s", _conn_str)
     except Exception as exc:
-        logging.getLogger(__name__).warning("数据库初始化失败，ORM 查询将不可用: %s", exc)
+        logging.getLogger(__name__).warning(
+            "数据库初始化失败，ORM 查询将不可用: %s", exc
+        )
 
     # ---- 认证 & 页面路由 ----
     from src.web.routes.auth import router as auth_router

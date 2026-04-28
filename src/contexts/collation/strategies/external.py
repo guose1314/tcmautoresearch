@@ -18,8 +18,14 @@ def _record_to_dict(record: Any) -> Dict[str, Any]:
         return asdict(record)
     # duck typing fallback
     keys = (
-        "title", "authors", "year", "doi", "url", "abstract",
-        "citation_count", "external_id",
+        "title",
+        "authors",
+        "year",
+        "doi",
+        "url",
+        "abstract",
+        "citation_count",
+        "external_id",
     )
     return {k: getattr(record, k, None) for k in keys}
 
@@ -130,7 +136,9 @@ class ExternalCollationStrategy:
                     record = entry["record"] or {}
                     obj = ExternalEvidence(
                         document_id=document_id,
-                        source=str(entry.get("source") or record.get("source") or "unknown"),
+                        source=str(
+                            entry.get("source") or record.get("source") or "unknown"
+                        ),
                         external_id=str(record.get("external_id") or "") or None,
                         title=record.get("title") or None,
                         authors_json=list(record.get("authors") or []),

@@ -60,7 +60,9 @@ def _default_llm_call(prompt: str, *, max_tokens: int = 1500) -> str:
     return f"[summary stub]\n{head}"
 
 
-def _build_prompt(topic_key: str, label: str, documents: Sequence[Dict[str, Any]]) -> str:
+def _build_prompt(
+    topic_key: str, label: str, documents: Sequence[Dict[str, Any]]
+) -> str:
     lines = [f"为主题「{label or topic_key}」生成中文社区摘要（≤ 1500 tokens）。"]
     lines.append("素材：")
     for doc in documents:
@@ -143,7 +145,9 @@ def build_community_summaries(
 
 
 def _build_argparser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate CommunitySummary nodes for all Topics.")
+    parser = argparse.ArgumentParser(
+        description="Generate CommunitySummary nodes for all Topics."
+    )
     parser.add_argument("--neo4j-database", default="neo4j")
     parser.add_argument("--max-tokens", type=int, default=1500)
     parser.add_argument("--sample-size", type=int, default=20)

@@ -39,9 +39,13 @@ class ObservePhaseMixin:
 
     pipeline: "ResearchPipeline"  # provided by ResearchPhaseHandlers
 
-    def execute_observe_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute_observe_phase(
+        self, cycle: "ResearchCycle", context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         context = context or {}
-        self._observe_tracker = StrategyApplicationTracker("observe", context, self.pipeline.config)
+        self._observe_tracker = StrategyApplicationTracker(
+            "observe", context, self.pipeline.config
+        )
 
         corpus_result = self._collect_observe_corpus_if_enabled(context)
         literature_result = self._run_observe_literature_if_enabled(context)
@@ -49,9 +53,13 @@ class ObservePhaseMixin:
         observations, findings = self._build_observe_seed_lists()
         self._append_corpus_observe_updates(corpus_result, observations, findings)
 
-        ingestion_result = self._run_observe_ingestion_if_enabled(corpus_result, context)
+        ingestion_result = self._run_observe_ingestion_if_enabled(
+            corpus_result, context
+        )
         self._append_ingestion_observe_updates(ingestion_result, observations, findings)
-        self._append_literature_observe_updates(literature_result, observations, findings)
+        self._append_literature_observe_updates(
+            literature_result, observations, findings
+        )
 
         collation_result = self._run_observe_collation_if_enabled(
             corpus_result, ingestion_result, context
@@ -74,21 +82,37 @@ class ObservePhaseMixin:
                 "failed_total": collation_result.get("failed_total", 0),
             }
         artifacts = self._build_observe_philology_artifacts(ingestion_result)
-        graph_assets = self._build_observe_graph_assets(cycle.cycle_id, ingestion_result)
+        graph_assets = self._build_observe_graph_assets(
+            cycle.cycle_id, ingestion_result
+        )
         if graph_assets:
             metadata.setdefault(
                 "graph_asset_subgraphs",
                 sorted(key for key in graph_assets.keys() if key != "summary"),
             )
-        status = "degraded" if any(
-            isinstance(item, dict) and item.get("error")
-            for item in (corpus_result, ingestion_result, literature_result, collation_result)
-        ) else "completed"
+        status = (
+            "degraded"
+            if any(
+                isinstance(item, dict) and item.get("error")
+                for item in (
+                    corpus_result,
+                    ingestion_result,
+                    literature_result,
+                    collation_result,
+                )
+            )
+            else "completed"
+        )
         evidence_protocol = build_phase_evidence_protocol(
             "observe",
             evidence_records=[
-                {"content": f, "source_type": "classical_text", "evidence_grade": "preliminary"}
-                for f in findings if f
+                {
+                    "content": f,
+                    "source_type": "classical_text",
+                    "evidence_grade": "preliminary",
+                }
+                for f in findings
+                if f
             ],
             evidence_grade="preliminary",
             evidence_summary={"phase": "observe", "finding_count": len(findings)},
@@ -132,7 +156,9 @@ class ObservePhaseMixin:
         ]
         return observations, findings
 
-    def _collect_observe_corpus_if_enabled(self, context: Dict[str, Any]) -> Dict[str, Any] | None:
+    def _collect_observe_corpus_if_enabled(
+        self, context: Dict[str, Any]
+    ) -> Dict[str, Any] | None:
         collect_ctext = self.pipeline._should_collect_ctext_corpus(context)
         collect_local = self.pipeline._should_collect_local_corpus(context)
 
@@ -142,7 +168,11 @@ class ObservePhaseMixin:
         bundles: list[CorpusBundle] = []
         fallback_error: Dict[str, Any] | None = None
 
-        ctext_result = self.pipeline._collect_ctext_observation_corpus(context) if collect_ctext else None
+        ctext_result = (
+            self.pipeline._collect_ctext_observation_corpus(context)
+            if collect_ctext
+            else None
+        )
         fallback_error = self._register_observe_collection_result(
             ctext_result,
             "ctext",
@@ -150,7 +180,11 @@ class ObservePhaseMixin:
             fallback_error,
         )
 
-        local_result = self.pipeline._collect_local_observation_corpus(context) if collect_local else None
+        local_result = (
+            self.pipeline._collect_local_observation_corpus(context)
+            if collect_local
+            else None
+        )
         fallback_error = self._register_observe_collection_result(
             local_result,
             "local",
@@ -191,7 +225,9 @@ class ObservePhaseMixin:
             return CorpusBundle.from_dict(source_result)
         return None
 
-    def _run_observe_literature_if_enabled(self, context: Dict[str, Any]) -> Dict[str, Any] | None:
+    def _run_observe_literature_if_enabled(
+        self, context: Dict[str, Any]
+    ) -> Dict[str, Any] | None:
         if not self._should_run_observe_literature(context):
             return None
         return self._run_observe_literature_pipeline(context)
@@ -224,16 +260,28 @@ class ObservePhaseMixin:
             sources = corpus_result.get("sources", [])
             total = stats.get("total_documents", 0)
             if sources == ["ctext"]:
-                observations.insert(0, f"已从 ctext 白名单自动采集 {stats.get('document_count', total)} 个根文献")
-                findings.insert(0, "观察阶段已接入标准语料白名单，可直接进入后续假设生成")
+                observations.insert(
+                    0,
+                    f"已从 ctext 白名单自动采集 {stats.get('document_count', total)} 个根文献",
+                )
+                findings.insert(
+                    0, "观察阶段已接入标准语料白名单，可直接进入后续假设生成"
+                )
             else:
                 source_label = "+".join(sources) if sources else "多来源"
-                observations.insert(0, f"已从 {source_label} 自动采集 {total} 篇文档（CorpusBundle）")
-                findings.insert(0, "观察阶段已输出统一 CorpusBundle，多来源文档可直接进入后续假设生成")
+                observations.insert(
+                    0, f"已从 {source_label} 自动采集 {total} 篇文档（CorpusBundle）"
+                )
+                findings.insert(
+                    0,
+                    "观察阶段已输出统一 CorpusBundle，多来源文档可直接进入后续假设生成",
+                )
             return
 
         stats = corpus_result.get("stats", {})
-        observations.insert(0, f"已从 ctext 白名单自动采集 {stats.get('document_count', 0)} 个根文献")
+        observations.insert(
+            0, f"已从 ctext 白名单自动采集 {stats.get('document_count', 0)} 个根文献"
+        )
         findings.insert(0, "观察阶段已接入标准语料白名单，可直接进入后续假设生成")
 
     def _append_ingestion_observe_updates(
@@ -245,7 +293,9 @@ class ObservePhaseMixin:
         if not ingestion_result:
             return
         if ingestion_result.get("error"):
-            findings.append(f"预处理、实体抽取与语义建模链路失败: {ingestion_result['error']}")
+            findings.append(
+                f"预处理、实体抽取与语义建模链路失败: {ingestion_result['error']}"
+            )
             return
 
         aggregate = ingestion_result.get("aggregate", {})
@@ -254,14 +304,22 @@ class ObservePhaseMixin:
         )
         philology_document_count = int(aggregate.get("philology_document_count") or 0)
         term_mapping_count = int(aggregate.get("term_mapping_count") or 0)
-        orthographic_variant_count = int(aggregate.get("orthographic_variant_count") or 0)
+        orthographic_variant_count = int(
+            aggregate.get("orthographic_variant_count") or 0
+        )
         recognized_term_count = int(aggregate.get("recognized_term_count") or 0)
-        terminology_standard_table_count = int(aggregate.get("terminology_standard_table_count") or 0)
-        version_collation_difference_count = int(aggregate.get("version_collation_difference_count") or 0)
+        terminology_standard_table_count = int(
+            aggregate.get("terminology_standard_table_count") or 0
+        )
+        version_collation_difference_count = int(
+            aggregate.get("version_collation_difference_count") or 0
+        )
         collation_entry_count = int(aggregate.get("collation_entry_count") or 0)
         fragment_candidate_count = int(aggregate.get("fragment_candidate_count") or 0)
         if philology_document_count:
-            observations.append(f"已对 {philology_document_count} 篇文本执行术语标准化与文献学注记")
+            observations.append(
+                f"已对 {philology_document_count} 篇文本执行术语标准化与文献学注记"
+            )
         if term_mapping_count or orthographic_variant_count:
             findings.append(
                 f"文献学层累计完成 {term_mapping_count + orthographic_variant_count} 处术语归一或异写识别"
@@ -269,14 +327,20 @@ class ObservePhaseMixin:
         if recognized_term_count:
             findings.append(f"文献学层输出 {recognized_term_count} 条术语训诂注记")
         if terminology_standard_table_count:
-            findings.append(f"文献学层整理 {terminology_standard_table_count} 条术语标准表记录")
+            findings.append(
+                f"文献学层整理 {terminology_standard_table_count} 条术语标准表记录"
+            )
         if version_collation_difference_count:
-            findings.append(f"版本对勘累计发现 {version_collation_difference_count} 处异文")
+            findings.append(
+                f"版本对勘累计发现 {version_collation_difference_count} 处异文"
+            )
         if collation_entry_count:
             findings.append(f"文献学层生成 {collation_entry_count} 条可复用校勘条目")
         if fragment_candidate_count:
             findings.append(f"文献学层生成 {fragment_candidate_count} 条可审核辑佚候选")
-        findings.append(f"首段主流程累计识别 {aggregate.get('total_entities', 0)} 个实体")
+        findings.append(
+            f"首段主流程累计识别 {aggregate.get('total_entities', 0)} 个实体"
+        )
         findings.append(
             f"累计构建 {aggregate.get('semantic_graph_nodes', 0)} 个语义节点与 {aggregate.get('semantic_graph_edges', 0)} 条关系"
         )
@@ -298,12 +362,16 @@ class ObservePhaseMixin:
         observations.append(
             f"已完成 {literature_result.get('record_count', 0)} 条医学文献检索并抽取摘要证据"
         )
-        findings.append(f"证据矩阵覆盖 {evidence_matrix.get('dimension_count', 0)} 个维度")
+        findings.append(
+            f"证据矩阵覆盖 {evidence_matrix.get('dimension_count', 0)} 个维度"
+        )
         findings.append(
             f"文献来源统计: {', '.join(literature_result.get('source_counts_summary', [])) or '无'}"
         )
         if clinical_gap.get("report"):
-            findings.append("已完成 Qwen 临床关联 Gap Analysis，可直接用于选题与方案设计")
+            findings.append(
+                "已完成 Qwen 临床关联 Gap Analysis，可直接用于选题与方案设计"
+            )
 
     def _build_observe_metadata(
         self,
@@ -330,22 +398,36 @@ class ObservePhaseMixin:
             "finding_count": len(findings),
             "auto_collected_ctext": self._is_ctext_corpus_collected(corpus_result),
             "auto_collected_corpus": bool(corpus_result),
-            "corpus_schema": "bundle" if is_corpus_bundle(corpus_result) else ("ctext_raw" if corpus_result else None),
+            "corpus_schema": "bundle"
+            if is_corpus_bundle(corpus_result)
+            else ("ctext_raw" if corpus_result else None),
             "ctext_groups": self._resolve_whitelist_groups(context),
             "downstream_processing": downstream_processing,
             "semantic_modeling": semantic_modeling,
-            "philology_processing": bool(ingestion_aggregate.get("philology_document_count", 0) > 0),
+            "philology_processing": bool(
+                ingestion_aggregate.get("philology_document_count", 0) > 0
+            ),
             "terminology_standardization": bool(
                 ingestion_aggregate.get("term_mapping_count", 0) > 0
                 or ingestion_aggregate.get("orthographic_variant_count", 0) > 0
                 or ingestion_aggregate.get("recognized_term_count", 0) > 0
             ),
-            "version_collation": bool(ingestion_aggregate.get("version_collation_witness_count", 0) > 0),
-            "fragment_reconstruction": bool(ingestion_aggregate.get("fragment_candidate_count", 0) > 0),
-            "philology_artifacts": bool(ingestion_aggregate.get("philology_asset_count", 0) > 0),
-            "output_generation": self._has_observe_output_generation(ingestion_result, ingestion_ok),
+            "version_collation": bool(
+                ingestion_aggregate.get("version_collation_witness_count", 0) > 0
+            ),
+            "fragment_reconstruction": bool(
+                ingestion_aggregate.get("fragment_candidate_count", 0) > 0
+            ),
+            "philology_artifacts": bool(
+                ingestion_aggregate.get("philology_asset_count", 0) > 0
+            ),
+            "output_generation": self._has_observe_output_generation(
+                ingestion_result, ingestion_ok
+            ),
             "literature_retrieval": literature_ok,
-            "evidence_matrix": self._has_observe_evidence_matrix(literature_result, literature_ok),
+            "evidence_matrix": self._has_observe_evidence_matrix(
+                literature_result, literature_ok
+            ),
             "clinical_gap_analysis": bool(literature_ok and clinical_gap.get("report")),
             "learning_strategy_applied": learning_strategy_applied,
         }
@@ -395,8 +477,12 @@ class ObservePhaseMixin:
             reason = "no_adjustment"
         if hasattr(self, "_observe_tracker"):
             self._observe_tracker.record(
-                "literature_max_results", base_value, adjusted, reason,
-                parameter="quality_threshold", parameter_value=quality_threshold,
+                "literature_max_results",
+                base_value,
+                adjusted,
+                reason,
+                parameter="quality_threshold",
+                parameter_value=quality_threshold,
             )
         return adjusted
 
@@ -427,12 +513,18 @@ class ObservePhaseMixin:
             reason = "no_adjustment"
         if hasattr(self, "_observe_tracker"):
             self._observe_tracker.record(
-                "max_texts", base_value, adjusted, reason,
-                parameter="quality_threshold", parameter_value=quality_threshold,
+                "max_texts",
+                base_value,
+                adjusted,
+                reason,
+                parameter="quality_threshold",
+                parameter_value=quality_threshold,
             )
         return adjusted
 
-    def _resolve_observe_entity_confidence_threshold(self, context: Dict[str, Any]) -> float:
+    def _resolve_observe_entity_confidence_threshold(
+        self, context: Dict[str, Any]
+    ) -> float:
         if not has_learning_strategy(context, self.pipeline.config):
             return 0.0
 
@@ -446,8 +538,12 @@ class ObservePhaseMixin:
         )
         if hasattr(self, "_observe_tracker"):
             self._observe_tracker.record(
-                "entity_confidence_threshold", 0.7, adjusted, "from_learning_parameter",
-                parameter="confidence_threshold", parameter_value=adjusted,
+                "entity_confidence_threshold",
+                0.7,
+                adjusted,
+                "from_learning_parameter",
+                parameter="confidence_threshold",
+                parameter_value=adjusted,
             )
         return adjusted
 
@@ -483,7 +579,9 @@ class ObservePhaseMixin:
             return False, False
 
         downstream_processing = ingestion_result.get("processed_document_count", 0) > 0
-        semantic_modeling = ingestion_result.get("aggregate", {}).get("semantic_graph_nodes", 0) > 0
+        semantic_modeling = (
+            ingestion_result.get("aggregate", {}).get("semantic_graph_nodes", 0) > 0
+        )
         return bool(downstream_processing), bool(semantic_modeling)
 
     def _has_observe_evidence_matrix(
@@ -493,7 +591,9 @@ class ObservePhaseMixin:
     ) -> bool:
         if not literature_ok or not literature_result:
             return False
-        return bool(literature_result.get("evidence_matrix", {}).get("record_count", 0) > 0)
+        return bool(
+            literature_result.get("evidence_matrix", {}).get("record_count", 0) > 0
+        )
 
     def _has_observe_output_generation(
         self,
@@ -506,7 +606,9 @@ class ObservePhaseMixin:
         return bool(aggregate.get("output_quality_metrics"))
 
     def _resolve_observe_data_source(self, context: Dict[str, Any]) -> str:
-        if self.pipeline._should_collect_ctext_corpus(context) and self.pipeline._should_collect_local_corpus(context):
+        if self.pipeline._should_collect_ctext_corpus(
+            context
+        ) and self.pipeline._should_collect_local_corpus(context):
             return "ctext_whitelist+local"
         if self.pipeline._should_collect_ctext_corpus(context):
             return "ctext_whitelist"
@@ -525,7 +627,12 @@ class ObservePhaseMixin:
     # T4.2: CollationContext 接入
     # ------------------------------------------------------------------ #
 
-    _ALL_COLLATION_STRATEGIES: tuple[str, ...] = ("cross", "intra", "external", "rational")
+    _ALL_COLLATION_STRATEGIES: tuple[str, ...] = (
+        "cross",
+        "intra",
+        "external",
+        "rational",
+    )
 
     def _should_run_observe_collation(self, context: Dict[str, Any]) -> bool:
         if "run_collation" in context:
@@ -533,7 +640,9 @@ class ObservePhaseMixin:
         collation_config = self.pipeline.config.get("collation_context", {})
         return bool(collation_config.get("enabled", True))
 
-    def _resolve_observe_collation_strategies(self, context: Dict[str, Any]) -> List[str]:
+    def _resolve_observe_collation_strategies(
+        self, context: Dict[str, Any]
+    ) -> List[str]:
         explicit = context.get("enable_collation_strategies")
         if explicit is None:
             collation_config = self.pipeline.config.get("collation_context", {})
@@ -550,7 +659,9 @@ class ObservePhaseMixin:
             strategies = [s for s in strategies if s != "cross"]
         return strategies
 
-    def _build_observe_collation_context(self, context: Dict[str, Any]) -> CollationContext | None:
+    def _build_observe_collation_context(
+        self, context: Dict[str, Any]
+    ) -> CollationContext | None:
         # 允许测试通过 context["collation_context"] 注入 mock
         injected = context.get("collation_context")
         if injected is not None:
@@ -559,23 +670,28 @@ class ObservePhaseMixin:
         philology_service = None
         try:
             if self._should_run_observe_philology(context):
-                philology_service = self.pipeline.analysis_port.create_philology_service(
-                    self._merge_observe_module_config(
-                        self.pipeline.config.get("philology_service", {}),
-                        context.get("philology_config") or {},
+                philology_service = (
+                    self.pipeline.analysis_port.create_philology_service(
+                        self._merge_observe_module_config(
+                            self.pipeline.config.get("philology_service", {}),
+                            context.get("philology_config") or {},
+                        )
                     )
                 )
                 if philology_service is not None and not philology_service.initialize():
                     philology_service = None
         except Exception:
-            self.pipeline.logger.exception("collation: philology service init failed; cross will be inert")
+            self.pipeline.logger.exception(
+                "collation: philology service init failed; cross will be inert"
+            )
             philology_service = None
 
         neo4j_driver = getattr(self.pipeline, "neo4j_driver", None)
         literature_retriever = None
         try:
             literature_retriever = self.pipeline.create_module(
-                "literature_retriever", self.pipeline.config.get("literature_retrieval", {})
+                "literature_retriever",
+                self.pipeline.config.get("literature_retrieval", {}),
             )
         except Exception:
             literature_retriever = None
@@ -591,7 +707,9 @@ class ObservePhaseMixin:
                 db_session_factory=db_session_factory,
             )
         except Exception:
-            self.pipeline.logger.exception("collation: failed to build CollationContext")
+            self.pipeline.logger.exception(
+                "collation: failed to build CollationContext"
+            )
             return None
 
     def _iter_observe_collation_documents(
@@ -624,7 +742,9 @@ class ObservePhaseMixin:
                     continue
                 documents.append(
                     {
-                        "document_id": str(entry.get("urn") or entry.get("title") or "doc"),
+                        "document_id": str(
+                            entry.get("urn") or entry.get("title") or "doc"
+                        ),
                         "title": str(entry.get("title") or ""),
                         "raw_text": str(entry.get("text") or ""),
                         "metadata": entry,
@@ -649,7 +769,9 @@ class ObservePhaseMixin:
                 "succeeded_total": 0,
                 "failed_total": 0,
             }
-        documents = self._iter_observe_collation_documents(corpus_result, ingestion_result)
+        documents = self._iter_observe_collation_documents(
+            corpus_result, ingestion_result
+        )
         if not documents:
             return {
                 "document_count": 0,
@@ -660,7 +782,10 @@ class ObservePhaseMixin:
             }
         collation_context = self._build_observe_collation_context(context)
         if collation_context is None:
-            return {"error": "collation context unavailable", "strategies_enabled": list(strategies)}
+            return {
+                "error": "collation context unavailable",
+                "strategies_enabled": list(strategies),
+            }
 
         reports: List[Dict[str, Any]] = []
         succeeded_total = 0
@@ -671,7 +796,10 @@ class ObservePhaseMixin:
                 break
             ctx_payload = {
                 "raw_text": doc.get("raw_text", ""),
-                "parallel_versions": (doc.get("metadata") or {}).get("parallel_versions") or [],
+                "parallel_versions": (doc.get("metadata") or {}).get(
+                    "parallel_versions"
+                )
+                or [],
                 "input_metadata": doc.get("metadata") or {},
                 "query": doc.get("title") or doc.get("document_id"),
                 "title": doc.get("title"),
@@ -684,7 +812,9 @@ class ObservePhaseMixin:
                     context=ctx_payload,
                 )
             except Exception as exc:  # noqa: BLE001
-                self.pipeline.logger.exception("collation failed for %s", doc.get("document_id"))
+                self.pipeline.logger.exception(
+                    "collation failed for %s", doc.get("document_id")
+                )
                 reports.append(
                     {
                         "document_id": doc.get("document_id"),
@@ -738,16 +868,24 @@ class ObservePhaseMixin:
         philology_config = self.pipeline.config.get("philology_service", {})
         return bool(philology_config.get("enabled", True))
 
-    def _run_observe_literature_pipeline(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _run_observe_literature_pipeline(
+        self, context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         literature_config = self.pipeline.config.get("literature_retrieval", {})
         sources = context.get("literature_sources") or literature_config.get(
             "default_sources",
             ["pubmed", "semantic_scholar", "plos_one", "arxiv"],
         )
-        query = context.get("literature_query") or context.get("query") or "traditional chinese medicine"
+        query = (
+            context.get("literature_query")
+            or context.get("query")
+            or "traditional chinese medicine"
+        )
         raw_max_results = context.get("literature_max_results")
         if raw_max_results is None:
-            raw_max_results = self._resolve_observe_literature_max_results(literature_config, context)
+            raw_max_results = self._resolve_observe_literature_max_results(
+                literature_config, context
+            )
         max_results = max(1, min(int(raw_max_results), 50))
         offline_plan_only = bool(
             context.get(
@@ -761,8 +899,12 @@ class ObservePhaseMixin:
             {
                 "timeout_sec": literature_config.get("timeout_sec", 20),
                 "retry_count": literature_config.get("retry_count", 2),
-                "request_interval_sec": literature_config.get("request_interval_sec", 0.2),
-                "user_agent": literature_config.get("user_agent", "TCM-AutoResearch-Observe/1.0"),
+                "request_interval_sec": literature_config.get(
+                    "request_interval_sec", 0.2
+                ),
+                "user_agent": literature_config.get(
+                    "user_agent", "TCM-AutoResearch-Observe/1.0"
+                ),
             },
         )
 
@@ -771,8 +913,12 @@ class ObservePhaseMixin:
                 query=query,
                 sources=sources,
                 max_results_per_source=max_results,
-                pubmed_email=context.get("pubmed_email", literature_config.get("pubmed_email", "")),
-                pubmed_api_key=context.get("pubmed_api_key", literature_config.get("pubmed_api_key", "")),
+                pubmed_email=context.get(
+                    "pubmed_email", literature_config.get("pubmed_email", "")
+                ),
+                pubmed_api_key=context.get(
+                    "pubmed_api_key", literature_config.get("pubmed_api_key", "")
+                ),
                 offline_plan_only=offline_plan_only,
             )
         except Exception as e:
@@ -781,11 +927,15 @@ class ObservePhaseMixin:
         finally:
             retriever.close()
 
-        summaries = self.pipeline._extract_literature_summaries(retrieval_result.get("records", []))
+        summaries = self.pipeline._extract_literature_summaries(
+            retrieval_result.get("records", [])
+        )
         evidence_matrix = self.pipeline._build_evidence_matrix(summaries, context)
         clinical_gap_result = None
         if self.pipeline._should_run_clinical_gap_analysis(context):
-            clinical_gap_result = self.pipeline._run_clinical_gap_analysis(evidence_matrix, summaries, context)
+            clinical_gap_result = self.pipeline._run_clinical_gap_analysis(
+                evidence_matrix, summaries, context
+            )
 
         source_counts = retrieval_result.get("source_stats", {})
         source_counts_summary = [
@@ -834,15 +984,25 @@ class ObservePhaseMixin:
         local_config = self.pipeline.config.get("local_corpus", {})
         return bool(local_config.get("enabled"))
 
-    def _collect_local_observation_corpus(self, context: Dict[str, Any]) -> Dict[str, Any] | None:
+    def _collect_local_observation_corpus(
+        self, context: Dict[str, Any]
+    ) -> Dict[str, Any] | None:
         local_config = self.pipeline.config.get("local_corpus", {})
         collector = self.pipeline.create_module(
             "local_corpus_collector",
             {
-                "data_dir": context.get("local_data_dir", local_config.get("data_dir", "data")),
-                "file_glob": context.get("file_glob", local_config.get("file_glob", "*.txt")),
-                "max_files": context.get("local_max_files", local_config.get("max_files", 50)),
-                "recursive": context.get("local_recursive", local_config.get("recursive", False)),
+                "data_dir": context.get(
+                    "local_data_dir", local_config.get("data_dir", "data")
+                ),
+                "file_glob": context.get(
+                    "file_glob", local_config.get("file_glob", "*.txt")
+                ),
+                "max_files": context.get(
+                    "local_max_files", local_config.get("max_files", 50)
+                ),
+                "recursive": context.get(
+                    "local_recursive", local_config.get("recursive", False)
+                ),
                 "encoding_fallbacks": local_config.get("encoding_fallbacks"),
                 "min_text_length": local_config.get("min_text_length", 50),
             },
@@ -861,19 +1021,32 @@ class ObservePhaseMixin:
     def _resolve_whitelist_groups(self, context: Dict[str, Any]) -> List[str]:
         ctext_config = self.pipeline.config.get("ctext_corpus", {})
         whitelist_config = ctext_config.get("whitelist", {})
-        return context.get("whitelist_groups") or whitelist_config.get("default_groups", [])
+        return context.get("whitelist_groups") or whitelist_config.get(
+            "default_groups", []
+        )
 
-    def _collect_ctext_observation_corpus(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _collect_ctext_observation_corpus(
+        self, context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         ctext_config = self.pipeline.config.get("ctext_corpus", {})
         whitelist_config = ctext_config.get("whitelist", {})
 
         collector = self.pipeline.create_module(
             "ctext_corpus_collector",
             {
-                "api_base": context.get("api_base", ctext_config.get("api_base", "https://api.ctext.org")),
-                "request_interval_sec": context.get("request_interval_sec", ctext_config.get("request_interval_sec", 0.2)),
-                "retry_count": context.get("retry_count", ctext_config.get("retry_count", 2)),
-                "timeout_sec": context.get("timeout_sec", ctext_config.get("timeout_sec", 20)),
+                "api_base": context.get(
+                    "api_base", ctext_config.get("api_base", "https://api.ctext.org")
+                ),
+                "request_interval_sec": context.get(
+                    "request_interval_sec",
+                    ctext_config.get("request_interval_sec", 0.2),
+                ),
+                "retry_count": context.get(
+                    "retry_count", ctext_config.get("retry_count", 2)
+                ),
+                "timeout_sec": context.get(
+                    "timeout_sec", ctext_config.get("timeout_sec", 20)
+                ),
                 "output_dir": context.get("output_dir", os.path.join("data", "ctext")),
             },
         )
@@ -886,12 +1059,16 @@ class ObservePhaseMixin:
             return collector.execute(
                 {
                     "use_whitelist": True,
-                    "whitelist_path": context.get("whitelist_path", whitelist_config.get("path")),
+                    "whitelist_path": context.get(
+                        "whitelist_path", whitelist_config.get("path")
+                    ),
                     "whitelist_groups": self._resolve_whitelist_groups(context),
                     "recurse": context.get("recurse", True),
                     "max_depth": context.get("max_depth", 3),
                     "save_to_disk": context.get("save_to_disk", True),
-                    "output_dir": context.get("output_dir", os.path.join("data", "ctext")),
+                    "output_dir": context.get(
+                        "output_dir", os.path.join("data", "ctext")
+                    ),
                 }
             )
         except Exception as e:
@@ -900,15 +1077,21 @@ class ObservePhaseMixin:
         finally:
             collector.cleanup()
 
-    def _run_observe_ingestion_pipeline(self, corpus_result: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    def _run_observe_ingestion_pipeline(
+        self, corpus_result: Dict[str, Any], context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         text_entries = self.pipeline._extract_corpus_text_entries(corpus_result)
         raw_max_texts = context.get("max_texts")
         if raw_max_texts is None:
             raw_max_texts = self._resolve_observe_max_texts(context)
         max_texts = max(1, min(int(raw_max_texts), 20))
-        max_chars_per_text = max(200, min(int(context.get("max_chars_per_text", 1200)), 4000))
+        max_chars_per_text = max(
+            200, min(int(context.get("max_chars_per_text", 1200)), 4000)
+        )
         selected_entries = text_entries[:max_texts]
-        entity_confidence_threshold = self._resolve_observe_entity_confidence_threshold(context)
+        entity_confidence_threshold = self._resolve_observe_entity_confidence_threshold(
+            context
+        )
         learning_filter_active = entity_confidence_threshold > 0.0
 
         if not selected_entries:
@@ -923,7 +1106,9 @@ class ObservePhaseMixin:
             }
 
         try:
-            module_chain, cleanup_modules = self._build_observe_subpipeline_modules(context)
+            module_chain, cleanup_modules = self._build_observe_subpipeline_modules(
+                context
+            )
         except Exception as e:
             self.pipeline.logger.error("观察阶段子流程初始化失败: %s", e)
             return {"error": str(e)}
@@ -969,52 +1154,104 @@ class ObservePhaseMixin:
                     optional_modules={"ReasoningEngine", "OutputGenerator"},
                 )
 
-                philology_result = self._extract_module_output(module_results, "PhilologyService")
-                preprocess_result = self._extract_module_output(module_results, "DocumentPreprocessor")
-                extraction_result = self._extract_module_output(module_results, "EntityExtractor")
-                semantic_result = self._extract_module_output(module_results, "SemanticModeler")
-                reasoning_result = self._extract_module_output(module_results, "ReasoningEngine")
-                output_result = self._extract_module_output(module_results, "OutputGenerator")
+                philology_result = self._extract_module_output(
+                    module_results, "PhilologyService"
+                )
+                preprocess_result = self._extract_module_output(
+                    module_results, "DocumentPreprocessor"
+                )
+                extraction_result = self._extract_module_output(
+                    module_results, "EntityExtractor"
+                )
+                semantic_result = self._extract_module_output(
+                    module_results, "SemanticModeler"
+                )
+                reasoning_result = self._extract_module_output(
+                    module_results, "ReasoningEngine"
+                )
+                output_result = self._extract_module_output(
+                    module_results, "OutputGenerator"
+                )
 
-                philology_payload = philology_result.get("philology", {}) if isinstance(philology_result, dict) else {}
+                philology_payload = (
+                    philology_result.get("philology", {})
+                    if isinstance(philology_result, dict)
+                    else {}
+                )
                 term_standardization = philology_payload.get("term_standardization", {})
                 version_collation = philology_payload.get("version_collation", {})
-                fragment_reconstruction = philology_payload.get("fragment_reconstruction", {})
-                philology_assets = philology_payload.get("philology_assets", {}) if isinstance(philology_payload, dict) else {}
-                document_philology_notes = philology_payload.get("philology_notes", []) or philology_result.get("philology_notes", [])
+                fragment_reconstruction = philology_payload.get(
+                    "fragment_reconstruction", {}
+                )
+                philology_assets = (
+                    philology_payload.get("philology_assets", {})
+                    if isinstance(philology_payload, dict)
+                    else {}
+                )
+                document_philology_notes = philology_payload.get(
+                    "philology_notes", []
+                ) or philology_result.get("philology_notes", [])
 
                 if philology_payload:
                     philology_document_count += 1
-                term_mapping_count += int(term_standardization.get("mapping_count") or 0)
-                orthographic_variant_count += int(term_standardization.get("orthographic_variant_count") or 0)
-                recognized_term_count += int(term_standardization.get("recognized_term_count") or 0)
-                terminology_standard_table_count += int(term_standardization.get("terminology_standard_table_count") or 0)
-                version_collation_difference_count += int(version_collation.get("difference_count") or 0)
+                term_mapping_count += int(
+                    term_standardization.get("mapping_count") or 0
+                )
+                orthographic_variant_count += int(
+                    term_standardization.get("orthographic_variant_count") or 0
+                )
+                recognized_term_count += int(
+                    term_standardization.get("recognized_term_count") or 0
+                )
+                terminology_standard_table_count += int(
+                    term_standardization.get("terminology_standard_table_count") or 0
+                )
+                version_collation_difference_count += int(
+                    version_collation.get("difference_count") or 0
+                )
                 if int(version_collation.get("witness_count") or 0) > 0:
                     version_collation_witness_count += 1
-                collation_entry_count += int(version_collation.get("collation_entry_count") or 0)
-                fragment_candidate_count += int(fragment_reconstruction.get("fragment_candidate_count") or 0)
-                lost_text_candidate_count += int(fragment_reconstruction.get("lost_text_candidate_count") or 0)
-                citation_source_candidate_count += int(fragment_reconstruction.get("citation_source_candidate_count") or 0)
+                collation_entry_count += int(
+                    version_collation.get("collation_entry_count") or 0
+                )
+                fragment_candidate_count += int(
+                    fragment_reconstruction.get("fragment_candidate_count") or 0
+                )
+                lost_text_candidate_count += int(
+                    fragment_reconstruction.get("lost_text_candidate_count") or 0
+                )
+                citation_source_candidate_count += int(
+                    fragment_reconstruction.get("citation_source_candidate_count") or 0
+                )
                 for note in document_philology_notes:
                     note_text = str(note or "").strip()
                     if note_text and note_text not in philology_notes:
                         philology_notes.append(note_text)
 
                 entities = extraction_result.get("entities", [])
-                filtered_entities = self._deduplicate_entities(
-                    entities,
-                    confidence_threshold=entity_confidence_threshold,
-                ) if learning_filter_active else self._deduplicate_entities(entities)
-                total_entities += len(filtered_entities) if learning_filter_active else len(entities)
+                filtered_entities = (
+                    self._deduplicate_entities(
+                        entities,
+                        confidence_threshold=entity_confidence_threshold,
+                    )
+                    if learning_filter_active
+                    else self._deduplicate_entities(entities)
+                )
+                total_entities += (
+                    len(filtered_entities) if learning_filter_active else len(entities)
+                )
                 confidence_values.extend(
                     entity.get("confidence", 0.0)
-                    for entity in (filtered_entities if learning_filter_active else entities)
+                    for entity in (
+                        filtered_entities if learning_filter_active else entities
+                    )
                 )
                 graph_stats = semantic_result.get("graph_statistics", {})
                 semantic_relationships = self._merge_relationship_sources(
                     self._extract_semantic_relationships(semantic_result),
-                    self._extract_reasoning_relationships(reasoning_result, semantic_result, filtered_entities),
+                    self._extract_reasoning_relationships(
+                        reasoning_result, semantic_result, filtered_entities
+                    ),
                 )
                 if learning_filter_active:
                     semantic_relationships = self._deduplicate_relationships(
@@ -1028,10 +1265,14 @@ class ObservePhaseMixin:
                 if reasoning_summary:
                     reasoning_summaries.append(reasoning_summary)
                 if output_result:
-                    quality_metrics = (output_result.get("output_data") or {}).get("quality_metrics")
+                    quality_metrics = (output_result.get("output_data") or {}).get(
+                        "quality_metrics"
+                    )
                     if isinstance(quality_metrics, dict):
                         output_quality_metrics.append(quality_metrics)
-                    recommendations = (output_result.get("output_data") or {}).get("recommendations")
+                    recommendations = (output_result.get("output_data") or {}).get(
+                        "recommendations"
+                    )
                     if isinstance(recommendations, list):
                         for rec in recommendations:
                             rec_str = str(rec).strip() if rec else ""
@@ -1040,11 +1281,27 @@ class ObservePhaseMixin:
 
                 if learning_filter_active:
                     for entity in filtered_entities:
-                        entity_type = str(entity.get("type") or entity.get("entity_type") or "other").strip().lower()
-                        entity_type_counts[entity_type] = entity_type_counts.get(entity_type, 0) + 1
+                        entity_type = (
+                            str(
+                                entity.get("type")
+                                or entity.get("entity_type")
+                                or "other"
+                            )
+                            .strip()
+                            .lower()
+                        )
+                        entity_type_counts[entity_type] = (
+                            entity_type_counts.get(entity_type, 0) + 1
+                        )
                 else:
-                    for entity_type, count in extraction_result.get("statistics", {}).get("by_type", {}).items():
-                        entity_type_counts[entity_type] = entity_type_counts.get(entity_type, 0) + count
+                    for entity_type, count in (
+                        extraction_result.get("statistics", {})
+                        .get("by_type", {})
+                        .items()
+                    ):
+                        entity_type_counts[entity_type] = (
+                            entity_type_counts.get(entity_type, 0) + count
+                        )
 
                 document_results.append(
                     {
@@ -1057,34 +1314,76 @@ class ObservePhaseMixin:
                         "philology": philology_payload,
                         "philology_notes": document_philology_notes,
                         "philology_assets": philology_assets,
-                        "processed_text_preview": preprocess_result.get("processed_text", "")[:120],
-                        "processed_text_size": len(str(preprocess_result.get("processed_text", "") or "")),
+                        "processed_text_preview": preprocess_result.get(
+                            "processed_text", ""
+                        )[:120],
+                        "processed_text_size": len(
+                            str(preprocess_result.get("processed_text", "") or "")
+                        ),
                         "entities": filtered_entities,
-                        "entity_count": len(filtered_entities) if learning_filter_active else len(entities),
+                        "entity_count": len(filtered_entities)
+                        if learning_filter_active
+                        else len(entities),
                         "entity_types": {
-                            str(entity.get("type") or entity.get("entity_type") or "other").strip().lower(): sum(
+                            str(
+                                entity.get("type")
+                                or entity.get("entity_type")
+                                or "other"
+                            )
+                            .strip()
+                            .lower(): sum(
                                 1
                                 for candidate in filtered_entities
-                                if str(candidate.get("type") or candidate.get("entity_type") or "other").strip().lower()
-                                == str(entity.get("type") or entity.get("entity_type") or "other").strip().lower()
+                                if str(
+                                    candidate.get("type")
+                                    or candidate.get("entity_type")
+                                    or "other"
+                                )
+                                .strip()
+                                .lower()
+                                == str(
+                                    entity.get("type")
+                                    or entity.get("entity_type")
+                                    or "other"
+                                )
+                                .strip()
+                                .lower()
                             )
                             for entity in filtered_entities
-                        } if learning_filter_active else extraction_result.get("statistics", {}).get("by_type", {}),
+                        }
+                        if learning_filter_active
+                        else extraction_result.get("statistics", {}).get("by_type", {}),
                         "average_confidence": round(
-                            sum(float(entity.get("confidence") or 0.0) for entity in filtered_entities) / len(filtered_entities),
+                            sum(
+                                float(entity.get("confidence") or 0.0)
+                                for entity in filtered_entities
+                            )
+                            / len(filtered_entities),
                             4,
-                        ) if learning_filter_active and filtered_entities else extraction_result.get("confidence_scores", {}).get("average_confidence", 0.0),
+                        )
+                        if learning_filter_active and filtered_entities
+                        else extraction_result.get("confidence_scores", {}).get(
+                            "average_confidence", 0.0
+                        ),
                         "semantic_graph_nodes": graph_stats.get("nodes_count", 0),
                         "semantic_graph_edges": graph_stats.get("edges_count", 0),
-                        "relationship_types": graph_stats.get("relationships_by_type", {}),
+                        "relationship_types": graph_stats.get(
+                            "relationships_by_type", {}
+                        ),
                         "semantic_relationships": semantic_relationships,
-                        "reasoning_results": (reasoning_result or {}).get("reasoning_results", {}),
+                        "reasoning_results": (reasoning_result or {}).get(
+                            "reasoning_results", {}
+                        ),
                         "reasoning_summary": reasoning_summary,
                         "output_generation": (output_result or {}).get("output_data"),
                     }
                 )
 
-            average_confidence = sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
+            average_confidence = (
+                sum(confidence_values) / len(confidence_values)
+                if confidence_values
+                else 0.0
+            )
             aggregate_entities = self._deduplicate_entities(
                 [
                     entity
@@ -1095,9 +1394,15 @@ class ObservePhaseMixin:
                 ],
                 confidence_threshold=entity_confidence_threshold,
             )
-            terminology_standard_table = self._aggregate_observe_terminology_standard_table(document_results)
-            collation_entries = self._aggregate_observe_collation_entries(document_results)
-            fragment_candidate_assets = self._aggregate_observe_fragment_candidates(document_results)
+            terminology_standard_table = (
+                self._aggregate_observe_terminology_standard_table(document_results)
+            )
+            collation_entries = self._aggregate_observe_collation_entries(
+                document_results
+            )
+            fragment_candidate_assets = self._aggregate_observe_fragment_candidates(
+                document_results
+            )
             philology_annotation_report = self._build_observe_philology_annotation_report(
                 document_results,
                 {
@@ -1110,9 +1415,15 @@ class ObservePhaseMixin:
                     "version_collation_difference_count": version_collation_difference_count,
                     "version_collation_witness_count": version_collation_witness_count,
                     "collation_entry_count": len(collation_entries),
-                    "fragment_candidate_count": len(fragment_candidate_assets["fragment_candidates"]),
-                    "lost_text_candidate_count": len(fragment_candidate_assets["lost_text_candidates"]),
-                    "citation_source_candidate_count": len(fragment_candidate_assets["citation_source_candidates"]),
+                    "fragment_candidate_count": len(
+                        fragment_candidate_assets["fragment_candidates"]
+                    ),
+                    "lost_text_candidate_count": len(
+                        fragment_candidate_assets["lost_text_candidates"]
+                    ),
+                    "citation_source_candidate_count": len(
+                        fragment_candidate_assets["citation_source_candidates"]
+                    ),
                     "philology_notes": philology_notes,
                 },
             )
@@ -1120,8 +1431,12 @@ class ObservePhaseMixin:
                 "terminology_standard_table": terminology_standard_table,
                 "collation_entries": collation_entries,
                 "fragment_candidates": fragment_candidate_assets["fragment_candidates"],
-                "lost_text_candidates": fragment_candidate_assets["lost_text_candidates"],
-                "citation_source_candidates": fragment_candidate_assets["citation_source_candidates"],
+                "lost_text_candidates": fragment_candidate_assets[
+                    "lost_text_candidates"
+                ],
+                "citation_source_candidates": fragment_candidate_assets[
+                    "citation_source_candidates"
+                ],
                 "annotation_report": philology_annotation_report,
             }
             philology_asset_count = sum(
@@ -1147,7 +1462,9 @@ class ObservePhaseMixin:
                     "average_confidence": average_confidence,
                     "semantic_graph_nodes": total_semantic_nodes,
                     "semantic_graph_edges": total_semantic_edges,
-                    "semantic_relationships": self._deduplicate_relationships(total_semantic_relationships),
+                    "semantic_relationships": self._deduplicate_relationships(
+                        total_semantic_relationships
+                    ),
                     "philology_document_count": philology_document_count,
                     "term_mapping_count": term_mapping_count,
                     "orthographic_variant_count": orthographic_variant_count,
@@ -1156,13 +1473,21 @@ class ObservePhaseMixin:
                     "version_collation_difference_count": version_collation_difference_count,
                     "version_collation_witness_count": version_collation_witness_count,
                     "collation_entry_count": len(collation_entries),
-                    "fragment_candidate_count": len(fragment_candidate_assets["fragment_candidates"]),
-                    "lost_text_candidate_count": len(fragment_candidate_assets["lost_text_candidates"]),
-                    "citation_source_candidate_count": len(fragment_candidate_assets["citation_source_candidates"]),
+                    "fragment_candidate_count": len(
+                        fragment_candidate_assets["fragment_candidates"]
+                    ),
+                    "lost_text_candidate_count": len(
+                        fragment_candidate_assets["lost_text_candidates"]
+                    ),
+                    "citation_source_candidate_count": len(
+                        fragment_candidate_assets["citation_source_candidates"]
+                    ),
                     "philology_asset_count": philology_asset_count,
                     "philology_assets": philology_assets,
                     "philology_notes": philology_notes,
-                    "reasoning_summary": self._merge_reasoning_summaries(reasoning_summaries),
+                    "reasoning_summary": self._merge_reasoning_summaries(
+                        reasoning_summaries
+                    ),
                     "output_quality_metrics": output_quality_metrics,
                     "output_recommendations": output_recommendations,
                 },
@@ -1183,13 +1508,30 @@ class ObservePhaseMixin:
                 context.get("philology_config") or {},
             )
         )
-        preprocessor = self.pipeline.analysis_port.create_preprocessor(context.get("preprocessor_config") or {})
-        extractor = self.pipeline.analysis_port.create_extractor(context.get("extractor_config") or {})
-        semantic_builder = self.pipeline.analysis_port.create_semantic_builder(context.get("semantic_builder_config") or {})
-        reasoning_engine = self.pipeline.analysis_port.create_reasoning_engine(context.get("reasoning_engine_config") or {})
-        output_generator = self.pipeline.output_port.create_output_generator(context.get("output_generator_config") or {})
+        preprocessor = self.pipeline.analysis_port.create_preprocessor(
+            context.get("preprocessor_config") or {}
+        )
+        extractor = self.pipeline.analysis_port.create_extractor(
+            context.get("extractor_config") or {}
+        )
+        semantic_builder = self.pipeline.analysis_port.create_semantic_builder(
+            context.get("semantic_builder_config") or {}
+        )
+        reasoning_engine = self.pipeline.analysis_port.create_reasoning_engine(
+            context.get("reasoning_engine_config") or {}
+        )
+        output_generator = self.pipeline.output_port.create_output_generator(
+            context.get("output_generator_config") or {}
+        )
 
-        cleanup_modules = [output_generator, reasoning_engine, semantic_builder, extractor, preprocessor, philology_service]
+        cleanup_modules = [
+            output_generator,
+            reasoning_engine,
+            semantic_builder,
+            extractor,
+            preprocessor,
+            philology_service,
+        ]
         module_chain: List[tuple[str, Any]] = []
 
         if self._should_run_observe_philology(context):
@@ -1223,11 +1565,15 @@ class ObservePhaseMixin:
 
         return module_chain, cleanup_modules
 
-    def _build_observe_philology_artifacts(self, ingestion_result: Dict[str, Any] | None) -> List[Dict[str, Any]]:
+    def _build_observe_philology_artifacts(
+        self, ingestion_result: Dict[str, Any] | None
+    ) -> List[Dict[str, Any]]:
         if not ingestion_result or ingestion_result.get("error"):
             return []
 
-        artifact_config = self.pipeline.config.get("philology_service", {}).get("artifact_output", {})
+        artifact_config = self.pipeline.config.get("philology_service", {}).get(
+            "artifact_output", {}
+        )
         philology_assets = extract_observe_philology_assets_from_phase_result(
             {
                 "results": {
@@ -1235,9 +1581,13 @@ class ObservePhaseMixin:
                 }
             }
         )
-        return build_observe_philology_artifact_payloads(philology_assets, artifact_config)
+        return build_observe_philology_artifact_payloads(
+            philology_assets, artifact_config
+        )
 
-    def _build_observe_graph_assets(self, cycle_id: str, ingestion_result: Dict[str, Any] | None) -> Dict[str, Any]:
+    def _build_observe_graph_assets(
+        self, cycle_id: str, ingestion_result: Dict[str, Any] | None
+    ) -> Dict[str, Any]:
         if not ingestion_result or ingestion_result.get("error"):
             return {}
 
@@ -1251,20 +1601,38 @@ class ObservePhaseMixin:
         if not philology_assets:
             return {}
 
-        return build_observe_philology_graph_assets(cycle_id, philology_assets, phase="observe")
+        return build_observe_philology_graph_assets(
+            cycle_id, philology_assets, phase="observe"
+        )
 
-    def _aggregate_observe_terminology_standard_table(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _aggregate_observe_terminology_standard_table(
+        self, documents: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
         seen: set[tuple[str, str, tuple[str, ...]]] = set()
         for document in documents:
             if not isinstance(document, dict):
                 continue
-            philology_assets = document.get("philology_assets") if isinstance(document.get("philology_assets"), dict) else {}
-            document_rows = philology_assets.get("terminology_standard_table") if isinstance(philology_assets.get("terminology_standard_table"), list) else []
+            philology_assets = (
+                document.get("philology_assets")
+                if isinstance(document.get("philology_assets"), dict)
+                else {}
+            )
+            document_rows = (
+                philology_assets.get("terminology_standard_table")
+                if isinstance(philology_assets.get("terminology_standard_table"), list)
+                else []
+            )
             for row in document_rows:
                 if not isinstance(row, dict):
                     continue
-                observed_forms = tuple(sorted(str(item) for item in (row.get("observed_forms") or []) if str(item).strip()))
+                observed_forms = tuple(
+                    sorted(
+                        str(item)
+                        for item in (row.get("observed_forms") or [])
+                        if str(item).strip()
+                    )
+                )
                 key = (
                     str(document.get("urn") or document.get("title") or "").strip(),
                     str(row.get("canonical") or "").strip(),
@@ -1283,20 +1651,32 @@ class ObservePhaseMixin:
                 )
         return rows
 
-    def _aggregate_observe_collation_entries(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _aggregate_observe_collation_entries(
+        self, documents: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         entries: List[Dict[str, Any]] = []
         seen: set[tuple[str, str, str, str, str]] = set()
         for document in documents:
             if not isinstance(document, dict):
                 continue
-            philology_assets = document.get("philology_assets") if isinstance(document.get("philology_assets"), dict) else {}
-            document_entries = philology_assets.get("collation_entries") if isinstance(philology_assets.get("collation_entries"), list) else []
+            philology_assets = (
+                document.get("philology_assets")
+                if isinstance(document.get("philology_assets"), dict)
+                else {}
+            )
+            document_entries = (
+                philology_assets.get("collation_entries")
+                if isinstance(philology_assets.get("collation_entries"), list)
+                else []
+            )
             for entry in document_entries:
                 if not isinstance(entry, dict):
                     continue
                 key = (
                     str(document.get("urn") or document.get("title") or "").strip(),
-                    str(entry.get("witness_urn") or entry.get("witness_title") or "").strip(),
+                    str(
+                        entry.get("witness_urn") or entry.get("witness_title") or ""
+                    ).strip(),
                     str(entry.get("difference_type") or "").strip(),
                     str(entry.get("base_text") or "").strip(),
                     str(entry.get("witness_text") or "").strip(),
@@ -1314,7 +1694,9 @@ class ObservePhaseMixin:
                 )
         return entries
 
-    def _aggregate_observe_fragment_candidates(self, documents: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    def _aggregate_observe_fragment_candidates(
+        self, documents: List[Dict[str, Any]]
+    ) -> Dict[str, List[Dict[str, Any]]]:
         aggregated = {
             "fragment_candidates": [],
             "lost_text_candidates": [],
@@ -1324,9 +1706,17 @@ class ObservePhaseMixin:
         for document in documents:
             if not isinstance(document, dict):
                 continue
-            philology_assets = document.get("philology_assets") if isinstance(document.get("philology_assets"), dict) else {}
+            philology_assets = (
+                document.get("philology_assets")
+                if isinstance(document.get("philology_assets"), dict)
+                else {}
+            )
             for field_name in aggregated:
-                document_entries = philology_assets.get(field_name) if isinstance(philology_assets.get(field_name), list) else []
+                document_entries = (
+                    philology_assets.get(field_name)
+                    if isinstance(philology_assets.get(field_name), list)
+                    else []
+                )
                 for entry in document_entries:
                     if not isinstance(entry, dict):
                         continue
@@ -1343,9 +1733,19 @@ class ObservePhaseMixin:
                     aggregated[field_name].append(
                         {
                             **entry,
-                            "document_title": str(entry.get("document_title") or document.get("title") or "").strip(),
-                            "document_urn": str(entry.get("document_urn") or document.get("urn") or "").strip(),
-                            "source_type": str(entry.get("source_type") or document.get("source_type") or "").strip(),
+                            "document_title": str(
+                                entry.get("document_title")
+                                or document.get("title")
+                                or ""
+                            ).strip(),
+                            "document_urn": str(
+                                entry.get("document_urn") or document.get("urn") or ""
+                            ).strip(),
+                            "source_type": str(
+                                entry.get("source_type")
+                                or document.get("source_type")
+                                or ""
+                            ).strip(),
                         }
                     )
         return aggregated
@@ -1359,25 +1759,63 @@ class ObservePhaseMixin:
         for document in documents:
             if not isinstance(document, dict):
                 continue
-            philology = document.get("philology") if isinstance(document.get("philology"), dict) else {}
-            term_standardization = philology.get("term_standardization") if isinstance(philology.get("term_standardization"), dict) else {}
-            version_collation = philology.get("version_collation") if isinstance(philology.get("version_collation"), dict) else {}
-            fragment_reconstruction = philology.get("fragment_reconstruction") if isinstance(philology.get("fragment_reconstruction"), dict) else {}
+            philology = (
+                document.get("philology")
+                if isinstance(document.get("philology"), dict)
+                else {}
+            )
+            term_standardization = (
+                philology.get("term_standardization")
+                if isinstance(philology.get("term_standardization"), dict)
+                else {}
+            )
+            version_collation = (
+                philology.get("version_collation")
+                if isinstance(philology.get("version_collation"), dict)
+                else {}
+            )
+            fragment_reconstruction = (
+                philology.get("fragment_reconstruction")
+                if isinstance(philology.get("fragment_reconstruction"), dict)
+                else {}
+            )
             document_reports.append(
                 {
                     "document_title": str(document.get("title") or "").strip(),
                     "document_urn": str(document.get("urn") or "").strip(),
                     "source_type": str(document.get("source_type") or "").strip(),
-                    "mapping_count": int(term_standardization.get("mapping_count") or 0),
-                    "recognized_term_count": int(term_standardization.get("recognized_term_count") or 0),
-                    "terminology_standard_table_count": int(term_standardization.get("terminology_standard_table_count") or 0),
-                    "difference_count": int(version_collation.get("difference_count") or 0),
-                    "collation_entry_count": int(version_collation.get("collation_entry_count") or 0),
+                    "mapping_count": int(
+                        term_standardization.get("mapping_count") or 0
+                    ),
+                    "recognized_term_count": int(
+                        term_standardization.get("recognized_term_count") or 0
+                    ),
+                    "terminology_standard_table_count": int(
+                        term_standardization.get("terminology_standard_table_count")
+                        or 0
+                    ),
+                    "difference_count": int(
+                        version_collation.get("difference_count") or 0
+                    ),
+                    "collation_entry_count": int(
+                        version_collation.get("collation_entry_count") or 0
+                    ),
                     "witness_count": int(version_collation.get("witness_count") or 0),
-                    "fragment_candidate_count": int(fragment_reconstruction.get("fragment_candidate_count") or 0),
-                    "lost_text_candidate_count": int(fragment_reconstruction.get("lost_text_candidate_count") or 0),
-                    "citation_source_candidate_count": int(fragment_reconstruction.get("citation_source_candidate_count") or 0),
-                    "philology_notes": [str(note) for note in (document.get("philology_notes") or []) if str(note).strip()],
+                    "fragment_candidate_count": int(
+                        fragment_reconstruction.get("fragment_candidate_count") or 0
+                    ),
+                    "lost_text_candidate_count": int(
+                        fragment_reconstruction.get("lost_text_candidate_count") or 0
+                    ),
+                    "citation_source_candidate_count": int(
+                        fragment_reconstruction.get("citation_source_candidate_count")
+                        or 0
+                    ),
+                    "philology_notes": [
+                        str(note)
+                        for note in (document.get("philology_notes") or [])
+                        if str(note).strip()
+                    ],
                 }
             )
         return {
@@ -1386,12 +1824,16 @@ class ObservePhaseMixin:
         }
 
     @staticmethod
-    def _merge_observe_module_config(base_config: Mapping[str, Any], override_config: Mapping[str, Any]) -> Dict[str, Any]:
+    def _merge_observe_module_config(
+        base_config: Mapping[str, Any], override_config: Mapping[str, Any]
+    ) -> Dict[str, Any]:
         merged: Dict[str, Any] = dict(base_config or {})
         for key, value in (override_config or {}).items():
             existing = merged.get(key)
             if isinstance(existing, dict) and isinstance(value, Mapping):
-                merged[key] = ObservePhaseMixin._merge_observe_module_config(existing, value)
+                merged[key] = ObservePhaseMixin._merge_observe_module_config(
+                    existing, value
+                )
                 continue
             merged[key] = value
         return merged
@@ -1401,7 +1843,9 @@ class ObservePhaseMixin:
         entries: List[Dict[str, Any]],
     ) -> Dict[str, List[Dict[str, Any]]]:
         lineage_groups: Dict[str, List[tuple[str, Dict[str, Any], Dict[str, Any]]]] = {}
-        work_fragment_groups: Dict[str, List[tuple[str, Dict[str, Any], Dict[str, Any]]]] = {}
+        work_fragment_groups: Dict[
+            str, List[tuple[str, Dict[str, Any], Dict[str, Any]]]
+        ] = {}
         indexed_entries: List[tuple[str, Dict[str, Any], Dict[str, Any]]] = []
 
         for index, entry in enumerate(entries):
@@ -1410,41 +1854,63 @@ class ObservePhaseMixin:
             indexed_entry = (entry_key, entry, version_metadata)
             indexed_entries.append(indexed_entry)
 
-            version_lineage_key = str(version_metadata.get("version_lineage_key") or "").strip()
+            version_lineage_key = str(
+                version_metadata.get("version_lineage_key") or ""
+            ).strip()
             if version_lineage_key:
                 lineage_groups.setdefault(version_lineage_key, []).append(indexed_entry)
 
-            work_fragment_key = str(version_metadata.get("work_fragment_key") or "").strip()
+            work_fragment_key = str(
+                version_metadata.get("work_fragment_key") or ""
+            ).strip()
             if work_fragment_key:
-                work_fragment_groups.setdefault(work_fragment_key, []).append(indexed_entry)
+                work_fragment_groups.setdefault(work_fragment_key, []).append(
+                    indexed_entry
+                )
 
         witness_map: Dict[str, List[Dict[str, Any]]] = {}
         for entry_key, entry, version_metadata in indexed_entries:
-            version_lineage_key = str(version_metadata.get("version_lineage_key") or "").strip()
-            work_fragment_key = str(version_metadata.get("work_fragment_key") or "").strip()
+            version_lineage_key = str(
+                version_metadata.get("version_lineage_key") or ""
+            ).strip()
+            work_fragment_key = str(
+                version_metadata.get("work_fragment_key") or ""
+            ).strip()
             selection_strategy = ""
             grouped: List[tuple[str, Dict[str, Any], Dict[str, Any]]] = []
 
-            if version_lineage_key and len(lineage_groups.get(version_lineage_key, [])) > 1:
+            if (
+                version_lineage_key
+                and len(lineage_groups.get(version_lineage_key, [])) > 1
+            ):
                 grouped = lineage_groups[version_lineage_key]
                 selection_strategy = "version_lineage_key"
-            elif work_fragment_key and len(work_fragment_groups.get(work_fragment_key, [])) > 1:
+            elif (
+                work_fragment_key
+                and len(work_fragment_groups.get(work_fragment_key, [])) > 1
+            ):
                 grouped = work_fragment_groups[work_fragment_key]
                 selection_strategy = "work_fragment_key"
 
             if not grouped:
                 continue
 
-            base_witness_key = str(version_metadata.get("witness_key") or entry_key).strip()
+            base_witness_key = str(
+                version_metadata.get("witness_key") or entry_key
+            ).strip()
             ranked_candidates = sorted(
                 [candidate for candidate in grouped if candidate[0] != entry_key],
-                key=lambda candidate: self._score_observe_witness_candidate(version_metadata, candidate[2]),
+                key=lambda candidate: self._score_observe_witness_candidate(
+                    version_metadata, candidate[2]
+                ),
                 reverse=True,
             )
 
             witness_payloads: List[Dict[str, Any]] = []
             for other_key, other_entry, other_version_metadata in ranked_candidates:
-                witness_key = str(other_version_metadata.get("witness_key") or other_key).strip()
+                witness_key = str(
+                    other_version_metadata.get("witness_key") or other_key
+                ).strip()
                 if witness_key == base_witness_key:
                     continue
                 if not str(other_entry.get("text", "")).strip():
@@ -1464,30 +1930,49 @@ class ObservePhaseMixin:
     def _build_observe_entry_metadata(self, entry: Dict[str, Any]) -> Dict[str, Any]:
         metadata = dict(entry.get("metadata") or {})
         metadata.setdefault("title", entry.get("title", ""))
-        metadata.setdefault("source_type", entry.get("source_type", metadata.get("source_type") or "unknown"))
-        metadata.setdefault("source", metadata.get("source_name") or metadata.get("source") or metadata.get("source_type") or "unknown")
+        metadata.setdefault(
+            "source_type",
+            entry.get("source_type", metadata.get("source_type") or "unknown"),
+        )
+        metadata.setdefault(
+            "source",
+            metadata.get("source_name")
+            or metadata.get("source")
+            or metadata.get("source_type")
+            or "unknown",
+        )
         metadata.setdefault("collection_stage", "observe")
         metadata.setdefault("source_file", entry.get("urn", "unknown"))
         if entry.get("doc_id"):
             metadata.setdefault("identifier", entry.get("doc_id"))
 
         if not isinstance(metadata.get("version_metadata"), dict):
-            metadata["version_metadata"] = self._extract_observe_entry_version_metadata(entry)
+            metadata["version_metadata"] = self._extract_observe_entry_version_metadata(
+                entry
+            )
 
         return metadata
 
-    def _extract_observe_entry_version_metadata(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_observe_entry_version_metadata(
+        self, entry: Dict[str, Any]
+    ) -> Dict[str, Any]:
         version_metadata = entry.get("version_metadata")
         if isinstance(version_metadata, dict) and version_metadata:
             return dict(version_metadata)
 
-        metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
-        if isinstance(metadata.get("version_metadata"), dict) and metadata.get("version_metadata"):
+        metadata = (
+            entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+        )
+        if isinstance(metadata.get("version_metadata"), dict) and metadata.get(
+            "version_metadata"
+        ):
             return dict(metadata["version_metadata"])
 
         enriched_metadata = build_document_version_metadata(
             title=str(entry.get("title") or ""),
-            source_type=str(entry.get("source_type") or metadata.get("source_type") or "unknown"),
+            source_type=str(
+                entry.get("source_type") or metadata.get("source_type") or "unknown"
+            ),
             source_ref=str(entry.get("urn") or metadata.get("source_file") or ""),
             metadata=metadata,
         )
@@ -1499,15 +1984,27 @@ class ObservePhaseMixin:
         candidate_version_metadata: Dict[str, Any],
     ) -> int:
         score = 0
-        if candidate_version_metadata.get("version_lineage_key") == base_version_metadata.get("version_lineage_key"):
+        if candidate_version_metadata.get(
+            "version_lineage_key"
+        ) == base_version_metadata.get("version_lineage_key"):
             score += 100
-        if candidate_version_metadata.get("work_fragment_key") == base_version_metadata.get("work_fragment_key"):
+        if candidate_version_metadata.get(
+            "work_fragment_key"
+        ) == base_version_metadata.get("work_fragment_key"):
             score += 50
-        if candidate_version_metadata.get("dynasty") and candidate_version_metadata.get("dynasty") == base_version_metadata.get("dynasty"):
+        if candidate_version_metadata.get("dynasty") and candidate_version_metadata.get(
+            "dynasty"
+        ) == base_version_metadata.get("dynasty"):
             score += 20
-        if candidate_version_metadata.get("author") and candidate_version_metadata.get("author") == base_version_metadata.get("author"):
+        if candidate_version_metadata.get("author") and candidate_version_metadata.get(
+            "author"
+        ) == base_version_metadata.get("author"):
             score += 15
-        if candidate_version_metadata.get("source_name") and candidate_version_metadata.get("source_name") != base_version_metadata.get("source_name"):
+        if candidate_version_metadata.get(
+            "source_name"
+        ) and candidate_version_metadata.get(
+            "source_name"
+        ) != base_version_metadata.get("source_name"):
             score += 5
         return score
 
@@ -1557,10 +2054,14 @@ class ObservePhaseMixin:
                 return output_data if isinstance(output_data, dict) else {}
         return {}
 
-    def _extract_corpus_text_entries(self, corpus_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _extract_corpus_text_entries(
+        self, corpus_result: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
         return extract_text_entries(corpus_result)
 
-    def _extract_semantic_relationships(self, semantic_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _extract_semantic_relationships(
+        self, semantic_result: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
         semantic_graph = semantic_result.get("semantic_graph") or {}
         nodes = semantic_graph.get("nodes") or []
         edges = semantic_graph.get("edges") or []
@@ -1606,7 +2107,9 @@ class ObservePhaseMixin:
                     "target_type": target_node["type"],
                     "metadata": {
                         "confidence": float(attributes.get("confidence") or 0.0),
-                        "relationship_name": str(attributes.get("relationship_name") or relation_type),
+                        "relationship_name": str(
+                            attributes.get("relationship_name") or relation_type
+                        ),
                         "description": str(attributes.get("description") or ""),
                         "source_node_id": source_id,
                         "target_node_id": target_id,
@@ -1631,7 +2134,9 @@ class ObservePhaseMixin:
         for entity in entities:
             if not isinstance(entity, dict) or not entity.get("name"):
                 continue
-            entity_type_map[str(entity.get("name"))] = str(entity.get("type") or "generic")
+            entity_type_map[str(entity.get("name"))] = str(
+                entity.get("type") or "generic"
+            )
 
         for relation in self._extract_semantic_relationships(semantic_result):
             source = str(relation.get("source") or "")
@@ -1649,7 +2154,9 @@ class ObservePhaseMixin:
                 continue
             source = str(relation.get("source") or "").strip()
             target = str(relation.get("target") or "").strip()
-            relation_type = str(relation.get("type") or relation.get("rel_type") or "related_to").strip()
+            relation_type = str(
+                relation.get("type") or relation.get("rel_type") or "related_to"
+            ).strip()
             if not source or not target:
                 continue
             relationships.append(
@@ -1669,7 +2176,9 @@ class ObservePhaseMixin:
             )
         return self._deduplicate_relationships(relationships)
 
-    def _extract_reasoning_summary(self, reasoning_result: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_reasoning_summary(
+        self, reasoning_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
         reasoning_results = (reasoning_result or {}).get("reasoning_results") or {}
         if not reasoning_results:
             return {}
@@ -1678,21 +2187,33 @@ class ObservePhaseMixin:
         most_shared_efficacies = knowledge_patterns.get("most_shared_efficacies") or []
         entity_groups = knowledge_patterns.get("entity_groups") or {}
         return {
-            "inference_confidence": float(reasoning_results.get("inference_confidence") or 0.0),
+            "inference_confidence": float(
+                reasoning_results.get("inference_confidence") or 0.0
+            ),
             "knowledge_patterns": {
-                "common_entities": [str(item) for item in common_entities if str(item).strip()],
-                "most_shared_efficacies": [str(item) for item in most_shared_efficacies if str(item).strip()],
+                "common_entities": [
+                    str(item) for item in common_entities if str(item).strip()
+                ],
+                "most_shared_efficacies": [
+                    str(item) for item in most_shared_efficacies if str(item).strip()
+                ],
                 "entity_groups": {
-                    str(key): [str(item) for item in (values or []) if str(item).strip()]
+                    str(key): [
+                        str(item) for item in (values or []) if str(item).strip()
+                    ]
                     for key, values in entity_groups.items()
                 },
             },
         }
 
-    def _merge_reasoning_summaries(self, summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _merge_reasoning_summaries(
+        self, summaries: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         if not summaries:
             return {}
-        inference_scores = [float(item.get("inference_confidence") or 0.0) for item in summaries]
+        inference_scores = [
+            float(item.get("inference_confidence") or 0.0) for item in summaries
+        ]
         merged_patterns = {
             "common_entities": [],
             "most_shared_efficacies": [],
@@ -1710,11 +2231,15 @@ class ObservePhaseMixin:
                     if value not in merged_patterns["entity_groups"][group_key]:
                         merged_patterns["entity_groups"][group_key].append(value)
         return {
-            "inference_confidence": round(sum(inference_scores) / len(inference_scores), 4),
+            "inference_confidence": round(
+                sum(inference_scores) / len(inference_scores), 4
+            ),
             "knowledge_patterns": merged_patterns,
         }
 
-    def _merge_relationship_sources(self, *relationship_groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _merge_relationship_sources(
+        self, *relationship_groups: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         merged: List[Dict[str, Any]] = []
         for group in relationship_groups:
             if isinstance(group, list):
@@ -1731,14 +2256,21 @@ class ObservePhaseMixin:
             if not isinstance(entity, dict):
                 continue
             name = str(entity.get("name") or "").strip()
-            entity_type = str(entity.get("type") or entity.get("entity_type") or "other").strip().lower()
+            entity_type = (
+                str(entity.get("type") or entity.get("entity_type") or "other")
+                .strip()
+                .lower()
+            )
             if not name:
                 continue
             try:
                 candidate_confidence = float(entity.get("confidence") or 0.0)
             except (TypeError, ValueError):
                 candidate_confidence = 0.0
-            if confidence_threshold > 0.0 and candidate_confidence < confidence_threshold:
+            if (
+                confidence_threshold > 0.0
+                and candidate_confidence < confidence_threshold
+            ):
                 continue
             key = (name, entity_type or "other")
             current = deduplicated_map.get(key)
@@ -1759,7 +2291,9 @@ class ObservePhaseMixin:
         for relation in relationships:
             if not isinstance(relation, dict):
                 continue
-            if not self._relationship_meets_confidence_threshold(relation, confidence_threshold):
+            if not self._relationship_meets_confidence_threshold(
+                relation, confidence_threshold
+            ):
                 continue
             key = (
                 str(relation.get("source") or ""),
@@ -1772,7 +2306,9 @@ class ObservePhaseMixin:
             if current is None:
                 deduplicated_map[key] = relation
                 continue
-            deduplicated_map[key] = self._resolve_relationship_conflict(current, relation)
+            deduplicated_map[key] = self._resolve_relationship_conflict(
+                current, relation
+            )
         return list(deduplicated_map.values())
 
     def _resolve_relationship_conflict(
@@ -1780,7 +2316,13 @@ class ObservePhaseMixin:
         current: Dict[str, Any],
         candidate: Dict[str, Any],
     ) -> Dict[str, Any]:
-        relation_type = str(current.get("type") or current.get("rel_type") or candidate.get("type") or candidate.get("rel_type") or "")
+        relation_type = str(
+            current.get("type")
+            or current.get("rel_type")
+            or candidate.get("type")
+            or candidate.get("rel_type")
+            or ""
+        )
         strategy = self._relationship_conflict_strategy(relation_type)
         current_priority = self._relationship_source_priority(current)
         candidate_priority = self._relationship_source_priority(candidate)
@@ -1845,7 +2387,11 @@ class ObservePhaseMixin:
     def _relationship_conflict_strategy(self, relation_type: str) -> str:
         config = self._relationship_conflict_resolution_config()
         relation_type_strategies = config.get("relation_type_strategies") or {}
-        strategy = relation_type_strategies.get(relation_type) or config.get("default_strategy") or "source_priority_then_confidence"
+        strategy = (
+            relation_type_strategies.get(relation_type)
+            or config.get("default_strategy")
+            or "source_priority_then_confidence"
+        )
         strategy = str(strategy or "source_priority_then_confidence").strip()
         if strategy not in self._RELATION_CONFLICT_STRATEGIES:
             return "source_priority_then_confidence"
@@ -1853,7 +2399,9 @@ class ObservePhaseMixin:
 
     def _relationship_conflict_resolution_config(self) -> Dict[str, Any]:
         root_config = self.pipeline.config.get("relationship_conflict_resolution") or {}
-        observe_config = (self.pipeline.config.get("observe_pipeline") or {}).get("relationship_conflict_resolution") or {}
+        observe_config = (self.pipeline.config.get("observe_pipeline") or {}).get(
+            "relationship_conflict_resolution"
+        ) or {}
         merged_config = dict(root_config) if isinstance(root_config, dict) else {}
         if isinstance(observe_config, dict):
             merged_config.update(observe_config)
@@ -1893,4 +2441,3 @@ class ObservePhaseMixin:
         if not has_explicit_confidence:
             return True
         return self._relationship_confidence(relation) >= confidence_threshold
-

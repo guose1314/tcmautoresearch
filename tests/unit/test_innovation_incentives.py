@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.innovation_incentives import (
+from tools.experimental.innovation_incentives import (
     AdaptiveLearningState,
     ContributionProfile,
     apply_adaptive_learning,

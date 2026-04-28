@@ -77,6 +77,7 @@ logger = logging.getLogger(__name__)
 # 辅助：枚举安全转换
 # ---------------------------------------------------------------------------
 
+
 def _to_session_status(value: Any) -> SessionStatusEnum:
     if isinstance(value, SessionStatusEnum):
         return value
@@ -132,7 +133,8 @@ def _graph_asset_subgraphs(graph_assets: Mapping[str, Any] | None) -> List[str]:
     if not isinstance(graph_assets, Mapping):
         return []
     return sorted(
-        key for key, value in graph_assets.items()
+        key
+        for key, value in graph_assets.items()
         if key != "summary" and isinstance(value, Mapping)
     )
 
@@ -142,7 +144,9 @@ def _graph_asset_counts(graph_assets: Mapping[str, Any] | None) -> Dict[str, Any
     node_count = 0
     edge_count = 0
     for subgraph_name in subgraphs:
-        subgraph = graph_assets.get(subgraph_name) if isinstance(graph_assets, Mapping) else {}
+        subgraph = (
+            graph_assets.get(subgraph_name) if isinstance(graph_assets, Mapping) else {}
+        )
         if not isinstance(subgraph, Mapping):
             continue
         node_count += int(subgraph.get("node_count") or 0)
@@ -154,10 +158,14 @@ def _graph_asset_counts(graph_assets: Mapping[str, Any] | None) -> Dict[str, Any
     }
 
 
-def _normalize_phase_output_for_graph_assets(output: Mapping[str, Any] | None, phase_name: str, phase_status: Any) -> Dict[str, Any]:
+def _normalize_phase_output_for_graph_assets(
+    output: Mapping[str, Any] | None, phase_name: str, phase_status: Any
+) -> Dict[str, Any]:
     payload = dict(output or {})
     payload.setdefault("phase", str(phase_name or "").strip())
-    payload.setdefault("status", getattr(phase_status, "value", phase_status) or "completed")
+    payload.setdefault(
+        "status", getattr(phase_status, "value", phase_status) or "completed"
+    )
     payload["results"] = dict(payload.get("results") or {})
     payload["metadata"] = dict(payload.get("metadata") or {})
     payload["artifacts"] = list(payload.get("artifacts") or [])
@@ -174,7 +182,11 @@ def _build_inferred_phase_graph_assets(
     observe_documents: Sequence[Mapping[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     normalized_phase = str(phase_name or "").strip().lower()
-    results = dict(phase_output.get("results") or {}) if isinstance(phase_output.get("results"), Mapping) else {}
+    results = (
+        dict(phase_output.get("results") or {})
+        if isinstance(phase_output.get("results"), Mapping)
+        else {}
+    )
 
     if normalized_phase == "observe":
         observe_philology = resolve_observe_philology_assets(
@@ -196,14 +208,21 @@ def _build_inferred_phase_graph_assets(
                     continue
                 doc_urn = str(doc.get("urn") or doc.get("document_urn") or "").strip()
                 doc_title = str(
-                    doc.get("title") or doc.get("document_title") or doc.get("work_title") or ""
+                    doc.get("title")
+                    or doc.get("document_title")
+                    or doc.get("work_title")
+                    or ""
                 ).strip()
-                for entity in (doc.get("entities") or []):
+                for entity in doc.get("entities") or []:
                     if not isinstance(entity, Mapping):
                         continue
-                    canonical = str(entity.get("name") or entity.get("canonical") or "").strip()
+                    canonical = str(
+                        entity.get("name") or entity.get("canonical") or ""
+                    ).strip()
                     semantic_scope = str(
-                        entity.get("entity_type") or entity.get("semantic_scope") or "common"
+                        entity.get("entity_type")
+                        or entity.get("semantic_scope")
+                        or "common"
                     ).strip()
                     if not canonical:
                         continue
@@ -211,40 +230,58 @@ def _build_inferred_phase_graph_assets(
                     if term_key in seen_term_keys:
                         continue
                     seen_term_keys.add(term_key)
-                    legacy_terms.append({
-                        "canonical": canonical,
-                        "semantic_scope": semantic_scope,
-                        "label": semantic_scope,
-                        "document_urn": doc_urn,
-                        "document_title": doc_title,
-                        "review_status": "inferred",
-                        "needs_manual_review": True,
-                        "decision_basis": "legacy_entity_extraction",
-                    })
+                    legacy_terms.append(
+                        {
+                            "canonical": canonical,
+                            "semantic_scope": semantic_scope,
+                            "label": semantic_scope,
+                            "document_urn": doc_urn,
+                            "document_title": doc_title,
+                            "review_status": "inferred",
+                            "needs_manual_review": True,
+                            "decision_basis": "legacy_entity_extraction",
+                        }
+                    )
             if legacy_terms:
                 observe_philology = dict(observe_philology or {})
                 observe_philology["terminology_standard_table"] = legacy_terms
-        return build_observe_philology_graph_assets(cycle_id, observe_philology, phase="observe")
+        return build_observe_philology_graph_assets(
+            cycle_id, observe_philology, phase="observe"
+        )
 
     if normalized_phase == "hypothesis":
         hypotheses = results.get("hypotheses")
         if not isinstance(hypotheses, list) or not hypotheses:
-            hypotheses = phase_output.get("hypotheses") if isinstance(phase_output.get("hypotheses"), list) else []
+            hypotheses = (
+                phase_output.get("hypotheses")
+                if isinstance(phase_output.get("hypotheses"), list)
+                else []
+            )
         if not hypotheses:
             return {}
         hypothesis_subgraph = build_hypothesis_subgraph(cycle_id, hypotheses)
-        if not hypothesis_subgraph.get("node_count") and not hypothesis_subgraph.get("edge_count"):
+        if not hypothesis_subgraph.get("node_count") and not hypothesis_subgraph.get(
+            "edge_count"
+        ):
             return {}
         return build_graph_assets_payload(hypothesis_subgraph=hypothesis_subgraph)
 
     if normalized_phase == "analyze":
         evidence_protocol = results.get("evidence_protocol")
         if not isinstance(evidence_protocol, Mapping):
-            evidence_protocol = phase_output.get("evidence_protocol") if isinstance(phase_output.get("evidence_protocol"), Mapping) else {}
+            evidence_protocol = (
+                phase_output.get("evidence_protocol")
+                if isinstance(phase_output.get("evidence_protocol"), Mapping)
+                else {}
+            )
         if not evidence_protocol:
             return {}
-        evidence_subgraph = build_evidence_subgraph(cycle_id, evidence_protocol, phase="analyze")
-        if not evidence_subgraph.get("node_count") and not evidence_subgraph.get("edge_count"):
+        evidence_subgraph = build_evidence_subgraph(
+            cycle_id, evidence_protocol, phase="analyze"
+        )
+        if not evidence_subgraph.get("node_count") and not evidence_subgraph.get(
+            "edge_count"
+        ):
             return {}
         return build_graph_assets_payload(evidence_subgraph=evidence_subgraph)
 
@@ -254,6 +291,7 @@ def _build_inferred_phase_graph_assets(
 # ---------------------------------------------------------------------------
 # ResearchSessionRepository
 # ---------------------------------------------------------------------------
+
 
 class ResearchSessionRepository:
     """ResearchSession 全生命周期仓储。"""
@@ -330,7 +368,11 @@ class ResearchSessionRepository:
     ) -> Optional[Dict[str, Any]]:
         """按 cycle_id 查询，返回 None 表示不存在。"""
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return None
             return self._session_to_dict(rs)
@@ -357,7 +399,11 @@ class ResearchSessionRepository:
     ) -> Optional[Dict[str, Any]]:
         """部分更新会话字段，返回更新后的字典。"""
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return None
             self._apply_session_updates(rs, updates)
@@ -372,7 +418,11 @@ class ResearchSessionRepository:
     ) -> bool:
         """删除会话及其级联的阶段/工件记录。"""
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return False
             self._delete_observe_document_graphs(db_session, cycle_id)
@@ -389,9 +439,13 @@ class ResearchSessionRepository:
     ) -> Dict[str, Any]:
         """分页列出会话。"""
         with self._db.session_scope() as session:
-            query = session.query(ResearchSession).order_by(ResearchSession.created_at.desc())
+            query = session.query(ResearchSession).order_by(
+                ResearchSession.created_at.desc()
+            )
             if status:
-                query = query.filter(ResearchSession.status == _to_session_status(status))
+                query = query.filter(
+                    ResearchSession.status == _to_session_status(status)
+                )
             total = query.count()
             items = query.offset(offset).limit(limit).all()
             return {
@@ -409,10 +463,14 @@ class ResearchSessionRepository:
         *,
         session: Optional[Session] = None,
     ) -> Optional[Dict[str, Any]]:
-        return self.update_session(cycle_id, {
-            "status": "active",
-            "started_at": datetime.now(timezone.utc).isoformat(),
-        }, session=session)
+        return self.update_session(
+            cycle_id,
+            {
+                "status": "active",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            },
+            session=session,
+        )
 
     def complete_session(
         self,
@@ -420,10 +478,14 @@ class ResearchSessionRepository:
         *,
         session: Optional[Session] = None,
     ) -> Optional[Dict[str, Any]]:
-        return self.update_session(cycle_id, {
-            "status": "completed",
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-        }, session=session)
+        return self.update_session(
+            cycle_id,
+            {
+                "status": "completed",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            },
+            session=session,
+        )
 
     def fail_session(
         self,
@@ -452,7 +514,11 @@ class ResearchSessionRepository:
     ) -> Optional[Dict[str, Any]]:
         """为指定会话添加阶段执行记录。"""
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return None
             pe = PhaseExecution(
@@ -498,7 +564,11 @@ class ResearchSessionRepository:
 
     def list_phase_executions(self, cycle_id: str) -> List[Dict[str, Any]]:
         with self._db.session_scope() as session:
-            rs = session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return []
             phases = (
@@ -519,7 +589,11 @@ class ResearchSessionRepository:
         session: Optional[Session] = None,
     ) -> Optional[Dict[str, Any]]:
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return None
             phase_execution_id = payload.get("phase_execution_id")
@@ -552,7 +626,11 @@ class ResearchSessionRepository:
         artifact_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         with self._db.session_scope() as session:
-            rs = session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return []
             query = (
@@ -586,17 +664,27 @@ class ResearchSessionRepository:
         session: Optional[Session] = None,
     ) -> Optional[Dict[str, Any]]:
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return None
 
-            raw_records = payload.get("records") if isinstance(payload.get("records"), list) else []
+            raw_records = (
+                payload.get("records")
+                if isinstance(payload.get("records"), list)
+                else []
+            )
             normalized_records = [
                 normalize_learning_feedback_record(item)
                 for item in raw_records
                 if isinstance(item, Mapping)
             ]
-            db_session.query(ResearchLearningFeedback).filter_by(session_id=rs.id).delete(
+            db_session.query(ResearchLearningFeedback).filter_by(
+                session_id=rs.id
+            ).delete(
                 synchronize_session=False,
             )
 
@@ -612,7 +700,10 @@ class ResearchSessionRepository:
                 metadata = dict(record.get("metadata") or {})
                 metadata.setdefault(
                     "contract_version",
-                    str(payload.get("contract_version") or LEARNING_FEEDBACK_CONTRACT_VERSION),
+                    str(
+                        payload.get("contract_version")
+                        or LEARNING_FEEDBACK_CONTRACT_VERSION
+                    ),
                 )
 
                 db_session.add(
@@ -620,29 +711,52 @@ class ResearchSessionRepository:
                         session_id=rs.id,
                         cycle_id=cycle_id,
                         phase_execution_id=record_phase_execution_id,
-                        feedback_scope=str(record.get("feedback_scope") or "phase_assessment"),
+                        feedback_scope=str(
+                            record.get("feedback_scope") or "phase_assessment"
+                        ),
                         source_phase=str(record.get("source_phase") or "reflect"),
-                        target_phase=str(record.get("target_phase") or "").strip() or None,
+                        target_phase=str(record.get("target_phase") or "").strip()
+                        or None,
                         feedback_status=str(record.get("feedback_status") or "tracked"),
                         overall_score=record.get("overall_score"),
-                        grade_level=str(record.get("grade_level") or "").strip() or None,
-                        cycle_trend=str(record.get("cycle_trend") or "").strip() or None,
+                        grade_level=str(record.get("grade_level") or "").strip()
+                        or None,
+                        cycle_trend=str(record.get("cycle_trend") or "").strip()
+                        or None,
                         issue_count=max(int(record.get("issue_count") or 0), 0),
                         weakness_count=max(int(record.get("weakness_count") or 0), 0),
                         strength_count=max(int(record.get("strength_count") or 0), 0),
                         strategy_changed=bool(record.get("strategy_changed")),
-                        strategy_before_fingerprint=str(record.get("strategy_before_fingerprint") or "").strip() or None,
-                        strategy_after_fingerprint=str(record.get("strategy_after_fingerprint") or "").strip() or None,
-                        recorded_phase_names=list(record.get("recorded_phase_names") or []),
+                        strategy_before_fingerprint=str(
+                            record.get("strategy_before_fingerprint") or ""
+                        ).strip()
+                        or None,
+                        strategy_after_fingerprint=str(
+                            record.get("strategy_after_fingerprint") or ""
+                        ).strip()
+                        or None,
+                        recorded_phase_names=list(
+                            record.get("recorded_phase_names") or []
+                        ),
                         weak_phase_names=list(record.get("weak_phase_names") or []),
-                        quality_dimensions_json=_json_dumps(record.get("quality_dimensions"), "{}"),
+                        quality_dimensions_json=_json_dumps(
+                            record.get("quality_dimensions"), "{}"
+                        ),
                         issues_json=_json_dumps(record.get("issues"), "[]"),
-                        improvement_priorities_json=_json_dumps(record.get("improvement_priorities"), "[]"),
-                        replay_feedback_json=_json_dumps(record.get("replay_feedback"), "{}"),
+                        improvement_priorities_json=_json_dumps(
+                            record.get("improvement_priorities"), "[]"
+                        ),
+                        replay_feedback_json=_json_dumps(
+                            record.get("replay_feedback"), "{}"
+                        ),
                         details_json=_json_dumps(record.get("details"), "{}"),
                         metadata_json=_json_dumps(metadata, "{}"),
-                        prompt_version=(str(record.get("prompt_version") or "").strip() or None),
-                        schema_version=(str(record.get("schema_version") or "").strip() or None),
+                        prompt_version=(
+                            str(record.get("prompt_version") or "").strip() or None
+                        ),
+                        schema_version=(
+                            str(record.get("schema_version") or "").strip() or None
+                        ),
                     )
                 )
 
@@ -665,7 +779,11 @@ class ResearchSessionRepository:
         本方法只在末尾插入一条，供 ExpertFeedbackLoop 等"事件驱动"路径使用。
         """
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return None
             normalized = normalize_learning_feedback_record(dict(record or {}))
@@ -675,7 +793,9 @@ class ResearchSessionRepository:
                 str(contract_version or LEARNING_FEEDBACK_CONTRACT_VERSION),
             )
             record_phase_execution_id: Optional[uuid.UUID] = None
-            raw_phase_execution_id = normalized.get("phase_execution_id") or phase_execution_id
+            raw_phase_execution_id = (
+                normalized.get("phase_execution_id") or phase_execution_id
+            )
             if raw_phase_execution_id:
                 record_phase_execution_id = uuid.UUID(str(raw_phase_execution_id))
 
@@ -684,35 +804,52 @@ class ResearchSessionRepository:
                     session_id=rs.id,
                     cycle_id=cycle_id,
                     phase_execution_id=record_phase_execution_id,
-                    feedback_scope=str(normalized.get("feedback_scope") or "phase_assessment"),
+                    feedback_scope=str(
+                        normalized.get("feedback_scope") or "phase_assessment"
+                    ),
                     source_phase=str(normalized.get("source_phase") or "reflect"),
-                    target_phase=str(normalized.get("target_phase") or "").strip() or None,
+                    target_phase=str(normalized.get("target_phase") or "").strip()
+                    or None,
                     feedback_status=str(normalized.get("feedback_status") or "tracked"),
                     overall_score=normalized.get("overall_score"),
-                    grade_level=str(normalized.get("grade_level") or "").strip() or None,
-                    cycle_trend=str(normalized.get("cycle_trend") or "").strip() or None,
+                    grade_level=str(normalized.get("grade_level") or "").strip()
+                    or None,
+                    cycle_trend=str(normalized.get("cycle_trend") or "").strip()
+                    or None,
                     issue_count=max(int(normalized.get("issue_count") or 0), 0),
                     weakness_count=max(int(normalized.get("weakness_count") or 0), 0),
                     strength_count=max(int(normalized.get("strength_count") or 0), 0),
                     strategy_changed=bool(normalized.get("strategy_changed")),
                     strategy_before_fingerprint=str(
                         normalized.get("strategy_before_fingerprint") or ""
-                    ).strip() or None,
+                    ).strip()
+                    or None,
                     strategy_after_fingerprint=str(
                         normalized.get("strategy_after_fingerprint") or ""
-                    ).strip() or None,
-                    recorded_phase_names=list(normalized.get("recorded_phase_names") or []),
+                    ).strip()
+                    or None,
+                    recorded_phase_names=list(
+                        normalized.get("recorded_phase_names") or []
+                    ),
                     weak_phase_names=list(normalized.get("weak_phase_names") or []),
-                    quality_dimensions_json=_json_dumps(normalized.get("quality_dimensions"), "{}"),
+                    quality_dimensions_json=_json_dumps(
+                        normalized.get("quality_dimensions"), "{}"
+                    ),
                     issues_json=_json_dumps(normalized.get("issues"), "[]"),
                     improvement_priorities_json=_json_dumps(
                         normalized.get("improvement_priorities"), "[]"
                     ),
-                    replay_feedback_json=_json_dumps(normalized.get("replay_feedback"), "{}"),
+                    replay_feedback_json=_json_dumps(
+                        normalized.get("replay_feedback"), "{}"
+                    ),
                     details_json=_json_dumps(normalized.get("details"), "{}"),
                     metadata_json=_json_dumps(metadata, "{}"),
-                    prompt_version=(str(normalized.get("prompt_version") or "").strip() or None),
-                    schema_version=(str(normalized.get("schema_version") or "").strip() or None),
+                    prompt_version=(
+                        str(normalized.get("prompt_version") or "").strip() or None
+                    ),
+                    schema_version=(
+                        str(normalized.get("schema_version") or "").strip() or None
+                    ),
                 )
             )
             db_session.flush()
@@ -726,7 +863,11 @@ class ResearchSessionRepository:
         session: Optional[Session] = None,
     ) -> Optional[Dict[str, Any]]:
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return None
             return self._build_learning_feedback_library_snapshot(
@@ -744,17 +885,26 @@ class ResearchSessionRepository:
         offset: int = 0,
     ) -> Dict[str, Any]:
         with self._db.session_scope() as session:
-            query = session.query(ResearchLearningFeedback).order_by(ResearchLearningFeedback.created_at.desc())
+            query = session.query(ResearchLearningFeedback).order_by(
+                ResearchLearningFeedback.created_at.desc()
+            )
             if cycle_id:
                 query = query.filter(ResearchLearningFeedback.cycle_id == cycle_id)
             if feedback_scope:
                 query = query.filter(
-                    ResearchLearningFeedback.feedback_scope == str(feedback_scope).strip().lower(),
+                    ResearchLearningFeedback.feedback_scope
+                    == str(feedback_scope).strip().lower(),
                 )
             if target_phase:
-                query = query.filter(ResearchLearningFeedback.target_phase == str(target_phase).strip().lower())
+                query = query.filter(
+                    ResearchLearningFeedback.target_phase
+                    == str(target_phase).strip().lower()
+                )
             if cycle_trend:
-                query = query.filter(ResearchLearningFeedback.cycle_trend == str(cycle_trend).strip().lower())
+                query = query.filter(
+                    ResearchLearningFeedback.cycle_trend
+                    == str(cycle_trend).strip().lower()
+                )
 
             total = query.count()
             items = query.offset(offset).limit(limit).all()
@@ -945,7 +1095,8 @@ class ResearchSessionRepository:
                 )
             if priority_bucket:
                 query = query.filter(
-                    ReviewAssignment.priority_bucket == str(priority_bucket).strip().lower()
+                    ReviewAssignment.priority_bucket
+                    == str(priority_bucket).strip().lower()
                 )
             if asset_type:
                 query = query.filter(
@@ -978,7 +1129,9 @@ class ResearchSessionRepository:
         """Aggregate workload per reviewer (including the unassigned bucket)."""
 
         reference_now = now or datetime.now(timezone.utc)
-        rows = self.list_review_queue(cycle_id=cycle_id, now=reference_now, session=session)
+        rows = self.list_review_queue(
+            cycle_id=cycle_id, now=reference_now, session=session
+        )
         buckets: Dict[str, Dict[str, Any]] = {}
         for row in rows:
             reviewer_label = row.get("reviewer_label") or "未认领"
@@ -1037,7 +1190,9 @@ class ResearchSessionRepository:
 
         reference_now = now or datetime.now(timezone.utc)
         assignments = self.list_review_queue(
-            cycle_id=cycle_id, now=reference_now, session=session,
+            cycle_id=cycle_id,
+            now=reference_now,
+            session=session,
         )
         disputes = self.list_review_disputes(cycle_id=cycle_id, session=session)
         return compute_review_quality_summary(
@@ -1063,7 +1218,11 @@ class ResearchSessionRepository:
         session: Optional[Session],
     ) -> Optional[Dict[str, Any]]:
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return None
 
@@ -1077,7 +1236,10 @@ class ResearchSessionRepository:
                 normalized_status = "unassigned"
 
             normalized_priority = (priority_bucket or "").strip().lower() or None
-            if normalized_priority and normalized_priority not in self._REVIEW_ASSIGNMENT_PRIORITY_BUCKETS:
+            if (
+                normalized_priority
+                and normalized_priority not in self._REVIEW_ASSIGNMENT_PRIORITY_BUCKETS
+            ):
                 normalized_priority = None
 
             row = (
@@ -1134,7 +1296,9 @@ class ResearchSessionRepository:
         if claimed_at is not None:
             backlog_age_seconds = max(0.0, (reference_now - claimed_at).total_seconds())
         elif row.created_at is not None:
-            backlog_age_seconds = max(0.0, (reference_now - row.created_at).total_seconds())
+            backlog_age_seconds = max(
+                0.0, (reference_now - row.created_at).total_seconds()
+            )
         is_overdue = bool(
             row.due_at is not None
             and row.queue_status != "completed"
@@ -1204,13 +1368,17 @@ class ResearchSessionRepository:
             raise ValueError("summary is required to open a review dispute")
 
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return None
 
-            resolved_case_id = (case_id or "").strip() or self._generate_dispute_case_id(
-                db_session, cycle_id
-            )
+            resolved_case_id = (
+                case_id or ""
+            ).strip() or self._generate_dispute_case_id(db_session, cycle_id)
             now = datetime.now(timezone.utc)
             arbitrator_value = (arbitrator or "").strip() or None
             initial_status = "assigned" if arbitrator_value else "open"
@@ -1222,12 +1390,14 @@ class ResearchSessionRepository:
             }
             events: list[Dict[str, Any]] = [opened_event]
             if arbitrator_value:
-                events.append({
-                    "event": "assigned",
-                    "actor": normalized_opened_by,
-                    "arbitrator": arbitrator_value,
-                    "at": now.isoformat(),
-                })
+                events.append(
+                    {
+                        "event": "assigned",
+                        "actor": normalized_opened_by,
+                        "arbitrator": arbitrator_value,
+                        "at": now.isoformat(),
+                    }
+                )
             row = ReviewDispute(
                 session_id=rs.id,
                 cycle_id=cycle_id,
@@ -1435,13 +1605,19 @@ class ResearchSessionRepository:
             if dispute_status:
                 normalized_status = str(dispute_status).strip().lower()
                 if normalized_status in self._REVIEW_DISPUTE_STATUSES:
-                    query = query.filter(ReviewDispute.dispute_status == normalized_status)
+                    query = query.filter(
+                        ReviewDispute.dispute_status == normalized_status
+                    )
             if arbitrator:
-                query = query.filter(ReviewDispute.arbitrator == str(arbitrator).strip())
+                query = query.filter(
+                    ReviewDispute.arbitrator == str(arbitrator).strip()
+                )
             if opened_by:
                 query = query.filter(ReviewDispute.opened_by == str(opened_by).strip())
             if asset_type:
-                query = query.filter(ReviewDispute.asset_type == str(asset_type).strip())
+                query = query.filter(
+                    ReviewDispute.asset_type == str(asset_type).strip()
+                )
             if case_id:
                 query = query.filter(ReviewDispute.case_id == str(case_id).strip())
             query = query.order_by(
@@ -1525,7 +1701,11 @@ class ResearchSessionRepository:
         session: Optional[Session] = None,
     ) -> Optional[Dict[str, Any]]:
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return None
 
@@ -1553,8 +1733,12 @@ class ResearchSessionRepository:
                 )
                 .one_or_none()
             )
-            existing_content = _json_loads(artifact.content_json, {}) if artifact is not None else {}
-            content = upsert_observe_catalog_review_artifact_content(existing_content, normalized_decision)
+            existing_content = (
+                _json_loads(artifact.content_json, {}) if artifact is not None else {}
+            )
+            content = upsert_observe_catalog_review_artifact_content(
+                existing_content, normalized_decision
+            )
             metadata = {
                 "asset_kind": "catalog_review_decisions",
                 "decision_count": int(content.get("decision_count") or 0),
@@ -1596,7 +1780,11 @@ class ResearchSessionRepository:
         session: Optional[Session] = None,
     ) -> Optional[Dict[str, Any]]:
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return None
 
@@ -1620,12 +1808,17 @@ class ResearchSessionRepository:
                 db_session.query(ResearchArtifact)
                 .filter(
                     ResearchArtifact.phase_execution_id == phase_execution.id,
-                    ResearchArtifact.name == OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT,
+                    ResearchArtifact.name
+                    == OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT,
                 )
                 .one_or_none()
             )
-            existing_content = _json_loads(artifact.content_json, {}) if artifact is not None else {}
-            content = upsert_observe_review_workbench_artifact_content(existing_content, normalized_decision)
+            existing_content = (
+                _json_loads(artifact.content_json, {}) if artifact is not None else {}
+            )
+            content = upsert_observe_review_workbench_artifact_content(
+                existing_content, normalized_decision
+            )
             metadata = {
                 "asset_kind": "review_workbench_decisions",
                 "decision_count": int(content.get("decision_count") or 0),
@@ -1667,7 +1860,11 @@ class ResearchSessionRepository:
         session: Optional[Session] = None,
     ) -> Optional[Dict[str, Any]]:
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return None
 
@@ -1691,8 +1888,12 @@ class ResearchSessionRepository:
                 )
                 .one_or_none()
             )
-            existing_content = _json_loads(artifact.content_json, {}) if artifact is not None else {}
-            content = upsert_observe_catalog_review_artifact_content_batch(existing_content, decisions)
+            existing_content = (
+                _json_loads(artifact.content_json, {}) if artifact is not None else {}
+            )
+            content = upsert_observe_catalog_review_artifact_content_batch(
+                existing_content, decisions
+            )
             if not content:
                 return None
             metadata = {
@@ -1734,7 +1935,11 @@ class ResearchSessionRepository:
         session: Optional[Session] = None,
     ) -> Optional[Dict[str, Any]]:
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return None
 
@@ -1754,12 +1959,17 @@ class ResearchSessionRepository:
                 db_session.query(ResearchArtifact)
                 .filter(
                     ResearchArtifact.phase_execution_id == phase_execution.id,
-                    ResearchArtifact.name == OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT,
+                    ResearchArtifact.name
+                    == OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT,
                 )
                 .one_or_none()
             )
-            existing_content = _json_loads(artifact.content_json, {}) if artifact is not None else {}
-            content = upsert_observe_review_workbench_artifact_content_batch(existing_content, decisions)
+            existing_content = (
+                _json_loads(artifact.content_json, {}) if artifact is not None else {}
+            )
+            content = upsert_observe_review_workbench_artifact_content_batch(
+                existing_content, decisions
+            )
             if not content:
                 return None
             metadata = {
@@ -1804,7 +2014,11 @@ class ResearchSessionRepository:
         session: Optional[Session] = None,
     ) -> List[Dict[str, Any]]:
         with self._session_scope(session) as db_session:
-            rs = db_session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return []
 
@@ -1842,15 +2056,25 @@ class ResearchSessionRepository:
                 )
                 document.entities_extracted_count = len(entities)
                 document.process_status = ProcessStatusEnum.COMPLETED
-                quality_metrics = ((payload.get("output_generation") or {}) if isinstance(payload.get("output_generation"), dict) else {}).get("quality_metrics") or {}
+                quality_metrics = (
+                    (payload.get("output_generation") or {})
+                    if isinstance(payload.get("output_generation"), dict)
+                    else {}
+                ).get("quality_metrics") or {}
                 document.quality_score = float(
-                    (quality_metrics.get("confidence_score") if isinstance(quality_metrics, dict) else 0.0)
+                    (
+                        quality_metrics.get("confidence_score")
+                        if isinstance(quality_metrics, dict)
+                        else 0.0
+                    )
                     or payload.get("average_confidence")
                     or document.quality_score
                     or 0.0
                 )
                 db_session.flush()
-                snapshots.append(self._observe_document_to_dict(document, entities, relationships))
+                snapshots.append(
+                    self._observe_document_to_dict(document, entities, relationships)
+                )
 
             return snapshots
 
@@ -1871,9 +2095,8 @@ class ResearchSessionRepository:
         session: Optional[Session] = None,
     ) -> Dict[str, Any]:
         with self._session_scope(session) as db_session:
-            query = (
-                self._observe_document_query(db_session, cycle_id)
-                .order_by(Document.processing_timestamp.asc(), Document.created_at.asc())
+            query = self._observe_document_query(db_session, cycle_id).order_by(
+                Document.processing_timestamp.asc(), Document.created_at.asc()
             )
             effective_batch_size = max(int(batch_size or 0), 1)
             scanned_document_count = 0
@@ -1890,7 +2113,8 @@ class ResearchSessionRepository:
                 "batch_size": effective_batch_size,
                 "scanned_document_count": scanned_document_count,
                 "updated_document_count": updated_document_count,
-                "skipped_document_count": scanned_document_count - updated_document_count,
+                "skipped_document_count": scanned_document_count
+                - updated_document_count,
             }
 
     # ---- 快照（含阶段 + 工件） -------------------------------------------
@@ -1898,24 +2122,34 @@ class ResearchSessionRepository:
     def get_full_snapshot(self, cycle_id: str) -> Optional[Dict[str, Any]]:
         """返回完整会话快照，包含阶段执行列表与工件列表。"""
         with self._db.session_scope() as session:
-            rs = session.query(ResearchSession).filter_by(cycle_id=cycle_id).one_or_none()
+            rs = (
+                session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
             if rs is None:
                 return None
             result = self._session_to_dict(rs)
             result["phase_executions"] = [
                 self._phase_to_dict(pe) for pe in rs.phase_executions
             ]
-            result["artifacts"] = [
-                self._artifact_to_dict(a) for a in rs.artifacts
-            ]
-            result["observe_documents"] = self._list_observe_document_graphs(session, cycle_id)
-            result["version_lineages"] = self._group_observe_version_lineages(result["observe_documents"])
-            result["learning_feedback_library"] = self._build_learning_feedback_library_snapshot(
-                self._list_learning_feedback_records(session, cycle_id),
+            result["artifacts"] = [self._artifact_to_dict(a) for a in rs.artifacts]
+            result["observe_documents"] = self._list_observe_document_graphs(
+                session, cycle_id
+            )
+            result["version_lineages"] = self._group_observe_version_lineages(
+                result["observe_documents"]
+            )
+            result["learning_feedback_library"] = (
+                self._build_learning_feedback_library_snapshot(
+                    self._list_learning_feedback_records(session, cycle_id),
+                )
             )
             result["observe_philology"] = resolve_observe_philology_assets(
                 artifacts=result["artifacts"],
-                observe_phase_result=self._phase_output_by_name(result["phase_executions"], "observe"),
+                observe_phase_result=self._phase_output_by_name(
+                    result["phase_executions"], "observe"
+                ),
                 observe_documents=result["observe_documents"],
             )
             result["backfill_dependency"] = self._classify_backfill_dependency(result)
@@ -1948,12 +2182,16 @@ class ResearchSessionRepository:
             "observe_philology": {
                 "populated": philology_populated,
                 "depends_on": ["backfill_observe_philology_artifacts"],
-                "note": "历史会话需执行 backfill 才完整" if not philology_populated else None,
+                "note": "历史会话需执行 backfill 才完整"
+                if not philology_populated
+                else None,
             },
             "version_lineages": {
                 "populated": lineages_populated,
                 "depends_on": ["backfill_observe_document_version_metadata"],
-                "note": "历史会话需执行 backfill 才完整" if not lineages_populated else None,
+                "note": "历史会话需执行 backfill 才完整"
+                if not lineages_populated
+                else None,
             },
             "graph_projection": {
                 "backfill_pending": graph_pending,
@@ -1986,7 +2224,9 @@ class ResearchSessionRepository:
             created_artifact_count = 0
             observe_documents_cache: Dict[str, List[Dict[str, Any]]] = {}
 
-            for phase_execution, phase_cycle_id in query.yield_per(effective_batch_size):
+            for phase_execution, phase_cycle_id in query.yield_per(
+                effective_batch_size
+            ):
                 scanned_phase_count += 1
                 normalized_cycle_id = str(phase_cycle_id or "").strip()
                 if not normalized_cycle_id:
@@ -1998,7 +2238,9 @@ class ResearchSessionRepository:
                     .order_by(ResearchArtifact.created_at.asc())
                     .all()
                 )
-                existing_artifact_records = [self._artifact_to_dict(artifact) for artifact in existing_artifacts]
+                existing_artifact_records = [
+                    self._artifact_to_dict(artifact) for artifact in existing_artifacts
+                ]
                 existing_artifact_names = {
                     str(record.get("name") or "").strip()
                     for record in existing_artifact_records
@@ -2006,9 +2248,11 @@ class ResearchSessionRepository:
                 }
 
                 if normalized_cycle_id not in observe_documents_cache:
-                    observe_documents_cache[normalized_cycle_id] = self._list_observe_document_graphs(
-                        db_session,
-                        normalized_cycle_id,
+                    observe_documents_cache[normalized_cycle_id] = (
+                        self._list_observe_document_graphs(
+                            db_session,
+                            normalized_cycle_id,
+                        )
                     )
 
                 observe_philology = resolve_observe_philology_assets(
@@ -2018,8 +2262,11 @@ class ResearchSessionRepository:
                 )
                 artifact_payloads = [
                     payload
-                    for payload in build_observe_philology_artifact_payloads(observe_philology, artifact_output)
-                    if str(payload.get("name") or "").strip() not in existing_artifact_names
+                    for payload in build_observe_philology_artifact_payloads(
+                        observe_philology, artifact_output
+                    )
+                    if str(payload.get("name") or "").strip()
+                    not in existing_artifact_names
                 ]
                 if not artifact_payloads:
                     continue
@@ -2083,10 +2330,19 @@ class ResearchSessionRepository:
             }
             observe_documents_cache: Dict[str, List[Dict[str, Any]]] = {}
 
-            for phase_execution, phase_cycle_id in query.yield_per(effective_batch_size):
+            for phase_execution, phase_cycle_id in query.yield_per(
+                effective_batch_size
+            ):
                 scanned_phase_count += 1
                 normalized_cycle_id = str(phase_cycle_id or "").strip()
-                normalized_phase = str(getattr(phase_execution.phase, "value", phase_execution.phase) or "").strip().lower()
+                normalized_phase = (
+                    str(
+                        getattr(phase_execution.phase, "value", phase_execution.phase)
+                        or ""
+                    )
+                    .strip()
+                    .lower()
+                )
                 if not normalized_cycle_id or normalized_phase not in phase_counts:
                     continue
 
@@ -2107,23 +2363,30 @@ class ResearchSessionRepository:
                         self._artifact_to_dict(artifact)
                         for artifact in (
                             db_session.query(ResearchArtifact)
-                            .filter(ResearchArtifact.phase_execution_id == phase_execution.id)
+                            .filter(
+                                ResearchArtifact.phase_execution_id
+                                == phase_execution.id
+                            )
                             .order_by(ResearchArtifact.created_at.asc())
                             .all()
                         )
                     ]
                     if normalized_phase == "observe":
                         if normalized_cycle_id not in observe_documents_cache:
-                            observe_documents_cache[normalized_cycle_id] = self._list_observe_document_graphs(
-                                db_session,
-                                normalized_cycle_id,
+                            observe_documents_cache[normalized_cycle_id] = (
+                                self._list_observe_document_graphs(
+                                    db_session,
+                                    normalized_cycle_id,
+                                )
                             )
                         inferred_graph_assets = _build_inferred_phase_graph_assets(
                             normalized_phase,
                             normalized_cycle_id,
                             output,
                             phase_artifacts=phase_artifacts,
-                            observe_documents=observe_documents_cache[normalized_cycle_id],
+                            observe_documents=observe_documents_cache[
+                                normalized_cycle_id
+                            ],
                         )
                     else:
                         inferred_graph_assets = _build_inferred_phase_graph_assets(
@@ -2146,14 +2409,26 @@ class ResearchSessionRepository:
                     active_counts = existing_counts
 
                 metadata_changed = False
-                if active_counts["subgraphs"] and metadata.get("graph_asset_subgraphs") != active_counts["subgraphs"]:
+                if (
+                    active_counts["subgraphs"]
+                    and metadata.get("graph_asset_subgraphs")
+                    != active_counts["subgraphs"]
+                ):
                     metadata["graph_asset_subgraphs"] = list(active_counts["subgraphs"])
                     metadata_changed = True
-                if int(metadata.get("graph_asset_node_count") or 0) != int(active_counts["node_count"] or 0):
-                    metadata["graph_asset_node_count"] = int(active_counts["node_count"] or 0)
+                if int(metadata.get("graph_asset_node_count") or 0) != int(
+                    active_counts["node_count"] or 0
+                ):
+                    metadata["graph_asset_node_count"] = int(
+                        active_counts["node_count"] or 0
+                    )
                     metadata_changed = True
-                if int(metadata.get("graph_asset_edge_count") or 0) != int(active_counts["edge_count"] or 0):
-                    metadata["graph_asset_edge_count"] = int(active_counts["edge_count"] or 0)
+                if int(metadata.get("graph_asset_edge_count") or 0) != int(
+                    active_counts["edge_count"] or 0
+                ):
+                    metadata["graph_asset_edge_count"] = int(
+                        active_counts["edge_count"] or 0
+                    )
                     metadata_changed = True
 
                 if not wrote_graph_assets and not metadata_changed:
@@ -2201,7 +2476,9 @@ class ResearchSessionRepository:
             "cycle_name": cycle.cycle_name,
             "description": cycle.description,
             "status": getattr(cycle.status, "value", str(cycle.status)),
-            "current_phase": getattr(cycle.current_phase, "value", str(cycle.current_phase)),
+            "current_phase": getattr(
+                cycle.current_phase, "value", str(cycle.current_phase)
+            ),
             "research_objective": cycle.research_objective,
             "research_scope": cycle.research_scope,
             "target_audience": cycle.target_audience,
@@ -2234,7 +2511,9 @@ class ResearchSessionRepository:
             "cycle_id": rs.cycle_id,
             "cycle_name": rs.cycle_name,
             "description": rs.description or "",
-            "status": rs.status.value if isinstance(rs.status, SessionStatusEnum) else str(rs.status),
+            "status": rs.status.value
+            if isinstance(rs.status, SessionStatusEnum)
+            else str(rs.status),
             "current_phase": rs.current_phase or "",
             "research_objective": rs.research_objective or "",
             "research_scope": rs.research_scope or "",
@@ -2263,7 +2542,9 @@ class ResearchSessionRepository:
             "id": str(pe.id),
             "session_id": str(pe.session_id),
             "phase": pe.phase,
-            "status": pe.status.value if isinstance(pe.status, PhaseStatusEnum) else str(pe.status),
+            "status": pe.status.value
+            if isinstance(pe.status, PhaseStatusEnum)
+            else str(pe.status),
             "started_at": pe.started_at.isoformat() if pe.started_at else None,
             "completed_at": pe.completed_at.isoformat() if pe.completed_at else None,
             "duration": pe.duration,
@@ -2285,7 +2566,11 @@ class ResearchSessionRepository:
             current_phase = str(phase_execution.get("phase") or "").strip().lower()
             if current_phase != normalized_phase_name:
                 continue
-            return dict(phase_execution.get("output") or {}) if isinstance(phase_execution.get("output"), Mapping) else {}
+            return (
+                dict(phase_execution.get("output") or {})
+                if isinstance(phase_execution.get("output"), Mapping)
+                else {}
+            )
         return {}
 
     @staticmethod
@@ -2302,8 +2587,12 @@ class ResearchSessionRepository:
         return {
             "id": str(a.id),
             "session_id": str(a.session_id),
-            "phase_execution_id": str(a.phase_execution_id) if a.phase_execution_id else None,
-            "artifact_type": a.artifact_type.value if isinstance(a.artifact_type, ArtifactTypeEnum) else str(a.artifact_type),
+            "phase_execution_id": str(a.phase_execution_id)
+            if a.phase_execution_id
+            else None,
+            "artifact_type": a.artifact_type.value
+            if isinstance(a.artifact_type, ArtifactTypeEnum)
+            else str(a.artifact_type),
             "name": a.name,
             "description": a.description or "",
             "content": _json_loads(a.content_json, {}),
@@ -2316,13 +2605,17 @@ class ResearchSessionRepository:
         }
 
     @staticmethod
-    def _learning_feedback_to_dict(feedback: ResearchLearningFeedback) -> Dict[str, Any]:
+    def _learning_feedback_to_dict(
+        feedback: ResearchLearningFeedback,
+    ) -> Dict[str, Any]:
         details = _json_loads(feedback.details_json, {})
         record = {
             "id": str(feedback.id),
             "session_id": str(feedback.session_id),
             "cycle_id": feedback.cycle_id,
-            "phase_execution_id": str(feedback.phase_execution_id) if feedback.phase_execution_id else None,
+            "phase_execution_id": str(feedback.phase_execution_id)
+            if feedback.phase_execution_id
+            else None,
             "feedback_scope": feedback.feedback_scope,
             "source_phase": feedback.source_phase,
             "target_phase": feedback.target_phase,
@@ -2340,13 +2633,17 @@ class ResearchSessionRepository:
             "weak_phase_names": list(feedback.weak_phase_names or []),
             "quality_dimensions": _json_loads(feedback.quality_dimensions_json, {}),
             "issues": _json_loads(feedback.issues_json, []),
-            "improvement_priorities": _json_loads(feedback.improvement_priorities_json, []),
+            "improvement_priorities": _json_loads(
+                feedback.improvement_priorities_json, []
+            ),
             "replay_feedback": _json_loads(feedback.replay_feedback_json, {}),
             "details": details if isinstance(details, dict) else {},
             "metadata": _json_loads(feedback.metadata_json, {}),
             "prompt_version": feedback.prompt_version or "unknown",
             "schema_version": feedback.schema_version or "unknown",
-            "created_at": feedback.created_at.isoformat() if feedback.created_at else None,
+            "created_at": feedback.created_at.isoformat()
+            if feedback.created_at
+            else None,
         }
         if isinstance(details, dict):
             for key in (
@@ -2364,7 +2661,9 @@ class ResearchSessionRepository:
         return record
 
     @staticmethod
-    def _build_learning_feedback_library_summary(records: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    def _build_learning_feedback_library_summary(
+        records: Sequence[Mapping[str, Any]],
+    ) -> Dict[str, Any]:
         cycle_summary = next(
             (
                 record
@@ -2376,12 +2675,16 @@ class ResearchSessionRepository:
         return {
             "record_count": len(records),
             "phase_record_count": sum(
-                1 for record in records if str(record.get("feedback_scope") or "") == "phase_assessment"
+                1
+                for record in records
+                if str(record.get("feedback_scope") or "") == "phase_assessment"
             ),
             "latest_cycle_score": cycle_summary.get("overall_score"),
             "cycle_trend": cycle_summary.get("cycle_trend"),
             "weak_phase_names": list(cycle_summary.get("weak_phase_names") or []),
-            "recorded_phase_names": list(cycle_summary.get("recorded_phase_names") or []),
+            "recorded_phase_names": list(
+                cycle_summary.get("recorded_phase_names") or []
+            ),
             "strategy_changed": bool(cycle_summary.get("strategy_changed")),
             "latest_feedback_at": cycle_summary.get("created_at"),
         }
@@ -2391,10 +2694,16 @@ class ResearchSessionRepository:
         cls,
         records: Sequence[Mapping[str, Any]],
     ) -> Dict[str, Any]:
-        normalized_records = [dict(record) for record in records if isinstance(record, Mapping)]
+        normalized_records = [
+            dict(record) for record in records if isinstance(record, Mapping)
+        ]
         contract_version = LEARNING_FEEDBACK_CONTRACT_VERSION
         for record in normalized_records:
-            metadata = record.get("metadata") if isinstance(record.get("metadata"), Mapping) else {}
+            metadata = (
+                record.get("metadata")
+                if isinstance(record.get("metadata"), Mapping)
+                else {}
+            )
             version = str(metadata.get("contract_version") or "").strip()
             if version:
                 contract_version = version
@@ -2407,7 +2716,11 @@ class ResearchSessionRepository:
             ),
             {},
         )
-        replay_feedback = cycle_summary.get("replay_feedback") if isinstance(cycle_summary, Mapping) else {}
+        replay_feedback = (
+            cycle_summary.get("replay_feedback")
+            if isinstance(cycle_summary, Mapping)
+            else {}
+        )
         if not isinstance(replay_feedback, Mapping):
             replay_feedback = {}
         return {
@@ -2436,7 +2749,9 @@ class ResearchSessionRepository:
             "id": str(entity.id),
             "document_id": str(entity.document_id),
             "name": entity.name,
-            "type": entity.type.value if isinstance(entity.type, EntityTypeEnum) else str(entity.type),
+            "type": entity.type.value
+            if isinstance(entity.type, EntityTypeEnum)
+            else str(entity.type),
             "confidence": entity.confidence,
             "position": entity.position,
             "length": entity.length,
@@ -2451,23 +2766,57 @@ class ResearchSessionRepository:
     def _relationship_to_dict(relationship: EntityRelationship) -> Dict[str, Any]:
         source_entity = relationship.source_entity
         target_entity = relationship.target_entity
-        source_metadata = dict(getattr(source_entity, "entity_metadata", {}) or {}) if source_entity is not None else {}
-        target_metadata = dict(getattr(target_entity, "entity_metadata", {}) or {}) if target_entity is not None else {}
+        source_metadata = (
+            dict(getattr(source_entity, "entity_metadata", {}) or {})
+            if source_entity is not None
+            else {}
+        )
+        target_metadata = (
+            dict(getattr(target_entity, "entity_metadata", {}) or {})
+            if target_entity is not None
+            else {}
+        )
         return {
             "id": str(relationship.id),
             "source_entity_id": str(relationship.source_entity_id),
             "target_entity_id": str(relationship.target_entity_id),
-            "source_entity_name": getattr(source_entity, "name", "") if source_entity is not None else "",
-            "target_entity_name": getattr(target_entity, "name", "") if target_entity is not None else "",
-            "source_entity_type": str(source_metadata.get("raw_type") or getattr(getattr(source_entity, "type", None), "value", getattr(source_entity, "type", "other")) or "other"),
-            "target_entity_type": str(target_metadata.get("raw_type") or getattr(getattr(target_entity, "type", None), "value", getattr(target_entity, "type", "other")) or "other"),
-            "relationship_type": relationship.type.relationship_type if relationship.type else None,
-            "relationship_name": relationship.type.relationship_name if relationship.type else None,
+            "source_entity_name": getattr(source_entity, "name", "")
+            if source_entity is not None
+            else "",
+            "target_entity_name": getattr(target_entity, "name", "")
+            if target_entity is not None
+            else "",
+            "source_entity_type": str(
+                source_metadata.get("raw_type")
+                or getattr(
+                    getattr(source_entity, "type", None),
+                    "value",
+                    getattr(source_entity, "type", "other"),
+                )
+                or "other"
+            ),
+            "target_entity_type": str(
+                target_metadata.get("raw_type")
+                or getattr(
+                    getattr(target_entity, "type", None),
+                    "value",
+                    getattr(target_entity, "type", "other"),
+                )
+                or "other"
+            ),
+            "relationship_type": relationship.type.relationship_type
+            if relationship.type
+            else None,
+            "relationship_name": relationship.type.relationship_name
+            if relationship.type
+            else None,
             "confidence": relationship.confidence,
             "created_by_module": relationship.created_by_module,
             "evidence": relationship.evidence,
             "relationship_metadata": dict(relationship.relationship_metadata or {}),
-            "created_at": relationship.created_at.isoformat() if relationship.created_at else None,
+            "created_at": relationship.created_at.isoformat()
+            if relationship.created_at
+            else None,
         }
 
     # ---- 内部 ------------------------------------------------------------
@@ -2477,9 +2826,17 @@ class ResearchSessionRepository:
         return f"research://{cycle_id}/observe/"
 
     @staticmethod
-    def _observe_document_source_file(cycle_id: str, document_index: int, payload: Mapping[str, Any]) -> str:
-        source_ref = str(payload.get("urn") or payload.get("title") or f"document_{document_index + 1}").strip()
-        stable_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{cycle_id}:observe:{document_index}:{source_ref}")
+    def _observe_document_source_file(
+        cycle_id: str, document_index: int, payload: Mapping[str, Any]
+    ) -> str:
+        source_ref = str(
+            payload.get("urn")
+            or payload.get("title")
+            or f"document_{document_index + 1}"
+        ).strip()
+        stable_id = uuid.uuid5(
+            uuid.NAMESPACE_URL, f"{cycle_id}:observe:{document_index}:{source_ref}"
+        )
         return f"{ResearchSessionRepository._observe_document_source_prefix(cycle_id)}{stable_id}"
 
     @staticmethod
@@ -2501,20 +2858,34 @@ class ResearchSessionRepository:
             "urn": str(payload.get("urn") or "").strip(),
             "title": str(payload.get("title") or "").strip(),
             "source_type": source_type,
-            "catalog_id": str(version_metadata.get("catalog_id") or document_metadata.get("catalog_id") or "").strip(),
+            "catalog_id": str(
+                version_metadata.get("catalog_id")
+                or document_metadata.get("catalog_id")
+                or ""
+            ).strip(),
             "raw_text_preview": str(payload.get("raw_text_preview") or "")[:240],
-            "processed_text_preview": str(payload.get("processed_text_preview") or "")[:240],
+            "processed_text_preview": str(payload.get("processed_text_preview") or "")[
+                :240
+            ],
             "processed_text_size": int(payload.get("processed_text_size") or 0),
             "metadata": dict(document_metadata or {}),
             "version_metadata": dict(version_metadata or {}),
-            "philology": payload.get("philology") if isinstance(payload.get("philology"), dict) else {},
+            "philology": payload.get("philology")
+            if isinstance(payload.get("philology"), dict)
+            else {},
             "philology_notes": [
                 str(note)
                 for note in (payload.get("philology_notes") or [])
                 if str(note).strip()
-            ] if isinstance(payload.get("philology_notes"), list) else [],
-            "philology_assets": payload.get("philology_assets") if isinstance(payload.get("philology_assets"), dict) else {},
-            "output_generation": payload.get("output_generation") if isinstance(payload.get("output_generation"), dict) else {},
+            ]
+            if isinstance(payload.get("philology_notes"), list)
+            else [],
+            "philology_assets": payload.get("philology_assets")
+            if isinstance(payload.get("philology_assets"), dict)
+            else {},
+            "output_generation": payload.get("output_generation")
+            if isinstance(payload.get("output_generation"), dict)
+            else {},
         }
         return _json_dumps(note_payload, "{}")
 
@@ -2533,31 +2904,48 @@ class ResearchSessionRepository:
         payload: Mapping[str, Any],
     ) -> Document:
         document_metadata = self._extract_observe_document_metadata(payload)
-        version_metadata = self._extract_observe_document_version_metadata(payload, document_metadata)
+        version_metadata = self._extract_observe_document_version_metadata(
+            payload, document_metadata
+        )
         document_metadata["version_metadata"] = version_metadata
-        source_type = str(
-            payload.get("source_type")
-            or document_metadata.get("source_type")
-            or version_metadata.get("source_type")
+        source_type = (
+            str(
+                payload.get("source_type")
+                or document_metadata.get("source_type")
+                or version_metadata.get("source_type")
+                or "observe"
+            ).strip()
             or "observe"
-        ).strip() or "observe"
+        )
         document = Document(
-            source_file=self._observe_document_source_file(cycle_id, document_index, payload),
+            source_file=self._observe_document_source_file(
+                cycle_id, document_index, payload
+            ),
             document_urn=str(payload.get("urn") or "").strip() or None,
             document_title=str(payload.get("title") or "").strip() or None,
             source_type=source_type or None,
             catalog_id=str(version_metadata.get("catalog_id") or "").strip() or None,
             work_title=str(version_metadata.get("work_title") or "").strip() or None,
-            fragment_title=str(version_metadata.get("fragment_title") or "").strip() or None,
-            work_fragment_key=str(version_metadata.get("work_fragment_key") or "").strip() or None,
-            version_lineage_key=str(version_metadata.get("version_lineage_key") or "").strip() or None,
+            fragment_title=str(version_metadata.get("fragment_title") or "").strip()
+            or None,
+            work_fragment_key=str(
+                version_metadata.get("work_fragment_key") or ""
+            ).strip()
+            or None,
+            version_lineage_key=str(
+                version_metadata.get("version_lineage_key") or ""
+            ).strip()
+            or None,
             witness_key=str(version_metadata.get("witness_key") or "").strip() or None,
             dynasty=str(version_metadata.get("dynasty") or "").strip() or None,
             author=str(version_metadata.get("author") or "").strip() or None,
             edition=str(version_metadata.get("edition") or "").strip() or None,
             version_metadata_json=version_metadata,
-            processing_timestamp=_parse_datetime(payload.get("processing_timestamp")) or datetime.now(timezone.utc),
-            objective=research_session.research_objective or research_session.description or None,
+            processing_timestamp=_parse_datetime(payload.get("processing_timestamp"))
+            or datetime.now(timezone.utc),
+            objective=research_session.research_objective
+            or research_session.description
+            or None,
             raw_text_size=int(payload.get("raw_text_size") or 0),
             entities_extracted_count=int(payload.get("entity_count") or 0),
             process_status=ProcessStatusEnum.COMPLETED,
@@ -2577,9 +2965,19 @@ class ResearchSessionRepository:
         return document
 
     @staticmethod
-    def _extract_observe_document_metadata(payload: Mapping[str, Any]) -> Dict[str, Any]:
-        metadata = dict(payload.get("metadata") or {}) if isinstance(payload.get("metadata"), Mapping) else {}
-        version_metadata = payload.get("version_metadata") if isinstance(payload.get("version_metadata"), Mapping) else {}
+    def _extract_observe_document_metadata(
+        payload: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        metadata = (
+            dict(payload.get("metadata") or {})
+            if isinstance(payload.get("metadata"), Mapping)
+            else {}
+        )
+        version_metadata = (
+            payload.get("version_metadata")
+            if isinstance(payload.get("version_metadata"), Mapping)
+            else {}
+        )
         if version_metadata and not isinstance(metadata.get("version_metadata"), dict):
             metadata["version_metadata"] = dict(version_metadata)
         return metadata
@@ -2589,9 +2987,23 @@ class ResearchSessionRepository:
         payload: Mapping[str, Any],
         metadata: Mapping[str, Any],
     ) -> Dict[str, Any]:
-        existing_version_metadata = metadata.get("version_metadata") if isinstance(metadata.get("version_metadata"), Mapping) else {}
-        source_type = str(payload.get("source_type") or metadata.get("source_type") or "observe").strip() or "observe"
-        source_ref = str(payload.get("urn") or metadata.get("source_file") or payload.get("title") or "observe").strip()
+        existing_version_metadata = (
+            metadata.get("version_metadata")
+            if isinstance(metadata.get("version_metadata"), Mapping)
+            else {}
+        )
+        source_type = (
+            str(
+                payload.get("source_type") or metadata.get("source_type") or "observe"
+            ).strip()
+            or "observe"
+        )
+        source_ref = str(
+            payload.get("urn")
+            or metadata.get("source_file")
+            or payload.get("title")
+            or "observe"
+        ).strip()
         enriched_metadata = build_document_version_metadata(
             title=str(payload.get("title") or "").strip(),
             source_type=source_type,
@@ -2599,7 +3011,8 @@ class ResearchSessionRepository:
             metadata={
                 **dict(metadata),
                 "version_metadata": dict(existing_version_metadata or {}),
-                "catalog_id": metadata.get("catalog_id") or existing_version_metadata.get("catalog_id"),
+                "catalog_id": metadata.get("catalog_id")
+                or existing_version_metadata.get("catalog_id"),
             },
         )
         return dict(enriched_metadata.get("version_metadata") or {})
@@ -2620,8 +3033,20 @@ class ResearchSessionRepository:
             name = str(entity_payload.get("name") or "").strip()
             if not name:
                 continue
-            raw_type = str(entity_payload.get("type") or entity_payload.get("entity_type") or "other").strip().lower()
-            metadata = dict(entity_payload.get("metadata") or entity_payload.get("entity_metadata") or {})
+            raw_type = (
+                str(
+                    entity_payload.get("type")
+                    or entity_payload.get("entity_type")
+                    or "other"
+                )
+                .strip()
+                .lower()
+            )
+            metadata = dict(
+                entity_payload.get("metadata")
+                or entity_payload.get("entity_metadata")
+                or {}
+            )
             metadata.update(
                 {
                     "cycle_id": cycle_id,
@@ -2640,8 +3065,13 @@ class ResearchSessionRepository:
                 confidence=float(entity_payload.get("confidence") or 0.5),
                 position=int(entity_payload.get("position") or 0),
                 length=int(entity_payload.get("length") or len(name)),
-                alternative_names=list(entity_payload.get("alternative_names") or entity_payload.get("aliases") or []),
-                description=str(entity_payload.get("description") or "").strip() or None,
+                alternative_names=list(
+                    entity_payload.get("alternative_names")
+                    or entity_payload.get("aliases")
+                    or []
+                ),
+                description=str(entity_payload.get("description") or "").strip()
+                or None,
                 entity_metadata=metadata,
             )
             session.add(entity)
@@ -2665,8 +3095,12 @@ class ResearchSessionRepository:
         for relationship_payload in payload.get("semantic_relationships") or []:
             if not isinstance(relationship_payload, Mapping):
                 continue
-            source_entity = self._resolve_observe_entity(relationship_payload, entity_lookup, "source")
-            target_entity = self._resolve_observe_entity(relationship_payload, entity_lookup, "target")
+            source_entity = self._resolve_observe_entity(
+                relationship_payload, entity_lookup, "source"
+            )
+            target_entity = self._resolve_observe_entity(
+                relationship_payload, entity_lookup, "target"
+            )
             if source_entity is None or target_entity is None:
                 continue
             relationship_type = self._resolve_relationship_type(
@@ -2679,7 +3113,11 @@ class ResearchSessionRepository:
                     or ""
                 ).strip(),
             )
-            relationship_metadata = dict(relationship_payload.get("metadata") or relationship_payload.get("relationship_metadata") or {})
+            relationship_metadata = dict(
+                relationship_payload.get("metadata")
+                or relationship_payload.get("relationship_metadata")
+                or {}
+            )
             relationship_metadata.update(
                 {
                     "cycle_id": cycle_id,
@@ -2688,17 +3126,39 @@ class ResearchSessionRepository:
                     "document_id": str(document.id),
                     "document_urn": document_notes.get("urn"),
                     "document_title": document_notes.get("title"),
-                    "source_type": str(relationship_payload.get("source_type") or self._entity_raw_type(source_entity) or "entity"),
-                    "target_type": str(relationship_payload.get("target_type") or self._entity_raw_type(target_entity) or "entity"),
+                    "source_type": str(
+                        relationship_payload.get("source_type")
+                        or self._entity_raw_type(source_entity)
+                        or "entity"
+                    ),
+                    "target_type": str(
+                        relationship_payload.get("target_type")
+                        or self._entity_raw_type(target_entity)
+                        or "entity"
+                    ),
                 }
             )
             relationship = EntityRelationship(
                 source_entity_id=source_entity.id,
                 target_entity_id=target_entity.id,
                 relationship_type_id=relationship_type["id"],
-                confidence=float(relationship_payload.get("confidence") or relationship_metadata.get("confidence") or 0.5),
-                created_by_module=str(relationship_payload.get("created_by_module") or relationship_metadata.get("source") or "observe_phase").strip() or None,
-                evidence=str(relationship_payload.get("evidence") or relationship_metadata.get("description") or "").strip() or None,
+                confidence=float(
+                    relationship_payload.get("confidence")
+                    or relationship_metadata.get("confidence")
+                    or 0.5
+                ),
+                created_by_module=str(
+                    relationship_payload.get("created_by_module")
+                    or relationship_metadata.get("source")
+                    or "observe_phase"
+                ).strip()
+                or None,
+                evidence=str(
+                    relationship_payload.get("evidence")
+                    or relationship_metadata.get("description")
+                    or ""
+                ).strip()
+                or None,
                 relationship_metadata=relationship_metadata,
             )
             session.add(relationship)
@@ -2706,7 +3166,9 @@ class ResearchSessionRepository:
         session.flush()
         return relationships
 
-    def _list_observe_document_graphs(self, session: Session, cycle_id: str) -> List[Dict[str, Any]]:
+    def _list_observe_document_graphs(
+        self, session: Session, cycle_id: str
+    ) -> List[Dict[str, Any]]:
         documents = (
             self._observe_document_query(session, cycle_id)
             .order_by(Document.processing_timestamp.asc(), Document.created_at.asc())
@@ -2714,7 +3176,12 @@ class ResearchSessionRepository:
         )
         snapshots: List[Dict[str, Any]] = []
         for document in documents:
-            entities = session.query(Entity).filter_by(document_id=document.id).order_by(Entity.created_at.asc()).all()
+            entities = (
+                session.query(Entity)
+                .filter_by(document_id=document.id)
+                .order_by(Entity.created_at.asc())
+                .all()
+            )
             entity_ids = [entity.id for entity in entities]
             relationships: List[EntityRelationship] = []
             if entity_ids:
@@ -2724,7 +3191,9 @@ class ResearchSessionRepository:
                     .order_by(EntityRelationship.created_at.asc())
                     .all()
                 )
-            snapshots.append(self._observe_document_to_dict(document, entities, relationships))
+            snapshots.append(
+                self._observe_document_to_dict(document, entities, relationships)
+            )
         return snapshots
 
     def _observe_document_to_dict(
@@ -2735,22 +3204,32 @@ class ResearchSessionRepository:
     ) -> Dict[str, Any]:
         notes = self._parse_observe_document_notes(document.notes)
         version_metadata = self._document_version_metadata(document, notes)
-        metadata = dict(notes.get("metadata") or {}) if isinstance(notes.get("metadata"), dict) else {}
+        metadata = (
+            dict(notes.get("metadata") or {})
+            if isinstance(notes.get("metadata"), dict)
+            else {}
+        )
         metadata["version_metadata"] = version_metadata
         if document.source_type and not metadata.get("source_type"):
             metadata["source_type"] = document.source_type
         if document.catalog_id and not metadata.get("catalog_id"):
             metadata["catalog_id"] = document.catalog_id
         entity_dicts = [self._entity_to_dict(entity) for entity in entities]
-        relationship_dicts = [self._relationship_to_dict(relationship) for relationship in relationships]
+        relationship_dicts = [
+            self._relationship_to_dict(relationship) for relationship in relationships
+        ]
         return {
             "id": str(document.id),
             "source_file": document.source_file,
-            "processing_timestamp": document.processing_timestamp.isoformat() if document.processing_timestamp else None,
+            "processing_timestamp": document.processing_timestamp.isoformat()
+            if document.processing_timestamp
+            else None,
             "objective": document.objective,
             "raw_text_size": document.raw_text_size,
             "entities_extracted_count": document.entities_extracted_count,
-            "process_status": document.process_status.value if isinstance(document.process_status, ProcessStatusEnum) else str(document.process_status),
+            "process_status": document.process_status.value
+            if isinstance(document.process_status, ProcessStatusEnum)
+            else str(document.process_status),
             "quality_score": document.quality_score,
             "cycle_id": notes.get("cycle_id"),
             "phase": notes.get("phase"),
@@ -2758,12 +3237,19 @@ class ResearchSessionRepository:
             "document_index": notes.get("document_index"),
             "urn": document.document_urn or notes.get("urn"),
             "title": document.document_title or notes.get("title"),
-            "source_type": document.source_type or notes.get("source_type") or version_metadata.get("source_type"),
-            "catalog_id": document.catalog_id or notes.get("catalog_id") or version_metadata.get("catalog_id"),
+            "source_type": document.source_type
+            or notes.get("source_type")
+            or version_metadata.get("source_type"),
+            "catalog_id": document.catalog_id
+            or notes.get("catalog_id")
+            or version_metadata.get("catalog_id"),
             "work_title": document.work_title or version_metadata.get("work_title"),
-            "fragment_title": document.fragment_title or version_metadata.get("fragment_title"),
-            "work_fragment_key": document.work_fragment_key or version_metadata.get("work_fragment_key"),
-            "version_lineage_key": document.version_lineage_key or version_metadata.get("version_lineage_key"),
+            "fragment_title": document.fragment_title
+            or version_metadata.get("fragment_title"),
+            "work_fragment_key": document.work_fragment_key
+            or version_metadata.get("work_fragment_key"),
+            "version_lineage_key": document.version_lineage_key
+            or version_metadata.get("version_lineage_key"),
             "witness_key": document.witness_key or version_metadata.get("witness_key"),
             "dynasty": document.dynasty or version_metadata.get("dynasty"),
             "author": document.author or version_metadata.get("author"),
@@ -2773,10 +3259,18 @@ class ResearchSessionRepository:
             "processed_text_size": notes.get("processed_text_size"),
             "metadata": metadata,
             "version_metadata": version_metadata,
-            "philology": notes.get("philology") if isinstance(notes.get("philology"), dict) else {},
-            "philology_notes": notes.get("philology_notes") if isinstance(notes.get("philology_notes"), list) else [],
-            "philology_assets": notes.get("philology_assets") if isinstance(notes.get("philology_assets"), dict) else {},
-            "output_generation": notes.get("output_generation") if isinstance(notes.get("output_generation"), dict) else {},
+            "philology": notes.get("philology")
+            if isinstance(notes.get("philology"), dict)
+            else {},
+            "philology_notes": notes.get("philology_notes")
+            if isinstance(notes.get("philology_notes"), list)
+            else [],
+            "philology_assets": notes.get("philology_assets")
+            if isinstance(notes.get("philology_assets"), dict)
+            else {},
+            "output_generation": notes.get("output_generation")
+            if isinstance(notes.get("output_generation"), dict)
+            else {},
             "entities": entity_dicts,
             "semantic_relationships": relationship_dicts,
             "entity_count": len(entity_dicts),
@@ -2787,41 +3281,88 @@ class ResearchSessionRepository:
         notes = self._parse_observe_document_notes(document.notes)
         version_metadata = self._document_version_metadata(document, notes)
 
-        document_urn = str(
-            document.document_urn
-            or notes.get("urn")
-            or version_metadata.get("source_ref")
-            or ""
-        ).strip() or None
-        document_title = str(
-            document.document_title
-            or notes.get("title")
-            or version_metadata.get("fragment_title")
-            or version_metadata.get("work_title")
-            or ""
-        ).strip() or None
-        source_type = str(
-            document.source_type
-            or notes.get("source_type")
-            or version_metadata.get("source_type")
-            or self._infer_legacy_observe_source_type(document_urn or document.source_file)
-            or "observe"
-        ).strip() or None
+        document_urn = (
+            str(
+                document.document_urn
+                or notes.get("urn")
+                or version_metadata.get("source_ref")
+                or ""
+            ).strip()
+            or None
+        )
+        document_title = (
+            str(
+                document.document_title
+                or notes.get("title")
+                or version_metadata.get("fragment_title")
+                or version_metadata.get("work_title")
+                or ""
+            ).strip()
+            or None
+        )
+        source_type = (
+            str(
+                document.source_type
+                or notes.get("source_type")
+                or version_metadata.get("source_type")
+                or self._infer_legacy_observe_source_type(
+                    document_urn or document.source_file
+                )
+                or "observe"
+            ).strip()
+            or None
+        )
 
         updated = False
         updated |= self._assign_if_changed(document, "document_urn", document_urn)
         updated |= self._assign_if_changed(document, "document_title", document_title)
         updated |= self._assign_if_changed(document, "source_type", source_type)
-        updated |= self._assign_if_changed(document, "catalog_id", self._optional_version_value(version_metadata, "catalog_id"))
-        updated |= self._assign_if_changed(document, "work_title", self._optional_version_value(version_metadata, "work_title"))
-        updated |= self._assign_if_changed(document, "fragment_title", self._optional_version_value(version_metadata, "fragment_title"))
-        updated |= self._assign_if_changed(document, "work_fragment_key", self._optional_version_value(version_metadata, "work_fragment_key"))
-        updated |= self._assign_if_changed(document, "version_lineage_key", self._optional_version_value(version_metadata, "version_lineage_key"))
-        updated |= self._assign_if_changed(document, "witness_key", self._optional_version_value(version_metadata, "witness_key"))
-        updated |= self._assign_if_changed(document, "dynasty", self._optional_version_value(version_metadata, "dynasty"))
-        updated |= self._assign_if_changed(document, "author", self._optional_version_value(version_metadata, "author"))
-        updated |= self._assign_if_changed(document, "edition", self._optional_version_value(version_metadata, "edition"))
-        updated |= self._assign_if_changed(document, "version_metadata_json", dict(version_metadata))
+        updated |= self._assign_if_changed(
+            document,
+            "catalog_id",
+            self._optional_version_value(version_metadata, "catalog_id"),
+        )
+        updated |= self._assign_if_changed(
+            document,
+            "work_title",
+            self._optional_version_value(version_metadata, "work_title"),
+        )
+        updated |= self._assign_if_changed(
+            document,
+            "fragment_title",
+            self._optional_version_value(version_metadata, "fragment_title"),
+        )
+        updated |= self._assign_if_changed(
+            document,
+            "work_fragment_key",
+            self._optional_version_value(version_metadata, "work_fragment_key"),
+        )
+        updated |= self._assign_if_changed(
+            document,
+            "version_lineage_key",
+            self._optional_version_value(version_metadata, "version_lineage_key"),
+        )
+        updated |= self._assign_if_changed(
+            document,
+            "witness_key",
+            self._optional_version_value(version_metadata, "witness_key"),
+        )
+        updated |= self._assign_if_changed(
+            document,
+            "dynasty",
+            self._optional_version_value(version_metadata, "dynasty"),
+        )
+        updated |= self._assign_if_changed(
+            document, "author", self._optional_version_value(version_metadata, "author")
+        )
+        updated |= self._assign_if_changed(
+            document,
+            "edition",
+            self._optional_version_value(version_metadata, "edition"),
+        )
+        updated |= self._assign_if_changed(
+            document, "version_metadata_json", dict(version_metadata)
+        )
 
         note_payload = dict(notes)
         if document_urn:
@@ -2834,7 +3375,11 @@ class ResearchSessionRepository:
         if catalog_id:
             note_payload["catalog_id"] = catalog_id
 
-        note_metadata = dict(note_payload.get("metadata") or {}) if isinstance(note_payload.get("metadata"), dict) else {}
+        note_metadata = (
+            dict(note_payload.get("metadata") or {})
+            if isinstance(note_payload.get("metadata"), dict)
+            else {}
+        )
         if source_type:
             note_metadata["source_type"] = source_type
         if catalog_id:
@@ -2857,18 +3402,30 @@ class ResearchSessionRepository:
         return True
 
     @staticmethod
-    def _optional_version_value(version_metadata: Mapping[str, Any], key: str) -> Optional[str]:
+    def _optional_version_value(
+        version_metadata: Mapping[str, Any], key: str
+    ) -> Optional[str]:
         value = str(version_metadata.get(key) or "").strip()
         return value or None
 
     @staticmethod
-    def _document_version_metadata(document: Document, notes: Mapping[str, Any]) -> Dict[str, Any]:
+    def _document_version_metadata(
+        document: Document, notes: Mapping[str, Any]
+    ) -> Dict[str, Any]:
         version_metadata = dict(document.version_metadata_json or {})
-        note_version_metadata = notes.get("version_metadata") if isinstance(notes.get("version_metadata"), dict) else {}
+        note_version_metadata = (
+            notes.get("version_metadata")
+            if isinstance(notes.get("version_metadata"), dict)
+            else {}
+        )
         if not version_metadata and note_version_metadata:
             version_metadata = dict(note_version_metadata)
 
-        note_metadata = dict(notes.get("metadata") or {}) if isinstance(notes.get("metadata"), dict) else {}
+        note_metadata = (
+            dict(notes.get("metadata") or {})
+            if isinstance(notes.get("metadata"), dict)
+            else {}
+        )
         if note_version_metadata:
             note_metadata["version_metadata"] = {
                 **dict(note_metadata.get("version_metadata") or {}),
@@ -2900,20 +3457,30 @@ class ResearchSessionRepository:
             or document.source_file
             or ""
         ).strip()
-        source_type = str(
-            version_metadata.get("source_type")
-            or document.source_type
-            or notes.get("source_type")
-            or ResearchSessionRepository._infer_legacy_observe_source_type(source_ref)
+        source_type = (
+            str(
+                version_metadata.get("source_type")
+                or document.source_type
+                or notes.get("source_type")
+                or ResearchSessionRepository._infer_legacy_observe_source_type(
+                    source_ref
+                )
+                or "observe"
+            ).strip()
             or "observe"
-        ).strip() or "observe"
+        )
         title = str(
             version_metadata.get("fragment_title")
             or document.document_title
             or notes.get("title")
             or ""
         ).strip()
-        catalog_id = str(version_metadata.get("catalog_id") or notes.get("catalog_id") or note_metadata.get("catalog_id") or "").strip()
+        catalog_id = str(
+            version_metadata.get("catalog_id")
+            or notes.get("catalog_id")
+            or note_metadata.get("catalog_id")
+            or ""
+        ).strip()
         if catalog_id:
             note_metadata["catalog_id"] = catalog_id
 
@@ -2937,21 +3504,29 @@ class ResearchSessionRepository:
             return "ctext"
         if normalized.endswith(".pdf"):
             return "pdf"
-        if normalized.endswith((".txt", ".md", ".markdown", ".json", ".xml", ".html", ".htm")):
+        if normalized.endswith(
+            (".txt", ".md", ".markdown", ".json", ".xml", ".html", ".htm")
+        ):
             return "local"
         if "\\" in normalized or "/" in normalized:
             return "local"
         return "observe"
 
     @staticmethod
-    def _group_observe_version_lineages(documents: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    def _group_observe_version_lineages(
+        documents: Sequence[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
         grouped: Dict[str, Dict[str, Any]] = {}
         seen_witnesses: set[tuple[str, str]] = set()
 
         for document in documents:
             if not isinstance(document, Mapping):
                 continue
-            version_metadata = document.get("version_metadata") if isinstance(document.get("version_metadata"), Mapping) else {}
+            version_metadata = (
+                document.get("version_metadata")
+                if isinstance(document.get("version_metadata"), Mapping)
+                else {}
+            )
             lineage_key = str(
                 version_metadata.get("version_lineage_key")
                 or version_metadata.get("work_fragment_key")
@@ -2962,7 +3537,12 @@ class ResearchSessionRepository:
             if not lineage_key:
                 continue
 
-            witness_key = str(version_metadata.get("witness_key") or document.get("id") or document.get("urn") or "").strip()
+            witness_key = str(
+                version_metadata.get("witness_key")
+                or document.get("id")
+                or document.get("urn")
+                or ""
+            ).strip()
             if witness_key:
                 seen_key = (lineage_key, witness_key)
                 if seen_key in seen_witnesses:
@@ -2973,13 +3553,31 @@ class ResearchSessionRepository:
                 lineage_key,
                 {
                     "cycle_id": document.get("cycle_id"),
-                    "version_lineage_key": str(version_metadata.get("version_lineage_key") or lineage_key).strip(),
-                    "work_fragment_key": str(version_metadata.get("work_fragment_key") or "").strip(),
-                    "work_title": str(version_metadata.get("work_title") or document.get("work_title") or "").strip(),
-                    "fragment_title": str(version_metadata.get("fragment_title") or document.get("fragment_title") or "").strip(),
-                    "dynasty": str(version_metadata.get("dynasty") or document.get("dynasty") or "").strip(),
-                    "author": str(version_metadata.get("author") or document.get("author") or "").strip(),
-                    "edition": str(version_metadata.get("edition") or document.get("edition") or "").strip(),
+                    "version_lineage_key": str(
+                        version_metadata.get("version_lineage_key") or lineage_key
+                    ).strip(),
+                    "work_fragment_key": str(
+                        version_metadata.get("work_fragment_key") or ""
+                    ).strip(),
+                    "work_title": str(
+                        version_metadata.get("work_title")
+                        or document.get("work_title")
+                        or ""
+                    ).strip(),
+                    "fragment_title": str(
+                        version_metadata.get("fragment_title")
+                        or document.get("fragment_title")
+                        or ""
+                    ).strip(),
+                    "dynasty": str(
+                        version_metadata.get("dynasty") or document.get("dynasty") or ""
+                    ).strip(),
+                    "author": str(
+                        version_metadata.get("author") or document.get("author") or ""
+                    ).strip(),
+                    "edition": str(
+                        version_metadata.get("edition") or document.get("edition") or ""
+                    ).strip(),
                     "witnesses": [],
                 },
             )
@@ -2989,15 +3587,23 @@ class ResearchSessionRepository:
                     "urn": document.get("urn"),
                     "title": document.get("title"),
                     "source_type": document.get("source_type"),
-                    "catalog_id": version_metadata.get("catalog_id") or document.get("catalog_id"),
+                    "catalog_id": version_metadata.get("catalog_id")
+                    or document.get("catalog_id"),
                     "witness_key": witness_key,
-                    "dynasty": version_metadata.get("dynasty") or document.get("dynasty"),
+                    "dynasty": version_metadata.get("dynasty")
+                    or document.get("dynasty"),
                     "author": version_metadata.get("author") or document.get("author"),
-                    "edition": version_metadata.get("edition") or document.get("edition"),
+                    "edition": version_metadata.get("edition")
+                    or document.get("edition"),
                 }
             )
 
-        ordered = sorted(grouped.values(), key=lambda item: str(item.get("version_lineage_key") or item.get("work_fragment_key") or ""))
+        ordered = sorted(
+            grouped.values(),
+            key=lambda item: str(
+                item.get("version_lineage_key") or item.get("work_fragment_key") or ""
+            ),
+        )
         for item in ordered:
             item["witness_count"] = len(item.get("witnesses") or [])
         return ordered
@@ -3008,26 +3614,52 @@ class ResearchSessionRepository:
         session: Session,
         cycle_id: Optional[str] = None,
     ):
-        source_pattern = f"{cls._observe_document_source_prefix(cycle_id)}%" if cycle_id else "research://%/observe/%"
+        source_pattern = (
+            f"{cls._observe_document_source_prefix(cycle_id)}%"
+            if cycle_id
+            else "research://%/observe/%"
+        )
         return session.query(Document).filter(Document.source_file.like(source_pattern))
 
     def _delete_observe_document_graphs(self, session: Session, cycle_id: str) -> None:
-        document_ids = [row[0] for row in self._observe_document_query(session, cycle_id).with_entities(Document.id).all()]
+        document_ids = [
+            row[0]
+            for row in self._observe_document_query(session, cycle_id)
+            .with_entities(Document.id)
+            .all()
+        ]
         if not document_ids:
             return
 
-        entity_ids = [row[0] for row in session.query(Entity.id).filter(Entity.document_id.in_(document_ids)).all()]
+        entity_ids = [
+            row[0]
+            for row in session.query(Entity.id)
+            .filter(Entity.document_id.in_(document_ids))
+            .all()
+        ]
         if entity_ids:
             session.query(EntityRelationship).filter(
                 (EntityRelationship.source_entity_id.in_(entity_ids))
                 | (EntityRelationship.target_entity_id.in_(entity_ids))
             ).delete(synchronize_session=False)
-        session.query(Entity).filter(Entity.document_id.in_(document_ids)).delete(synchronize_session=False)
-        session.query(ProcessingLog).filter(ProcessingLog.document_id.in_(document_ids)).delete(synchronize_session=False)
-        session.query(ProcessingStatistics).filter(ProcessingStatistics.document_id.in_(document_ids)).delete(synchronize_session=False)
-        session.query(QualityMetrics).filter(QualityMetrics.document_id.in_(document_ids)).delete(synchronize_session=False)
-        session.query(ResearchAnalysis).filter(ResearchAnalysis.document_id.in_(document_ids)).delete(synchronize_session=False)
-        session.query(Document).filter(Document.id.in_(document_ids)).delete(synchronize_session=False)
+        session.query(Entity).filter(Entity.document_id.in_(document_ids)).delete(
+            synchronize_session=False
+        )
+        session.query(ProcessingLog).filter(
+            ProcessingLog.document_id.in_(document_ids)
+        ).delete(synchronize_session=False)
+        session.query(ProcessingStatistics).filter(
+            ProcessingStatistics.document_id.in_(document_ids)
+        ).delete(synchronize_session=False)
+        session.query(QualityMetrics).filter(
+            QualityMetrics.document_id.in_(document_ids)
+        ).delete(synchronize_session=False)
+        session.query(ResearchAnalysis).filter(
+            ResearchAnalysis.document_id.in_(document_ids)
+        ).delete(synchronize_session=False)
+        session.query(Document).filter(Document.id.in_(document_ids)).delete(
+            synchronize_session=False
+        )
         session.flush()
 
     def _relationship_type_cache(self, session: Session) -> Dict[str, Dict[str, Any]]:
@@ -3082,7 +3714,9 @@ class ResearchSessionRepository:
         cache[relationship_type.relationship_type] = entry
         return entry
 
-    def _build_observe_entity_lookup(self, entities: Sequence[Entity]) -> Dict[str, Entity]:
+    def _build_observe_entity_lookup(
+        self, entities: Sequence[Entity]
+    ) -> Dict[str, Entity]:
         lookup: Dict[str, Entity] = {}
         for entity in entities:
             lookup[str(entity.id)] = entity
@@ -3099,7 +3733,9 @@ class ResearchSessionRepository:
         lookup: Mapping[str, Entity],
         prefix: str,
     ) -> Optional[Entity]:
-        direct_id = str(payload.get(f"{prefix}_entity_id") or payload.get(f"{prefix}_id") or "").strip()
+        direct_id = str(
+            payload.get(f"{prefix}_entity_id") or payload.get(f"{prefix}_id") or ""
+        ).strip()
         if direct_id and direct_id in lookup:
             return lookup[direct_id]
         entity_name = str(
@@ -3120,7 +3756,15 @@ class ResearchSessionRepository:
     @staticmethod
     def _entity_raw_type(entity: Entity) -> str:
         metadata = dict(entity.entity_metadata or {})
-        return str(metadata.get("raw_type") or (entity.type.value if isinstance(entity.type, EntityTypeEnum) else str(entity.type)) or "other")
+        return str(
+            metadata.get("raw_type")
+            or (
+                entity.type.value
+                if isinstance(entity.type, EntityTypeEnum)
+                else str(entity.type)
+            )
+            or "other"
+        )
 
     @staticmethod
     def _apply_session_updates(rs: ResearchSession, updates: Mapping[str, Any]) -> None:

@@ -39,6 +39,7 @@ def _seed(repo) -> str:
 # from_review_dispute 单元行为
 # ---------------------------------------------------------------------------
 
+
 def test_from_review_dispute_rejected_maps_to_high_severity_with_violation():
     dispute = {
         "case_id": "DISP-1",
@@ -54,7 +55,9 @@ def test_from_review_dispute_rejected_maps_to_high_severity_with_violation():
     assert entry.severity == "high"
     assert entry.graph_targets == ["k-1"]
     assert entry.source_phase == "review_workbench:catalog"
-    assert entry.violations and entry.violations[0]["rule_id"] == "expert_dispute:rejected"
+    assert (
+        entry.violations and entry.violations[0]["rule_id"] == "expert_dispute:rejected"
+    )
     assert entry.extra["dispute_case_id"] == "DISP-1"
 
 
@@ -75,13 +78,17 @@ def test_from_review_dispute_accepted_no_violation():
 # 验收门：dispute close → 反馈库新增条目
 # ---------------------------------------------------------------------------
 
+
 def test_dispute_close_appends_learning_feedback_record(repo):
     cycle_id = _seed(repo)
     loop = ExpertFeedbackLoop()
     loop.attach_to_repo(repo)
 
     opened = repo.open_review_dispute(
-        cycle_id, "catalog", "k-target", "李研究员",
+        cycle_id,
+        "catalog",
+        "k-target",
+        "李研究员",
         "需要专家重新审议此条版本谱系",
         arbitrator="张专家",
     )
@@ -92,8 +99,11 @@ def test_dispute_close_appends_learning_feedback_record(repo):
     assert library_before is None or len(library_before.get("records", [])) == 0
 
     resolved = repo.resolve_review_dispute(
-        cycle_id, case_id, "rejected",
-        resolved_by="张专家", resolution_notes="证据链不完整",
+        cycle_id,
+        case_id,
+        "rejected",
+        resolved_by="张专家",
+        resolution_notes="证据链不完整",
     )
     assert resolved["dispute_status"] == "resolved"
 
@@ -115,6 +125,11 @@ def test_record_dispute_feedback_without_repo_returns_none():
     loop = ExpertFeedbackLoop()
     out = loop.record_dispute_feedback(
         "cycle-x",
-        {"case_id": "DISP-Z", "asset_type": "catalog", "asset_key": "k", "resolution": "accepted"},
+        {
+            "case_id": "DISP-Z",
+            "asset_type": "catalog",
+            "asset_key": "k",
+            "resolution": "accepted",
+        },
     )
     assert out is None

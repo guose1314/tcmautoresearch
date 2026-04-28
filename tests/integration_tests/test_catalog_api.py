@@ -55,15 +55,25 @@ def _build_app(driver) -> FastAPI:
 
 class TestCatalogViewsAPI(unittest.TestCase):
     def test_topic_view_returns_paginated_items(self) -> None:
-        driver = _make_driver({
-            "MATCH (t:Topic)": [
-                _FakeRecord(key="spleen_qi_deficiency", label="脾气虚",
-                            description="", document_count=12),
-                _FakeRecord(key="dampness_obstruction", label="湿阻",
-                            description="", document_count=7),
-            ],
-            "CREATE CONSTRAINT": [],
-        })
+        driver = _make_driver(
+            {
+                "MATCH (t:Topic)": [
+                    _FakeRecord(
+                        key="spleen_qi_deficiency",
+                        label="脾气虚",
+                        description="",
+                        document_count=12,
+                    ),
+                    _FakeRecord(
+                        key="dampness_obstruction",
+                        label="湿阻",
+                        description="",
+                        document_count=7,
+                    ),
+                ],
+                "CREATE CONSTRAINT": [],
+            }
+        )
         client = TestClient(_build_app(driver))
         resp = client.get("/api/catalog/views/topic", params={"page": 1, "size": 10})
         self.assertEqual(resp.status_code, 200, resp.text)
@@ -76,12 +86,16 @@ class TestCatalogViewsAPI(unittest.TestCase):
         self.assertEqual(body["items"][0]["document_count"], 12)
 
     def test_subject_view_returns_items(self) -> None:
-        driver = _make_driver({
-            "MATCH (s:SubjectClass)": [
-                _FakeRecord(code="R29", name="中医基础理论", scheme="CLC", document_count=42),
-            ],
-            "CREATE CONSTRAINT": [],
-        })
+        driver = _make_driver(
+            {
+                "MATCH (s:SubjectClass)": [
+                    _FakeRecord(
+                        code="R29", name="中医基础理论", scheme="CLC", document_count=42
+                    ),
+                ],
+                "CREATE CONSTRAINT": [],
+            }
+        )
         client = TestClient(_build_app(driver))
         resp = client.get("/api/catalog/views/subject")
         self.assertEqual(resp.status_code, 200, resp.text)
@@ -93,12 +107,16 @@ class TestCatalogViewsAPI(unittest.TestCase):
         self.assertEqual(item["scheme"], "CLC")
 
     def test_dynasty_view_returns_items(self) -> None:
-        driver = _make_driver({
-            "MATCH (d:DynastySlice)": [
-                _FakeRecord(dynasty="Tang", start_year=618, end_year=907, document_count=88),
-            ],
-            "CREATE CONSTRAINT": [],
-        })
+        driver = _make_driver(
+            {
+                "MATCH (d:DynastySlice)": [
+                    _FakeRecord(
+                        dynasty="Tang", start_year=618, end_year=907, document_count=88
+                    ),
+                ],
+                "CREATE CONSTRAINT": [],
+            }
+        )
         client = TestClient(_build_app(driver))
         resp = client.get("/api/catalog/views/dynasty", params={"size": 5})
         self.assertEqual(resp.status_code, 200, resp.text)

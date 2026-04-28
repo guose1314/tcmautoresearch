@@ -66,8 +66,10 @@ class TestCollationContextE2E(unittest.TestCase):
         neo4j = _build_neo4j_driver(
             [
                 _FakeRecord(
-                    entity_a="脾气虚", type_a="syndrome",
-                    entity_b="四君子汤", type_b="formula",
+                    entity_a="脾气虚",
+                    type_a="syndrome",
+                    entity_b="四君子汤",
+                    type_b="formula",
                     rel_types=["SUPPORTS"],
                 ),
             ]
@@ -78,8 +80,13 @@ class TestCollationContextE2E(unittest.TestCase):
             "open_api_results": {
                 "arxiv": [
                     _FakeLitRecord(
-                        title="paper", authors=["A"], year=2024, doi="",
-                        url="u", abstract="", citation_count=1,
+                        title="paper",
+                        authors=["A"],
+                        year=2024,
+                        doi="",
+                        url="u",
+                        abstract="",
+                        citation_count=1,
                         external_id="arx-1",
                     )
                 ],
@@ -89,12 +96,19 @@ class TestCollationContextE2E(unittest.TestCase):
         captured_session = _CollectingSession()
         # rational
         from src.llm.self_refine_runner import RefineResult, RefineRound
+
         runner = MagicMock()
         runner.run.return_value = RefineResult(
             purpose="collation_rational",
             final_output="修订",
             rounds=[
-                RefineRound(round_index=0, draft="d", critique_raw="[]", issues=[], refined="修订")
+                RefineRound(
+                    round_index=0,
+                    draft="d",
+                    critique_raw="[]",
+                    issues=[],
+                    refined="修订",
+                )
             ],
             succeeded=True,
         )
@@ -110,14 +124,18 @@ class TestCollationContextE2E(unittest.TestCase):
             "doc-e2e-1",
             context={
                 "raw_text": "底本原文：脾气虚证宜补气健脾。",
-                "parallel_versions": [{"title": "校本", "text": "底本原文：脾气虚证应补气健脾。"}],
+                "parallel_versions": [
+                    {"title": "校本", "text": "底本原文：脾气虚证应补气健脾。"}
+                ],
                 "query": "脾气虚 补气健脾",
                 "rational_rounds": 1,
             },
         )
 
         self.assertEqual(report.document_id, "doc-e2e-1")
-        self.assertEqual(set(report.strategies.keys()), {"cross", "intra", "external", "rational"})
+        self.assertEqual(
+            set(report.strategies.keys()), {"cross", "intra", "external", "rational"}
+        )
         for name in ("cross", "intra", "external", "rational"):
             self.assertTrue(
                 report.strategies[name].succeeded,

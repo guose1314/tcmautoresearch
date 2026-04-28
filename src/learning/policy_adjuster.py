@@ -26,7 +26,7 @@ import logging
 import threading
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timezone
 from typing import Any, Deque, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,10 @@ class PolicyAdjuster:
         self,
         initial_evidence_policy: Optional[Dict[str, Any]] = None,
         initial_template_preferences: Optional[Dict[str, float]] = None,
+        *,
+        adaptive_tuner: Optional[Any] = None,
+        adaptive_tuner_specs: Optional[Dict[str, Dict[str, Any]]] = None,
+        performance_target: float = 0.80,
     ) -> None:
         self._lock = threading.RLock()
         self._evidence_policy = dict(initial_evidence_policy or _DEFAULT_EVIDENCE_POLICY)
@@ -100,8 +104,67 @@ class PolicyAdjuster:
         self._history: Deque[PolicyVersion] = deque(maxlen=_MAX_POLICY_HISTORY)
         self._version_counter = 0
 
+        # T5.6: PolicyAdjuster 现在拥有调参子模块（前 SelfLearningEngine 的职责）
+        self._adaptive_tuner = adaptive_tuner
+        self._tuner_specs = adaptive_tuner_specs
+        self._tuner_target = float(performance_target)
+
         # 记录初始版本
         self._record_version("initial", cycle_score=None, summary="初始化")
+
+    # ── T5.6: AdaptiveTuner 接口（前 SelfLearningEngine 调参职责） ──────────
+
+    def _ensure_tuner(self) -> Optional[Any]:
+        if self._adaptive_tuner is not None:
+            return self._adaptive_tuner
+        try:
+            from src.learning.policy_adjuster_internals.adaptive_tuner import (
+                AdaptiveTuner,
+            )
+        except Exception:  # pragma: no cover
+            return None
+        try:
+            self._adaptive_tuner = AdaptiveTuner(
+                specs=self._tuner_specs,
+                performance_target=self._tuner_target,
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.warning("AdaptiveTuner 初始化失败: %s", exc)
+            self._adaptive_tuner = None
+        return self._adaptive_tuner
+
+    def tune(self, metrics: Dict[str, float]) -> Dict[str, float]:
+        """喂入一轮性能指标，返回最新参数快照。"""
+        with self._lock:
+            tuner = self._ensure_tuner()
+            if tuner is None:
+                return {}
+            try:
+                return dict(tuner.step(dict(metrics)))
+            except Exception as exc:
+                logger.warning("PolicyAdjuster.tune 失败: %s", exc)
+                return self.current_tuned_parameters()
+
+    def current_tuned_parameters(self) -> Dict[str, float]:
+        """返回 AdaptiveTuner 当前参数快照。"""
+        with self._lock:
+            tuner = self._adaptive_tuner
+            if tuner is None:
+                return {}
+            try:
+                return dict(tuner.current_values())
+            except Exception:  # pragma: no cover
+                return {}
+
+    def set_tuned_parameter(self, name: str, value: float) -> None:
+        with self._lock:
+            tuner = self._ensure_tuner()
+            if tuner is None:
+                return
+            try:
+                tuner.set_parameter(name, float(value))
+            except Exception as exc:  # pragma: no cover
+                logger.warning("set_tuned_parameter(%s) 失败: %s", name, exc)
 
     # ── 核心 API ─────────────────────────────────────────────────────────
 

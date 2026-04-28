@@ -41,7 +41,11 @@ from src.research.learning_strategy import (
 try:  # T5.2: 可选 LFITL 包依赖，保证老调用者仍可走
     from src.contexts.lfitl import (
         FeedbackTranslator as _LFITLTranslator,
+    )
+    from src.contexts.lfitl import (
         GraphWeightUpdater as _LFITLGraphWeightUpdater,
+    )
+    from src.contexts.lfitl import (
         PromptBiasCompiler as _LFITLPromptBiasCompiler,
     )
 except Exception:  # noqa: BLE001
@@ -97,7 +101,9 @@ class LearningLoopOrchestrator:
     # Phase I-3：消费 SmallModel benchmark summary，回灌策略调整。
     # ------------------------------------------------------------------
 
-    def consume_benchmark_summary(self, benchmark_summary: Dict[str, Any]) -> Dict[str, Any]:
+    def consume_benchmark_summary(
+        self, benchmark_summary: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """将 SmallModel benchmark 报告中的命中率回灌至 PolicyAdjuster。
 
         Returns
@@ -114,7 +120,9 @@ class LearningLoopOrchestrator:
             }
 
         adjustment = self._policy_adjuster.apply_benchmark_summary(benchmark_summary)
-        recommendations = deepcopy(benchmark_summary.get("learning_recommendations") or {})
+        recommendations = deepcopy(
+            benchmark_summary.get("learning_recommendations") or {}
+        )
         return {
             "policy_adjustment": {
                 "evidence_policy": adjustment.evidence_policy,
@@ -151,13 +159,17 @@ class LearningLoopOrchestrator:
                 logger.warning("冻结学习策略快照失败: %s", exc)
                 self._snapshot_before = {}
         else:
-            self._snapshot_before = build_strategy_snapshot(None, getattr(pipeline, "config", None))
+            self._snapshot_before = build_strategy_snapshot(
+                None, getattr(pipeline, "config", None)
+            )
 
         # 提取学习策略
         learning_strategy = self._extract_learning_strategy(pipeline)
 
         # 提取上一轮反馈
-        previous_iteration_feedback = self._extract_previous_iteration_feedback(pipeline)
+        previous_iteration_feedback = self._extract_previous_iteration_feedback(
+            pipeline
+        )
 
         # ---- T5.2: 从 feedback_repo 拉取近期反馈，生成 LFITL plan ----
         lfitl_plan_dict, prompt_bias_blocks = self._build_lfitl_plan(pipeline)
@@ -188,8 +200,13 @@ class LearningLoopOrchestrator:
         ctx = dict(phase_context)
         if isinstance(learning_strategy, dict) and learning_strategy:
             ctx.setdefault("learning_strategy", deepcopy(learning_strategy))
-        if isinstance(previous_iteration_feedback, dict) and previous_iteration_feedback:
-            ctx.setdefault("previous_iteration_feedback", deepcopy(previous_iteration_feedback))
+        if (
+            isinstance(previous_iteration_feedback, dict)
+            and previous_iteration_feedback
+        ):
+            ctx.setdefault(
+                "previous_iteration_feedback", deepcopy(previous_iteration_feedback)
+            )
         # T5.2: prompt_bias_blocks 供 SelfRefineRunner 调用侧 手动 inject 进 inputs
         if isinstance(prompt_bias_blocks, dict) and prompt_bias_blocks:
             ctx.setdefault("prompt_bias_blocks", deepcopy(prompt_bias_blocks))
@@ -234,7 +251,9 @@ class LearningLoopOrchestrator:
             except Exception as exc:
                 logger.warning("刷新学习策略快照失败: %s", exc)
 
-        snapshot_after = build_strategy_snapshot(None, getattr(pipeline, "config", None))
+        snapshot_after = build_strategy_snapshot(
+            None, getattr(pipeline, "config", None)
+        )
         strategy_diff = (
             build_strategy_diff(self._snapshot_before, snapshot_after)
             if self._snapshot_before
@@ -292,10 +311,14 @@ class LearningLoopOrchestrator:
             base_summary["reflect_learning"] = {
                 "fed": self._reflect_learning_result.get("fed", False),
                 "strategy_changed": bool(
-                    (self._reflect_learning_result.get("strategy_diff") or {}).get("changed")
+                    (self._reflect_learning_result.get("strategy_diff") or {}).get(
+                        "changed"
+                    )
                 ),
                 "change_count": (
-                    (self._reflect_learning_result.get("strategy_diff") or {}).get("change_count", 0)
+                    (self._reflect_learning_result.get("strategy_diff") or {}).get(
+                        "change_count", 0
+                    )
                 ),
             }
 
@@ -321,9 +344,13 @@ class LearningLoopOrchestrator:
 
         result = {
             "learning_strategy": self._extract_learning_strategy(pipeline),
-            "previous_iteration_feedback": self._extract_previous_iteration_feedback(pipeline),
+            "previous_iteration_feedback": self._extract_previous_iteration_feedback(
+                pipeline
+            ),
             "evidence_policy": self._policy_adjuster.get_evidence_policy(),
-            "template_preferences": self._policy_adjuster.get_active_policy().get("template_preferences", {}),
+            "template_preferences": self._policy_adjuster.get_active_policy().get(
+                "template_preferences", {}
+            ),
         }
         return result
 
@@ -343,7 +370,9 @@ class LearningLoopOrchestrator:
                 logger.warning("提取学习策略失败: %s", exc)
 
         config = getattr(pipeline, "config", None)
-        if isinstance(config, dict) and isinstance(config.get("learning_strategy"), dict):
+        if isinstance(config, dict) and isinstance(
+            config.get("learning_strategy"), dict
+        ):
             return dict(config["learning_strategy"])
         return {}
 
@@ -418,12 +447,16 @@ class LearningLoopOrchestrator:
                 logger.warning("提取上一轮反馈失败: %s", exc)
 
         config = getattr(pipeline, "config", None)
-        if isinstance(config, dict) and isinstance(config.get("previous_iteration_feedback"), dict):
+        if isinstance(config, dict) and isinstance(
+            config.get("previous_iteration_feedback"), dict
+        ):
             return dict(config["previous_iteration_feedback"])
         return {}
 
     @staticmethod
-    def _feed_self_learning(pipeline: Any, cycle_assessment: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _feed_self_learning(
+        pipeline: Any, cycle_assessment: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         config = getattr(pipeline, "config", None)
         if not isinstance(config, dict):
             return None

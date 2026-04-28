@@ -11,12 +11,12 @@ from src.research.hypothesis_engine import (
     Hypothesis,
     infer_methodology_tag,
 )
-from src.research.phases.hypothesis_phase import (
-    _validate_hypothesis_methodology_contract,
-)
 from src.research.phases.analyze_phase import (
     _resolve_analyze_methodology,
     _validate_analyze_methodology_contract,
+)
+from src.research.phases.hypothesis_phase import (
+    _validate_hypothesis_methodology_contract,
 )
 
 
@@ -32,7 +32,9 @@ class TestMethodologyVocabulary(unittest.TestCase):
         self.assertIn(DEFAULT_HYPOTHESIS_EVIDENCE_GRADE, HYPOTHESIS_EVIDENCE_GRADES)
 
     def test_methodology_tags_complete(self) -> None:
-        self.assertEqual(set(METHODOLOGY_TAGS), {"philology", "classification", "evidence_based"})
+        self.assertEqual(
+            set(METHODOLOGY_TAGS), {"philology", "classification", "evidence_based"}
+        )
 
     def test_grades_complete(self) -> None:
         self.assertEqual(set(HYPOTHESIS_EVIDENCE_GRADES), {"A", "B", "C", "D"})
@@ -44,7 +46,9 @@ class TestInferMethodologyTag(unittest.TestCase):
         self.assertEqual(infer_methodology_tag("missing_witness"), "philology")
 
     def test_classification_keywords(self) -> None:
-        self.assertEqual(infer_methodology_tag("incomplete_composition"), "classification")
+        self.assertEqual(
+            infer_methodology_tag("incomplete_composition"), "classification"
+        )
         self.assertEqual(infer_methodology_tag("herb_taxonomy_gap"), "classification")
 
     def test_default_evidence_based(self) -> None:
@@ -86,7 +90,9 @@ class TestHypothesisContractValidation(unittest.TestCase):
         _validate_hypothesis_methodology_contract([self._valid_hypothesis()])
 
     def test_passes_when_grade_none(self) -> None:
-        _validate_hypothesis_methodology_contract([self._valid_hypothesis(evidence_grade=None)])
+        _validate_hypothesis_methodology_contract(
+            [self._valid_hypothesis(evidence_grade=None)]
+        )
 
     def test_passes_with_empty_list(self) -> None:
         _validate_hypothesis_methodology_contract([])
@@ -135,18 +141,26 @@ class TestAnalyzeMethodologyResolution(unittest.TestCase):
 
 class TestAnalyzeContractValidation(unittest.TestCase):
     def test_passes(self) -> None:
-        _validate_analyze_methodology_contract({"methodology_tag": "philology", "evidence_grade": "A"})
+        _validate_analyze_methodology_contract(
+            {"methodology_tag": "philology", "evidence_grade": "A"}
+        )
 
     def test_passes_grade_none(self) -> None:
-        _validate_analyze_methodology_contract({"methodology_tag": "philology", "evidence_grade": None})
+        _validate_analyze_methodology_contract(
+            {"methodology_tag": "philology", "evidence_grade": None}
+        )
 
     def test_fails_invalid_tag(self) -> None:
         with self.assertRaises(ValueError):
-            _validate_analyze_methodology_contract({"methodology_tag": "bogus", "evidence_grade": "C"})
+            _validate_analyze_methodology_contract(
+                {"methodology_tag": "bogus", "evidence_grade": "C"}
+            )
 
     def test_fails_invalid_grade(self) -> None:
         with self.assertRaises(ValueError):
-            _validate_analyze_methodology_contract({"methodology_tag": "philology", "evidence_grade": "Z"})
+            _validate_analyze_methodology_contract(
+                {"methodology_tag": "philology", "evidence_grade": "Z"}
+            )
 
     def test_fails_non_dict(self) -> None:
         with self.assertRaises(ValueError):

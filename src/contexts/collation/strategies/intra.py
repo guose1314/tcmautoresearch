@@ -48,7 +48,9 @@ class IntraCollationStrategy:
 
     name = "intra"
 
-    def __init__(self, *, neo4j_driver: Any = None, neo4j_database: str = "neo4j") -> None:
+    def __init__(
+        self, *, neo4j_driver: Any = None, neo4j_database: str = "neo4j"
+    ) -> None:
         self._driver = neo4j_driver
         self._database = neo4j_database
 

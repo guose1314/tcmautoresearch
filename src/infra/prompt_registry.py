@@ -354,9 +354,7 @@ PROMPT_REGISTRY: Dict[str, PromptTemplate] = {
             "结构化、有据可依，避免空泛与编造。"
         ),
         user_template=(
-            "【任务】\n{task_description}\n\n"
-            "【输入】\n{input_payload}\n\n"
-            "请输出初稿。"
+            "【任务】\n{task_description}\n\n【输入】\n{input_payload}\n\n请输出初稿。"
         ),
         output_kind="text",
     ),

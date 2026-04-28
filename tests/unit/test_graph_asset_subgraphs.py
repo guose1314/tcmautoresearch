@@ -162,7 +162,11 @@ def _sample_evidence_protocol() -> Dict[str, Any]:
             }
         ],
         "evidence_grade_summary": {"overall_grade": "moderate"},
-        "summary": {"evidence_record_count": 1, "claim_count": 1, "linked_claim_count": 1},
+        "summary": {
+            "evidence_record_count": 1,
+            "claim_count": 1,
+            "linked_claim_count": 1,
+        },
     }
 
 
@@ -198,7 +202,9 @@ def _sample_observe_philology() -> Dict[str, Any]:
                             "observed_forms": ["黃芪"],
                             "configured_variants": ["黃耆"],
                             "sources": ["structured_tcm_knowledge"],
-                            "source_refs": ["TCMRelationshipDefinitions.HERB_EFFICACY_MAP"],
+                            "source_refs": [
+                                "TCMRelationshipDefinitions.HERB_EFFICACY_MAP"
+                            ],
                             "notes": ["结构化释义"],
                             "dynasty_usage": ["明"],
                             "disambiguation_basis": ["structured_tcm_knowledge"],
@@ -213,7 +219,9 @@ def _sample_observe_philology() -> Dict[str, Any]:
                             "definition_source": "structured_tcm_knowledge",
                             "semantic_scope": "方剂名",
                             "sources": ["structured_tcm_knowledge"],
-                            "source_refs": ["TCMRelationshipDefinitions.FORMULA_COMPOSITIONS"],
+                            "source_refs": [
+                                "TCMRelationshipDefinitions.FORMULA_COMPOSITIONS"
+                            ],
                             "review_status": "pending",
                             "needs_manual_review": True,
                             "exegesis_notes": "「补中益气汤」释义来源：结构化知识库",
@@ -225,7 +233,9 @@ def _sample_observe_philology() -> Dict[str, Any]:
                             "definition_source": "structured_tcm_knowledge",
                             "semantic_scope": "证候术语",
                             "sources": ["structured_tcm_knowledge"],
-                            "source_refs": ["TCMRelationshipDefinitions.SYNDROME_DEFINITIONS"],
+                            "source_refs": [
+                                "TCMRelationshipDefinitions.SYNDROME_DEFINITIONS"
+                            ],
                             "review_status": "pending",
                             "needs_manual_review": True,
                             "exegesis_notes": "「气虚证」释义来源：结构化知识库",
@@ -307,30 +317,50 @@ class TestHypothesisGraphAssetBuilder(unittest.TestCase):
     def test_hypothesis_subgraph_has_nodes_and_edges(self):
         payload = build_hypothesis_subgraph(
             "cycle-001",
-            [{"hypothesis_id": "hyp-1", "title": "A", "statement": "A", "source_entities": ["黄芪", "补气"]}],
+            [
+                {
+                    "hypothesis_id": "hyp-1",
+                    "title": "A",
+                    "statement": "A",
+                    "source_entities": ["黄芪", "补气"],
+                }
+            ],
         )
         self.assertGreater(payload["node_count"], 0)
         self.assertGreater(payload["edge_count"], 0)
 
     def test_hypothesis_subgraph_contains_hypothesis_node(self):
-        payload = build_hypothesis_subgraph("cycle-001", [{"hypothesis_id": "hyp-1", "title": "A", "statement": "A"}])
+        payload = build_hypothesis_subgraph(
+            "cycle-001", [{"hypothesis_id": "hyp-1", "title": "A", "statement": "A"}]
+        )
         labels = {node["label"] for node in payload["nodes"]}
         self.assertIn("Hypothesis", labels)
 
     def test_hypothesis_subgraph_deduplicates_entities(self):
         payload = build_hypothesis_subgraph(
             "cycle-001",
-            [{"hypothesis_id": "hyp-1", "title": "A", "statement": "A", "source_entities": ["黄芪", "黄芪"]}],
+            [
+                {
+                    "hypothesis_id": "hyp-1",
+                    "title": "A",
+                    "statement": "A",
+                    "source_entities": ["黄芪", "黄芪"],
+                }
+            ],
         )
         entity_nodes = [node for node in payload["nodes"] if node["label"] == "Entity"]
         self.assertEqual(len(entity_nodes), 1)
 
     def test_hypothesis_subgraph_summary_tracks_count(self):
-        payload = build_hypothesis_subgraph("cycle-001", [{"hypothesis_id": "hyp-1", "title": "A", "statement": "A"}])
+        payload = build_hypothesis_subgraph(
+            "cycle-001", [{"hypothesis_id": "hyp-1", "title": "A", "statement": "A"}]
+        )
         self.assertEqual(payload["summary"]["hypothesis_count"], 1)
 
     def test_graph_assets_payload_contains_summary(self):
-        payload = build_graph_assets_payload(hypothesis_subgraph={"node_count": 2, "edge_count": 1})
+        payload = build_graph_assets_payload(
+            hypothesis_subgraph={"node_count": 2, "edge_count": 1}
+        )
         self.assertIn("summary", payload)
         self.assertEqual(payload["summary"]["hypothesis_subgraph"]["node_count"], 2)
 
@@ -358,21 +388,29 @@ class TestEvidenceGraphAssetBuilder(unittest.TestCase):
 
     def test_claim_without_explicit_evidence_ids_can_be_inferred(self):
         protocol = _sample_evidence_protocol()
-        protocol["claims"] = [{
-            "claim_id": "claim-2",
-            "source_entity": "黄芪",
-            "target_entity": "补气",
-            "relation_type": "treats",
-            "confidence": 0.7,
-            "evidence_ids": [],
-        }]
+        protocol["claims"] = [
+            {
+                "claim_id": "claim-2",
+                "source_entity": "黄芪",
+                "target_entity": "补气",
+                "relation_type": "treats",
+                "confidence": 0.7,
+                "evidence_ids": [],
+            }
+        ]
         payload = build_evidence_subgraph("cycle-001", protocol)
-        support_edges = [edge for edge in payload["edges"] if edge["relationship_type"] == "EVIDENCE_FOR"]
+        support_edges = [
+            edge
+            for edge in payload["edges"]
+            if edge["relationship_type"] == "EVIDENCE_FOR"
+        ]
         self.assertEqual(len(support_edges), 1)
 
     def test_claim_node_contains_derived_claim_text(self):
         payload = build_evidence_subgraph("cycle-001", _sample_evidence_protocol())
-        claim_node = next(node for node in payload["nodes"] if node["label"] == "EvidenceClaim")
+        claim_node = next(
+            node for node in payload["nodes"] if node["label"] == "EvidenceClaim"
+        )
         self.assertIn("黄芪", claim_node["properties"]["claim_text"])
 
     def test_claim_endpoints_emit_entity_nodes(self):
@@ -382,7 +420,11 @@ class TestEvidenceGraphAssetBuilder(unittest.TestCase):
 
     def test_evidence_edge_keeps_provenance_properties(self):
         payload = build_evidence_subgraph("cycle-001", _sample_evidence_protocol())
-        evidence_for_edge = next(edge for edge in payload["edges"] if edge["relationship_type"] == "EVIDENCE_FOR")
+        evidence_for_edge = next(
+            edge
+            for edge in payload["edges"]
+            if edge["relationship_type"] == "EVIDENCE_FOR"
+        )
         self.assertEqual(evidence_for_edge["properties"]["version_lineage_key"], "vl-1")
         self.assertEqual(evidence_for_edge["properties"]["witness_key"], "w-1")
 
@@ -394,8 +436,18 @@ class TestEvidenceGraphAssetBuilder(unittest.TestCase):
     def test_analyze_phase_emits_evidence_subgraph(self):
         mixin = _AnalyzeMixin(_FakeAnalyzePipeline())
         cycle = _FakeCycle()
-        with patch("src.research.phases.analyze_phase.build_evidence_protocol", return_value=_sample_evidence_protocol()):
-            result = mixin.execute_analyze_phase(cycle, {"analysis_records": [{"formula": "黄芪汤", "syndrome": "气虚", "herbs": ["黄芪"]}]})
+        with patch(
+            "src.research.phases.analyze_phase.build_evidence_protocol",
+            return_value=_sample_evidence_protocol(),
+        ):
+            result = mixin.execute_analyze_phase(
+                cycle,
+                {
+                    "analysis_records": [
+                        {"formula": "黄芪汤", "syndrome": "气虚", "herbs": ["黄芪"]}
+                    ]
+                },
+            )
         graph_assets = result["results"]["graph_assets"]
         self.assertIn("evidence_subgraph", graph_assets)
         self.assertGreater(graph_assets["evidence_subgraph"]["node_count"], 0)
@@ -449,26 +501,44 @@ class TestPhilologyGraphAssetBuilder(unittest.TestCase):
 
     def test_exegesis_node_links_to_domain_terms_with_explicit_semantic_edges(self):
         payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
-        exegesis_nodes = [node for node in payload["nodes"] if node["label"] == "ExegesisEntry"]
+        exegesis_nodes = [
+            node for node in payload["nodes"] if node["label"] == "ExegesisEntry"
+        ]
         self.assertEqual(len(exegesis_nodes), 3)
         semantic_edges = [
-            edge for edge in payload["edges"]
+            edge
+            for edge in payload["edges"]
             if edge["source_label"] == "ExegesisEntry"
-            and edge["relationship_type"] in {"EXPLAINS_HERB", "EXPLAINS_FORMULA", "EXPLAINS_SYNDROME"}
+            and edge["relationship_type"]
+            in {"EXPLAINS_HERB", "EXPLAINS_FORMULA", "EXPLAINS_SYNDROME"}
         ]
         relation_types = {edge["relationship_type"] for edge in semantic_edges}
-        self.assertEqual(relation_types, {"EXPLAINS_HERB", "EXPLAINS_FORMULA", "EXPLAINS_SYNDROME"})
-        herb_edge = next(edge for edge in semantic_edges if edge["relationship_type"] == "EXPLAINS_HERB")
-        formula_edge = next(edge for edge in semantic_edges if edge["relationship_type"] == "EXPLAINS_FORMULA")
         self.assertEqual(
-            set(herb_edge["properties"]).intersection(HerbProvenanceEdgeContract.required_fields),
+            relation_types, {"EXPLAINS_HERB", "EXPLAINS_FORMULA", "EXPLAINS_SYNDROME"}
+        )
+        herb_edge = next(
+            edge
+            for edge in semantic_edges
+            if edge["relationship_type"] == "EXPLAINS_HERB"
+        )
+        formula_edge = next(
+            edge
+            for edge in semantic_edges
+            if edge["relationship_type"] == "EXPLAINS_FORMULA"
+        )
+        self.assertEqual(
+            set(herb_edge["properties"]).intersection(
+                HerbProvenanceEdgeContract.required_fields
+            ),
             HerbProvenanceEdgeContract.required_fields,
         )
         self.assertEqual(herb_edge["properties"]["herb_canonical"], "黄芪")
         self.assertEqual(herb_edge["properties"]["source_herb"], "黄芪")
         self.assertTrue(herb_edge["properties"]["source_exegesis_id"])
         self.assertEqual(
-            set(formula_edge["properties"]).intersection(FormulaProvenanceEdgeContract.required_fields),
+            set(formula_edge["properties"]).intersection(
+                FormulaProvenanceEdgeContract.required_fields
+            ),
             FormulaProvenanceEdgeContract.required_fields,
         )
         self.assertEqual(formula_edge["properties"]["formula_canonical"], "补中益气汤")
@@ -478,22 +548,30 @@ class TestPhilologyGraphAssetBuilder(unittest.TestCase):
     def test_herb_exegesis_projects_efficacy_nodes(self):
         payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
         efficacy_edges = [
-            edge for edge in payload["edges"]
-            if edge["source_label"] == "ExegesisEntry" and edge["relationship_type"] == "EXPLAINS_EFFICACY"
+            edge
+            for edge in payload["edges"]
+            if edge["source_label"] == "ExegesisEntry"
+            and edge["relationship_type"] == "EXPLAINS_EFFICACY"
         ]
         herb_edges = [
-            edge for edge in payload["edges"]
-            if edge["source_label"] == "Herb" and edge["relationship_type"] == "HAS_EFFICACY"
+            edge
+            for edge in payload["edges"]
+            if edge["source_label"] == "Herb"
+            and edge["relationship_type"] == "HAS_EFFICACY"
         ]
         self.assertGreaterEqual(len(efficacy_edges), 1)
         self.assertGreaterEqual(len(herb_edges), 1)
         efficacy_nodes = [
-            node for node in payload["nodes"]
-            if node["label"] == "Efficacy" and node["properties"].get("type") == EfficacyNodeContract.node_type
+            node
+            for node in payload["nodes"]
+            if node["label"] == "Efficacy"
+            and node["properties"].get("type") == EfficacyNodeContract.node_type
         ]
         self.assertGreaterEqual(len(efficacy_nodes), 1)
         self.assertEqual(
-            set(efficacy_nodes[0]["properties"]).intersection(EfficacyNodeContract.required_fields),
+            set(efficacy_nodes[0]["properties"]).intersection(
+                EfficacyNodeContract.required_fields
+            ),
             EfficacyNodeContract.required_fields,
         )
         self.assertEqual(efficacy_nodes[0]["properties"]["herb_canonical"], "黄芪")
@@ -503,80 +581,116 @@ class TestPhilologyGraphAssetBuilder(unittest.TestCase):
     def test_formula_exegesis_projects_component_herbs(self):
         payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
         composition_edges = [
-            edge for edge in payload["edges"]
-            if edge["source_label"] == "ExegesisEntry" and edge["relationship_type"] == "EXPLAINS_FORMULA_COMPONENT"
+            edge
+            for edge in payload["edges"]
+            if edge["source_label"] == "ExegesisEntry"
+            and edge["relationship_type"] == "EXPLAINS_FORMULA_COMPONENT"
         ]
         role_edges = [
-            edge for edge in payload["edges"]
-            if edge["source_label"] == "Formula" and edge["relationship_type"] in {"SOVEREIGN", "MINISTER", "ASSISTANT", "ENVOY"}
+            edge
+            for edge in payload["edges"]
+            if edge["source_label"] == "Formula"
+            and edge["relationship_type"]
+            in {"SOVEREIGN", "MINISTER", "ASSISTANT", "ENVOY"}
         ]
         self.assertGreaterEqual(len(composition_edges), 1)
         self.assertGreaterEqual(len(role_edges), 1)
         component_nodes = [
-            node for node in payload["nodes"]
-            if node["label"] == "Herb" and node["properties"].get("type") == FormulaComponentNodeContract.node_type
+            node
+            for node in payload["nodes"]
+            if node["label"] == "Herb"
+            and node["properties"].get("type") == FormulaComponentNodeContract.node_type
         ]
         self.assertGreaterEqual(len(component_nodes), 1)
         self.assertEqual(
-            set(component_nodes[0]["properties"]).intersection(FormulaComponentNodeContract.required_fields),
+            set(component_nodes[0]["properties"]).intersection(
+                FormulaComponentNodeContract.required_fields
+            ),
             FormulaComponentNodeContract.required_fields,
         )
-        self.assertEqual(component_nodes[0]["properties"]["formula_canonical"], "补中益气汤")
-        self.assertEqual(component_nodes[0]["properties"]["source_formula"], "补中益气汤")
+        self.assertEqual(
+            component_nodes[0]["properties"]["formula_canonical"], "补中益气汤"
+        )
+        self.assertEqual(
+            component_nodes[0]["properties"]["source_formula"], "补中益气汤"
+        )
         self.assertTrue(component_nodes[0]["properties"]["source_exegesis_id"])
 
     def test_syndrome_exegesis_projects_pathogenesis_node(self):
         payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
         pathogenesis_edges = [
-            edge for edge in payload["edges"]
-            if edge["source_label"] == "ExegesisEntry" and edge["relationship_type"] == "EXPLAINS_PATHOGENESIS"
+            edge
+            for edge in payload["edges"]
+            if edge["source_label"] == "ExegesisEntry"
+            and edge["relationship_type"] == "EXPLAINS_PATHOGENESIS"
         ]
         pathogenesis_nodes = [
-            node for node in payload["nodes"]
-            if node["label"] == "Property" and node["properties"].get("type") == PATHOGENESIS_PROPERTY_TYPE
+            node
+            for node in payload["nodes"]
+            if node["label"] == "Property"
+            and node["properties"].get("type") == PATHOGENESIS_PROPERTY_TYPE
         ]
         self.assertEqual(len(pathogenesis_edges), 1)
         self.assertEqual(len(pathogenesis_nodes), 1)
         self.assertTrue(pathogenesis_nodes[0]["properties"]["source_exegesis_id"])
-        self.assertEqual(pathogenesis_nodes[0]["properties"]["syndrome_canonical"], "气虚证")
-        self.assertEqual(pathogenesis_nodes[0]["properties"]["source_syndrome"], "气虚证")
         self.assertEqual(
-            set(pathogenesis_nodes[0]["properties"]).intersection(PathogenesisNodeContract.required_fields),
+            pathogenesis_nodes[0]["properties"]["syndrome_canonical"], "气虚证"
+        )
+        self.assertEqual(
+            pathogenesis_nodes[0]["properties"]["source_syndrome"], "气虚证"
+        )
+        self.assertEqual(
+            set(pathogenesis_nodes[0]["properties"]).intersection(
+                PathogenesisNodeContract.required_fields
+            ),
             PathogenesisNodeContract.required_fields,
         )
 
     def test_syndrome_exegesis_projects_symptom_nodes(self):
         payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
         symptom_edges = [
-            edge for edge in payload["edges"]
-            if edge["source_label"] == "ExegesisEntry" and edge["relationship_type"] == "EXPLAINS_SYMPTOM"
+            edge
+            for edge in payload["edges"]
+            if edge["source_label"] == "ExegesisEntry"
+            and edge["relationship_type"] == "EXPLAINS_SYMPTOM"
         ]
         symptom_of_edges = [
-            edge for edge in payload["edges"]
-            if edge["source_label"] == "Symptom" and edge["relationship_type"] == "SYMPTOM_OF"
+            edge
+            for edge in payload["edges"]
+            if edge["source_label"] == "Symptom"
+            and edge["relationship_type"] == "SYMPTOM_OF"
         ]
         symptom_nodes = [
-            node for node in payload["nodes"]
-            if node["label"] == "Symptom"
+            node for node in payload["nodes"] if node["label"] == "Symptom"
         ]
         self.assertGreaterEqual(len(symptom_edges), 1)
         self.assertGreaterEqual(len(symptom_of_edges), 1)
         self.assertGreaterEqual(len(symptom_nodes), 1)
-        self.assertEqual(symptom_nodes[0]["properties"]["symptom_category"], SYMPTOM_CATEGORY_TYPICAL_MANIFESTATION)
-        self.assertEqual(symptom_nodes[0]["properties"]["manifestation_source"], MANIFESTATION_SOURCE_STRUCTURED)
+        self.assertEqual(
+            symptom_nodes[0]["properties"]["symptom_category"],
+            SYMPTOM_CATEGORY_TYPICAL_MANIFESTATION,
+        )
+        self.assertEqual(
+            symptom_nodes[0]["properties"]["manifestation_source"],
+            MANIFESTATION_SOURCE_STRUCTURED,
+        )
         self.assertEqual(symptom_nodes[0]["properties"]["syndrome_canonical"], "气虚证")
         self.assertEqual(symptom_nodes[0]["properties"]["source_syndrome"], "气虚证")
         self.assertTrue(symptom_nodes[0]["properties"]["source_exegesis_id"])
         self.assertEqual(
-            set(symptom_nodes[0]["properties"]).intersection(SymptomNodeContract.required_fields),
+            set(symptom_nodes[0]["properties"]).intersection(
+                SymptomNodeContract.required_fields
+            ),
             SymptomNodeContract.required_fields,
         )
 
     def test_fragment_candidate_links_to_witness(self):
         payload = build_philology_subgraph("cycle-001", _sample_observe_philology())
         derived_edges = [
-            edge for edge in payload["edges"]
-            if edge["source_label"] == "FragmentCandidate" and edge["relationship_type"] == "DERIVED_FROM"
+            edge
+            for edge in payload["edges"]
+            if edge["source_label"] == "FragmentCandidate"
+            and edge["relationship_type"] == "DERIVED_FROM"
         ]
         self.assertGreaterEqual(len(derived_edges), 1)
 
@@ -593,9 +707,50 @@ class TestGraphAssetProjection(unittest.TestCase):
         orchestrator = self._make_orchestrator()
         cycle = _FakeCycle(
             phase_executions={
-                _Phase.HYPOTHESIS: {"result": {"phase": "hypothesis", "results": {"graph_assets": build_graph_assets_payload(hypothesis_subgraph=build_hypothesis_subgraph("cycle-001", [{"hypothesis_id": "hyp-1", "title": "A", "statement": "A", "source_entities": ["黄芪"]}]))}}},
-                _Phase.ANALYZE: {"result": {"phase": "analyze", "results": {"graph_assets": build_graph_assets_payload(evidence_subgraph=build_evidence_subgraph("cycle-001", _sample_evidence_protocol()))}}},
-                _Phase.OBSERVE: {"result": {"phase": "observe", "results": {"graph_assets": build_graph_assets_payload(philology_subgraph=build_philology_subgraph("cycle-001", _sample_observe_philology()))}}},
+                _Phase.HYPOTHESIS: {
+                    "result": {
+                        "phase": "hypothesis",
+                        "results": {
+                            "graph_assets": build_graph_assets_payload(
+                                hypothesis_subgraph=build_hypothesis_subgraph(
+                                    "cycle-001",
+                                    [
+                                        {
+                                            "hypothesis_id": "hyp-1",
+                                            "title": "A",
+                                            "statement": "A",
+                                            "source_entities": ["黄芪"],
+                                        }
+                                    ],
+                                )
+                            )
+                        },
+                    }
+                },
+                _Phase.ANALYZE: {
+                    "result": {
+                        "phase": "analyze",
+                        "results": {
+                            "graph_assets": build_graph_assets_payload(
+                                evidence_subgraph=build_evidence_subgraph(
+                                    "cycle-001", _sample_evidence_protocol()
+                                )
+                            )
+                        },
+                    }
+                },
+                _Phase.OBSERVE: {
+                    "result": {
+                        "phase": "observe",
+                        "results": {
+                            "graph_assets": build_graph_assets_payload(
+                                philology_subgraph=build_philology_subgraph(
+                                    "cycle-001", _sample_observe_philology()
+                                )
+                            )
+                        },
+                    }
+                },
             }
         )
 
@@ -615,7 +770,10 @@ class TestGraphAssetProjection(unittest.TestCase):
             neo4j_driver=MagicMock(),
             cycle=cycle,
             session_record={"current_phase": "analyze"},
-            phase_records={"hypothesis": {"id": "phase-h"}, "analyze": {"id": "phase-a"}},
+            phase_records={
+                "hypothesis": {"id": "phase-h"},
+                "analyze": {"id": "phase-a"},
+            },
             artifact_records=[],
             observe_documents=[],
             transaction=txn,
@@ -641,7 +799,26 @@ class TestGraphAssetProjection(unittest.TestCase):
         orchestrator = self._make_orchestrator()
         cycle = _FakeCycle(
             phase_executions={
-                _Phase.HYPOTHESIS: {"result": {"phase": "hypothesis", "results": {"graph_assets": build_graph_assets_payload(hypothesis_subgraph=build_hypothesis_subgraph("cycle-001", [{"hypothesis_id": "hyp-1", "title": "A", "statement": "A", "source_entities": ["黄芪"]}]))}}},
+                _Phase.HYPOTHESIS: {
+                    "result": {
+                        "phase": "hypothesis",
+                        "results": {
+                            "graph_assets": build_graph_assets_payload(
+                                hypothesis_subgraph=build_hypothesis_subgraph(
+                                    "cycle-001",
+                                    [
+                                        {
+                                            "hypothesis_id": "hyp-1",
+                                            "title": "A",
+                                            "statement": "A",
+                                            "source_entities": ["黄芪"],
+                                        }
+                                    ],
+                                )
+                            )
+                        },
+                    }
+                },
             }
         )
 
@@ -667,7 +844,26 @@ class TestGraphAssetProjection(unittest.TestCase):
         orchestrator = self._make_orchestrator()
         cycle = _FakeCycle(
             phase_executions={
-                _Phase.HYPOTHESIS: {"result": {"phase": "hypothesis", "results": {"graph_assets": build_graph_assets_payload(hypothesis_subgraph=build_hypothesis_subgraph("cycle-001", [{"hypothesis_id": "hyp-1", "title": "A", "statement": "A", "source_entities": ["黄芪"]}]))}}},
+                _Phase.HYPOTHESIS: {
+                    "result": {
+                        "phase": "hypothesis",
+                        "results": {
+                            "graph_assets": build_graph_assets_payload(
+                                hypothesis_subgraph=build_hypothesis_subgraph(
+                                    "cycle-001",
+                                    [
+                                        {
+                                            "hypothesis_id": "hyp-1",
+                                            "title": "A",
+                                            "statement": "A",
+                                            "source_entities": ["黄芪"],
+                                        }
+                                    ],
+                                )
+                            )
+                        },
+                    }
+                },
             }
         )
 

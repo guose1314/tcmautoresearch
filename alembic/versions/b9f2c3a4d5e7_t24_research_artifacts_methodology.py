@@ -7,9 +7,9 @@ Create Date: 2026-04-26 00:00:00
 
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "b9f2c3a4d5e7"
@@ -23,8 +23,12 @@ def upgrade() -> None:
     dialect = bind.dialect.name if bind is not None else ""
     if dialect == "sqlite":
         with op.batch_alter_table("research_artifacts") as batch_op:
-            batch_op.add_column(sa.Column("methodology_tag", sa.String(length=32), nullable=True))
-            batch_op.add_column(sa.Column("evidence_grade", sa.String(length=2), nullable=True))
+            batch_op.add_column(
+                sa.Column("methodology_tag", sa.String(length=32), nullable=True)
+            )
+            batch_op.add_column(
+                sa.Column("evidence_grade", sa.String(length=2), nullable=True)
+            )
     else:
         op.add_column(
             "research_artifacts",
