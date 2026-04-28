@@ -290,6 +290,49 @@ class PublishPhaseMixin:
         except Exception:
             # self-refine 故障不能影响 publish 阶段交付物
             pass
+        # T4.5: enable_self_refine=True 时，对 paper title+abstract 调用 SelfRefineRunner
+        try:
+            from src.research._self_refine_t45 import (
+                apply_self_refine_v2,
+                resolve_enable_self_refine,
+                resolve_self_refine_runner,
+            )
+
+            if resolve_enable_self_refine(context, self.pipeline.config):
+                runner = resolve_self_refine_runner(context, self.pipeline)
+                paper_draft = (
+                    paper_result.get("paper_draft", {})
+                    if isinstance(paper_result, dict)
+                    else {}
+                )
+                if not isinstance(paper_draft, dict):
+                    paper_draft = {}
+                seed_segments_v2 = []
+                for key in ("title", "abstract", "summary"):
+                    value = paper_draft.get(key)
+                    if isinstance(value, str) and value.strip():
+                        seed_segments_v2.append(value.strip())
+                if not seed_segments_v2:
+                    fallback_title = str(
+                        paper_context.get("title")
+                        or getattr(cycle, "research_objective", "")
+                        or getattr(cycle, "description", "")
+                        or ""
+                    ).strip()
+                    if fallback_title:
+                        seed_segments_v2.append(fallback_title)
+                metadata.update(
+                    apply_self_refine_v2(
+                        runner=runner,
+                        purpose="publish",
+                        draft_text="\n\n".join(seed_segments_v2),
+                        max_refine_rounds=int(
+                            (context or {}).get("self_refine_max_rounds", 1)
+                        ),
+                    )
+                )
+        except Exception:
+            pass
         evidence_protocol = build_phase_evidence_protocol(
             "publish",
             evidence_records=citation_records,

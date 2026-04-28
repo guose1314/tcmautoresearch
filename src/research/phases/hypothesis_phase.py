@@ -82,9 +82,13 @@ class HypothesisPhaseMixin:
 
     pipeline: "ResearchPipeline"  # provided by ResearchPhaseHandlers
 
-    def execute_hypothesis_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute_hypothesis_phase(
+        self, cycle: "ResearchCycle", context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         context = context or {}
-        self._hypothesis_tracker = StrategyApplicationTracker("hypothesis", context, self.pipeline.config)
+        self._hypothesis_tracker = StrategyApplicationTracker(
+            "hypothesis", context, self.pipeline.config
+        )
         hypothesis_context = self._build_hypothesis_context(cycle, context)
         result = self.pipeline.hypothesis_engine.execute(hypothesis_context)
         hypotheses = result.get("hypotheses") or []
@@ -93,14 +97,22 @@ class HypothesisPhaseMixin:
         metadata = result.setdefault("metadata", {})
         result["phase"] = "hypothesis"
         result.setdefault("validation_iterations", [])
-        result.setdefault("domain", hypothesis_context.get("research_domain") or "integrative_research")
+        result.setdefault(
+            "domain",
+            hypothesis_context.get("research_domain") or "integrative_research",
+        )
         metadata.setdefault("hypothesis_count", len(hypotheses))
-        metadata.setdefault("validation_iteration_count", len(result.get("validation_iterations") or []))
+        metadata.setdefault(
+            "validation_iteration_count", len(result.get("validation_iterations") or [])
+        )
         metadata.setdefault(
             "selected_hypothesis_id",
             str((hypotheses[0] or {}).get("hypothesis_id") if hypotheses else ""),
         )
-        metadata.setdefault("used_llm_generation", any(item.get("generation_mode") == "llm" for item in hypotheses))
+        metadata.setdefault(
+            "used_llm_generation",
+            any(item.get("generation_mode") == "llm" for item in hypotheses),
+        )
         metadata.setdefault("used_llm_closed_loop", False)
         metadata.setdefault("llm_iteration_count", 0)
         # Phase I-4: 若没有任何 LLM 生成的假设（rules-only 或全部 fallback），写入 fallback 质量元数据
@@ -130,7 +142,11 @@ class HypothesisPhaseMixin:
         # 记录推理框架选择
         reasoning_fw = hypothesis_context.get("reasoning_framework")
         if reasoning_fw is not None:
-            metadata["reasoning_framework"] = reasoning_fw.to_dict() if hasattr(reasoning_fw, "to_dict") else str(reasoning_fw)
+            metadata["reasoning_framework"] = (
+                reasoning_fw.to_dict()
+                if hasattr(reasoning_fw, "to_dict")
+                else str(reasoning_fw)
+            )
         # Phase J-4: 对 top hypothesis 文本执行 self-refine，写入 quality delta 元数据
         try:
             from src.research.self_refine import (
@@ -157,6 +173,38 @@ class HypothesisPhaseMixin:
         except Exception:
             # self-refine 任何故障都不能阻断 hypothesis 阶段
             pass
+        # T4.5: 当 enable_self_refine=True 时，把 SelfRefineRunner 套用到 top hypothesis 文本
+        try:
+            from src.research._self_refine_t45 import (
+                apply_self_refine_v2,
+                resolve_enable_self_refine,
+                resolve_self_refine_runner,
+            )
+
+            if resolve_enable_self_refine(context, self.pipeline.config):
+                runner = resolve_self_refine_runner(context, self.pipeline)
+                top = next((h for h in hypotheses if isinstance(h, dict)), None)
+                top_text_v2 = ""
+                if top is not None:
+                    top_text_v2 = str(
+                        top.get("statement")
+                        or top.get("description")
+                        or top.get("hypothesis_text")
+                        or top.get("title")
+                        or ""
+                    ).strip()
+                metadata.update(
+                    apply_self_refine_v2(
+                        runner=runner,
+                        purpose="hypothesis",
+                        draft_text=top_text_v2,
+                        max_refine_rounds=int(
+                            (context or {}).get("self_refine_max_rounds", 1)
+                        ),
+                    )
+                )
+        except Exception:
+            pass
         if hasattr(self, "_hypothesis_tracker"):
             metadata["learning"] = self._hypothesis_tracker.to_metadata()
             self.pipeline.register_phase_learning_manifest(
@@ -164,33 +212,55 @@ class HypothesisPhaseMixin:
             )
         phase_payload = dict(result)
         hypothesis_subgraph = build_hypothesis_subgraph(cycle.cycle_id, hypotheses)
-        graph_assets = build_graph_assets_payload(hypothesis_subgraph=hypothesis_subgraph)
-        metadata.setdefault("graph_asset_subgraphs", sorted(key for key in graph_assets.keys() if key != "summary"))
-        metadata.setdefault("graph_asset_node_count", int(hypothesis_subgraph.get("node_count") or 0))
-        metadata.setdefault("graph_asset_edge_count", int(hypothesis_subgraph.get("edge_count") or 0))
+        graph_assets = build_graph_assets_payload(
+            hypothesis_subgraph=hypothesis_subgraph
+        )
+        metadata.setdefault(
+            "graph_asset_subgraphs",
+            sorted(key for key in graph_assets.keys() if key != "summary"),
+        )
+        metadata.setdefault(
+            "graph_asset_node_count", int(hypothesis_subgraph.get("node_count") or 0)
+        )
+        metadata.setdefault(
+            "graph_asset_edge_count", int(hypothesis_subgraph.get("edge_count") or 0)
+        )
         evidence_protocol = build_phase_evidence_protocol(
             "hypothesis",
             claims=[
                 {
                     "claim_id": h.get("hypothesis_id") or "",
-                    "claim_text": h.get("statement") or h.get("description") or h.get("hypothesis_text") or "",
+                    "claim_text": h.get("statement")
+                    or h.get("description")
+                    or h.get("hypothesis_text")
+                    or "",
                     "claim_type": "hypothesis",
-                    "source_entity": (h.get("source_entities") or [""])[0] if isinstance(h, dict) else "",
+                    "source_entity": (h.get("source_entities") or [""])[0]
+                    if isinstance(h, dict)
+                    else "",
                     "target_entity": h.get("title") or h.get("statement") or "",
                     "relation_type": "proposes",
                 }
-                for h in hypotheses if isinstance(h, dict)
+                for h in hypotheses
+                if isinstance(h, dict)
             ],
             evidence_grade="hypothesis",
-            evidence_summary={"phase": "hypothesis", "hypothesis_count": len(hypotheses)},
+            evidence_summary={
+                "phase": "hypothesis",
+                "hypothesis_count": len(hypotheses),
+            },
         )
         return build_phase_result(
             "hypothesis",
-            status=str(result.get("status") or ("completed" if hypotheses else "degraded")),
+            status=str(
+                result.get("status") or ("completed" if hypotheses else "degraded")
+            ),
             results={
                 "hypotheses": hypotheses,
                 "validation_iterations": result.get("validation_iterations") or [],
-                "domain": result.get("domain") or hypothesis_context.get("research_domain") or "integrative_research",
+                "domain": result.get("domain")
+                or hypothesis_context.get("research_domain")
+                or "integrative_research",
                 "selected_hypothesis_id": metadata.get("selected_hypothesis_id", ""),
                 "evidence_protocol": evidence_protocol,
                 "graph_assets": graph_assets,
@@ -201,10 +271,16 @@ class HypothesisPhaseMixin:
             extra_fields=phase_payload,
         )
 
-    def _build_hypothesis_context(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
-        observe_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.OBSERVE, {}).get("result", {})
+    def _build_hypothesis_context(
+        self, cycle: "ResearchCycle", context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        observe_result = cycle.phase_executions.get(
+            self.pipeline.ResearchPhase.OBSERVE, {}
+        ).get("result", {})
         existing_hypotheses = get_phase_value(
-            cycle.phase_executions.get(self.pipeline.ResearchPhase.HYPOTHESIS, {}).get("result", {}),
+            cycle.phase_executions.get(self.pipeline.ResearchPhase.HYPOTHESIS, {}).get(
+                "result", {}
+            ),
             "hypotheses",
             [],
         )
@@ -212,15 +288,34 @@ class HypothesisPhaseMixin:
 
         observations = get_phase_value(observe_result, "observations", [])
         findings = get_phase_value(observe_result, "findings", [])
-        literature_pipeline = get_phase_value(observe_result, "literature_pipeline", {}) or {}
-        corpus_collection = get_phase_value(observe_result, "corpus_collection", {}) or {}
-        ingestion_pipeline = get_phase_value(observe_result, "ingestion_pipeline", {}) or {}
+        literature_pipeline = (
+            get_phase_value(observe_result, "literature_pipeline", {}) or {}
+        )
+        corpus_collection = (
+            get_phase_value(observe_result, "corpus_collection", {}) or {}
+        )
+        ingestion_pipeline = (
+            get_phase_value(observe_result, "ingestion_pipeline", {}) or {}
+        )
 
-        entities = context.get("entities") or ingestion_pipeline.get("entities") or corpus_collection.get("entities") or []
-        contradictions = context.get("contradictions") or observe_result.get("contradictions") or []
-        literature_titles = self._extract_hypothesis_literature_titles(literature_pipeline, context)
-        semantic_relationships = self._extract_hypothesis_relationships(ingestion_pipeline, context)
-        reasoning_summary = self._extract_hypothesis_reasoning_summary(ingestion_pipeline, context)
+        entities = (
+            context.get("entities")
+            or ingestion_pipeline.get("entities")
+            or corpus_collection.get("entities")
+            or []
+        )
+        contradictions = (
+            context.get("contradictions") or observe_result.get("contradictions") or []
+        )
+        literature_titles = self._extract_hypothesis_literature_titles(
+            literature_pipeline, context
+        )
+        semantic_relationships = self._extract_hypothesis_relationships(
+            ingestion_pipeline, context
+        )
+        reasoning_summary = self._extract_hypothesis_reasoning_summary(
+            ingestion_pipeline, context
+        )
         knowledge_graph = self._build_hypothesis_knowledge_graph(
             entities,
             {
@@ -228,30 +323,49 @@ class HypothesisPhaseMixin:
                 "relationships": semantic_relationships,
             },
         )
-        knowledge_gap = context.get("knowledge_gap") or self._derive_hypothesis_knowledge_gap(knowledge_graph, entities)
+        knowledge_gap = context.get(
+            "knowledge_gap"
+        ) or self._derive_hypothesis_knowledge_gap(knowledge_graph, entities)
 
         # ---- 推理结构自发现：选择最匹配的推理框架 ----
         reasoning_framework = select_reasoning_framework(
-            getattr(cycle, "research_objective", "") or context.get("research_objective") or "",
+            getattr(cycle, "research_objective", "")
+            or context.get("research_objective")
+            or "",
             {
                 "entities": entities,
                 "knowledge_gap": knowledge_gap,
-                "research_domain": context.get("research_domain") or self._infer_hypothesis_domain(cycle, observations, findings),
-                "research_scope": getattr(cycle, "research_scope", "") or context.get("research_scope") or "",
+                "research_domain": context.get("research_domain")
+                or self._infer_hypothesis_domain(cycle, observations, findings),
+                "research_scope": getattr(cycle, "research_scope", "")
+                or context.get("research_scope")
+                or "",
                 "learning_strategy": learning_strategy,
                 "reasoning_framework": context.get("reasoning_framework"),
             },
             force_framework=context.get("force_reasoning_framework"),
         )
-        
+
         dynamic_few_shot = ""
-        if hasattr(self.pipeline, "self_learning_engine") and self.pipeline.self_learning_engine:
-            dynamic_few_shot = self.pipeline.self_learning_engine.get_dynamic_few_shot_examples(limit=3)
+        if (
+            hasattr(self.pipeline, "self_learning_engine")
+            and self.pipeline.self_learning_engine
+        ):
+            dynamic_few_shot = (
+                self.pipeline.self_learning_engine.get_dynamic_few_shot_examples(
+                    limit=3
+                )
+            )
 
         return {
-            "research_objective": cycle.research_objective or context.get("research_objective") or cycle.description,
-            "research_scope": cycle.research_scope or context.get("research_scope") or "",
-            "research_domain": context.get("research_domain") or self._infer_hypothesis_domain(cycle, observations, findings),
+            "research_objective": cycle.research_objective
+            or context.get("research_objective")
+            or cycle.description,
+            "research_scope": cycle.research_scope
+            or context.get("research_scope")
+            or "",
+            "research_domain": context.get("research_domain")
+            or self._infer_hypothesis_domain(cycle, observations, findings),
             "observations": observations,
             "findings": findings,
             "entities": entities,
@@ -261,9 +375,13 @@ class HypothesisPhaseMixin:
             "relationships": semantic_relationships,
             "reasoning_summary": reasoning_summary,
             "knowledge_patterns": (reasoning_summary.get("knowledge_patterns") or {}),
-            "inference_confidence": float(reasoning_summary.get("inference_confidence") or 0.0),
+            "inference_confidence": float(
+                reasoning_summary.get("inference_confidence") or 0.0
+            ),
             "existing_hypotheses": existing_hypotheses,
-            "use_llm_generation": self._resolve_hypothesis_use_llm_generation(context, learning_strategy),
+            "use_llm_generation": self._resolve_hypothesis_use_llm_generation(
+                context, learning_strategy
+            ),
             "llm_service": context.get("llm_service"),
             "knowledge_graph": knowledge_graph,
             "knowledge_gap": knowledge_gap,
@@ -292,7 +410,10 @@ class HypothesisPhaseMixin:
             reason = "default_false"
         if hasattr(self, "_hypothesis_tracker"):
             self._hypothesis_tracker.record(
-                "use_llm_generation", False, adjusted, reason,
+                "use_llm_generation",
+                False,
+                adjusted,
+                reason,
             )
         return adjusted
 
@@ -304,35 +425,50 @@ class HypothesisPhaseMixin:
         explicit_summary = context.get("reasoning_summary")
         if isinstance(explicit_summary, dict) and explicit_summary:
             return explicit_summary
-        aggregate_summary = (ingestion_pipeline.get("aggregate") or {}).get("reasoning_summary") or {}
+        aggregate_summary = (ingestion_pipeline.get("aggregate") or {}).get(
+            "reasoning_summary"
+        ) or {}
         if isinstance(aggregate_summary, dict) and aggregate_summary:
             return aggregate_summary
         document_summaries = [
             item.get("reasoning_summary")
             for item in (ingestion_pipeline.get("documents") or [])
-            if isinstance(item, dict) and isinstance(item.get("reasoning_summary"), dict)
+            if isinstance(item, dict)
+            and isinstance(item.get("reasoning_summary"), dict)
         ]
-        return self._merge_reasoning_summaries([item for item in document_summaries if item])
+        return self._merge_reasoning_summaries(
+            [item for item in document_summaries if item]
+        )
 
     def _extract_hypothesis_relationships(
         self,
         ingestion_pipeline: Dict[str, Any],
         context: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
-        explicit_relationships = context.get("relationships") or context.get("relations")
+        explicit_relationships = context.get("relationships") or context.get(
+            "relations"
+        )
         if isinstance(explicit_relationships, list) and explicit_relationships:
-            return self._deduplicate_relationships([item for item in explicit_relationships if isinstance(item, dict)])
+            return self._deduplicate_relationships(
+                [item for item in explicit_relationships if isinstance(item, dict)]
+            )
 
-        aggregate_relationships = (ingestion_pipeline.get("aggregate") or {}).get("semantic_relationships") or []
+        aggregate_relationships = (ingestion_pipeline.get("aggregate") or {}).get(
+            "semantic_relationships"
+        ) or []
         if isinstance(aggregate_relationships, list) and aggregate_relationships:
-            return self._deduplicate_relationships([item for item in aggregate_relationships if isinstance(item, dict)])
+            return self._deduplicate_relationships(
+                [item for item in aggregate_relationships if isinstance(item, dict)]
+            )
 
         document_relationships: List[Dict[str, Any]] = []
         for document in ingestion_pipeline.get("documents") or []:
             if not isinstance(document, dict):
                 continue
             document_relationships.extend(
-                item for item in (document.get("semantic_relationships") or []) if isinstance(item, dict)
+                item
+                for item in (document.get("semantic_relationships") or [])
+                if isinstance(item, dict)
             )
         return self._deduplicate_relationships(document_relationships)
 
@@ -345,7 +481,11 @@ class HypothesisPhaseMixin:
         if isinstance(titles, list) and titles:
             return [str(item) for item in titles if str(item).strip()]
         records = literature_pipeline.get("records") or []
-        return [str(item.get("title")) for item in records if isinstance(item, dict) and item.get("title")]
+        return [
+            str(item.get("title"))
+            for item in records
+            if isinstance(item, dict) and item.get("title")
+        ]
 
     def _build_hypothesis_knowledge_graph(
         self,
@@ -374,9 +514,15 @@ class HypothesisPhaseMixin:
         self._add_first_pair_relation(graph, type_map, "formula", "herb", "contains")
         self._add_first_pair_relation(graph, type_map, "formula", "syndrome", "treats")
         self._add_first_pair_relation(graph, type_map, "herb", "efficacy", "efficacy")
-        self._add_first_pair_relation(graph, type_map, "syndrome", "target", "associated_target")
-        self._add_first_pair_relation(graph, type_map, "target", "pathway", "participates_in")
-        self._add_first_pair_relation(graph, type_map, "herb", "pathway", "participates_in")
+        self._add_first_pair_relation(
+            graph, type_map, "syndrome", "target", "associated_target"
+        )
+        self._add_first_pair_relation(
+            graph, type_map, "target", "pathway", "participates_in"
+        )
+        self._add_first_pair_relation(
+            graph, type_map, "herb", "pathway", "participates_in"
+        )
         return graph
 
     def _add_hypothesis_relation(self, graph: IKnowledgeGraph, relation: Any) -> None:
@@ -391,11 +537,17 @@ class HypothesisPhaseMixin:
                     graph.add_entity({"name": str(src), "type": source_type})
                 if target_type:
                     graph.add_entity({"name": str(dst), "type": target_type})
-                graph.add_relation(str(src), str(rel_type), str(dst), relation.get("metadata") or {})
+                graph.add_relation(
+                    str(src), str(rel_type), str(dst), relation.get("metadata") or {}
+                )
             return
         if isinstance(relation, (list, tuple)) and len(relation) >= 3:
             src, rel_type, dst = relation[:3]
-            metadata = relation[3] if len(relation) >= 4 and isinstance(relation[3], dict) else {}
+            metadata = (
+                relation[3]
+                if len(relation) >= 4 and isinstance(relation[3], dict)
+                else {}
+            )
             graph.add_relation(str(src), str(rel_type), str(dst), metadata)
 
     def _add_first_pair_relation(
@@ -412,9 +564,16 @@ class HypothesisPhaseMixin:
             return
         source = sources[0]
         target = targets[0]
-        if hasattr(graph, 'neighbors') and target in graph.neighbors(source, relation_type):
+        if hasattr(graph, "neighbors") and target in graph.neighbors(
+            source, relation_type
+        ):
             return
-        graph.add_relation(source, relation_type, target, {"inferred": True, "source": "pipeline_hypothesis_context"})
+        graph.add_relation(
+            source,
+            relation_type,
+            target,
+            {"inferred": True, "source": "pipeline_hypothesis_context"},
+        )
 
     def _derive_hypothesis_knowledge_gap(
         self,
@@ -425,7 +584,9 @@ class HypothesisPhaseMixin:
         for item in entities:
             if not isinstance(item, dict) or not item.get("name"):
                 continue
-            type_map.setdefault(str(item.get("type") or "generic").lower(), []).append(str(item.get("name")))
+            type_map.setdefault(str(item.get("type") or "generic").lower(), []).append(
+                str(item.get("name"))
+            )
 
         candidate_pairs = [
             ("formula", "efficacy"),
@@ -440,7 +601,9 @@ class HypothesisPhaseMixin:
                 continue
             source = sources[0]
             target = targets[0]
-            if graph.query_path(source, target) and target not in graph.neighbors(source):
+            if graph.query_path(source, target) and target not in graph.neighbors(
+                source
+            ):
                 return {
                     "gap_type": "missing_direct_relation",
                     "entity": source,
@@ -464,8 +627,16 @@ class HypothesisPhaseMixin:
 
         if entities:
             first_entity = entities[0]
-            name = str(first_entity.get("name") or "研究对象") if isinstance(first_entity, dict) else str(first_entity)
-            entity_type = str(first_entity.get("type") or "generic") if isinstance(first_entity, dict) else "generic"
+            name = (
+                str(first_entity.get("name") or "研究对象")
+                if isinstance(first_entity, dict)
+                else str(first_entity)
+            )
+            entity_type = (
+                str(first_entity.get("type") or "generic")
+                if isinstance(first_entity, dict)
+                else "generic"
+            )
             return {
                 "gap_type": "insufficient_graph_relation",
                 "entity": name,
@@ -512,13 +683,28 @@ class HypothesisPhaseMixin:
         cycle: "ResearchCycle",
         context: Dict[str, Any],
     ) -> tuple[Dict[str, Any] | None, Dict[str, Any]]:
-        hypothesis_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.HYPOTHESIS, {}).get("result", {})
+        hypothesis_result = cycle.phase_executions.get(
+            self.pipeline.ResearchPhase.HYPOTHESIS, {}
+        ).get("result", {})
         hypotheses = get_phase_value(hypothesis_result, "hypotheses", []) or []
         explicit_id = str(context.get("selected_hypothesis_id") or "").strip()
-        selected_id = explicit_id or str((hypothesis_result.get("metadata") or {}).get("selected_hypothesis_id") or "").strip()
+        selected_id = (
+            explicit_id
+            or str(
+                (hypothesis_result.get("metadata") or {}).get("selected_hypothesis_id")
+                or ""
+            ).strip()
+        )
         selected = None
         if selected_id:
-            selected = next((item for item in hypotheses if item.get("hypothesis_id") == selected_id), None)
+            selected = next(
+                (
+                    item
+                    for item in hypotheses
+                    if item.get("hypothesis_id") == selected_id
+                ),
+                None,
+            )
         if selected is None and hypotheses:
             selected = hypotheses[0]
             selected_id = str(selected.get("hypothesis_id") or "").strip()

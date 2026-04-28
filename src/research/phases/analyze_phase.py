@@ -33,9 +33,7 @@ except Exception:
     EvidenceGrader = None
 
 
-_HERB_DRIVEN_SYNDROME_PREFERENCES: tuple[tuple[str, str], ...] = (
-    ("火麻仁", "中风"),
-)
+_HERB_DRIVEN_SYNDROME_PREFERENCES: tuple[tuple[str, str], ...] = (("火麻仁", "中风"),)
 
 
 def _resolve_analyze_methodology(
@@ -52,15 +50,27 @@ def _resolve_analyze_methodology(
     if explicit_tag in METHODOLOGY_TAGS:
         tag = explicit_tag
     else:
-        objective = str(getattr(cycle, "research_objective", "") or context.get("research_objective") or "").lower()
-        if any(token in objective for token in ("校勘", "训诂", "philolog", "version", "异文")):
+        objective = str(
+            getattr(cycle, "research_objective", "")
+            or context.get("research_objective")
+            or ""
+        ).lower()
+        if any(
+            token in objective
+            for token in ("校勘", "训诂", "philolog", "version", "异文")
+        ):
             tag = "philology"
-        elif any(token in objective for token in ("分类", "本草", "classification", "taxonomy", "category")):
+        elif any(
+            token in objective
+            for token in ("分类", "本草", "classification", "taxonomy", "category")
+        ):
             tag = "classification"
         else:
             tag = "evidence_based"
 
-    explicit_grade = context.get("methodology_evidence_grade") or context.get("hypothesis_evidence_grade")
+    explicit_grade = context.get("methodology_evidence_grade") or context.get(
+        "hypothesis_evidence_grade"
+    )
     if explicit_grade in HYPOTHESIS_EVIDENCE_GRADES:
         grade = explicit_grade
     else:
@@ -98,18 +108,26 @@ class AnalyzePhaseMixin:
 
     pipeline: "ResearchPipeline"  # provided by ResearchPhaseHandlers
 
-    def execute_analyze_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute_analyze_phase(
+        self, cycle: "ResearchCycle", context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         context = context or {}
-        self._analyze_tracker = StrategyApplicationTracker("analyze", context, self.pipeline.config)
+        self._analyze_tracker = StrategyApplicationTracker(
+            "analyze", context, self.pipeline.config
+        )
 
         # ---- 推理结构自发现 ----
         reasoning_framework = select_reasoning_framework(
-            getattr(cycle, "research_objective", "") or context.get("research_objective") or "",
+            getattr(cycle, "research_objective", "")
+            or context.get("research_objective")
+            or "",
             context,
             force_framework=context.get("force_reasoning_framework"),
         )
         context.setdefault("reasoning_framework", reasoning_framework)
-        context.setdefault("analyze_evidence_priority", reasoning_framework.analyze_evidence_priority)
+        context.setdefault(
+            "analyze_evidence_priority", reasoning_framework.analyze_evidence_priority
+        )
 
         significance_level = self._resolve_analyze_significance_level(context)
         analyze_records = self._collect_analyze_records(cycle, context)
@@ -131,9 +149,15 @@ class AnalyzePhaseMixin:
         )
         if evidence_grade_payload:
             analysis_results["evidence_grade"] = evidence_grade_payload
-            analysis_results["evidence_grade_summary"] = self._build_evidence_grade_summary(evidence_grade_payload)
-            analysis_results["statistical_analysis"]["evidence_grade"] = evidence_grade_payload
-            analysis_results["statistical_analysis"]["evidence_grade_summary"] = analysis_results["evidence_grade_summary"]
+            analysis_results["evidence_grade_summary"] = (
+                self._build_evidence_grade_summary(evidence_grade_payload)
+            )
+            analysis_results["statistical_analysis"]["evidence_grade"] = (
+                evidence_grade_payload
+            )
+            analysis_results["statistical_analysis"]["evidence_grade_summary"] = (
+                analysis_results["evidence_grade_summary"]
+            )
 
         evidence_protocol = build_evidence_protocol(
             reasoning_results,
@@ -154,35 +178,83 @@ class AnalyzePhaseMixin:
         analysis_results["methodology"] = methodology
 
         cycle_id = str(getattr(cycle, "cycle_id", "") or "analyze-cycle")
-        evidence_subgraph = build_evidence_subgraph(
-            cycle_id,
-            evidence_protocol,
-            phase="analyze",
-        ) if evidence_protocol else {}
+        evidence_subgraph = (
+            build_evidence_subgraph(
+                cycle_id,
+                evidence_protocol,
+                phase="analyze",
+            )
+            if evidence_protocol
+            else {}
+        )
         if evidence_subgraph:
-            analysis_results["graph_assets"] = build_graph_assets_payload(evidence_subgraph=evidence_subgraph)
+            analysis_results["graph_assets"] = build_graph_assets_payload(
+                evidence_subgraph=evidence_subgraph
+            )
 
         metadata = {
             "analysis_type": "statistical_analysis",
             "significance_level": significance_level,
-            "analysis_modules": self._resolve_analyze_modules(reasoning_results, data_mining_result),
+            "analysis_modules": self._resolve_analyze_modules(
+                reasoning_results, data_mining_result
+            ),
             "record_count": len(analyze_records),
             "minimum_sample_size": self._resolve_analyze_min_sample_size(context),
-            "syndrome_count": len({record.get("syndrome") for record in analyze_records if record.get("syndrome") and record.get("syndrome") != "unknown"}),
+            "syndrome_count": len(
+                {
+                    record.get("syndrome")
+                    for record in analyze_records
+                    if record.get("syndrome") and record.get("syndrome") != "unknown"
+                }
+            ),
             "reasoning_engine_used": bool(reasoning_results),
-            "reasoning_relationship_count": len(((reasoning_results.get("reasoning_results") or {}).get("entity_relationships") or [])),
-            "data_mining_methods": list(data_mining_result.get("methods_executed") or []),
+            "reasoning_relationship_count": len(
+                (
+                    (reasoning_results.get("reasoning_results") or {}).get(
+                        "entity_relationships"
+                    )
+                    or []
+                )
+            ),
+            "data_mining_methods": list(
+                data_mining_result.get("methods_executed") or []
+            ),
             "evidence_grade_generated": bool(evidence_grade_payload),
-            "evidence_study_count": int(evidence_grade_payload.get("study_count") or 0) if evidence_grade_payload else 0,
+            "evidence_study_count": int(evidence_grade_payload.get("study_count") or 0)
+            if evidence_grade_payload
+            else 0,
             "evidence_protocol_generated": bool(evidence_protocol),
-            "evidence_record_count": int(((evidence_protocol.get("summary") or {}).get("evidence_record_count") or 0)) if evidence_protocol else 0,
-            "evidence_claim_count": int(((evidence_protocol.get("summary") or {}).get("claim_count") or 0)) if evidence_protocol else 0,
+            "evidence_record_count": int(
+                (
+                    (evidence_protocol.get("summary") or {}).get(
+                        "evidence_record_count"
+                    )
+                    or 0
+                )
+            )
+            if evidence_protocol
+            else 0,
+            "evidence_claim_count": int(
+                ((evidence_protocol.get("summary") or {}).get("claim_count") or 0)
+            )
+            if evidence_protocol
+            else 0,
             "textual_evidence_chain_consumed": bool(textual_evidence_summary),
-            "textual_evidence_chain_count": int(textual_evidence_summary.get("evidence_chain_count") or 0) if textual_evidence_summary else 0,
+            "textual_evidence_chain_count": int(
+                textual_evidence_summary.get("evidence_chain_count") or 0
+            )
+            if textual_evidence_summary
+            else 0,
             "graph_asset_subgraphs": ["evidence_subgraph"] if evidence_subgraph else [],
-            "graph_asset_node_count": int(evidence_subgraph.get("node_count") or 0) if evidence_subgraph else 0,
-            "graph_asset_edge_count": int(evidence_subgraph.get("edge_count") or 0) if evidence_subgraph else 0,
-            "learning_strategy_applied": has_learning_strategy(context, self.pipeline.config),
+            "graph_asset_node_count": int(evidence_subgraph.get("node_count") or 0)
+            if evidence_subgraph
+            else 0,
+            "graph_asset_edge_count": int(evidence_subgraph.get("edge_count") or 0)
+            if evidence_subgraph
+            else 0,
+            "learning_strategy_applied": has_learning_strategy(
+                context, self.pipeline.config
+            ),
             "reasoning_framework": reasoning_framework.to_dict(),
         }
         if evidence_grade_error:
@@ -192,6 +264,54 @@ class AnalyzePhaseMixin:
             self.pipeline.register_phase_learning_manifest(
                 {"phase": "analyze", **self._analyze_tracker.to_metadata()}
             )
+
+        # T4.5: enable_self_refine=True 时，对 analyze 主结论文本调用 SelfRefineRunner
+        try:
+            from src.research._self_refine_t45 import (
+                apply_self_refine_v2,
+                resolve_enable_self_refine,
+                resolve_self_refine_runner,
+            )
+
+            if resolve_enable_self_refine(context, self.pipeline.config):
+                runner = resolve_self_refine_runner(context, self.pipeline)
+                draft_segments: List[str] = []
+                stat_summary = (
+                    analysis_results.get("statistical_analysis", {}).get("summary")
+                    if isinstance(analysis_results.get("statistical_analysis"), dict)
+                    else None
+                )
+                if isinstance(stat_summary, str) and stat_summary.strip():
+                    draft_segments.append(stat_summary.strip())
+                evid_summary = analysis_results.get("evidence_grade_summary")
+                if isinstance(evid_summary, str) and evid_summary.strip():
+                    draft_segments.append(evid_summary.strip())
+                if not draft_segments:
+                    # fallback：把 reasoning_results 关键字段拼成短文
+                    rr = (
+                        reasoning_results.get("reasoning_results")
+                        if isinstance(reasoning_results, dict)
+                        else None
+                    )
+                    if isinstance(rr, dict):
+                        rels = rr.get("entity_relationships") or []
+                        if rels:
+                            draft_segments.append(
+                                f"识别 {len(rels)} 条实体关系，覆盖 {len(set((r or {}).get('source') for r in rels if isinstance(r, dict)))} 个源实体。"
+                            )
+                draft_text_v2 = "\n\n".join(draft_segments)
+                metadata.update(
+                    apply_self_refine_v2(
+                        runner=runner,
+                        purpose="analyze",
+                        draft_text=draft_text_v2,
+                        max_refine_rounds=int(
+                            (context or {}).get("self_refine_max_rounds", 1)
+                        ),
+                    )
+                )
+        except Exception:
+            pass
 
         return build_phase_result(
             "analyze",
@@ -255,9 +375,12 @@ class AnalyzePhaseMixin:
         adjusted = round(min(0.1, max(0.01, 0.12 - quality_threshold * 0.1)), 4)
         if hasattr(self, "_analyze_tracker"):
             self._analyze_tracker.record(
-                "significance_level", 0.05, adjusted,
+                "significance_level",
+                0.05,
+                adjusted,
                 f"quality_threshold={quality_threshold}",
-                parameter="quality_threshold", parameter_value=quality_threshold,
+                parameter="quality_threshold",
+                parameter_value=quality_threshold,
             )
         return adjusted
 
@@ -285,9 +408,12 @@ class AnalyzePhaseMixin:
         adjusted = max(3, min(8, int(round(2 + quality_threshold * 4))))
         if hasattr(self, "_analyze_tracker"):
             self._analyze_tracker.record(
-                "min_sample_size", 5, adjusted,
+                "min_sample_size",
+                5,
+                adjusted,
                 f"quality_threshold={quality_threshold}",
-                parameter="quality_threshold", parameter_value=quality_threshold,
+                parameter="quality_threshold",
+                parameter_value=quality_threshold,
             )
         return adjusted
 
@@ -297,7 +423,9 @@ class AnalyzePhaseMixin:
         context: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
         explicit_threshold = context.get("analyze_confidence_threshold")
-        if explicit_threshold is None and not has_learning_strategy(context, self.pipeline.config):
+        if explicit_threshold is None and not has_learning_strategy(
+            context, self.pipeline.config
+        ):
             return relationships
 
         if explicit_threshold is None:
@@ -321,12 +449,16 @@ class AnalyzePhaseMixin:
         filtered_relationships: List[Dict[str, Any]] = []
         for relationship in relationships:
             metadata = relationship.get("metadata") or {}
-            has_explicit_confidence = "confidence" in metadata or "confidence" in relationship
+            has_explicit_confidence = (
+                "confidence" in metadata or "confidence" in relationship
+            )
             if not has_explicit_confidence:
                 filtered_relationships.append(relationship)
                 continue
             try:
-                confidence = float(metadata.get("confidence", relationship.get("confidence") or 0.0))
+                confidence = float(
+                    metadata.get("confidence", relationship.get("confidence") or 0.0)
+                )
             except (TypeError, ValueError):
                 confidence = 0.0
             if confidence >= confidence_threshold:
@@ -366,15 +498,25 @@ class AnalyzePhaseMixin:
         for index, record in enumerate(records, start=1):
             if not isinstance(record, dict):
                 continue
-            herbs = self._unique_text_list(record.get("herbs") or record.get("items") or [])
+            herbs = self._unique_text_list(
+                record.get("herbs") or record.get("items") or []
+            )
             if not herbs:
                 continue
             normalized_records.append(
                 {
-                    "formula": str(record.get("formula") or record.get("title") or f"record_{index}"),
+                    "formula": str(
+                        record.get("formula")
+                        or record.get("title")
+                        or f"record_{index}"
+                    ),
                     "syndrome": str(record.get("syndrome") or "unknown"),
                     "herbs": herbs,
-                    "title": str(record.get("title") or record.get("formula") or f"record_{index}"),
+                    "title": str(
+                        record.get("title")
+                        or record.get("formula")
+                        or f"record_{index}"
+                    ),
                 }
             )
         return normalized_records
@@ -388,8 +530,14 @@ class AnalyzePhaseMixin:
         if isinstance(context_documents, list):
             return [item for item in context_documents if isinstance(item, dict)]
 
-        observe_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.OBSERVE, {}).get("result", {})
-        ingestion_pipeline = context.get("ingestion_pipeline") or get_phase_value(observe_result, "ingestion_pipeline", {}) or {}
+        observe_result = cycle.phase_executions.get(
+            self.pipeline.ResearchPhase.OBSERVE, {}
+        ).get("result", {})
+        ingestion_pipeline = (
+            context.get("ingestion_pipeline")
+            or get_phase_value(observe_result, "ingestion_pipeline", {})
+            or {}
+        )
         documents = ingestion_pipeline.get("documents") or []
         return [item for item in documents if isinstance(item, dict)]
 
@@ -399,7 +547,9 @@ class AnalyzePhaseMixin:
         index: int,
     ) -> Dict[str, Any]:
         relationships = [
-            item for item in (document.get("semantic_relationships") or []) if isinstance(item, dict)
+            item
+            for item in (document.get("semantic_relationships") or [])
+            if isinstance(item, dict)
         ]
         grouped_entities = self._group_relationship_entities(relationships)
         herbs = grouped_entities.get("herb") or []
@@ -416,7 +566,9 @@ class AnalyzePhaseMixin:
             "herbs": herbs,
         }
 
-    def _select_analyze_record_syndrome(self, syndromes: List[str], herbs: List[str]) -> str:
+    def _select_analyze_record_syndrome(
+        self, syndromes: List[str], herbs: List[str]
+    ) -> str:
         if not syndromes:
             return "unknown"
 
@@ -427,12 +579,16 @@ class AnalyzePhaseMixin:
                 return preferred_syndrome
         return syndromes[0]
 
-    def _group_relationship_entities(self, relationships: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    def _group_relationship_entities(
+        self, relationships: List[Dict[str, Any]]
+    ) -> Dict[str, List[str]]:
         grouped: Dict[str, List[str]] = {}
         for relationship in relationships:
             for side in ("source", "target"):
                 entity_name = str(relationship.get(side) or "").strip()
-                entity_type = str(relationship.get(f"{side}_type") or "generic").strip().lower()
+                entity_type = (
+                    str(relationship.get(f"{side}_type") or "generic").strip().lower()
+                )
                 if not entity_name:
                     continue
                 grouped.setdefault(entity_type, [])
@@ -445,24 +601,42 @@ class AnalyzePhaseMixin:
         cycle: "ResearchCycle",
         context: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
-        explicit_relationships = context.get("relationships") or context.get("semantic_relationships") or context.get("relations")
+        explicit_relationships = (
+            context.get("relationships")
+            or context.get("semantic_relationships")
+            or context.get("relations")
+        )
         if isinstance(explicit_relationships, list) and explicit_relationships:
-            return self._deduplicate_analyze_relationships([item for item in explicit_relationships if isinstance(item, dict)])
+            return self._deduplicate_analyze_relationships(
+                [item for item in explicit_relationships if isinstance(item, dict)]
+            )
 
         execution_relationships = self._collect_execution_stage_relationships(cycle)
         if execution_relationships:
             return execution_relationships
 
-        observe_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.OBSERVE, {}).get("result", {})
-        ingestion_pipeline = context.get("ingestion_pipeline") or get_phase_value(observe_result, "ingestion_pipeline", {}) or {}
-        aggregate_relationships = (ingestion_pipeline.get("aggregate") or {}).get("semantic_relationships") or []
+        observe_result = cycle.phase_executions.get(
+            self.pipeline.ResearchPhase.OBSERVE, {}
+        ).get("result", {})
+        ingestion_pipeline = (
+            context.get("ingestion_pipeline")
+            or get_phase_value(observe_result, "ingestion_pipeline", {})
+            or {}
+        )
+        aggregate_relationships = (ingestion_pipeline.get("aggregate") or {}).get(
+            "semantic_relationships"
+        ) or []
         if isinstance(aggregate_relationships, list) and aggregate_relationships:
-            return self._deduplicate_analyze_relationships([item for item in aggregate_relationships if isinstance(item, dict)])
+            return self._deduplicate_analyze_relationships(
+                [item for item in aggregate_relationships if isinstance(item, dict)]
+            )
 
         relationships: List[Dict[str, Any]] = []
         for document in self._collect_analyze_documents(cycle, context):
             relationships.extend(
-                item for item in (document.get("semantic_relationships") or []) if isinstance(item, dict)
+                item
+                for item in (document.get("semantic_relationships") or [])
+                if isinstance(item, dict)
             )
 
         if relationships:
@@ -471,7 +645,9 @@ class AnalyzePhaseMixin:
         # Fallback: 从 Hypothesis 阶段的 source_entities 合成关系
         return self._synthesize_relationships_from_hypotheses(cycle)
 
-    def _collect_execution_stage_records(self, cycle: "ResearchCycle") -> List[Dict[str, Any]]:
+    def _collect_execution_stage_records(
+        self, cycle: "ResearchCycle"
+    ) -> List[Dict[str, Any]]:
         execution_result = cycle.phase_executions.get(
             self.pipeline.ResearchPhase.EXPERIMENT_EXECUTION,
             {},
@@ -479,7 +655,13 @@ class AnalyzePhaseMixin:
         if not isinstance(execution_result, dict):
             return []
 
-        for key in ("analysis_records", "execution_records", "imported_records", "result_records", "records"):
+        for key in (
+            "analysis_records",
+            "execution_records",
+            "imported_records",
+            "result_records",
+            "records",
+        ):
             candidate = get_phase_value(execution_result, key, []) or []
             if not isinstance(candidate, list):
                 continue
@@ -500,7 +682,9 @@ class AnalyzePhaseMixin:
                 records.append(record)
         return records
 
-    def _collect_execution_stage_relationships(self, cycle: "ResearchCycle") -> List[Dict[str, Any]]:
+    def _collect_execution_stage_relationships(
+        self, cycle: "ResearchCycle"
+    ) -> List[Dict[str, Any]]:
         execution_result = cycle.phase_executions.get(
             self.pipeline.ResearchPhase.EXPERIMENT_EXECUTION,
             {},
@@ -530,25 +714,33 @@ class AnalyzePhaseMixin:
             if not isinstance(document, dict):
                 continue
             relationships.extend(
-                item for item in (document.get("semantic_relationships") or []) if isinstance(item, dict)
+                item
+                for item in (document.get("semantic_relationships") or [])
+                if isinstance(item, dict)
             )
         if not relationships:
             return []
         return self._deduplicate_analyze_relationships(relationships)
 
-    def _deduplicate_analyze_relationships(self, relationships: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _deduplicate_analyze_relationships(
+        self, relationships: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         deduplicated: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         for relationship in relationships:
             source = str(relationship.get("source") or "").strip()
             target = str(relationship.get("target") or "").strip()
-            relation_type = str(relationship.get("type") or relationship.get("rel_type") or "related_to").strip()
+            relation_type = str(
+                relationship.get("type") or relationship.get("rel_type") or "related_to"
+            ).strip()
             if not source or not target:
                 continue
 
             key = (source, target, relation_type)
             metadata = relationship.get("metadata") or {}
             candidate_confidence = float(metadata.get("confidence") or 0.0)
-            candidate_priority = int(self._RELATION_SOURCE_PRIORITY.get(str(metadata.get("source") or ""), 0))
+            candidate_priority = int(
+                self._RELATION_SOURCE_PRIORITY.get(str(metadata.get("source") or ""), 0)
+            )
             existing = deduplicated.get(key)
             if existing is None:
                 deduplicated[key] = relationship
@@ -556,8 +748,15 @@ class AnalyzePhaseMixin:
 
             existing_metadata = existing.get("metadata") or {}
             existing_confidence = float(existing_metadata.get("confidence") or 0.0)
-            existing_priority = int(self._RELATION_SOURCE_PRIORITY.get(str(existing_metadata.get("source") or ""), 0))
-            if (candidate_priority, candidate_confidence) >= (existing_priority, existing_confidence):
+            existing_priority = int(
+                self._RELATION_SOURCE_PRIORITY.get(
+                    str(existing_metadata.get("source") or ""), 0
+                )
+            )
+            if (candidate_priority, candidate_confidence) >= (
+                existing_priority,
+                existing_confidence,
+            ):
                 deduplicated[key] = relationship
 
         return list(deduplicated.values())
@@ -570,23 +769,51 @@ class AnalyzePhaseMixin:
         if not self._resolve_analyze_flag(context, "run_reasoning", True):
             return {}
 
-        filtered_relationships = self._filter_analyze_relationships_by_confidence(relationships, context)
+        filtered_relationships = self._filter_analyze_relationships_by_confidence(
+            relationships, context
+        )
         explicit_graph = context.get("semantic_graph")
-        semantic_graph = explicit_graph if isinstance(explicit_graph, dict) else self._build_analyze_semantic_graph(filtered_relationships)
+        semantic_graph = (
+            explicit_graph
+            if isinstance(explicit_graph, dict)
+            else self._build_analyze_semantic_graph(filtered_relationships)
+        )
         explicit_entities = self._normalize_analyze_entities(context.get("entities"))
-        inferred_entities = self._build_entities_from_relationships(filtered_relationships)
+        inferred_entities = self._build_entities_from_relationships(
+            filtered_relationships
+        )
         entities = self._merge_analyze_entities(explicit_entities, inferred_entities)
 
-        if not entities or not isinstance(semantic_graph, dict) or not (semantic_graph.get("edges") or []):
-            raw_text = context.get("raw_text") or context.get("input_data", {}).get("raw_text")
+        if (
+            not entities
+            or not isinstance(semantic_graph, dict)
+            or not (semantic_graph.get("edges") or [])
+        ):
+            raw_text = context.get("raw_text") or context.get("input_data", {}).get(
+                "raw_text"
+            )
             if raw_text and isinstance(raw_text, str):
-                self.pipeline.logger.info("Analyze 阶段未获取到预处理实体与关系，启动内置 Fallback 抽取流程...")
+                self.pipeline.logger.info(
+                    "Analyze 阶段未获取到预处理实体与关系，启动内置 Fallback 抽取流程..."
+                )
                 try:
-                    preprocessor = self.pipeline.analysis_port.create_preprocessor(context.get("preprocessor_config"))
-                    extractor = self.pipeline.analysis_port.create_extractor(context.get("extractor_config"))
-                    semantic_builder = self.pipeline.analysis_port.create_semantic_builder(context.get("semantic_builder_config"))
+                    preprocessor = self.pipeline.analysis_port.create_preprocessor(
+                        context.get("preprocessor_config")
+                    )
+                    extractor = self.pipeline.analysis_port.create_extractor(
+                        context.get("extractor_config")
+                    )
+                    semantic_builder = (
+                        self.pipeline.analysis_port.create_semantic_builder(
+                            context.get("semantic_builder_config")
+                        )
+                    )
 
-                    if preprocessor.initialize() and extractor.initialize() and semantic_builder.initialize():
+                    if (
+                        preprocessor.initialize()
+                        and extractor.initialize()
+                        and semantic_builder.initialize()
+                    ):
                         fallback_ctx = {"raw_text": raw_text}
                         fallback_ctx = preprocessor.execute(fallback_ctx)
                         fallback_ctx = extractor.execute(fallback_ctx)
@@ -594,16 +821,30 @@ class AnalyzePhaseMixin:
 
                         fb_entities = fallback_ctx.get("entities", [])
                         fb_graph = fallback_ctx.get("semantic_graph", {})
-                        fb_rels = fb_graph.get("edges", []) if isinstance(fb_graph, dict) else []
+                        fb_rels = (
+                            fb_graph.get("edges", [])
+                            if isinstance(fb_graph, dict)
+                            else []
+                        )
 
                         if fb_entities and fb_rels:
                             entities = fb_entities
                             semantic_graph = fb_graph
-                            self.pipeline.logger.info("Fallback 抽取成功：获取到 %d 个实体，%d 条关系", len(entities), len(fb_rels))
+                            self.pipeline.logger.info(
+                                "Fallback 抽取成功：获取到 %d 个实体，%d 条关系",
+                                len(entities),
+                                len(fb_rels),
+                            )
                 except Exception as exc:
-                    self.pipeline.logger.warning("Analyze 阶段 Fallback 降级抽取失败: %s", exc)
+                    self.pipeline.logger.warning(
+                        "Analyze 阶段 Fallback 降级抽取失败: %s", exc
+                    )
 
-        if not entities or not isinstance(semantic_graph, dict) or not (semantic_graph.get("edges") or []):
+        if (
+            not entities
+            or not isinstance(semantic_graph, dict)
+            or not (semantic_graph.get("edges") or [])
+        ):
             return {}
 
         try:
@@ -611,12 +852,16 @@ class AnalyzePhaseMixin:
                 context.get("reasoning_engine_config") or {}
             )
         except Exception as exc:
-            self.pipeline.logger.warning("Analyze 阶段无法创建 ReasoningEngine: %s", exc)
+            self.pipeline.logger.warning(
+                "Analyze 阶段无法创建 ReasoningEngine: %s", exc
+            )
             return {}
 
         try:
             if not reasoning_engine.initialize():
-                self.pipeline.logger.warning("Analyze 阶段 ReasoningEngine 初始化失败，跳过推理分析")
+                self.pipeline.logger.warning(
+                    "Analyze 阶段 ReasoningEngine 初始化失败，跳过推理分析"
+                )
                 return {}
             return reasoning_engine.execute(
                 {
@@ -625,7 +870,9 @@ class AnalyzePhaseMixin:
                 }
             )
         except Exception as exc:
-            self.pipeline.logger.warning("Analyze 阶段 ReasoningEngine 执行失败: %s", exc)
+            self.pipeline.logger.warning(
+                "Analyze 阶段 ReasoningEngine 执行失败: %s", exc
+            )
             return {}
         finally:
             reasoning_engine.cleanup()
@@ -644,22 +891,30 @@ class AnalyzePhaseMixin:
                     }
                 )
             elif item:
-                normalized.append({"name": str(item), "type": "generic", "confidence": 0.0})
+                normalized.append(
+                    {"name": str(item), "type": "generic", "confidence": 0.0}
+                )
         return normalized
 
-    def _build_entities_from_relationships(self, relationships: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _build_entities_from_relationships(
+        self, relationships: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         entity_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
         for relationship in relationships:
             metadata = relationship.get("metadata") or {}
             confidence = float(metadata.get("confidence") or 0.0)
             for side in ("source", "target"):
                 entity_name = str(relationship.get(side) or "").strip()
-                entity_type = str(relationship.get(f"{side}_type") or "generic").strip().lower()
+                entity_type = (
+                    str(relationship.get(f"{side}_type") or "generic").strip().lower()
+                )
                 if not entity_name:
                     continue
                 key = (entity_name, entity_type)
                 current = entity_map.get(key)
-                if current is None or confidence > float(current.get("confidence") or 0.0):
+                if current is None or confidence > float(
+                    current.get("confidence") or 0.0
+                ):
                     entity_map[key] = {
                         "name": entity_name,
                         "type": entity_type,
@@ -696,16 +951,24 @@ class AnalyzePhaseMixin:
                 merged[key] = candidate
         return list(merged.values())
 
-    def _build_analyze_semantic_graph(self, relationships: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _build_analyze_semantic_graph(
+        self, relationships: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         node_map: Dict[str, Dict[str, Any]] = {}
         edges: List[Dict[str, Any]] = []
 
         for relationship in relationships:
             source_name = str(relationship.get("source") or "").strip()
-            source_type = str(relationship.get("source_type") or "generic").strip().lower()
+            source_type = (
+                str(relationship.get("source_type") or "generic").strip().lower()
+            )
             target_name = str(relationship.get("target") or "").strip()
-            target_type = str(relationship.get("target_type") or "generic").strip().lower()
-            relation_type = str(relationship.get("type") or relationship.get("rel_type") or "related_to").strip()
+            target_type = (
+                str(relationship.get("target_type") or "generic").strip().lower()
+            )
+            relation_type = str(
+                relationship.get("type") or relationship.get("rel_type") or "related_to"
+            ).strip()
             metadata = relationship.get("metadata") or {}
             if not source_name or not target_name:
                 continue
@@ -726,7 +989,11 @@ class AnalyzePhaseMixin:
                     "target": target_id,
                     "attributes": {
                         "relationship_type": relation_type or "related_to",
-                        "relationship_name": str(metadata.get("relationship_name") or relation_type or "related_to"),
+                        "relationship_name": str(
+                            metadata.get("relationship_name")
+                            or relation_type
+                            or "related_to"
+                        ),
                         "description": str(metadata.get("description") or ""),
                         "confidence": float(metadata.get("confidence") or 0.0),
                     },
@@ -739,8 +1006,12 @@ class AnalyzePhaseMixin:
         self,
         records: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        herbs = sorted({herb for record in records for herb in (record.get("herbs") or []) if herb})
-        transactions = [record.get("herbs") or [] for record in records if record.get("herbs")]
+        herbs = sorted(
+            {herb for record in records for herb in (record.get("herbs") or []) if herb}
+        )
+        transactions = [
+            record.get("herbs") or [] for record in records if record.get("herbs")
+        ]
         result: Dict[str, Any] = {
             "record_count": len(records),
             "transaction_count": len(transactions),
@@ -748,12 +1019,19 @@ class AnalyzePhaseMixin:
             "methods_executed": [],
         }
         if not herbs or not records:
-            result["frequency_chi_square"] = {"herb_frequency": [], "chi_square_top": []}
+            result["frequency_chi_square"] = {
+                "herb_frequency": [],
+                "chi_square_top": [],
+            }
             result["association_rules"] = {"rules": []}
             return result
 
-        result["frequency_chi_square"] = StatisticalDataMiner.frequency_and_chi_square(records, herbs)
-        result["association_rules"] = StatisticalDataMiner.association_rules(transactions)
+        result["frequency_chi_square"] = StatisticalDataMiner.frequency_and_chi_square(
+            records, herbs
+        )
+        result["association_rules"] = StatisticalDataMiner.association_rules(
+            transactions
+        )
         result["methods_executed"] = ["frequency_chi_square", "association_rules"]
         return result
 
@@ -764,7 +1042,9 @@ class AnalyzePhaseMixin:
         data_mining_result: Dict[str, Any],
         context: Dict[str, Any],
     ) -> Dict[str, Any]:
-        statistical_analysis = self._build_statistical_analysis(records, reasoning_results, data_mining_result, context)
+        statistical_analysis = self._build_statistical_analysis(
+            records, reasoning_results, data_mining_result, context
+        )
         return {
             "statistical_analysis": dict(statistical_analysis),
         }
@@ -776,30 +1056,54 @@ class AnalyzePhaseMixin:
         data_mining_result: Dict[str, Any],
         context: Dict[str, Any],
     ) -> Dict[str, Any]:
-        chi_square_items = ((data_mining_result.get("frequency_chi_square") or {}).get("chi_square_top") or [])
-        primary_finding = self._select_primary_statistical_finding(records, chi_square_items)
-        inference_confidence = float(((reasoning_results.get("reasoning_results") or {}).get("inference_confidence") or 0.0))
+        chi_square_items = (data_mining_result.get("frequency_chi_square") or {}).get(
+            "chi_square_top"
+        ) or []
+        primary_finding = self._select_primary_statistical_finding(
+            records, chi_square_items
+        )
+        inference_confidence = float(
+            (
+                (reasoning_results.get("reasoning_results") or {}).get(
+                    "inference_confidence"
+                )
+                or 0.0
+            )
+        )
         significance_level = self._resolve_analyze_significance_level(context)
 
         if not primary_finding:
-            limitations = self._build_analyze_limitations(records, reasoning_results, has_statistical_finding=False, context=context)
+            limitations = self._build_analyze_limitations(
+                records,
+                reasoning_results,
+                has_statistical_finding=False,
+                context=context,
+            )
             return {
                 "statistical_significance": False,
                 "confidence_level": round(inference_confidence, 4),
                 "effect_size": 0.0,
                 "p_value": None,
-                "interpretation": self._build_analyze_interpretation({}, reasoning_results, len(records)),
+                "interpretation": self._build_analyze_interpretation(
+                    {}, reasoning_results, len(records)
+                ),
                 "limitations": limitations,
                 "primary_association": {},
             }
 
         p_value = primary_finding.get("p_value")
-        confidence_level = round(max(inference_confidence, 1.0 - float(p_value or 0.0)), 4)
+        confidence_level = round(
+            max(inference_confidence, 1.0 - float(p_value or 0.0)), 4
+        )
         statistical_significance = bool(
             p_value is not None and float(p_value) <= significance_level
         )
-        limitations = self._build_analyze_limitations(records, reasoning_results, has_statistical_finding=True, context=context)
-        interpretation = self._build_analyze_interpretation(primary_finding, reasoning_results, len(records))
+        limitations = self._build_analyze_limitations(
+            records, reasoning_results, has_statistical_finding=True, context=context
+        )
+        interpretation = self._build_analyze_interpretation(
+            primary_finding, reasoning_results, len(records)
+        )
         return {
             "statistical_significance": statistical_significance,
             "confidence_level": confidence_level,
@@ -815,14 +1119,19 @@ class AnalyzePhaseMixin:
         records: List[Dict[str, Any]],
         chi_square_items: List[Any],
     ) -> Dict[str, Any]:
-        if not records or not isinstance(chi_square_items, list) or not chi_square_items:
+        if (
+            not records
+            or not isinstance(chi_square_items, list)
+            or not chi_square_items
+        ):
             return {}
 
         selected = next(
             (
                 item
                 for item in chi_square_items
-                if isinstance(item, dict) and self._is_positive_statistical_candidate(records, item)
+                if isinstance(item, dict)
+                and self._is_positive_statistical_candidate(records, item)
             ),
             None,
         )
@@ -834,7 +1143,9 @@ class AnalyzePhaseMixin:
         if not herb or not syndrome:
             return {}
 
-        a, b, c, d = StatisticalDataMiner._build_contingency_counts(records, herb, syndrome)
+        a, b, c, d = StatisticalDataMiner._build_contingency_counts(
+            records, herb, syndrome
+        )
         chi2, p_value = StatisticalDataMiner._compute_chi_square(a, b, c, d)
         normalized_p_value = self._normalize_p_value(p_value, float(chi2))
         sample_size = a + b + c + d
@@ -859,7 +1170,9 @@ class AnalyzePhaseMixin:
         if not herb or not syndrome:
             return False
 
-        a, _, _, _ = StatisticalDataMiner._build_contingency_counts(records, herb, syndrome)
+        a, _, _, _ = StatisticalDataMiner._build_contingency_counts(
+            records, herb, syndrome
+        )
         return a > 0
 
     def _normalize_p_value(self, raw_p_value: Any, chi2: float) -> float | None:
@@ -883,13 +1196,21 @@ class AnalyzePhaseMixin:
         reasoning_results: Dict[str, Any],
         record_count: int,
     ) -> str:
-        reasoning_payload = (reasoning_results.get("reasoning_results") or {}) if isinstance(reasoning_results, dict) else {}
+        reasoning_payload = (
+            (reasoning_results.get("reasoning_results") or {})
+            if isinstance(reasoning_results, dict)
+            else {}
+        )
         knowledge_patterns = reasoning_payload.get("knowledge_patterns") or {}
-        common_entities = [str(item) for item in (knowledge_patterns.get("common_entities") or []) if str(item).strip()]
+        common_entities = [
+            str(item)
+            for item in (knowledge_patterns.get("common_entities") or [])
+            if str(item).strip()
+        ]
 
         if not primary_finding:
             if common_entities:
-                return f"当前样本不足以形成稳定统计显著性，但 ReasoningEngine 已识别出 { '、'.join(common_entities[:3]) } 等高频核心实体，可作为下一轮实验验证线索。"
+                return f"当前样本不足以形成稳定统计显著性，但 ReasoningEngine 已识别出 {'、'.join(common_entities[:3])} 等高频核心实体，可作为下一轮实验验证线索。"
             if record_count <= 0:
                 return "当前缺少可用的结构化观察记录，Analyze 阶段仅完成最小化结果汇总，尚不能给出可靠统计推断。"
             return "当前可用记录不足以支撑稳定的卡方检验结果，建议补充 Observe 阶段的结构化实体与关系数据。"
@@ -903,7 +1224,7 @@ class AnalyzePhaseMixin:
             f"（p={p_value}, 效应量={effect_size}）。"
         )
         if common_entities:
-            interpretation += f" ReasoningEngine 同时在知识图谱中归纳出 { '、'.join(common_entities[:3]) } 等关键实体共现模式，支持该关联具有结构性解释。"
+            interpretation += f" ReasoningEngine 同时在知识图谱中归纳出 {'、'.join(common_entities[:3])} 等关键实体共现模式，支持该关联具有结构性解释。"
         return interpretation
 
     def _build_analyze_limitations(
@@ -919,14 +1240,24 @@ class AnalyzePhaseMixin:
             limitations.append(
                 f"可用于统计检验的结构化记录数量偏少（当前 {len(records)}，建议至少 {minimum_sample_size}），显著性结论稳定性有限"
             )
-        syndrome_count = len({record.get("syndrome") for record in records if record.get("syndrome") and record.get("syndrome") != "unknown"})
+        syndrome_count = len(
+            {
+                record.get("syndrome")
+                for record in records
+                if record.get("syndrome") and record.get("syndrome") != "unknown"
+            }
+        )
         if syndrome_count < 2:
             limitations.append("证候分层不足，当前只能进行有限的二分类统计比较")
         if not reasoning_results:
             limitations.append("缺少可复用的语义图关系或推理结果，结构性解释仍不充分")
         if not has_statistical_finding:
-            limitations.append("当前数据尚不足以产出稳定的主统计关联，建议先增强 Observe 阶段的实体与关系覆盖")
-        return limitations or ["当前分析基于自动抽取结果，仍需结合专家复核与外部证据验证"]
+            limitations.append(
+                "当前数据尚不足以产出稳定的主统计关联，建议先增强 Observe 阶段的实体与关系覆盖"
+            )
+        return limitations or [
+            "当前分析基于自动抽取结果，仍需结合专家复核与外部证据验证"
+        ]
 
     def _unique_text_list(self, values: Any) -> List[str]:
         if not isinstance(values, list):
@@ -947,7 +1278,10 @@ class AnalyzePhaseMixin:
         if not self._resolve_analyze_flag(context, "grade_evidence", True):
             return {}, ""
 
-        records = list(literature_records or self._collect_analyze_literature_records(cycle, context))
+        records = list(
+            literature_records
+            or self._collect_analyze_literature_records(cycle, context)
+        )
         if not records:
             return {}, ""
 
@@ -963,13 +1297,21 @@ class AnalyzePhaseMixin:
         cycle: "ResearchCycle",
         context: Dict[str, Any],
     ) -> List[Any]:
-        observe_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.OBSERVE, {}).get("result", {})
+        observe_result = cycle.phase_executions.get(
+            self.pipeline.ResearchPhase.OBSERVE, {}
+        ).get("result", {})
         context_literature_pipeline = context.get("literature_pipeline")
 
         candidates = [
             context.get("literature_records"),
-            context_literature_pipeline.get("records") if isinstance(context_literature_pipeline, dict) else None,
-            (get_phase_value(observe_result, "literature_pipeline", {}) or {}).get("records") if isinstance(observe_result, dict) else None,
+            context_literature_pipeline.get("records")
+            if isinstance(context_literature_pipeline, dict)
+            else None,
+            (get_phase_value(observe_result, "literature_pipeline", {}) or {}).get(
+                "records"
+            )
+            if isinstance(observe_result, dict)
+            else None,
         ]
         for candidate in candidates:
             if not isinstance(candidate, list):
@@ -979,7 +1321,9 @@ class AnalyzePhaseMixin:
                 return records
         return []
 
-    def _build_evidence_grade_summary(self, evidence_grade: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_evidence_grade_summary(
+        self, evidence_grade: Dict[str, Any]
+    ) -> Dict[str, Any]:
         if not isinstance(evidence_grade, dict) or not evidence_grade:
             return {}
 
@@ -1024,8 +1368,12 @@ class AnalyzePhaseMixin:
             "summary": summary_lines,
         }
 
-    def _extract_textual_evidence_summary(self, cycle: "ResearchCycle") -> Dict[str, Any]:
-        observe_result = cycle.phase_executions.get(self.pipeline.ResearchPhase.OBSERVE, {}).get("result", {})
+    def _extract_textual_evidence_summary(
+        self, cycle: "ResearchCycle"
+    ) -> Dict[str, Any]:
+        observe_result = cycle.phase_executions.get(
+            self.pipeline.ResearchPhase.OBSERVE, {}
+        ).get("result", {})
         if not isinstance(observe_result, dict):
             return {}
         philology_assets = get_phase_value(observe_result, "philology_assets", {})
@@ -1035,10 +1383,18 @@ class AnalyzePhaseMixin:
         if not evidence_chains:
             return {}
         conflict_claims = philology_assets.get("conflict_claims") or []
-        evidence_chain_count = int(philology_assets.get("evidence_chain_count") or len(evidence_chains))
-        conflict_count = int(philology_assets.get("conflict_count") or len(conflict_claims))
-        needs_review_count = sum(1 for c in evidence_chains if c.get("needs_manual_review"))
-        high_confidence_count = sum(1 for c in evidence_chains if (c.get("confidence") or 0) >= 0.60)
+        evidence_chain_count = int(
+            philology_assets.get("evidence_chain_count") or len(evidence_chains)
+        )
+        conflict_count = int(
+            philology_assets.get("conflict_count") or len(conflict_claims)
+        )
+        needs_review_count = sum(
+            1 for c in evidence_chains if c.get("needs_manual_review")
+        )
+        high_confidence_count = sum(
+            1 for c in evidence_chains if (c.get("confidence") or 0) >= 0.60
+        )
         return {
             "evidence_chain_count": evidence_chain_count,
             "conflict_count": conflict_count,
@@ -1057,11 +1413,9 @@ class AnalyzePhaseMixin:
         当 Observe 阶段未产出 ingestion_pipeline（无语料采集）时，
         利用假设中的实体列表构建最小化分析记录，避免 Analyze 阶段空转。
         """
-        hypothesis_result = (
-            cycle.phase_executions
-            .get(self.pipeline.ResearchPhase.HYPOTHESIS, {})
-            .get("result", {})
-        )
+        hypothesis_result = cycle.phase_executions.get(
+            self.pipeline.ResearchPhase.HYPOTHESIS, {}
+        ).get("result", {})
         hypotheses = get_phase_value(hypothesis_result, "hypotheses", []) or []
         if not hypotheses:
             return []
@@ -1076,12 +1430,14 @@ class AnalyzePhaseMixin:
             entity_list = [str(e).strip() for e in entities if str(e).strip()]
             if not entity_list:
                 continue
-            records.append({
-                "formula": hyp.get("title") or f"hypothesis_{index}",
-                "title": hyp.get("title") or f"hypothesis_{index}",
-                "syndrome": hyp.get("source_gap_type") or "unknown",
-                "herbs": entity_list,
-            })
+            records.append(
+                {
+                    "formula": hyp.get("title") or f"hypothesis_{index}",
+                    "title": hyp.get("title") or f"hypothesis_{index}",
+                    "syndrome": hyp.get("source_gap_type") or "unknown",
+                    "herbs": entity_list,
+                }
+            )
         return records
 
     def _synthesize_relationships_from_hypotheses(
@@ -1093,11 +1449,9 @@ class AnalyzePhaseMixin:
         利用假设中实体对生成 'hypothesis_association' 类型关系，
         使 ReasoningEngine 能在此基础上进行推理分析。
         """
-        hypothesis_result = (
-            cycle.phase_executions
-            .get(self.pipeline.ResearchPhase.HYPOTHESIS, {})
-            .get("result", {})
-        )
+        hypothesis_result = cycle.phase_executions.get(
+            self.pipeline.ResearchPhase.HYPOTHESIS, {}
+        ).get("result", {})
         hypotheses = get_phase_value(hypothesis_result, "hypotheses", []) or []
         if not hypotheses:
             return []
@@ -1111,20 +1465,24 @@ class AnalyzePhaseMixin:
                 for e in (hyp.get("source_entities") or [])
                 if str(e).strip()
             ]
-            confidence = float(hyp.get("confidence") or hyp.get("evidence_support") or 0.5)
+            confidence = float(
+                hyp.get("confidence") or hyp.get("evidence_support") or 0.5
+            )
             # 为每对实体生成一条关系
             for i in range(len(entities)):
                 for j in range(i + 1, len(entities)):
-                    relationships.append({
-                        "source": entities[i],
-                        "source_type": "herb",
-                        "target": entities[j],
-                        "target_type": "herb",
-                        "type": "hypothesis_association",
-                        "metadata": {
-                            "confidence": confidence,
-                            "source": "hypothesis_engine",
-                            "hypothesis_title": hyp.get("title") or "",
-                        },
-                    })
+                    relationships.append(
+                        {
+                            "source": entities[i],
+                            "source_type": "herb",
+                            "target": entities[j],
+                            "target_type": "herb",
+                            "type": "hypothesis_association",
+                            "metadata": {
+                                "confidence": confidence,
+                                "source": "hypothesis_engine",
+                                "hypothesis_title": hyp.get("title") or "",
+                            },
+                        }
+                    )
         return self._deduplicate_analyze_relationships(relationships)
