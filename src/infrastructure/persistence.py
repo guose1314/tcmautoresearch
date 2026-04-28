@@ -1016,6 +1016,57 @@ class ReviewDispute(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# T6.1 — Transactional Outbox 与 DLQ
+# ---------------------------------------------------------------------------
+
+
+class OutboxStatusEnum(str, enum.Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    PROCESSED = "processed"
+    FAILED = "failed"
+
+
+class OutboxEventORM(Base):
+    """事务性 outbox：与业务表共写一个 PG 事务，由后台 worker 异步消费。"""
+
+    __tablename__ = "outbox_events"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    aggregate_type = Column(String(64), nullable=False)
+    aggregate_id = Column(String(128), nullable=False)
+    event_type = Column(String(96), nullable=False)
+    payload = Column(JSON, default=dict, nullable=False)
+    status = Column(String(16), nullable=False, default=OutboxStatusEnum.PENDING.value)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    processed_at = Column(DateTime, nullable=True)
+    retry_count = Column(Integer, default=0, nullable=False)
+    last_error = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("idx_outbox_status_created", "status", "created_at"),
+        Index("idx_outbox_aggregate", "aggregate_type", "aggregate_id"),
+    )
+
+
+class OutboxDLQORM(Base):
+    """Outbox 死信表：失败 ≥ 5 次的事件归档至此，供人工审计/补偿。"""
+
+    __tablename__ = "outbox_dlq"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    original_event_id = Column(GUID(), nullable=False, index=True)
+    aggregate_type = Column(String(64), nullable=False)
+    aggregate_id = Column(String(128), nullable=False)
+    event_type = Column(String(96), nullable=False)
+    payload = Column(JSON, default=dict, nullable=False)
+    retry_count = Column(Integer, default=0, nullable=False)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    moved_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
 def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")

@@ -1040,6 +1040,25 @@ def _persist_to_orm(
                     projection_relation.get("props") or {}
                 )
                 projection_relations.append(projection_relation)
+
+            # T6.1: 同事务向 outbox_events 写入投影任务，便于后台 worker 异步消费 Neo4j。
+            try:
+                from src.storage.outbox.pg_outbox_store import enqueue_in_session
+
+                enqueue_in_session(
+                    session,
+                    aggregate_type="document",
+                    aggregate_id=str(getattr(doc, "id", "")),
+                    event_type="neo4j.projection.upsert",
+                    payload={
+                        "entities": projection_entities,
+                        "relations": projection_relations,
+                        "source_file": sf,
+                    },
+                )
+            except Exception:
+                # 老库未跑 outbox 迁移时静默跳过，不影响 PG 主写入。
+                logger.debug("outbox enqueue skipped", exc_info=True)
             # session_scope 自动 commit
     except Exception:
         logger.exception("ORM 持久化失败（不影响 KG 侧已写入的数据）")
