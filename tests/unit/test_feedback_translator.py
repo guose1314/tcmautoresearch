@@ -44,13 +44,16 @@ def _make_feedback(
 # graph_weight 路径
 # ---------------------------------------------------------------------------
 
+
 class TestGraphWeightTranslation(unittest.TestCase):
     def test_severity_maps_to_factor_and_aggregates_per_severity(self) -> None:
         fbs = [
             _make_feedback(severity="critical", graph_targets=["n-A", "n-B"]),
             _make_feedback(severity="critical", graph_targets=["n-B", "n-C"]),  # 去重
             _make_feedback(severity="high", graph_targets=["n-D"]),
-            _make_feedback(severity="low", graph_targets=["n-Z"]),  # factor=1.0 应被丢弃
+            _make_feedback(
+                severity="low", graph_targets=["n-Z"]
+            ),  # factor=1.0 应被丢弃
         ]
         plan = FeedbackTranslator().translate(fbs)
         actions = sorted(plan.graph_weight_actions, key=lambda a: a.factor)
@@ -81,6 +84,7 @@ class TestGraphWeightTranslation(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # prompt_bias 路径
 # ---------------------------------------------------------------------------
+
 
 class TestPromptBiasTranslation(unittest.TestCase):
     def test_per_phase_aggregation_and_text(self) -> None:
@@ -128,6 +132,7 @@ class TestPromptBiasTranslation(unittest.TestCase):
 # modes 路径
 # ---------------------------------------------------------------------------
 
+
 class TestModesTranslation(unittest.TestCase):
     def test_critical_triggers_conservative_mode(self) -> None:
         plan = FeedbackTranslator().translate([_make_feedback(severity="critical")])
@@ -150,6 +155,7 @@ class TestModesTranslation(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # GraphWeightUpdater (Cypher)
 # ---------------------------------------------------------------------------
+
 
 def _build_neo4j_driver(updated_count: int = 3):
     record = {"updated": updated_count}
@@ -183,7 +189,9 @@ class TestGraphWeightUpdater(unittest.TestCase):
         self.assertEqual(session.run.call_count, 2)
         first_call = session.run.call_args_list[0]
         self.assertIn("MATCH (n) WHERE n.id IN $ids", first_call.args[0])
-        self.assertIn("SET n.weight = coalesce(n.weight, 1.0) * $factor", first_call.args[0])
+        self.assertIn(
+            "SET n.weight = coalesce(n.weight, 1.0) * $factor", first_call.args[0]
+        )
         # 顺序 critical 先（factor=0.5）
         factors = sorted(call.kwargs["factor"] for call in session.run.call_args_list)
         self.assertEqual(factors, [0.5, 0.7])
@@ -201,6 +209,7 @@ class TestGraphWeightUpdater(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # PromptBiasCompiler
 # ---------------------------------------------------------------------------
+
 
 class TestPromptBiasCompiler(unittest.TestCase):
     def test_compile_returns_per_purpose_blocks(self) -> None:
@@ -252,6 +261,7 @@ class TestPromptBiasCompiler(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # FeedbackEntry.from_dict 边角
 # ---------------------------------------------------------------------------
+
 
 class TestFeedbackEntryNormalization(unittest.TestCase):
     def test_severity_inferred_from_violations_when_missing(self) -> None:

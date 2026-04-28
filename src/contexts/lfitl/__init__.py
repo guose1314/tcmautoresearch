@@ -20,14 +20,17 @@ from .feedback_translator import (
     PromptBiasAction,
     TranslationPlan,
 )
+from .graph_pattern_miner import GraphPatternMiner, Pattern
 from .graph_weight_updater import GraphWeightUpdater
 from .prompt_bias_compiler import PromptBiasCompiler
 
 __all__ = [
     "FeedbackEntry",
     "FeedbackTranslator",
+    "GraphPatternMiner",
     "GraphWeightAction",
     "GraphWeightUpdater",
+    "Pattern",
     "PromptBiasAction",
     "PromptBiasCompiler",
     "TranslationPlan",

@@ -38,6 +38,17 @@ from src.research.learning_strategy import (
     build_strategy_snapshot,
 )
 
+try:  # T5.2: 可选 LFITL 包依赖，保证老调用者仍可走
+    from src.contexts.lfitl import (
+        FeedbackTranslator as _LFITLTranslator,
+        GraphWeightUpdater as _LFITLGraphWeightUpdater,
+        PromptBiasCompiler as _LFITLPromptBiasCompiler,
+    )
+except Exception:  # noqa: BLE001
+    _LFITLTranslator = None  # type: ignore[assignment]
+    _LFITLGraphWeightUpdater = None  # type: ignore[assignment]
+    _LFITLPromptBiasCompiler = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,11 +59,34 @@ class LearningLoopOrchestrator:
     使其可以在不同 pipeline 实例间复用。
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        feedback_repo: Optional[Any] = None,
+        lfitl_translator: Optional[Any] = None,
+        prompt_bias_compiler: Optional[Any] = None,
+        graph_weight_updater: Optional[Any] = None,
+        recent_feedback_limit: int = 20,
+        apply_graph_weights: bool = False,
+    ) -> None:
         self._snapshot_before: Dict[str, Any] = {}
         self._phase_manifests: List[Dict[str, Any]] = []
         self._reflect_learning_result: Optional[Dict[str, Any]] = None
         self._policy_adjuster = PolicyAdjuster()
+
+        # ---- T5.2: LFITL 接入位 ----
+        self._feedback_repo = feedback_repo
+        if lfitl_translator is None and _LFITLTranslator is not None:
+            lfitl_translator = _LFITLTranslator()
+        if prompt_bias_compiler is None and _LFITLPromptBiasCompiler is not None:
+            prompt_bias_compiler = _LFITLPromptBiasCompiler()
+        self._lfitl_translator = lfitl_translator
+        self._prompt_bias_compiler = prompt_bias_compiler
+        self._graph_weight_updater = graph_weight_updater
+        self._recent_feedback_limit = int(recent_feedback_limit)
+        self._apply_graph_weights = bool(apply_graph_weights)
+        self._last_lfitl_plan: Optional[Dict[str, Any]] = None
+        self._last_prompt_bias_blocks: Dict[str, Dict[str, Any]] = {}
 
     @property
     def policy_adjuster(self) -> PolicyAdjuster:
@@ -125,10 +159,17 @@ class LearningLoopOrchestrator:
         # 提取上一轮反馈
         previous_iteration_feedback = self._extract_previous_iteration_feedback(pipeline)
 
+        # ---- T5.2: 从 feedback_repo 拉取近期反馈，生成 LFITL plan ----
+        lfitl_plan_dict, prompt_bias_blocks = self._build_lfitl_plan(pipeline)
+        self._last_lfitl_plan = lfitl_plan_dict
+        self._last_prompt_bias_blocks = prompt_bias_blocks
+
         return {
             "snapshot": dict(self._snapshot_before),
             "learning_strategy": learning_strategy,
             "previous_iteration_feedback": previous_iteration_feedback,
+            "lfitl_plan": lfitl_plan_dict,
+            "prompt_bias_blocks": dict(prompt_bias_blocks),
         }
 
     # ------------------------------------------------------------------
@@ -140,13 +181,20 @@ class LearningLoopOrchestrator:
         phase_context: Dict[str, Any],
         learning_strategy: Optional[Dict[str, Any]] = None,
         previous_iteration_feedback: Optional[Dict[str, Any]] = None,
+        prompt_bias_blocks: Optional[Dict[str, Dict[str, Any]]] = None,
+        lfitl_plan: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """将学习策略和上轮反馈合并到阶段上下文中（不覆盖已有值）。"""
+        """将学习策略、上轮反馈与 LFITL 输出合并到阶段上下文（不覆盖已有值）。"""
         ctx = dict(phase_context)
         if isinstance(learning_strategy, dict) and learning_strategy:
             ctx.setdefault("learning_strategy", deepcopy(learning_strategy))
         if isinstance(previous_iteration_feedback, dict) and previous_iteration_feedback:
             ctx.setdefault("previous_iteration_feedback", deepcopy(previous_iteration_feedback))
+        # T5.2: prompt_bias_blocks 供 SelfRefineRunner 调用侧 手动 inject 进 inputs
+        if isinstance(prompt_bias_blocks, dict) and prompt_bias_blocks:
+            ctx.setdefault("prompt_bias_blocks", deepcopy(prompt_bias_blocks))
+        if isinstance(lfitl_plan, dict) and lfitl_plan:
+            ctx.setdefault("lfitl_plan", deepcopy(lfitl_plan))
         return ctx
 
     # ------------------------------------------------------------------
@@ -298,6 +346,65 @@ class LearningLoopOrchestrator:
         if isinstance(config, dict) and isinstance(config.get("learning_strategy"), dict):
             return dict(config["learning_strategy"])
         return {}
+
+    # ------------------------------------------------------------------
+    # T5.2: LFITL plan 生成
+    # ------------------------------------------------------------------
+    def _build_lfitl_plan(
+        self, pipeline: Any
+    ) -> tuple[Optional[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+        """从 feedback_repo 拉取最近 N 条反馈，跑 FeedbackTranslator。
+
+        返回 ``(plan_dict_or_None, prompt_bias_blocks)``；任何缺件都安全降级为 ``(None, {})``。
+        """
+        repo = self._feedback_repo or self._extract_feedback_repo(pipeline)
+        translator = self._lfitl_translator
+        if repo is None or translator is None:
+            return None, {}
+        try:
+            recent = repo.recent(limit=self._recent_feedback_limit)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LFITL feedback_repo.recent 失败: %s", exc)
+            return None, {}
+        if not recent:
+            return {"summary": {"feedback_count": 0}}, {}
+        try:
+            plan = translator.translate(list(recent))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LFITL translate 失败: %s", exc)
+            return None, {}
+
+        # 可选：把 graph_weight_actions 写回 Neo4j
+        if self._apply_graph_weights and self._graph_weight_updater is not None:
+            try:
+                self._graph_weight_updater.apply(plan)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("LFITL graph_weight_updater.apply 失败: %s", exc)
+
+        # prompt_bias_blocks 供 phase 注入到 SelfRefineRunner.inputs
+        bias_blocks: Dict[str, Dict[str, Any]] = {}
+        if self._prompt_bias_compiler is not None:
+            try:
+                bias_blocks = self._prompt_bias_compiler.compile(plan)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("LFITL prompt_bias_compiler.compile 失败: %s", exc)
+                bias_blocks = {}
+
+        return plan.to_dict(), bias_blocks
+
+    @staticmethod
+    def _extract_feedback_repo(pipeline: Any) -> Optional[Any]:
+        """退化路径：试着从 pipeline.config 找 feedback_repo。"""
+        for attr in ("feedback_repo", "learning_feedback_repo"):
+            repo = getattr(pipeline, attr, None)
+            if repo is not None:
+                return repo
+        config = getattr(pipeline, "config", None)
+        if isinstance(config, dict):
+            for key in ("feedback_repo", "learning_feedback_repo"):
+                if config.get(key) is not None:
+                    return config[key]
+        return None
 
     @staticmethod
     def _extract_previous_iteration_feedback(pipeline: Any) -> Dict[str, Any]:

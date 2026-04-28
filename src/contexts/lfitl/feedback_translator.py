@@ -14,7 +14,6 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
-
 _DEFAULT_SEVERITY_FACTOR = {
     "critical": 0.5,
     "high": 0.7,
@@ -99,7 +98,11 @@ class GraphWeightAction:
     reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"node_ids": list(self.node_ids), "factor": self.factor, "reason": self.reason}
+        return {
+            "node_ids": list(self.node_ids),
+            "factor": self.factor,
+            "reason": self.reason,
+        }
 
 
 @dataclass
@@ -128,6 +131,7 @@ class TranslationPlan:
     prompt_bias_actions: List[PromptBiasAction] = field(default_factory=list)
     modes: Dict[str, str] = field(default_factory=dict)
     summary: Dict[str, Any] = field(default_factory=dict)
+    mined_patterns: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -135,6 +139,7 @@ class TranslationPlan:
             "prompt_bias_actions": [a.to_dict() for a in self.prompt_bias_actions],
             "modes": dict(self.modes),
             "summary": dict(self.summary),
+            "mined_patterns": list(self.mined_patterns),
         }
 
 
@@ -147,14 +152,22 @@ class FeedbackTranslator:
         severity_factor: Optional[Mapping[str, float]] = None,
         critical_mode_threshold: int = 1,
         high_mode_threshold: int = 3,
+        pattern_miner: Optional[Any] = None,
+        neo4j_driver: Optional[Any] = None,
     ) -> None:
         self._severity_factor = dict(severity_factor or _DEFAULT_SEVERITY_FACTOR)
         self._critical_mode_threshold = int(critical_mode_threshold)
         self._high_mode_threshold = int(high_mode_threshold)
+        self._pattern_miner = pattern_miner
+        self._neo4j_driver = neo4j_driver
 
     # ------------------------------------------------------------------ #
     def translate(
-        self, feedbacks: Sequence[Any]
+        self,
+        feedbacks: Sequence[Any],
+        *,
+        mined_patterns: Optional[Sequence[Any]] = None,
+        since_ts: Optional[float] = None,
     ) -> TranslationPlan:
         entries: List[FeedbackEntry] = []
         for item in feedbacks or []:
@@ -165,27 +178,47 @@ class FeedbackTranslator:
             else:
                 continue
 
+        # T5.3: 生成 plan 前先调 miner 拿高频负反馈模式
+        patterns = list(mined_patterns) if mined_patterns is not None else []
+        if not patterns and self._pattern_miner is not None and self._neo4j_driver is not None:
+            try:
+                patterns = list(
+                    self._pattern_miner.mine(self._neo4j_driver, since_ts=since_ts)
+                )
+            except Exception:  # noqa: BLE001
+                patterns = []
+
         plan = TranslationPlan()
         plan.graph_weight_actions = self._translate_graph(entries)
-        plan.prompt_bias_actions = self._translate_prompt(entries)
+        plan.prompt_bias_actions = self._translate_prompt(entries, patterns)
         plan.modes = self._translate_modes(entries)
+        plan.mined_patterns = [
+            p.to_dict() if hasattr(p, "to_dict") else dict(p) for p in patterns
+        ]
         plan.summary = {
             "feedback_count": len(entries),
-            "phases_touched": sorted({e.source_phase for e in entries if e.source_phase}),
+            "phases_touched": sorted(
+                {e.source_phase for e in entries if e.source_phase}
+            ),
             "graph_action_count": len(plan.graph_weight_actions),
             "prompt_bias_count": len(plan.prompt_bias_actions),
+            "mined_pattern_count": len(plan.mined_patterns),
             "modes": dict(plan.modes),
         }
         return plan
 
     # ------------------------------------------------------------------ #
-    def _translate_graph(self, entries: Iterable[FeedbackEntry]) -> List[GraphWeightAction]:
+    def _translate_graph(
+        self, entries: Iterable[FeedbackEntry]
+    ) -> List[GraphWeightAction]:
         # 按 (severity, factor) 聚合：同 severity 一次操作
         bucket: Dict[str, List[str]] = defaultdict(list)
         for entry in entries:
             if not entry.graph_targets:
                 continue
-            sev = entry.severity if entry.severity in self._severity_factor else "medium"
+            sev = (
+                entry.severity if entry.severity in self._severity_factor else "medium"
+            )
             for nid in entry.graph_targets:
                 if nid not in bucket[sev]:
                     bucket[sev].append(nid)
@@ -203,7 +236,11 @@ class FeedbackTranslator:
             )
         return actions
 
-    def _translate_prompt(self, entries: Iterable[FeedbackEntry]) -> List[PromptBiasAction]:
+    def _translate_prompt(
+        self,
+        entries: Iterable[FeedbackEntry],
+        patterns: Optional[Sequence[Any]] = None,
+    ) -> List[PromptBiasAction]:
         # 按 source_phase 聚合 issue_fields 与最严重 severity
         per_phase: Dict[str, Dict[str, Any]] = defaultdict(
             lambda: {"avoid": [], "violations": [], "severity": "low"}
@@ -234,8 +271,14 @@ class FeedbackTranslator:
                 )
             if violations:
                 parts.append(
-                    "请严格遵守以下宪法规则（曾被触发）：" + "、".join(violations) + "。"
+                    "请严格遵守以下宪法规则（曾被触发）："
+                    + "、".join(violations)
+                    + "。"
                 )
+            # T5.3: 把 miner 找出的"高频被纠正模式"也写入 bias_text
+            pattern_sentence = self._build_pattern_sentence(patterns or [])
+            if pattern_sentence:
+                parts.append(pattern_sentence)
             actions.append(
                 PromptBiasAction(
                     purpose=purpose,
@@ -245,6 +288,28 @@ class FeedbackTranslator:
                 )
             )
         return actions
+
+    @staticmethod
+    def _build_pattern_sentence(patterns: Sequence[Any]) -> str:
+        if not patterns:
+            return ""
+        snippets: List[str] = []
+        for p in patterns[:5]:
+            if hasattr(p, "to_dict"):
+                d = p.to_dict()
+            elif isinstance(p, Mapping):
+                d = dict(p)
+            else:
+                continue
+            labels = list(d.get("node_labels") or [])
+            rels = list(d.get("rel_types") or [])
+            if len(labels) >= 2 and rels:
+                snippets.append(f"({labels[0]})-[{rels[0]}]->({labels[1]})")
+            elif labels:
+                snippets.append("/".join(labels))
+        if not snippets:
+            return ""
+        return "高频被反馈纠正的图模式（请规避）：" + "；".join(snippets) + "。"
 
     def _translate_modes(self, entries: Iterable[FeedbackEntry]) -> Dict[str, str]:
         critical = sum(1 for e in entries if e.severity == "critical")

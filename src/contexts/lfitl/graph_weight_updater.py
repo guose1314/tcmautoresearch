@@ -45,7 +45,11 @@ class GraphWeightUpdater:
         if not actions:
             return {"applied": 0, "skipped": 0, "actions": []}
         if self._driver is None and not self._dry_run:
-            return {"applied": 0, "skipped": len(actions), "error": "neo4j driver missing"}
+            return {
+                "applied": 0,
+                "skipped": len(actions),
+                "error": "neo4j driver missing",
+            }
 
         applied = 0
         skipped = 0
@@ -62,7 +66,12 @@ class GraphWeightUpdater:
                         "dry_run": True,
                     }
                 )
-            return {"applied": 0, "skipped": len(actions), "actions": traces, "dry_run": True}
+            return {
+                "applied": 0,
+                "skipped": len(actions),
+                "actions": traces,
+                "dry_run": True,
+            }
 
         with opener(database=self._database) as session:
             for action in actions:
@@ -117,7 +126,11 @@ class GraphWeightUpdater:
             single = None
         if single is not None:
             try:
-                return int(single.get("updated") if hasattr(single, "get") else single["updated"])
+                return int(
+                    single.get("updated")
+                    if hasattr(single, "get")
+                    else single["updated"]
+                )
             except Exception:
                 return 0
         # fallback: iterable of records
