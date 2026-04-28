@@ -1,4 +1,39 @@
 {
   "default": true,
-  "MD013": false
+
+  "// Line length": "MD013 — 仓库存在大量长行（架构 / 阶段进度文档），不限制",
+  "MD013": false,
+
+  "// Ordered list prefix": "MD029 — 项目惯用 1. 2. 3. 顺序前缀，与默认 1/1/1 风格冲突，关闭",
+  "MD029": false,
+
+  "// Multiple consecutive blank lines": "MD012 — 大段落分隔多空行可读性更好，放宽",
+  "MD012": false,
+
+  "// Bare URLs": "MD034 — 文档含原始链接（pydev/官方文档）属于刻意标注，关闭",
+  "MD034": false,
+
+  "// Trailing newline": "MD047 — 让格式化工具自动处理，不要在 lint 报错",
+  "MD047": false,
+
+  "// Spaces in emphasis": "MD037 — 中文夹杂英文常出现，开启会大量误报",
+  "MD037": false,
+
+  "// Table column style": "MD060 — 紧凑分隔行 |---| 是项目默认风格，关闭",
+  "MD060": false,
+
+  "// Blanks around tables": "MD058 — 紧贴标题的表格更紧凑，放宽",
+  "MD058": false,
+
+  "// Blanks around fences": "MD031 — 嵌套缩进列表里 fence 难强制空行，放宽",
+  "MD031": false,
+
+  "// Blanks around lists": "MD032 — 列表前后强制空行误伤 blockquote 内列表",
+  "MD032": false,
+
+  "// Blanks around headings": "MD022 — 与上方放宽规则同源，放宽",
+  "MD022": false,
+
+  "// Blanks inside blockquote": "MD028 — blockquote 中插入空行用于分段，放宽",
+  "MD028": false
 }
