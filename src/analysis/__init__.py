@@ -47,6 +47,9 @@ if TYPE_CHECKING:
     from src.analysis.summary_analysis import SummaryAnalysisEngine
     from src.analysis.supramolecular import SupramolecularPhysicochemicalAnalyzer
     from src.research.gap_analyzer import GapAnalysisRequest, GapAnalyzer
+    from src.semantic_modeling.methods.integrated_analyzer import (
+        IntegratedResearchAnalyzer,
+    )
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "DocumentPreprocessor": ("src.analysis.preprocessor", "DocumentPreprocessor"),
@@ -72,6 +75,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "SummaryAnalysisEngine": ("src.analysis.summary_analysis", "SummaryAnalysisEngine"),
     "GapAnalyzer": ("src.research.gap_analyzer", "GapAnalyzer"),
     "GapAnalysisRequest": ("src.research.gap_analyzer", "GapAnalysisRequest"),
+    "IntegratedResearchAnalyzer": ("src.semantic_modeling.methods.integrated_analyzer", "IntegratedResearchAnalyzer"),
 }
 
 __all__ = list(_LAZY_IMPORTS.keys())

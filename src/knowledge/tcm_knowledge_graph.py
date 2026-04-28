@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -57,68 +58,94 @@ class _SQLiteBackend:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = str(db_path)
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self._db_path)
-        self._conn.executescript(_SCHEMA_SQL)
-        self._conn.commit()
+        self._local = threading.local()
+        self._init_db()
+
+    def _get_conn(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self._db_path, timeout=30, check_same_thread=False)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            self._local.conn = conn
+        return conn
+
+    def _init_db(self) -> None:
+        conn = sqlite3.connect(self._db_path, timeout=30, check_same_thread=False)
+        try:
+            conn.executescript(_SCHEMA_SQL)
+            conn.commit()
+        finally:
+            conn.close()
 
     # -- 写 --
 
     def upsert_entity(self, name: str, entity_type: str,
                       metadata: Dict[str, Any]) -> None:
-        self._conn.execute(
+        conn = self._get_conn()
+        conn.execute(
             "INSERT INTO entities(name, type, metadata) VALUES(?, ?, ?)"
             " ON CONFLICT(name) DO UPDATE SET type=excluded.type, metadata=excluded.metadata",
             (name, entity_type, json.dumps(metadata, ensure_ascii=False)),
         )
-        self._conn.commit()
+        conn.commit()
 
     def upsert_relation(self, src: str, rel_type: str, dst: str,
                         metadata: Dict[str, Any]) -> None:
-        self._conn.execute(
+        conn = self._get_conn()
+        conn.execute(
             "INSERT INTO relations(src, rel_type, dst, metadata) VALUES(?, ?, ?, ?)"
             " ON CONFLICT(src, rel_type, dst) DO UPDATE SET metadata=excluded.metadata",
             (src, rel_type, dst, json.dumps(metadata, ensure_ascii=False)),
         )
-        self._conn.commit()
+        conn.commit()
 
     # -- 批量写 --
 
     def bulk_upsert_entities(self, rows: Sequence[Tuple[str, str, Dict]]) -> None:
-        self._conn.executemany(
+        conn = self._get_conn()
+        conn.executemany(
             "INSERT INTO entities(name, type, metadata) VALUES(?, ?, ?)"
             " ON CONFLICT(name) DO UPDATE SET type=excluded.type, metadata=excluded.metadata",
             [(n, t, json.dumps(m, ensure_ascii=False)) for n, t, m in rows],
         )
-        self._conn.commit()
+        conn.commit()
 
     def bulk_upsert_relations(self, rows: Sequence[Tuple[str, str, str, Dict]]) -> None:
-        self._conn.executemany(
+        conn = self._get_conn()
+        conn.executemany(
             "INSERT INTO relations(src, rel_type, dst, metadata) VALUES(?, ?, ?, ?)"
             " ON CONFLICT(src, rel_type, dst) DO UPDATE SET metadata=excluded.metadata",
             [(s, r, d, json.dumps(m, ensure_ascii=False)) for s, r, d, m in rows],
         )
-        self._conn.commit()
+        conn.commit()
 
     # -- 读 --
 
     def load_all_entities(self) -> List[Tuple[str, str, Dict]]:
-        cur = self._conn.execute("SELECT name, type, metadata FROM entities")
+        cur = self._get_conn().execute("SELECT name, type, metadata FROM entities")
         return [(r[0], r[1], json.loads(r[2])) for r in cur.fetchall()]
 
     def load_all_relations(self) -> List[Tuple[str, str, str, Dict]]:
-        cur = self._conn.execute("SELECT src, rel_type, dst, metadata FROM relations")
+        cur = self._get_conn().execute("SELECT src, rel_type, dst, metadata FROM relations")
         return [(r[0], r[1], r[2], json.loads(r[3])) for r in cur.fetchall()]
 
     def entity_count(self) -> int:
-        return self._conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+        return self._get_conn().execute("SELECT COUNT(*) FROM entities").fetchone()[0]
 
     def relation_count(self) -> int:
-        return self._conn.execute("SELECT COUNT(*) FROM relations").fetchone()[0]
+        return self._get_conn().execute("SELECT COUNT(*) FROM relations").fetchone()[0]
 
     # -- 生命周期 --
 
     def close(self) -> None:
-        self._conn.close()
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            return
+        try:
+            conn.close()
+        finally:
+            self._local.conn = None
 
 
 # ---------------------------------------------------------------------------

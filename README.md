@@ -192,6 +192,44 @@ Legacy Web 启动后可访问：
 - API 文档：`http://127.0.0.1:8000/docs`
 - 健康检查：`http://127.0.0.1:8000/health`
 
+### 长文档批处理与续跑
+
+长跑批量蒸馏（`/api/analysis/distill`）已具备 watchdog 守护、分层限流、断点续跑能力，任意一天接手都可以按下面 SOP 续跑，不需要重置 `data/` 或重新登录。
+
+1. **启动 watchdog 守护**（推荐，崩溃后会自动重启 `python -m src.web.main --port 8765`）：
+
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File tools/watchdog_server.ps1 -Port 8765
+   ```
+
+   注意：`tools/watchdog_server.ps1` 仍把若干 `TCM_*` 凭据硬编码在脚本里，首次使用前请按本机真实密码替换占位 `yourpassword`，或改造成读 `secrets/production.yml` / 环境变量。
+
+2. **启动批处理（默认开启 resume，按 `logs/batch_distill_progress.jsonl` 跳过已完成文件）**：
+
+   ```powershell
+   venv310\Scripts\python.exe tools/batch_distill_corpus.py `
+     --base-url http://127.0.0.1:8765 `
+     --throttle-profile balanced `
+     --sort asc
+   ```
+
+   - 长文件占用带宽过多时切到 `--throttle-profile aggressive`，或显式 `--max-bytes 40000` 缩小单次入参；
+   - 想强制全量重跑请加 `--no-resume`；
+   - 仅做小批量回归请加 `--limit-files N`。
+
+3. **重复入库治理**（`documents.source_file` 含时间戳，前缀分组保留最早一条，并联动清理 Neo4j）：
+
+   ```powershell
+   venv310\Scripts\python.exe tools/cleanup_duplicate_batch_assets.py
+   venv310\Scripts\python.exe tools/cleanup_duplicate_batch_assets.py --apply
+   ```
+
+#### 关键稳定参数（更改前请回看 STAGE_SUMMARY.md 的 2026-04-28 收口章节）
+
+- `src/llm/llm_engine.py`：`DEFAULT_N_GPU_LAYERS=28`，并对 `LLMEngine.generate` 串行化，规避 RTX 4060 8GB 全量 GPU 卸载触发 `ggml-cuda assert`；
+- `src/knowledge/tcm_knowledge_graph.py`：SQLite 后端走每线程独立连接，避免 FastAPI 线程池触发 cross-thread 报错；
+- `tools/batch_distill_corpus.py`：默认 `--throttle-profile balanced`、`--max-bytes 80000`、`--skip-larger-than 2000000`、`--timeout 1800`、`--timeout-per-kchar 300`、`--timeout-cap 7200`，长文件由 `_apply_tiered_limit` 与 `_compute_read_timeout` 自动收紧。
+
 ### Helm Chart
 
 - Chart 路径：`deploy/helm/tcmautoresearch`

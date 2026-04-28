@@ -11,6 +11,7 @@ import glob
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "qwen1_5-7
 # 项目根，用于把配置里写的相对路径（如 "./models/..."）锚定到仓库根，
 # 避免随启动 cwd 变化导致 FileNotFoundError。
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_N_GPU_LAYERS = 28
 
 
 def _resolve_model_path(path: str | None) -> str:
@@ -81,8 +83,8 @@ class LLMEngine:
     """
     封装本地 GGUF 模型推理，通过 llama-cpp-python 调用。
 
-    RTX 4060 Laptop GPU（8 GB VRAM）全量加载 Qwen1.5-7B-Chat Q8_0 约需 7.5 GB，
-    建议 n_gpu_layers=-1（全量 GPU）或设置具体层数保留 CPU 余量。
+    RTX 4060 Laptop GPU（8 GB VRAM）在 4096 上下文下全量卸载 Qwen1.5-7B-Chat Q8_0
+    容易逼近显存上限，因此默认保留少量层在 CPU 侧，优先稳定性。
 
     Usage::
 
@@ -96,7 +98,7 @@ class LLMEngine:
     def __init__(
         self,
         model_path: str | None = None,
-        n_gpu_layers: int = -1,
+        n_gpu_layers: int = DEFAULT_N_GPU_LAYERS,
         n_ctx: int = 4096,
         temperature: float = 0.3,
         max_tokens: int = 1024,
@@ -105,58 +107,61 @@ class LLMEngine:
         """
         Args:
             model_path: GGUF 模型文件路径，默认使用项目 models/ 目录下的 Qwen 模型。
-            n_gpu_layers: GPU 卸载层数。-1 = 全量卸载；0 = 纯 CPU。
+            n_gpu_layers: GPU 卸载层数。0 = 纯 CPU；较大值 = 更多层驻留 GPU。
             n_ctx: 上下文窗口长度（token 数）。
             temperature: 采样温度，值越低越确定。
             max_tokens: 单次生成最大 token 数。
             verbose: 是否输出 llama.cpp 底层日志。
         """
         self.model_path = _resolve_model_path(model_path)
-        self.n_gpu_layers = n_gpu_layers
+        self.n_gpu_layers = int(n_gpu_layers)
         self.n_ctx = n_ctx
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.verbose = verbose
         self._llm: Any = None
+        self._lock = threading.RLock()
 
     def load(self) -> None:
         """加载模型到内存（GPU/CPU）。"""
-        if self._llm is not None:
-            logger.warning("模型已加载，跳过重复加载。")
-            return
+        with self._lock:
+            if self._llm is not None:
+                logger.warning("模型已加载，跳过重复加载。")
+                return
 
-        if not os.path.isfile(self.model_path):
-            raise FileNotFoundError(f"模型文件不存在: {self.model_path}")
+            if not os.path.isfile(self.model_path):
+                raise FileNotFoundError(f"模型文件不存在: {self.model_path}")
 
-        # 必须在首次 import llama_cpp 之前完成 DLL 注册
-        setup_cuda_dll_paths()
+            # 必须在首次 import llama_cpp 之前完成 DLL 注册
+            setup_cuda_dll_paths()
 
-        try:
-            from llama_cpp import Llama  # noqa: PLC0415  (late import by design)
-        except ImportError as exc:
-            raise ImportError(
-                "llama-cpp-python 未安装或 CUDA DLL 缺失。"
-                "请确认使用 venv310 环境运行，并已安装 nvidia-cublas-cu12。"
-            ) from exc
+            try:
+                from llama_cpp import Llama  # noqa: PLC0415  (late import by design)
+            except ImportError as exc:
+                raise ImportError(
+                    "llama-cpp-python 未安装或 CUDA DLL 缺失。"
+                    "请确认使用 venv310 环境运行，并已安装 nvidia-cublas-cu12。"
+                ) from exc
 
-        logger.info(
-            "加载模型: %s  (n_gpu_layers=%s, n_ctx=%d)",
-            self.model_path,
-            self.n_gpu_layers,
-            self.n_ctx,
-        )
-        self._llm = Llama(
-            model_path=self.model_path,
-            n_gpu_layers=self.n_gpu_layers,
-            n_ctx=self.n_ctx,
-            verbose=self.verbose,
-        )
-        logger.info("模型加载完成。")
+            logger.info(
+                "加载模型: %s  (n_gpu_layers=%s, n_ctx=%d)",
+                self.model_path,
+                self.n_gpu_layers,
+                self.n_ctx,
+            )
+            self._llm = Llama(
+                model_path=self.model_path,
+                n_gpu_layers=self.n_gpu_layers,
+                n_ctx=self.n_ctx,
+                verbose=self.verbose,
+            )
+            logger.info("模型加载完成。")
 
     def unload(self) -> None:
         """释放模型内存。"""
-        self._llm = None
-        logger.info("模型已卸载。")
+        with self._lock:
+            self._llm = None
+            logger.info("模型已卸载。")
 
     def generate(self, prompt: str, system_prompt: str = "") -> str:
         """
@@ -169,20 +174,21 @@ class LLMEngine:
         Returns:
             str: 模型生成的文本。
         """
-        if self._llm is None:
-            raise RuntimeError("请先调用 load() 加载模型。")
+        with self._lock:
+            if self._llm is None:
+                raise RuntimeError("请先调用 load() 加载模型。")
 
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
 
-        response = self._llm.create_chat_completion(
-            messages=messages,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-        )
-        return response["choices"][0]["message"]["content"]
+            response = self._llm.create_chat_completion(
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+            return response["choices"][0]["message"]["content"]
 
     # ------------------------------------------------------------------
     # TCM 科研专用便捷方法

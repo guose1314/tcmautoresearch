@@ -2,6 +2,98 @@
 
 <!-- markdownlint-configure-file {"MD022": false, "MD024": false, "MD032": false, "MD060": false} -->
 
+## 阶段性收口（2026-04-28）
+
+同步说明（2026-04-28）：
+
+- 本节是当前总续接入口；如果只能读一节，优先读本节，再回看 2026-04-27 的 repo memory `analysis-unsupervised-pg-neo4j-mainline-2026-04-27`。
+- 这轮收口范围只包括“在线 distill 入口 + 无监督科研增强 + PG/Neo4j 双写 + 长跑稳定性”，不涉及 reflect / learning feedback / dashboard 改动。
+- 涉及 PostgreSQL / Neo4j、降级与回填的现态判读，仍统一沿用 README 的结构化存储状态词汇表：双写完成、仅 PG 模式、待回填、schema drift 待治理。
+
+### 本轮收口目标
+
+- 让 `/api/analysis/distill` 在线入口真正成为“一个文件 = 一次预处理 → 实体 → 语义图 → LLM 蒸馏 → 双库持久化 → 无监督增强”的稳定主链。
+- 在不离线绕道 `self_learning_engine` 的前提下，把社区主题、桥接实体、显著关系、新颖性候选、文档签名、literature_alignment 接入实体 / 关系 metadata 与 PG / Neo4j。
+- 解决两个长跑必现的运行时根因：llama-cpp 在 Windows + RTX 4060 上的 GPU 卸载越界、`TCMKnowledgeGraph` 单例 SQLite 连接的 cross-thread 错误。
+- 给 1602 文件 / 358MB 这类批量蒸馏一条可断点续跑、可观测、可调档的分层限流通道，避免长文件单点拖死整个批次。
+
+### 当前已落地成果
+
+#### 1. 在线 distill 已具备无监督增强 + PG/Neo4j 双写
+
+- `src/web/routes/analysis.py` 的 `/api/analysis/text` 与 `/api/analysis/distill` 直接装配 `src/analysis/unsupervised_research_enhancer.py`，不再走离线 `self_learning_engine` 旁路。
+- 增强信号包括：实体图社区主题 (`community_topics`)、桥接实体 (`bridge_entities`)、显著关系、新颖性候选 (`novelty_candidates`)、文档签名 (`document_signature`)、`literature_alignment`，先回填到实体 / 关系 metadata，再进入 PG / Neo4j。
+- `_persist_to_orm` 除常规 `documents/entities/entity_relationships` 外，额外同步写 `processing_statistics` 与 `research_analyses`；commit 后再把 `ResearchDocument`、`ResearchTopic` 节点以及 `HAS_LATENT_TOPIC`、`HAS_TOPIC_MEMBER`、`HIGHLIGHTS_BRIDGE` 关系投影到 Neo4j。
+- 接口返回体新增 `research_enhancement` 摘要 + `orm_statistics / orm_analyses / neo4j_nodes / neo4j_edges` 计数，使在线观测不必再去 PG / Neo4j 现查。
+
+#### 2. 长跑运行时两条根因已修复，可稳定串行推理
+
+- `src/llm/llm_engine.py` 默认 `n_gpu_layers` 已从 `-1`（全量 GPU 卸载）降为 `28`，并在 `LLMEngine.generate` 上加 `threading.RLock`，避免 RTX 4060 8GB 在多线程入口下触发 `ggml-cuda assert`。
+- `src/knowledge/tcm_knowledge_graph.py` 的 SQLite 后端已改为每线程独立连接（`threading.local` + `check_same_thread=False`），不再让 FastAPI 线程池命中 `sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that same thread`。
+- 修复后的实证结果（单文件冒烟）：`processing_statistics=2 / research_analyses=2 / analysis_with_unsupervised=2 / ResearchDocument=2 / ResearchTopic=155 / HAS_LATENT_TOPIC=155 / HAS_TOPIC_MEMBER=173`。
+
+#### 3. 批处理已升级为分层限流 + 断点续跑 + 健康自愈
+
+- `tools/batch_distill_corpus.py` 新增 `_THROTTLE_PROFILES`（`conservative / balanced / aggressive`），按源文件 bytes / chars 自动选择 tier，并据此收紧 `effective_cap_chars` 与 `cooldown_s`。
+- 单次请求 `read_timeout` 走 `_compute_read_timeout(chars_sent, base_timeout, timeout_per_kchar, timeout_cap)` 动态放大；JWT 进入 `token_refresh_margin` 区间会主动重登。
+- 服务器 `ConnectionError / ReadTimeout` 命中时会先 `wait_for_server` 等待 watchdog 把进程拉起，再 refresh token 重试一次，而不是直接判负。
+- 进度 `logs/batch_distill_progress.jsonl` 每行带 `throttle.tier / effective_cap_chars / cooldown_s / read_timeout_s / chars_sent / elapsed_s / kg / research`，断点续跑只需重新跑同条命令并保留默认 `--resume`。
+
+#### 4. watchdog 守护脚本已具备自动拉起能力
+
+- `tools/watchdog_server.ps1` 负责持续守护 `python -m src.web.main --port 8765`，进程退出后按 `RestartDelaySec` 冷却再启动，并把所有事件落到 [logs/watchdog.log](logs/watchdog.log)。
+- 已知遗留风险：脚本里仍硬编码了 `TCM_DB_PASSWORD / TCM_NEO4J_PASSWORD` 等敏感项，属于历史遗留。这一轮不在本提交修复范围，后续应作为单独 secrets 治理提交。
+
+### 关键验证记录
+
+- 单文件 distill 冒烟：在 `n_gpu_layers=28` + 串行化 + per-thread SQLite 修复后，单文件返回 200，且 PG / Neo4j 计数与 `research_enhancement` 摘要均出现在响应体中。
+- 重复入库治理基线沿用 repo memory `batch-distill-duplicate-cleanup-2026-04-25`：因为 `documents.source_file = '<original>_<timestamp>_<suffix>'`，并发或重跑时会在 PG 制造重复文档；`tools/cleanup_duplicate_batch_assets.py` 提供 dry-run + apply，按 `source_file` 前缀分组保留 `created_at` 最早一条，并联动清理 Neo4j 节点。
+- 长跑批处理使用 `--throttle-profile balanced` 已能避开 1602 文件 / 358MB 全量批的长文件单点超时面，超长文件会被 tier 自动收口为更小的 `effective_cap_chars` 而不是直接拖崩进程。
+
+### 当前续接锚点
+
+- 在线分析这条线，单一事实源是 `/api/analysis/distill` + `unsupervised_research_enhancer` + `_persist_to_orm` + Neo4j 投影；后续若要继续接“分析—入库—增强”流程，不要再绕回 `self_learning_engine` 离线路径。
+- 长跑稳定性这条线，单一事实源是 `tools/batch_distill_corpus.py` 的 `_apply_tiered_limit` + `_compute_read_timeout` + `wait_for_server` 三段；不要在调用层再叠加一份独立超时或限流策略。
+- 重复治理仍是显式离线工具，不应自动并入在线 distill；长跑期间出现 `processing_statistics` / `research_analyses` 计数膨胀时优先使用 `tools/cleanup_duplicate_batch_assets.py --apply`。
+- watchdog 的硬编码密码是当前唯一明确暴露但未修补的安全风险，下一次安全治理提交应单独处理。
+
+### 任意日期继续接手命令清单
+
+> 下面命令已对照当前源码默认值核对。所有路径相对于仓库根 `c:/Users/hgk/tcmautoresearch`。
+
+1. 拉起 API 服务（推荐 watchdog 守护，自动重启）：
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File tools/watchdog_server.ps1 -Port 8765
+   ```
+2. preflight 双库连通（不需要时可跳过）：
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .vscode/production-local-backfill.ps1 -PreflightOnly
+   ```
+3. 续跑批量蒸馏（默认 `--resume`，已完成文件按 `logs/batch_distill_progress.jsonl` 自动跳过）：
+   ```powershell
+   venv310\Scripts\python.exe tools/batch_distill_corpus.py `
+     --base-url http://127.0.0.1:8765 `
+     --throttle-profile balanced `
+     --sort asc
+   ```
+   - 长文件掉队时切到 `--throttle-profile aggressive`，或显式 `--max-bytes 40000`。
+   - 想强制从头跑：追加 `--no-resume`。
+   - 只跑前 N 个文件：追加 `--limit-files N`。
+4. 检查重复文档并清理（先 dry-run，再 apply）：
+   ```powershell
+   venv310\Scripts\python.exe tools/cleanup_duplicate_batch_assets.py
+   venv310\Scripts\python.exe tools/cleanup_duplicate_batch_assets.py --apply
+   ```
+5. 验证 PG / Neo4j 计数：
+   ```powershell
+   venv310\Scripts\python.exe tools/verify_counts.py
+   ```
+
+### 提交边界说明
+
+- 本次提交应覆盖：在线 distill 入口接入无监督增强 + 双库投影、`LLMEngine` 与 `TCMKnowledgeGraph` 的运行时根因修复、`batch_distill_corpus.py` 的分层限流与自愈通道、watchdog 与重复清理工具，以及本节阶段摘要同步。
+- 工作区中以 `tmp_*.py`、`successful_files.txt`、`tests/test_debug.py`、`alembic/` 之外的其他历史改动不属于这一轮收口边界，不应一起搭车提交。
+
 ## 阶段性收口（2026-04-17）
 
 同步说明（2026-04-17）：
