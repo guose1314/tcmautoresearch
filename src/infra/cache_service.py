@@ -43,7 +43,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -302,19 +302,26 @@ class LLMDiskCache(DiskCacheStore):
         model_id: str,
         temperature: float,
         max_tokens: int,
+        extra_keys: Optional[Mapping[str, str]] = None,
     ) -> str:
-        """基于 LLM 推理参数生成确定性缓存键（SHA-256），兼容原 ``make_key`` 签名。"""
-        raw = json.dumps(
-            {
-                "p": prompt,
-                "s": system_prompt,
-                "m": model_id,
-                "t": round(temperature, 6),
-                "mt": max_tokens,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        )
+        """基于 LLM 推理参数生成确定性缓存键（SHA-256），兼容原 ``make_key`` 签名。
+
+        ``extra_keys`` 用于注入语义级版本号（如 prompt_version、schema_version），
+        缺省 ``None`` 时与历史键完全一致；一旦提供，键会按字母序合并到哈希原文中，
+        从而让上层在不修改 prompt 文本的前提下也能让缓存按版本隔离。
+        """
+        payload: dict[str, Any] = {
+            "p": prompt,
+            "s": system_prompt,
+            "m": model_id,
+            "t": round(temperature, 6),
+            "mt": max_tokens,
+        }
+        if extra_keys:
+            normalized = {str(k): str(v) for k, v in extra_keys.items() if v is not None}
+            if normalized:
+                payload["x"] = dict(sorted(normalized.items()))
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     # 保持对原 _DiskCache.make_key 的调用兼容
@@ -325,9 +332,12 @@ class LLMDiskCache(DiskCacheStore):
         model_id: str,
         temperature: float,
         max_tokens: int,
+        extra_keys: Optional[Mapping[str, str]] = None,
     ) -> str:
         """``make_llm_key`` 的别名，与原 ``_DiskCache.make_key`` 签名完全一致。"""
-        return LLMDiskCache.make_llm_key(prompt, system_prompt, model_id, temperature, max_tokens)
+        return LLMDiskCache.make_llm_key(
+            prompt, system_prompt, model_id, temperature, max_tokens, extra_keys=extra_keys
+        )
 
     def put_llm(
         self,

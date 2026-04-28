@@ -573,7 +573,18 @@ class CachedLLMService(LLMService):
         temperature = float(getattr(self._engine, "temperature", 0.3))
         max_tokens = int(getattr(self._engine, "max_tokens", 1024))
 
-        key = _DiskCache.make_key(prompt, system_prompt, model_id, temperature, max_tokens)
+        # 允许底层 engine 通过 extra_cache_keys（如 prompt_version、schema_version）
+        # 让缓存按语义版本隔离；当前所有 engine 默认未设置，行为与历史一致。
+        extra_cache_keys = getattr(self._engine, "extra_cache_keys", None)
+
+        key = _DiskCache.make_key(
+            prompt,
+            system_prompt,
+            model_id,
+            temperature,
+            max_tokens,
+            extra_keys=extra_cache_keys,
+        )
 
         cached = self._cache.get(key)
         if cached is not None:
@@ -643,9 +654,9 @@ class CachedLLMService(LLMService):
             )
         """
         # 延迟导入，避免 llama-cpp-python 未安装时影响其他模块
-        from src.llm.llm_engine import LLMEngine  # noqa: PLC0415
+        from src.llm.llm_engine import DEFAULT_N_GPU_LAYERS, LLMEngine  # noqa: PLC0415
 
-        n_gpu_layers = int(engine_options.get("n_gpu_layers", -1))
+        n_gpu_layers = int(engine_options.get("n_gpu_layers", DEFAULT_N_GPU_LAYERS))
         n_ctx = int(engine_options.get("n_ctx", 4096))
         temperature = float(engine_options.get("temperature", 0.3))
         max_tokens = int(engine_options.get("max_tokens", 1024))
@@ -744,9 +755,11 @@ class CachedLLMService(LLMService):
                 purpose=purpose,
             )
 
+        from src.llm.llm_engine import DEFAULT_N_GPU_LAYERS  # noqa: PLC0415
+
         return cls.from_engine_config(
             model_path=gc.get("model_path") or lc.get("path"),
-            n_gpu_layers=int(gc.get("n_gpu_layers", -1)),
+            n_gpu_layers=int(gc.get("n_gpu_layers", lc.get("n_gpu_layers", DEFAULT_N_GPU_LAYERS))),
             n_ctx=int(gc.get("n_ctx", 4096)),
             temperature=float(gc.get("temperature", lc.get("temperature", 0.15))),
             max_tokens=int(gc.get("max_tokens", lc.get("max_tokens", 1024))),

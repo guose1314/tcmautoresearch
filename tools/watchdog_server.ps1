@@ -2,10 +2,17 @@
 .SYNOPSIS
     Keep the TCM Web API process alive and restart it on failure.
 .DESCRIPTION
-    1. Start src.web.main with the required environment variables.
-    2. Watch the foreground process until it exits.
-    3. Wait for RestartDelaySec seconds and then restart it.
-    4. Write all watchdog messages to logs\watchdog.log.
+    1. Verify required environment variables are present (no hard-coded secrets).
+    2. Start src.web.main with the inherited environment.
+    3. Watch the foreground process until it exits.
+    4. Wait for RestartDelaySec seconds and then restart it.
+    5. Write all watchdog messages to logs\watchdog.log.
+
+    Required environment variables (must be set BEFORE invoking this script):
+        TCM__DATABASE__HOST, TCM__DATABASE__NAME, TCM__DATABASE__USER,
+        TCM_DB_PASSWORD, TCM_NEO4J_URI, TCM_NEO4J_PASSWORD
+    The watchdog refuses to start with any of them empty so an unconfigured
+    workstation cannot accidentally talk to the production database.
 .PARAMETER MaxRestarts
     Maximum restart attempts. 0 means unlimited.
 .PARAMETER RestartDelaySec
@@ -70,13 +77,31 @@ while ($true) {
 
     Write-Log "starting API server (restart_count=$restartCount)"
 
-    # Set runtime environment variables.
-    $env:TCM__DATABASE__HOST = "127.0.0.1"
-    $env:TCM__DATABASE__NAME = "postgres"
-    $env:TCM__DATABASE__USER = "postgres"
-    $env:TCM_DB_PASSWORD = "yourpassword"
-    $env:TCM_NEO4J_URI = "neo4j://localhost:7687"
-    $env:TCM_NEO4J_PASSWORD = "Hgk1989225"
+    # Required runtime credentials must be provided via environment variables.
+    # Defaults are intentionally left empty: we refuse to start with placeholder
+    # secrets so an unconfigured workstation cannot accidentally talk to the
+    # production database. Set the variables in a .env file or in your shell
+    # profile and re-run the watchdog.
+    $requiredEnv = @(
+        "TCM__DATABASE__HOST",
+        "TCM__DATABASE__NAME",
+        "TCM__DATABASE__USER",
+        "TCM_DB_PASSWORD",
+        "TCM_NEO4J_URI",
+        "TCM_NEO4J_PASSWORD"
+    )
+    $missing = @()
+    foreach ($name in $requiredEnv) {
+        $value = [Environment]::GetEnvironmentVariable($name, "Process")
+        if ([string]::IsNullOrWhiteSpace($value)) {
+            $missing += $name
+        }
+    }
+    if ($missing.Count -gt 0) {
+        Write-Log ("missing required environment variables: " + ($missing -join ", "))
+        Write-Log "watchdog refuses to start the API with empty credentials. Set them and re-run."
+        throw "Missing required environment variables: $($missing -join ', ')"
+    }
 
     # Start the API in the foreground so the watchdog can observe exit.
     try {
