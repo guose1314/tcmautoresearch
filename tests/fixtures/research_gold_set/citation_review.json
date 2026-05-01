@@ -1,0 +1,66 @@
+{
+  "case_id": "citation_review_wet_disease",
+  "category": "citation_review",
+  "category_label": "引用综述",
+  "input": {
+    "query": "湿病证治综述的引用支持",
+    "source_ref": "review_wet_disease_sources"
+  },
+  "expected": {
+    "entities": [
+      {"type": "topic", "name": "湿病"},
+      {"type": "method", "name": "证治综述"},
+      {"type": "classic", "name": "金匮要略"}
+    ],
+    "relationships": [
+      {"type": "summarizes", "source": "证治综述", "target": "湿病"},
+      {"type": "cites", "source": "证治综述", "target": "金匮要略"}
+    ],
+    "philology_verdict": {
+      "status": "citation_supported",
+      "confidence": 0.88
+    },
+    "citation_support": [
+      {
+        "claim_id": "claim_review_wet_disease",
+        "supported": true,
+        "citation_keys": ["review_wet_disease_sources", "jingui_wet_disease"]
+      }
+    ]
+  },
+  "actual": {
+    "report_markdown": "[claim:claim_review_wet_disease] 湿病证治综述引用《金匮要略》作为证据支撑。[@review_wet_disease_sources; @jingui_wet_disease]",
+    "entities": [
+      {"type": "topic", "name": "湿病"},
+      {"type": "method", "name": "证治综述"},
+      {"type": "classic", "name": "金匮要略"}
+    ],
+    "relationships": [
+      {"type": "summarizes", "source": "证治综述", "target": "湿病"},
+      {"type": "cites", "source": "证治综述", "target": "金匮要略"}
+    ],
+    "philology_verdict": {
+      "status": "citation_supported",
+      "confidence": 0.88
+    },
+    "citation_support": [
+      {
+        "claim_id": "claim_review_wet_disease",
+        "supported": true,
+        "citation_keys": ["review_wet_disease_sources", "jingui_wet_disease"]
+      }
+    ],
+    "citation_grounding_records": [
+      {
+        "claim_id": "claim_review_wet_disease",
+        "paragraph_id": "publish:claim:1",
+        "citation_keys": ["review_wet_disease_sources", "jingui_wet_disease"],
+        "evidence_claim_ids": ["claim_review_wet_disease"],
+        "witness_keys": ["jingui_wet_disease"],
+        "support_level": "strong",
+        "uncertainty_note": "Gold-set citation review claim is fully grounded.",
+        "claim_text": "湿病证治综述引用《金匮要略》作为证据支撑。"
+      }
+    ]
+  }
+}

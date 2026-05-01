@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from src.storage.neo4j_driver import (
     Neo4jDriver,
+    _build_unique_constraint_cypher,
     _get_neo4j_graph_database,
     create_knowledge_graph,
 )
@@ -51,12 +52,17 @@ class _FakeTransaction:
                 [
                     {
                         "relationship_type": "SIMILAR_TO",
-                        "properties": {"confidence": 0.92, "source": f"{formula_name}->{similar_formula_name}"},
+                        "properties": {
+                            "confidence": 0.92,
+                            "source": f"{formula_name}->{similar_formula_name}",
+                        },
                     }
                 ]
             )
         if "RETURN n" in query:
-            return _FakeQueryResult([{"n": {"id": node_id, "name": "四君子汤", "label": "Formula"}}])
+            return _FakeQueryResult(
+                [{"n": {"id": node_id, "name": "四君子汤", "label": "Formula"}}]
+            )
         if "WHERE type(r) IN $composition_roles" in query and "AS sovereign" in query:
             return _FakeQueryResult(
                 [
@@ -69,7 +75,14 @@ class _FakeTransaction:
                 ]
             )
         if "RETURN f2.name as name, f2 as properties" in query:
-            return _FakeQueryResult([{"name": "六君子汤", "properties": {"name": "六君子汤", "category": "补气方"}}])
+            return _FakeQueryResult(
+                [
+                    {
+                        "name": "六君子汤",
+                        "properties": {"name": "六君子汤", "category": "补气方"},
+                    }
+                ]
+            )
         if "RETURN 1" in query:
             return _FakeQueryResult([{"ok": 1}])
         raise AssertionError(f"unexpected query: {query}")
@@ -132,6 +145,10 @@ class _RecordingSession:
     def execute_read(self, callback):
         return callback(_RecordingTransaction(self._backend))
 
+    def run(self, query, **params):
+        self._backend.calls.append((query, params))
+        return _FakeQueryResult([])
+
 
 class _RecordingDriver:
     def __init__(self):
@@ -190,7 +207,10 @@ class TestNeo4jDriverSimilarityEvidence(unittest.TestCase):
             os.environ["TCM_NEO4J_PASSWORD"] = self.original_password
 
     def test_get_neo4j_graph_database_uses_lazy_import(self):
-        with patch("src.storage.neo4j_driver.import_module", return_value=SimpleNamespace(GraphDatabase=_FakeGraphDatabase)) as mocked:
+        with patch(
+            "src.storage.neo4j_driver.import_module",
+            return_value=SimpleNamespace(GraphDatabase=_FakeGraphDatabase),
+        ) as mocked:
             graph_database = _get_neo4j_graph_database()
 
         self.assertIs(graph_database, _FakeGraphDatabase)
@@ -199,7 +219,10 @@ class TestNeo4jDriverSimilarityEvidence(unittest.TestCase):
     def test_connect_uses_lazy_import_graphdatabase(self):
         driver = Neo4jDriver("neo4j://example", ("neo4j", "password"))
 
-        with patch("src.storage.neo4j_driver._get_neo4j_graph_database", return_value=_FakeGraphDatabase) as mocked:
+        with patch(
+            "src.storage.neo4j_driver._get_neo4j_graph_database",
+            return_value=_FakeGraphDatabase,
+        ) as mocked:
             driver.connect()
 
         self.assertIsNotNone(driver.driver)
@@ -217,7 +240,9 @@ class TestNeo4jDriverSimilarityEvidence(unittest.TestCase):
         self.assertEqual(payload["shared_herbs"][0]["herb"], "人参")
         self.assertEqual(payload["shared_herbs"][0]["formula_role"], "sovereign")
         self.assertEqual(payload["shared_herbs"][0]["similar_formula_role"], "minister")
-        self.assertEqual(payload["direct_relationships"][0]["relationship_type"], "SIMILAR_TO")
+        self.assertEqual(
+            payload["direct_relationships"][0]["relationship_type"], "SIMILAR_TO"
+        )
         self.assertAlmostEqual(payload["evidence_score"], 0.7, places=3)
 
     def test_collect_formula_similarity_evidence_returns_empty_dict_on_failure(self):
@@ -232,7 +257,10 @@ class TestNeo4jDriverSimilarityEvidence(unittest.TestCase):
         driver = Neo4jDriver("neo4j://example", ("neo4j", "password"))
         driver.driver = _FakeDriver()
 
-        with patch("src.storage.neo4j_driver.import_module", side_effect=AssertionError("should not import neo4j during query")):
+        with patch(
+            "src.storage.neo4j_driver.import_module",
+            side_effect=AssertionError("should not import neo4j during query"),
+        ):
             node = driver.get_node("formula:四君子汤", "Formula")
             composition = driver.find_formula_composition("四君子汤")
             similar_formulas = driver.find_similar_formulas("四君子汤", limit=5)
@@ -265,12 +293,17 @@ class TestNeo4jDriverSimilarityEvidence(unittest.TestCase):
         backend = _RecordingDriver()
         driver = Neo4jDriver("neo4j://example", ("neo4j", "password"))
         driver.driver = backend
-        graph = create_knowledge_graph({"neo4j": {"enabled": False}}, preload_formulas=False)
+        graph = create_knowledge_graph(
+            {"neo4j": {"enabled": False}}, preload_formulas=False
+        )
         del graph
 
         from src.storage.neo4j_driver import Neo4jKnowledgeGraph
 
-        with patch("src.storage.neo4j_driver.import_module", return_value=SimpleNamespace(DiGraph=_FakeDiGraph)):
+        with patch(
+            "src.storage.neo4j_driver.import_module",
+            return_value=SimpleNamespace(DiGraph=_FakeDiGraph),
+        ):
             kg = Neo4jKnowledgeGraph(driver, preload_formulas=False)
             kg.get_subgraph("entity::四君子汤", depth=2)
 
@@ -282,12 +315,15 @@ class TestNeo4jDriverSimilarityEvidence(unittest.TestCase):
     def test_create_knowledge_graph_prefers_explicit_password_over_env(self):
         os.environ["TCM_NEO4J_PASSWORD"] = "stale-env-password"
 
-        with patch("src.storage.neo4j_driver.Neo4jDriver", _CapturedNeo4jDriver), patch(
-            "src.storage.neo4j_driver.Neo4jKnowledgeGraph",
-            side_effect=lambda driver, preload_formulas=False: {
-                "driver": driver,
-                "preload_formulas": preload_formulas,
-            },
+        with (
+            patch("src.storage.neo4j_driver.Neo4jDriver", _CapturedNeo4jDriver),
+            patch(
+                "src.storage.neo4j_driver.Neo4jKnowledgeGraph",
+                side_effect=lambda driver, preload_formulas=False: {
+                    "driver": driver,
+                    "preload_formulas": preload_formulas,
+                },
+            ),
         ):
             graph = create_knowledge_graph(
                 {
@@ -309,6 +345,90 @@ class TestNeo4jDriverSimilarityEvidence(unittest.TestCase):
             ("neo4j", "explicit-neo4j-password"),
         )
         self.assertTrue(graph["preload_formulas"])
+
+    def test_setup_constraints_uses_ontology_registry_specs(self):
+        backend = _RecordingDriver()
+        driver = Neo4jDriver("neo4j://example", ("neo4j", "password"))
+        driver.driver = backend
+
+        driver._setup_constraints_and_indexes()
+
+        statements = [query for query, _params in backend.calls]
+        self.assertTrue(
+            any(
+                "FOR (n:Herb) REQUIRE n.id IS UNIQUE" in statement
+                for statement in statements
+            )
+        )
+        self.assertTrue(
+            any(
+                "FOR (n:Literature) REQUIRE n.id IS UNIQUE" in statement
+                for statement in statements
+            )
+        )
+        self.assertTrue(
+            any(
+                "FOR (n:Formula) REQUIRE n.id IS UNIQUE" in statement
+                for statement in statements
+            )
+        )
+        self.assertTrue(
+            any(
+                "FOR (n:EvidenceClaim) REQUIRE n.id IS UNIQUE" in statement
+                for statement in statements
+            )
+        )
+        self.assertTrue(
+            any(
+                "CREATE FULLTEXT INDEX ontology_herb_fulltext" in statement
+                and "FOR (n:Herb)" in statement
+                and "n.name" in statement
+                for statement in statements
+            )
+        )
+        self.assertTrue(
+            any(
+                "CREATE FULLTEXT INDEX ontology_literature_fulltext" in statement
+                and "FOR (n:Literature)" in statement
+                and "n.title" in statement
+                for statement in statements
+            )
+        )
+
+    def test_setup_constraints_falls_back_to_legacy_ddl_on_registry_failure(self):
+        backend = _RecordingDriver()
+        driver = Neo4jDriver("neo4j://example", ("neo4j", "password"))
+        driver.driver = backend
+
+        with patch(
+            "src.storage.ontology.registry.load_ontology_registry",
+            side_effect=RuntimeError("registry down"),
+        ):
+            driver._setup_constraints_and_indexes()
+
+        statements = [query for query, _params in backend.calls]
+        self.assertTrue(
+            any(
+                "FOR (p:Prescription) REQUIRE p.name IS UNIQUE" in statement
+                for statement in statements
+            )
+        )
+        self.assertTrue(
+            any(
+                "CREATE FULLTEXT INDEX entity_text_index" in statement
+                for statement in statements
+            )
+        )
+
+    def test_ontology_constraint_builder_rejects_illegal_label(self):
+        with self.assertRaises(ValueError):
+            _build_unique_constraint_cypher(
+                {
+                    "name": "ontology_bad_unique",
+                    "label": "Bad Label",
+                    "property": "id",
+                }
+            )
 
 
 if __name__ == "__main__":

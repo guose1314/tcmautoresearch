@@ -1,0 +1,61 @@
+{
+  "case_id": "formula_composition_gzt",
+  "category": "formula_composition",
+  "category_label": "方剂组成",
+  "input": {
+    "query": "桂枝汤的方剂组成与方证对应",
+    "source_ref": "shanghanlun_taiyang_12"
+  },
+  "expected": {
+    "entities": [
+      {"type": "formula", "name": "桂枝汤"},
+      {"type": "herb", "name": "桂枝"},
+      {"type": "herb", "name": "芍药"},
+      {"type": "herb", "name": "甘草"},
+      {"type": "syndrome", "name": "太阳中风"}
+    ],
+    "relationships": [
+      {"type": "contains", "source": "桂枝汤", "target": "桂枝"},
+      {"type": "contains", "source": "桂枝汤", "target": "芍药"},
+      {"type": "contains", "source": "桂枝汤", "target": "甘草"},
+      {"type": "formula_matches_syndrome", "source": "桂枝汤", "target": "太阳中风"}
+    ],
+    "philology_verdict": {
+      "status": "not_applicable",
+      "confidence": 1.0
+    },
+    "citation_support": [
+      {
+        "claim_id": "claim_formula_gzt_composition",
+        "supported": true,
+        "citation_keys": ["shanghanlun_taiyang_12"]
+      }
+    ]
+  },
+  "actual": {
+    "entities": [
+      {"type": "formula", "name": "桂枝汤"},
+      {"type": "herb", "name": "桂枝"},
+      {"type": "herb", "name": "芍药"},
+      {"type": "herb", "name": "甘草"},
+      {"type": "syndrome", "name": "太阳中风"}
+    ],
+    "relationships": [
+      {"type": "contains", "source": "桂枝汤", "target": "桂枝"},
+      {"type": "contains", "source": "桂枝汤", "target": "芍药"},
+      {"type": "contains", "source": "桂枝汤", "target": "甘草"},
+      {"type": "formula_matches_syndrome", "source": "桂枝汤", "target": "太阳中风"}
+    ],
+    "philology_verdict": {
+      "status": "not_applicable",
+      "confidence": 1.0
+    },
+    "citation_support": [
+      {
+        "claim_id": "claim_formula_gzt_composition",
+        "supported": true,
+        "citation_keys": ["shanghanlun_taiyang_12"]
+      }
+    ]
+  }
+}

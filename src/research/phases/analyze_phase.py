@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from math import erfc, sqrt
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
@@ -23,6 +24,17 @@ from src.research.learning_strategy import (
 )
 from src.research.phase_result import build_phase_result, get_phase_value
 from src.research.reasoning_template_selector import select_reasoning_framework
+from src.research.tcm_reasoning import (
+    TCM_REASONING_CONTRACT_VERSION,
+    TCMReasoningPremise,
+    build_tcm_reasoning_metadata,
+    run_tcm_reasoning,
+)
+from src.research.textual_criticism import (
+    VERDICT_CONTRACT_VERSION,
+    build_textual_criticism_summary,
+    normalize_authenticity_verdicts,
+)
 
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
@@ -171,6 +183,22 @@ class AnalyzePhaseMixin:
         textual_evidence_summary = self._extract_textual_evidence_summary(cycle)
         if textual_evidence_summary:
             analysis_results["textual_evidence_summary"] = textual_evidence_summary
+        textual_criticism = self._extract_textual_criticism(cycle, context)
+        textual_criticism_summary = (
+            textual_criticism.get("summary") if textual_criticism else {}
+        )
+        if textual_criticism:
+            analysis_results["textual_criticism"] = textual_criticism
+            analysis_results["textual_criticism_summary"] = textual_criticism_summary
+        graph_rag = self._prepare_analyze_graph_rag_context(context, cycle)
+        tcm_reasoning = self._run_analyze_tcm_reasoning(
+            cycle,
+            context,
+            analyze_records,
+            analyze_relationships,
+        )
+        if tcm_reasoning:
+            analysis_results["tcm_reasoning"] = tcm_reasoning
 
         # T2.4: methodology contract — methodology_tag 必填 + evidence_grade 默认 'C'
         methodology = _resolve_analyze_methodology(context, cycle)
@@ -245,6 +273,17 @@ class AnalyzePhaseMixin:
             )
             if textual_evidence_summary
             else 0,
+            "textual_criticism_consumed": bool(textual_criticism),
+            "textual_criticism_verdict_count": int(
+                textual_criticism_summary.get("verdict_count") or 0
+            )
+            if textual_criticism_summary
+            else 0,
+            "textual_criticism_needs_review_count": int(
+                textual_criticism_summary.get("needs_review_count") or 0
+            )
+            if textual_criticism_summary
+            else 0,
             "graph_asset_subgraphs": ["evidence_subgraph"] if evidence_subgraph else [],
             "graph_asset_node_count": int(evidence_subgraph.get("node_count") or 0)
             if evidence_subgraph
@@ -257,6 +296,11 @@ class AnalyzePhaseMixin:
             ),
             "reasoning_framework": reasoning_framework.to_dict(),
         }
+        metadata.update(self._build_analyze_tcm_reasoning_metadata(tcm_reasoning))
+        if textual_criticism:
+            metadata["analysis_modules"].append("textual_criticism")
+        if metadata.get("tcm_reasoning_generated"):
+            metadata["analysis_modules"].append("tcm_reasoning")
         if evidence_grade_error:
             metadata["evidence_grade_error"] = evidence_grade_error
         if hasattr(self, "_analyze_tracker"):
@@ -265,13 +309,7 @@ class AnalyzePhaseMixin:
                 {"phase": "analyze", **self._analyze_tracker.to_metadata()}
             )
 
-        # T5.5: 三档 GraphRAG 摘要 — 在 SelfRefineRunner 前先注入背景知识
-        try:
-            graph_rag_block = self._apply_graph_rag(context, cycle)
-            if graph_rag_block:
-                metadata["graph_rag"] = graph_rag_block
-        except Exception:
-            pass
+        metadata["graph_rag"] = graph_rag
 
         # T4.5: enable_self_refine=True 时，对 analyze 主结论文本调用 SelfRefineRunner
         try:
@@ -340,35 +378,46 @@ class AnalyzePhaseMixin:
     ) -> Dict[str, Any]:
         """T5.5: 在 SelfRefineRunner 之前先调 GraphRAG 三档检索。
 
-        触发条件（任一为真即启用）：
-          * ``context["enable_graph_rag"]`` 为真；
-          * pipeline.config 内 ``learning_strategy.enable_graph_rag`` 为真。
+                触发条件：默认遵循 ``graph_rag.default_enabled``；
+                ``context["enable_graph_rag"]`` 显式为 ``False`` 时关闭。
 
         ``question_type`` 解析顺序：
           1. ``context["graph_rag_question_type"]`` 显式覆盖；
           2. 启发式：含 ``entity_ids`` → ``local``；含 ``topic_keys`` → ``community``；
              否则 ``global``。
         """
-        if not self._resolve_analyze_flag(context, "enable_graph_rag", default=False):
-            return {}
+        if not self._resolve_analyze_graph_rag_enabled(context):
+            return self._build_graph_rag_block(
+                status="disabled",
+                reason=self._resolve_graph_rag_disabled_reason(context),
+            )
         try:
             from src.llm.graph_rag import VALID_QUESTION_TYPES, GraphRAG
-        except Exception:
-            return {}
+        except Exception as exc:  # noqa: BLE001
+            return self._build_graph_rag_block(
+                status="degraded",
+                reason="graph_rag_unavailable",
+                error=str(exc),
+            )
 
         rag: Any = context.get("graph_rag_runner")
+        missing_driver = False
         if rag is None:
             driver = getattr(self.pipeline, "neo4j_driver", None) or context.get(
                 "neo4j_driver"
             )
+            missing_driver = driver is None
             token_budget = int(context.get("graph_rag_token_budget", 8000))
             rag = GraphRAG(neo4j_driver=driver, token_budget=token_budget)
 
         topic_keys = list(context.get("graph_rag_topic_keys") or [])
         entity_ids = list(context.get("graph_rag_entity_ids") or [])
+        asset_type = str(context.get("graph_rag_asset_type") or "").strip().lower()
         question_type = (context.get("graph_rag_question_type") or "").strip().lower()
         if question_type not in VALID_QUESTION_TYPES:
-            if entity_ids:
+            if asset_type:
+                question_type = "local"
+            elif entity_ids:
                 question_type = "local"
             elif topic_keys:
                 question_type = "community"
@@ -386,13 +435,137 @@ class AnalyzePhaseMixin:
                 query,
                 topic_keys=topic_keys or None,
                 entity_ids=entity_ids or None,
+                asset_type=asset_type or None,
+                cycle_id=str(
+                    context.get("graph_rag_cycle_id")
+                    or getattr(cycle, "cycle_id", "")
+                    or ""
+                ),
             )
-        except Exception:
-            return {}
+        except Exception as exc:  # noqa: BLE001
+            return self._build_graph_rag_block(
+                status="degraded",
+                reason="retrieve_failed",
+                scope=question_type,
+                asset_type=asset_type,
+                error=str(exc),
+            )
         block = result.to_dict() if hasattr(result, "to_dict") else dict(result)
+        if self._is_empty_graph_rag_block(block):
+            block = self._build_graph_rag_block(
+                status="degraded",
+                reason="missing_neo4j_driver" if missing_driver else "empty_result",
+                scope=question_type,
+                asset_type=asset_type,
+                block=block,
+            )
+        else:
+            block = self._build_graph_rag_block(
+                status="applied",
+                reason="retrieved",
+                scope=question_type,
+                asset_type=asset_type,
+                block=block,
+            )
         # 写回 context 让 SelfRefineRunner 在 inputs 里看到
         context.setdefault("graph_rag_context", block)
         return block
+
+    def _prepare_analyze_graph_rag_context(
+        self,
+        context: Dict[str, Any],
+        cycle: "ResearchCycle",
+    ) -> Dict[str, Any]:
+        """Prepare GraphRAG early so Analyze substages can consume it."""
+        if self._resolve_analyze_graph_rag_enabled(context):
+            try:
+                return self._apply_graph_rag(context, cycle)
+            except Exception as exc:  # noqa: BLE001
+                return self._build_graph_rag_block(
+                    status="degraded",
+                    reason="exception",
+                    error=str(exc),
+                )
+        return self._build_graph_rag_block(
+            status="disabled",
+            reason=self._resolve_graph_rag_disabled_reason(context),
+        )
+
+    def _resolve_analyze_graph_rag_enabled(self, context: Dict[str, Any]) -> bool:
+        if "enable_graph_rag" in context:
+            return bool(context.get("enable_graph_rag"))
+
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        for flag_name in ("analyze_enable_graph_rag", "enable_graph_rag"):
+            if flag_name in strategy:
+                return bool(strategy.get(flag_name))
+
+        graph_rag_config = self._resolve_graph_rag_config()
+        if "default_enabled" in graph_rag_config:
+            return bool(graph_rag_config.get("default_enabled"))
+        return True
+
+    def _resolve_graph_rag_disabled_reason(self, context: Dict[str, Any]) -> str:
+        if "enable_graph_rag" in context:
+            return "explicit_context_disabled"
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        if "analyze_enable_graph_rag" in strategy:
+            return "strategy_analyze_disabled"
+        if "enable_graph_rag" in strategy:
+            return "strategy_disabled"
+        return "config_default_disabled"
+
+    def _resolve_graph_rag_config(self) -> Dict[str, Any]:
+        config = getattr(self.pipeline, "config", {}) or {}
+        graph_rag_config = config.get("graph_rag") if isinstance(config, dict) else {}
+        return dict(graph_rag_config) if isinstance(graph_rag_config, dict) else {}
+
+    @staticmethod
+    def _build_graph_rag_block(
+        *,
+        status: str,
+        reason: str,
+        scope: str = "",
+        asset_type: str = "",
+        block: Dict[str, Any] | None = None,
+        error: str = "",
+    ) -> Dict[str, Any]:
+        payload = dict(block or {})
+        payload.setdefault("scope", scope or payload.get("scope") or "")
+        payload.setdefault("asset_type", asset_type or payload.get("asset_type") or "")
+        payload.setdefault("body", str(payload.get("body") or ""))
+        payload.setdefault("token_count", int(payload.get("token_count") or 0))
+        payload.setdefault("citations", list(payload.get("citations") or []))
+        payload.setdefault("truncated", bool(payload.get("truncated", False)))
+        payload.setdefault("traceability", dict(payload.get("traceability") or {}))
+        payload["status"] = status
+        payload["reason"] = reason
+        if error:
+            payload["error"] = error
+        return payload
+
+    @staticmethod
+    def _is_empty_graph_rag_block(block: Dict[str, Any]) -> bool:
+        traceability = block.get("traceability") if isinstance(block, dict) else {}
+        has_traceability = AnalyzePhaseMixin._has_graph_rag_traceability(traceability)
+        return not (
+            str(block.get("body") or "").strip()
+            or block.get("citations")
+            or has_traceability
+        )
+
+    @staticmethod
+    def _has_graph_rag_traceability(traceability: Any) -> bool:
+        if not isinstance(traceability, dict):
+            return False
+        for key in ("node_ids", "relationship_ids", "source_phases", "cycle_ids"):
+            values = traceability.get(key)
+            if isinstance(values, list) and values:
+                return True
+        return bool(
+            str(traceability.get("source_phase") or "").strip()
+            or str(traceability.get("cycle_id") or "").strip()
+        )
 
     def _resolve_analyze_modules(
         self,
@@ -1469,6 +1642,538 @@ class AnalyzePhaseMixin:
             "conflict_count": conflict_count,
             "needs_review_count": needs_review_count,
             "high_confidence_count": high_confidence_count,
+        }
+
+    def _extract_textual_criticism(
+        self,
+        cycle: "ResearchCycle",
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        observe_result = cycle.phase_executions.get(
+            self.pipeline.ResearchPhase.OBSERVE, {}
+        ).get("result", {})
+        candidates = [context.get("textual_criticism")]
+        if isinstance(observe_result, dict):
+            candidates.append(get_phase_value(observe_result, "textual_criticism", {}))
+
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            verdicts = candidate.get("verdicts") or candidate.get(
+                "authenticity_verdicts"
+            )
+            normalized = normalize_authenticity_verdicts(verdicts or [])
+            if not normalized:
+                continue
+            return {
+                "verdicts": normalized,
+                "summary": build_textual_criticism_summary(normalized),
+                "contract_version": str(
+                    candidate.get("contract_version") or VERDICT_CONTRACT_VERSION
+                ),
+                "source_phase": "observe",
+            }
+        return {}
+
+    def _run_analyze_tcm_reasoning(
+        self,
+        cycle: "ResearchCycle",
+        context: Dict[str, Any],
+        analyze_records: List[Dict[str, Any]],
+        analyze_relationships: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if not self._resolve_analyze_flag(context, "run_tcm_reasoning", True):
+            return {}
+
+        premises = self._build_analyze_tcm_reasoning_premises(
+            context,
+            analyze_records,
+            analyze_relationships,
+        )
+        if not premises:
+            return {}
+
+        seed = self._resolve_analyze_tcm_reasoning_seed(cycle, context)
+        try:
+            trace = run_tcm_reasoning(premises, seed=seed)
+        except Exception as exc:  # noqa: BLE001 - TCM reasoning must not block analyze
+            self.pipeline.logger.warning("Analyze 阶段 TCMReasoning 失败: %s", exc)
+            summary = self._empty_analyze_tcm_reasoning_metadata()
+            summary["tcm_reasoning_error"] = str(exc)
+            return {
+                "seed": seed,
+                "premises": [premise.to_dict() for premise in premises],
+                "steps": [],
+                "overall_confidence": 0.0,
+                "pattern_coverage": [],
+                "notes": "TCMReasoning 执行失败，Analyze 主链已降级继续。",
+                "contract_version": TCM_REASONING_CONTRACT_VERSION,
+                "summary": summary,
+                "degraded_reason": "tcm_reasoning_failed",
+                "error": str(exc),
+            }
+
+        payload = trace.to_dict()
+        payload["summary"] = build_tcm_reasoning_metadata(trace)
+        return payload
+
+    def _build_analyze_tcm_reasoning_premises(
+        self,
+        context: Dict[str, Any],
+        analyze_records: List[Dict[str, Any]],
+        analyze_relationships: List[Dict[str, Any]],
+    ) -> List[TCMReasoningPremise]:
+        premises: List[TCMReasoningPremise] = []
+        seen: set[Tuple[str, str, str]] = set()
+
+        def add_premise(
+            premise_kind: Any,
+            canonical: Any,
+            *,
+            label: Any = "",
+            source_ref: Any = "",
+            note: Any = "",
+            claim_id: Any = "",
+            source_phase: Any = "",
+            confidence: Any = 0.0,
+        ) -> None:
+            kind = self._normalize_tcm_reasoning_premise_kind(premise_kind)
+            text = str(canonical or "").strip()
+            if not kind or not text or text == "unknown":
+                return
+            ref = str(source_ref or "analyze").strip() or "analyze"
+            normalized_claim_id = str(claim_id or "").strip()
+            key = (kind, text, normalized_claim_id or ref)
+            if key in seen:
+                return
+            seen.add(key)
+            premises.append(
+                TCMReasoningPremise(
+                    premise_kind=kind,
+                    canonical=text,
+                    label=str(label or text).strip() or text,
+                    source_ref=ref,
+                    note=str(note or "").strip(),
+                    claim_id=normalized_claim_id,
+                    source_phase=str(source_phase or "").strip(),
+                    confidence=self._clamp_graph_rag_confidence(confidence),
+                )
+            )
+
+        explicit_premises = (
+            context.get("tcm_reasoning_premises") or context.get("tcm_premises") or []
+        )
+        for item in explicit_premises:
+            if isinstance(item, TCMReasoningPremise):
+                add_premise(
+                    item.premise_kind,
+                    item.canonical,
+                    label=item.label,
+                    source_ref=item.source_ref,
+                    note=item.note,
+                    claim_id=item.claim_id,
+                    source_phase=item.source_phase,
+                    confidence=item.confidence,
+                )
+            elif isinstance(item, dict):
+                premise = TCMReasoningPremise.from_dict(item)
+                add_premise(
+                    premise.premise_kind,
+                    premise.canonical,
+                    label=premise.label,
+                    source_ref=premise.source_ref,
+                    note=premise.note,
+                    claim_id=premise.claim_id,
+                    source_phase=premise.source_phase,
+                    confidence=premise.confidence,
+                )
+
+        for spec in self._iter_analyze_graph_rag_tcm_premise_specs(context):
+            add_premise(
+                spec.get("premise_kind"),
+                spec.get("canonical"),
+                label=spec.get("label"),
+                source_ref=spec.get("source_ref"),
+                note=spec.get("note"),
+                claim_id=spec.get("claim_id"),
+                source_phase=spec.get("source_phase"),
+                confidence=spec.get("confidence"),
+            )
+
+        for index, record in enumerate(analyze_records, start=1):
+            if not isinstance(record, dict):
+                continue
+            source_ref = str(
+                record.get("title") or record.get("formula") or f"record_{index}"
+            )
+            add_premise("formula", record.get("formula"), source_ref=source_ref)
+            add_premise("syndrome", record.get("syndrome"), source_ref=source_ref)
+            for herb in record.get("herbs") or []:
+                add_premise("herb", herb, source_ref=source_ref)
+            for symptom in record.get("symptoms") or record.get("manifestations") or []:
+                add_premise("symptom", symptom, source_ref=source_ref)
+
+        for relationship in analyze_relationships or []:
+            if not isinstance(relationship, dict):
+                continue
+            metadata = (
+                relationship.get("metadata")
+                if isinstance(relationship.get("metadata"), dict)
+                else {}
+            )
+            source_ref = (
+                relationship.get("source_ref")
+                or metadata.get("source")
+                or metadata.get("source_ref")
+                or "analyze_relationship"
+            )
+            note = relationship.get("type") or relationship.get("rel_type") or ""
+            for side in ("source", "target"):
+                add_premise(
+                    relationship.get(f"{side}_type"),
+                    relationship.get(side),
+                    source_ref=source_ref,
+                    note=note,
+                )
+
+        for factor in self._iter_analyze_tcm_context_factors(context):
+            if isinstance(factor, dict):
+                add_premise(
+                    factor.get("premise_kind") or "context",
+                    factor.get("canonical")
+                    or factor.get("value")
+                    or factor.get("label"),
+                    label=factor.get("label"),
+                    source_ref=factor.get("source_ref") or "analyze_context",
+                    note=factor.get("note") or "三因制宜上下文",
+                )
+            else:
+                add_premise(
+                    "context",
+                    factor,
+                    source_ref="analyze_context",
+                    note="三因制宜上下文",
+                )
+        return premises
+
+    def _iter_analyze_graph_rag_tcm_premise_specs(
+        self,
+        context: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        specs: List[Dict[str, Any]] = []
+        for block in self._iter_analyze_graph_rag_blocks(context):
+            asset_type = str(block.get("asset_type") or "").strip().lower()
+            if asset_type not in {"claim", "evidence"}:
+                continue
+            traceability = block.get("traceability")
+            if not isinstance(traceability, dict):
+                traceability = {}
+            source_phase = str(traceability.get("source_phase") or "").strip()
+            if not source_phase:
+                source_phases = traceability.get("source_phases") or []
+                if isinstance(source_phases, list) and source_phases:
+                    source_phase = str(source_phases[0] or "").strip()
+            node_ids = [str(item) for item in traceability.get("node_ids") or []]
+            citations = [
+                item for item in block.get("citations") or [] if isinstance(item, dict)
+            ]
+            lines = [
+                line.strip()
+                for line in str(block.get("body") or "").splitlines()
+                if line.strip()
+            ]
+            if not lines and citations:
+                lines = [""] * len(citations)
+
+            for index, line in enumerate(lines):
+                parsed = self._parse_graph_rag_typed_asset_line(line)
+                line_asset_type = str(parsed.get("asset_type") or asset_type).lower()
+                if line_asset_type not in {"claim", "evidence"}:
+                    continue
+                citation = citations[index] if index < len(citations) else {}
+                node_id = (
+                    parsed.get("node_id")
+                    or citation.get("id")
+                    or (node_ids[index] if index < len(node_ids) else "")
+                    or (node_ids[0] if node_ids else "")
+                )
+                fields = dict(parsed.get("fields") or {})
+                claim_id = (
+                    fields.get("claim_id")
+                    or self._derive_graph_rag_claim_id(node_id)
+                    or self._derive_graph_rag_claim_id(citation.get("id"))
+                )
+                confidence = self._clamp_graph_rag_confidence(fields.get("confidence"))
+                if confidence == 0.0:
+                    confidence = self._clamp_graph_rag_confidence(
+                        fields.get("score") or fields.get("weight")
+                    )
+                source_ref = str(claim_id or node_id or "graph_rag").strip()
+                for (
+                    premise_kind,
+                    canonical,
+                ) in self._extract_tcm_specs_from_graph_rag_fields(
+                    line_asset_type,
+                    fields,
+                    line,
+                ):
+                    specs.append(
+                        {
+                            "premise_kind": premise_kind,
+                            "canonical": canonical,
+                            "label": canonical,
+                            "source_ref": source_ref,
+                            "note": f"GraphRAG {line_asset_type} typed asset",
+                            "claim_id": claim_id,
+                            "source_phase": source_phase,
+                            "confidence": confidence,
+                        }
+                    )
+        return specs
+
+    @staticmethod
+    def _iter_analyze_graph_rag_blocks(context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        raw = context.get("graph_rag_context") or context.get("graph_rag") or {}
+        if isinstance(raw, dict):
+            nested = raw.get("blocks")
+            if isinstance(nested, list):
+                return [item for item in nested if isinstance(item, dict)]
+            return [raw]
+        if isinstance(raw, list):
+            return [item for item in raw if isinstance(item, dict)]
+        return []
+
+    @staticmethod
+    def _parse_graph_rag_typed_asset_line(line: str) -> Dict[str, Any]:
+        text = str(line or "").strip()
+        match = re.match(
+            r"^\[(?P<asset>[^:\]]+):(?P<node>[^\]]+)\]\s*"
+            r"(?:\([^)]+\))?\s*(?P<rest>.*)$",
+            text,
+        )
+        asset_type = ""
+        node_id = ""
+        rest = text
+        if match:
+            asset_type = str(match.group("asset") or "").strip().lower()
+            node_id = str(match.group("node") or "").strip()
+            rest = str(match.group("rest") or "").strip()
+        fields: Dict[str, str] = {}
+        for part in re.split(r"[；;]", rest):
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            normalized_key = key.strip().lower()
+            normalized_value = value.strip()
+            if normalized_key and normalized_value:
+                fields[normalized_key] = normalized_value
+        if rest and "claim_text" not in fields and "excerpt" not in fields:
+            fields["body"] = rest
+        return {"asset_type": asset_type, "node_id": node_id, "fields": fields}
+
+    @classmethod
+    def _extract_tcm_specs_from_graph_rag_fields(
+        cls,
+        asset_type: str,
+        fields: Dict[str, str],
+        line: str,
+    ) -> List[Tuple[str, str]]:
+        specs: List[Tuple[str, str]] = []
+
+        def add(kind: str, value: Any) -> None:
+            text = str(value or "").strip()
+            if text and (kind, text) not in specs:
+                specs.append((kind, text))
+
+        for key in ("formula", "formula_name", "prescription"):
+            add("formula", fields.get(key))
+        for key in ("syndrome", "pattern"):
+            add("syndrome", fields.get(key))
+        for key in ("symptom", "manifestation"):
+            add("symptom", fields.get(key))
+        for key in ("herb", "medicine"):
+            add("herb", fields.get(key))
+        for key in ("herbs", "medicines"):
+            for item in cls._split_graph_rag_list(fields.get(key)):
+                add("herb", item)
+
+        source_entity = fields.get("source_entity") or fields.get("source")
+        target_entity = fields.get("target_entity") or fields.get("target")
+        relation_type = str(fields.get("relation_type") or "").lower()
+        if cls._looks_like_formula(source_entity):
+            add("formula", source_entity)
+        elif source_entity and any(token in relation_type for token in ("herb", "药")):
+            add("herb", source_entity)
+        if target_entity:
+            add("syndrome", target_entity)
+
+        claim_text = (
+            fields.get("claim_text")
+            or fields.get("excerpt")
+            or fields.get("title")
+            or fields.get("body")
+            or line
+        )
+        for formula in re.findall(
+            r"([\u4e00-\u9fa5A-Za-z0-9]{1,20}(?:汤|散|丸|方|颗粒|胶囊))",
+            claim_text,
+        ):
+            add("formula", formula)
+        syndrome_match = re.search(
+            r"(?:治疗|主治|用于|适用于)([^，,。；;]+)", claim_text
+        )
+        if syndrome_match:
+            syndrome = syndrome_match.group(1).strip()
+            if syndrome:
+                add("syndrome", syndrome)
+        for herb in cls._extract_herbs_from_claim_text(claim_text):
+            add("herb", herb)
+        return specs
+
+    @staticmethod
+    def _derive_graph_rag_claim_id(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if "::" in text:
+            return text.split("::")[-1].strip()
+        return text
+
+    @staticmethod
+    def _clamp_graph_rag_confidence(value: Any) -> float:
+        try:
+            confidence = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if 1.0 < confidence <= 100.0:
+            confidence = confidence / 100.0
+        return max(0.0, min(1.0, confidence))
+
+    @staticmethod
+    def _split_graph_rag_list(value: Any) -> List[str]:
+        text = str(value or "").strip()
+        if not text:
+            return []
+        return [item.strip() for item in re.split(r"[,，、/|]+", text) if item.strip()]
+
+    @staticmethod
+    def _looks_like_formula(value: Any) -> bool:
+        text = str(value or "").strip()
+        return bool(re.search(r"(?:汤|散|丸|方|颗粒|胶囊)$", text))
+
+    @classmethod
+    def _extract_herbs_from_claim_text(cls, claim_text: str) -> List[str]:
+        match = re.search(
+            r"(?:方含|含|由|组成[:：]?)([^。；;，,]+)", str(claim_text or "")
+        )
+        if not match:
+            return []
+        herbs: List[str] = []
+        for token in cls._split_graph_rag_list(match.group(1)):
+            cleaned = re.sub(r"等\d*味?$", "", token).strip()
+            if not cleaned or cls._looks_like_formula(cleaned):
+                continue
+            if cleaned.endswith("证") or "治疗" in cleaned or len(cleaned) > 8:
+                continue
+            herbs.append(cleaned)
+        return herbs
+
+    def _normalize_tcm_reasoning_premise_kind(self, value: Any) -> str:
+        kind = str(value or "").strip().lower()
+        aliases = {
+            "formula": "formula",
+            "prescription": "formula",
+            "方剂": "formula",
+            "方": "formula",
+            "herb": "herb",
+            "medicine": "herb",
+            "药材": "herb",
+            "药物": "herb",
+            "syndrome": "syndrome",
+            "pattern": "syndrome",
+            "证候": "syndrome",
+            "证": "syndrome",
+            "symptom": "symptom",
+            "manifestation": "symptom",
+            "症状": "symptom",
+            "context": "context",
+            "factor": "context",
+            "上下文": "context",
+        }
+        return aliases.get(kind, "")
+
+    def _iter_analyze_tcm_context_factors(self, context: Dict[str, Any]) -> List[Any]:
+        factors: List[Any] = []
+        for key in (
+            "tcm_context_factors",
+            "context_factors",
+            "sanyin_context",
+        ):
+            value = context.get(key)
+            if isinstance(value, list):
+                factors.extend(value)
+            elif value not in (None, "", [], {}):
+                factors.append(value)
+
+        for key in ("season", "region", "location", "population", "constitution"):
+            value = context.get(key)
+            if value not in (None, "", [], {}):
+                factors.append({"canonical": value, "label": str(value), "note": key})
+        return factors
+
+    def _resolve_analyze_tcm_reasoning_seed(
+        self,
+        cycle: "ResearchCycle",
+        context: Dict[str, Any],
+    ) -> str:
+        for key in (
+            "tcm_reasoning_seed",
+            "research_question",
+            "research_objective",
+            "topic",
+        ):
+            value = str(context.get(key) or "").strip()
+            if value:
+                return value
+        return str(getattr(cycle, "research_objective", "") or "").strip()
+
+    def _build_analyze_tcm_reasoning_metadata(
+        self,
+        tcm_reasoning: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        summary = (
+            tcm_reasoning.get("summary")
+            if isinstance(tcm_reasoning, dict)
+            and isinstance(tcm_reasoning.get("summary"), dict)
+            else {}
+        )
+        metadata = self._empty_analyze_tcm_reasoning_metadata()
+        metadata.update(
+            {key: value for key, value in summary.items() if key in metadata}
+        )
+        metadata["tcm_reasoning_generated"] = (
+            bool(
+                not tcm_reasoning.get("degraded_reason")
+                and int(metadata.get("tcm_reasoning_step_count") or 0) > 0
+            )
+            if isinstance(tcm_reasoning, dict)
+            else False
+        )
+        if isinstance(tcm_reasoning, dict) and tcm_reasoning.get("error"):
+            metadata["tcm_reasoning_error"] = tcm_reasoning["error"]
+        return metadata
+
+    def _empty_analyze_tcm_reasoning_metadata(self) -> Dict[str, Any]:
+        return {
+            "tcm_reasoning_generated": False,
+            "tcm_reasoning_step_count": 0,
+            "tcm_reasoning_pattern_coverage": [],
+            "tcm_reasoning_pattern_count": 0,
+            "tcm_reasoning_overall_confidence": 0.0,
+            "tcm_reasoning_pattern_distribution": {},
+            "tcm_reasoning_premise_count": 0,
+            "tcm_reasoning_notes": "",
+            "tcm_reasoning_contract_version": TCM_REASONING_CONTRACT_VERSION,
         }
 
     # ── Hypothesis fallback: 从先前阶段合成分析数据 ──────────────

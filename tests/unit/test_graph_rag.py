@@ -13,9 +13,11 @@ from unittest.mock import MagicMock
 
 from src.llm.graph_rag import (
     DEFAULT_TOKEN_BUDGET,
+    VALID_ASSET_TYPES,
     GraphRAG,
     RetrievalResult,
 )
+from src.research.phases.analyze_phase import AnalyzePhaseMixin
 from tools.build_community_summaries import build_community_summaries
 
 # ---------------------------------------------------------------------------
@@ -108,6 +110,284 @@ class TestGraphRAGQuestionTypes(unittest.TestCase):
         self.assertIn("便秘", result.body)
         self.assertEqual(session.run.call_args.kwargs["entity_ids"], ["Herb-麻仁"])
         self.assertLessEqual(result.token_count, DEFAULT_TOKEN_BUDGET)
+
+
+class TestGraphRAGTypedRetrieval(unittest.TestCase):
+    def test_evidence_asset_type_returns_traceability(self) -> None:
+        rows = [
+            {
+                "node_id": "evidence::cycle-1::ev-1",
+                "labels": ["Evidence"],
+                "props": {
+                    "cycle_id": "cycle-1",
+                    "phase": "analyze",
+                    "evidence_id": "ev-1",
+                    "title": "麻仁润肠证据",
+                    "excerpt": "麻仁可润肠通便",
+                    "evidence_grade": "B",
+                    "confidence": 0.82,
+                },
+                "relationship_id": "rel-ev-claim-1",
+                "rel_type": "EVIDENCE_FOR",
+                "neighbor_id": "claim::cycle-1::cl-1",
+                "neighbor_labels": ["EvidenceClaim"],
+                "source_phase": "analyze",
+                "cycle_id": "cycle-1",
+            }
+        ]
+        driver, session = _build_driver(rows)
+
+        result = GraphRAG(neo4j_driver=driver).retrieve(
+            "local",
+            query="麻仁",
+            asset_type="evidence",
+            entity_ids=["evidence::cycle-1::ev-1"],
+            cycle_id="cycle-1",
+        )
+
+        self.assertEqual(result.scope, "local")
+        self.assertEqual(result.asset_type, "evidence")
+        self.assertIn("麻仁润肠证据", result.body)
+        self.assertIn("麻仁可润肠通便", result.body)
+        self.assertEqual(result.citations[0]["asset_type"], "evidence")
+        self.assertEqual(result.traceability["node_ids"], ["evidence::cycle-1::ev-1"])
+        self.assertEqual(result.traceability["relationship_ids"], ["rel-ev-claim-1"])
+        self.assertEqual(result.traceability["source_phase"], "analyze")
+        self.assertEqual(result.traceability["cycle_id"], "cycle-1")
+        self.assertIn("MATCH (n:Evidence)", session.run.call_args.args[0])
+        self.assertEqual(session.run.call_args.kwargs["query_fields"][0], "evidence_id")
+        self.assertIn("evidence", VALID_ASSET_TYPES)
+
+    def test_invalid_asset_type_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            GraphRAG().retrieve("local", "x", asset_type="unknown")
+
+    def test_weight_hints_prioritize_boosted_claims(self) -> None:
+        rows = [
+            {
+                "node_id": "claim::cycle-1::cl-plain",
+                "labels": ["EvidenceClaim"],
+                "props": {
+                    "cycle_id": "cycle-1",
+                    "phase": "analyze",
+                    "claim_id": "cl-plain",
+                    "claim_text": "普通证据主张",
+                    "relation_type": "supports",
+                    "evidence_grade": "C",
+                    "confidence": 0.61,
+                },
+                "relationship_id": "rel-plain",
+                "source_phase": "analyze",
+                "cycle_id": "cycle-1",
+            },
+            {
+                "node_id": "claim::cycle-1::cl-boost",
+                "labels": ["EvidenceClaim"],
+                "props": {
+                    "cycle_id": "cycle-1",
+                    "phase": "analyze",
+                    "claim_id": "cl-boost",
+                    "claim_text": "高置信证据主张",
+                    "relation_type": "supports",
+                    "evidence_grade": "A",
+                    "confidence": 0.93,
+                },
+                "relationship_id": "rel-boost",
+                "source_phase": "analyze",
+                "cycle_id": "cycle-1",
+            },
+        ]
+        driver, _session = _build_driver(rows)
+
+        result = GraphRAG(neo4j_driver=driver).retrieve(
+            "local",
+            query="麻仁",
+            asset_type="claim",
+            cycle_id="cycle-1",
+            weight_hints=[
+                {
+                    "node_ids": ["claim::cycle-1::cl-boost"],
+                    "relationship_ids": ["rel-boost"],
+                    "boost": 1.8,
+                }
+            ],
+        )
+
+        self.assertIn("高置信证据主张", result.body.splitlines()[0])
+        self.assertEqual(result.metadata["weight_hint_applied_count"], 1)
+
+
+class TestGraphRAGRetrievalCache(unittest.TestCase):
+    def test_same_request_uses_cached_result_and_returns_deep_copy(self) -> None:
+        rows = [
+            {"topic_key": "t-1", "body": "全库主题 A 摘要", "token_count": 12},
+        ]
+        driver, session = _build_driver(rows)
+        rag = GraphRAG(neo4j_driver=driver)
+
+        first = rag.retrieve("global", query="麻仁")
+        first.citations.append({"type": "Mutated", "topic_key": "bad"})
+        first.body = "polluted"
+        second = rag.retrieve("global", query="麻仁")
+
+        self.assertEqual(session.run.call_count, 1)
+        self.assertIn("全库主题 A 摘要", second.body)
+        self.assertEqual(
+            second.citations, [{"type": "CommunitySummary", "topic_key": "t-1"}]
+        )
+        self.assertIsNot(first, second)
+
+    def test_different_cycle_id_does_not_share_cache(self) -> None:
+        first_rows = [self._typed_evidence_row("cycle-1", "ev-1")]
+        second_rows = [self._typed_evidence_row("cycle-2", "ev-2")]
+        driver, session = _build_driver(first_rows, second_rows)
+        rag = GraphRAG(neo4j_driver=driver)
+
+        first = rag.retrieve(
+            "local",
+            query="麻仁",
+            asset_type="evidence",
+            entity_ids=["ev-1"],
+            cycle_id="cycle-1",
+        )
+        second = rag.retrieve(
+            "local",
+            query="麻仁",
+            asset_type="evidence",
+            entity_ids=["ev-1"],
+            cycle_id="cycle-2",
+        )
+
+        self.assertEqual(session.run.call_count, 2)
+        self.assertEqual(first.traceability["cycle_id"], "cycle-1")
+        self.assertEqual(second.traceability["cycle_id"], "cycle-2")
+        self.assertEqual(session.run.call_args_list[0].kwargs["cycle_id"], "cycle-1")
+        self.assertEqual(session.run.call_args_list[1].kwargs["cycle_id"], "cycle-2")
+
+    def test_different_asset_type_does_not_share_cache(self) -> None:
+        evidence_rows = [self._typed_evidence_row("cycle-1", "ev-1")]
+        claim_rows = [
+            {
+                "node_id": "claim::cycle-1::cl-1",
+                "labels": ["EvidenceClaim"],
+                "props": {
+                    "cycle_id": "cycle-1",
+                    "phase": "analyze",
+                    "claim_id": "cl-1",
+                    "claim_text": "麻仁可润肠通便",
+                    "relation_type": "supports",
+                    "evidence_grade": "B",
+                    "confidence": 0.8,
+                },
+                "relationship_id": "rel-cl-ev-1",
+                "source_phase": "analyze",
+                "cycle_id": "cycle-1",
+            }
+        ]
+        driver, session = _build_driver(evidence_rows, claim_rows)
+        rag = GraphRAG(neo4j_driver=driver)
+
+        evidence = rag.retrieve(
+            "local",
+            query="麻仁",
+            asset_type="evidence",
+            entity_ids=["shared-id"],
+            cycle_id="cycle-1",
+        )
+        claim = rag.retrieve(
+            "local",
+            query="麻仁",
+            asset_type="claim",
+            entity_ids=["shared-id"],
+            cycle_id="cycle-1",
+        )
+
+        self.assertEqual(session.run.call_count, 2)
+        self.assertEqual(evidence.asset_type, "evidence")
+        self.assertEqual(claim.asset_type, "claim")
+        self.assertIn("MATCH (n:Evidence)", session.run.call_args_list[0].args[0])
+        self.assertIn("MATCH (n:EvidenceClaim)", session.run.call_args_list[1].args[0])
+
+    @staticmethod
+    def _typed_evidence_row(cycle_id: str, evidence_id: str) -> Dict[str, Any]:
+        return {
+            "node_id": f"evidence::{cycle_id}::{evidence_id}",
+            "labels": ["Evidence"],
+            "props": {
+                "cycle_id": cycle_id,
+                "phase": "analyze",
+                "evidence_id": evidence_id,
+                "title": f"{evidence_id} 麻仁润肠证据",
+                "excerpt": "麻仁可润肠通便",
+                "evidence_grade": "B",
+                "confidence": 0.82,
+            },
+            "relationship_id": f"rel-{evidence_id}",
+            "rel_type": "EVIDENCE_FOR",
+            "source_phase": "analyze",
+            "cycle_id": cycle_id,
+        }
+
+
+class _AnalyzePipeline:
+    config: Dict[str, Any] = {}
+
+
+class _AnalyzeHarness(AnalyzePhaseMixin):
+    def __init__(self) -> None:
+        self.pipeline = _AnalyzePipeline()
+
+
+class _AnalyzeCycle:
+    cycle_id = "cycle-typed"
+    research_objective = "麻仁润肠证据检索"
+
+
+class _TypedRagRunner:
+    def __init__(self) -> None:
+        self.calls: List[Dict[str, Any]] = []
+
+    def retrieve(
+        self, question_type: str, query: str, **kwargs: Any
+    ) -> RetrievalResult:
+        self.calls.append({"question_type": question_type, "query": query, **kwargs})
+        return RetrievalResult(
+            scope=question_type,
+            asset_type=str(kwargs.get("asset_type") or ""),
+            body="typed evidence context",
+            token_count=3,
+            citations=[{"type": "Evidence", "id": "ev-1", "asset_type": "evidence"}],
+            traceability={
+                "node_ids": ["ev-1"],
+                "relationship_ids": ["rel-1"],
+                "source_phase": "analyze",
+                "source_phases": ["analyze"],
+                "cycle_id": "cycle-typed",
+                "cycle_ids": ["cycle-typed"],
+            },
+        )
+
+
+class TestAnalyzeGraphRAGTypedInjection(unittest.TestCase):
+    def test_apply_graph_rag_passes_asset_type_and_cycle_id(self) -> None:
+        harness = _AnalyzeHarness()
+        runner = _TypedRagRunner()
+        context: Dict[str, Any] = {
+            "enable_graph_rag": True,
+            "graph_rag_runner": runner,
+            "graph_rag_asset_type": "evidence",
+            "graph_rag_entity_ids": ["ev-1"],
+            "graph_rag_query": "麻仁",
+        }
+
+        block = harness._apply_graph_rag(context, _AnalyzeCycle())
+
+        self.assertEqual(runner.calls[0]["question_type"], "local")
+        self.assertEqual(runner.calls[0]["asset_type"], "evidence")
+        self.assertEqual(runner.calls[0]["cycle_id"], "cycle-typed")
+        self.assertEqual(block["asset_type"], "evidence")
+        self.assertEqual(block["traceability"]["node_ids"], ["ev-1"])
+        self.assertEqual(context["graph_rag_context"], block)
 
 
 class TestGraphRAGTokenBudget(unittest.TestCase):

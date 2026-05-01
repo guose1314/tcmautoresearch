@@ -36,6 +36,7 @@ LLMService — LLM 调用抽象接口 + SQLite 磁盘缓存装饰器
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -51,6 +52,7 @@ from src.infra.cache_service import (
 from src.infra.token_budget_policy import (
     apply_token_budget_to_prompt,
     estimate_text_tokens,
+    load_token_budget_policy_settings,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,7 +80,9 @@ def _deep_merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str
     return merged
 
 
-def _normalize_dossier_sections(dossier_sections: Optional[Dict[str, Any]]) -> Dict[str, str]:
+def _normalize_dossier_sections(
+    dossier_sections: Optional[Dict[str, Any]],
+) -> Dict[str, str]:
     normalized: Dict[str, str] = {}
     for name, value in (dossier_sections or {}).items():
         text = str(value or "").strip()
@@ -87,16 +91,54 @@ def _normalize_dossier_sections(dossier_sections: Optional[Dict[str, Any]]) -> D
     return normalized
 
 
-def _load_small_model_optimizer_settings(llm_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _load_small_model_optimizer_settings(
+    llm_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     if llm_config is None:
         from src.infrastructure.config_loader import load_settings_section
 
         llm_config = load_settings_section("models.llm", default={})
 
-    payload = llm_config.get("small_model_optimizer") if isinstance(llm_config, dict) else {}
+    payload = (
+        llm_config.get("small_model_optimizer") if isinstance(llm_config, dict) else {}
+    )
     if not isinstance(payload, dict):
         payload = {}
     return _deep_merge_dict(_DEFAULT_SMALL_MODEL_OPTIMIZER_SETTINGS, payload)
+
+
+def _build_max_input_token_budget_settings(
+    max_input_tokens: Optional[int],
+) -> Optional[Dict[str, Any]]:
+    if max_input_tokens in (None, ""):
+        return None
+    try:
+        max_input = int(max_input_tokens or 0)
+    except (TypeError, ValueError):
+        return None
+    if max_input <= 0:
+        return None
+
+    settings = copy.deepcopy(load_token_budget_policy_settings())
+    current_min = int(settings.get("min_input_tokens", 512) or 512)
+    settings["min_input_tokens"] = max(64, min(current_min, max_input))
+
+    def _cap(value: Any) -> int:
+        try:
+            return min(int(value), max_input)
+        except (TypeError, ValueError):
+            return max_input
+
+    settings["default_input_tokens"] = _cap(
+        settings.get("default_input_tokens", max_input)
+    )
+    for budget_key in ("purpose_input_budgets", "task_input_budgets"):
+        raw_budget = settings.get(budget_key)
+        if isinstance(raw_budget, dict):
+            settings[budget_key] = {
+                str(key): _cap(value) for key, value in raw_budget.items()
+            }
+    return settings
 
 
 @dataclass
@@ -113,6 +155,7 @@ class PlannedLLMCall:
     plan: Optional["CallPlan"] = None
     fallback_path: Optional[str] = None
     prompt_application: Dict[str, Any] = field(default_factory=dict)
+    max_input_tokens: Optional[int] = None
     role_profile: Optional[Any] = None  # LLMRoleProfile, 可选；J-3 角色化 prompt 池
     kv_cache_descriptor: Optional[Any] = None  # KVCacheDescriptor, 可选；J-3 KV cache
 
@@ -127,7 +170,9 @@ class PlannedLLMCall:
     def build_prompt(self, prompt: str, system_prompt: str = "") -> tuple[str, str]:
         role_prefix = ""
         if self.role_profile is not None:
-            role_prefix = str(getattr(self.role_profile, "system_prompt", "") or "").strip()
+            role_prefix = str(
+                getattr(self.role_profile, "system_prompt", "") or ""
+            ).strip()
 
         if self.plan is None:
             merged_system = "\n\n".join(
@@ -144,7 +189,9 @@ class PlannedLLMCall:
         if self.plan.output_scaffold.strip():
             prompt_sections.append(f"【输出结构约束】\n{self.plan.output_scaffold}")
 
-        merged_prompt = "\n\n".join(section for section in prompt_sections if section.strip())
+        merged_prompt = "\n\n".join(
+            section for section in prompt_sections if section.strip()
+        )
         merged_system_prompt = "\n\n".join(
             section
             for section in (
@@ -180,16 +227,24 @@ class PlannedLLMCall:
                     "template_hit": bool(getattr(self.plan, "template_hit", False)),
                     "budget_hit": bool(getattr(self.plan, "budget_hit", True)),
                     "layer_hit": bool(getattr(self.plan, "layer_hit", False)),
-                    "max_layer_available": int(getattr(self.plan, "max_layer_available", -1)),
-                    "complexity_tier": str(getattr(self.plan, "complexity_tier", "medium")),
+                    "max_layer_available": int(
+                        getattr(self.plan, "max_layer_available", -1)
+                    ),
+                    "complexity_tier": str(
+                        getattr(self.plan, "complexity_tier", "medium")
+                    ),
                 }
             )
         if self.fallback_path:
             payload["fallback_path"] = self.fallback_path
         if self.prompt_application:
             payload["prompt_application"] = dict(self.prompt_application)
+        if self.max_input_tokens is not None:
+            payload["max_input_tokens"] = int(self.max_input_tokens)
         if self.role_profile is not None:
-            payload["role_name"] = str(getattr(self.role_profile, "role_name", "") or "")
+            payload["role_name"] = str(
+                getattr(self.role_profile, "role_name", "") or ""
+            )
             payload["role_temperature"] = float(
                 getattr(self.role_profile, "temperature", 0.0) or 0.0
             )
@@ -229,7 +284,9 @@ class PlannedLLMService:
         if not self.planned_call.should_call_llm:
             return ""
 
-        merged_prompt, merged_system_prompt = self.planned_call.build_prompt(prompt, system_prompt)
+        merged_prompt, merged_system_prompt = self.planned_call.build_prompt(
+            prompt, system_prompt
+        )
         budgeted = apply_token_budget_to_prompt(
             merged_prompt,
             system_prompt=merged_system_prompt,
@@ -237,6 +294,9 @@ class PlannedLLMService:
             purpose=self.planned_call.purpose,
             context_window_tokens=getattr(self._engine, "n_ctx", None),
             max_output_tokens=getattr(self._engine, "max_tokens", None),
+            settings=_build_max_input_token_budget_settings(
+                self.planned_call.max_input_tokens
+            ),
         )
         self.planned_call.prompt_application = {
             "trimmed": bool(budgeted.trimmed),
@@ -275,6 +335,7 @@ def prepare_planned_llm_call(
     llm_config: Optional[Dict[str, Any]] = None,
     role: Optional[str] = None,
     kv_cache_descriptor: Any = None,
+    max_input_tokens: Optional[int] = None,
 ) -> PlannedLLMCall:
     """为一次业务侧 LLM 调用准备统一 planner 上下文。
 
@@ -289,6 +350,14 @@ def prepare_planned_llm_call(
         from src.research.llm_role_profile import get_role_profile
 
         role_profile = get_role_profile(role)
+    try:
+        normalized_max_input_tokens = (
+            int(max_input_tokens) if max_input_tokens else None
+        )
+    except (TypeError, ValueError):
+        normalized_max_input_tokens = None
+    if normalized_max_input_tokens is not None and normalized_max_input_tokens <= 0:
+        normalized_max_input_tokens = None
 
     if llm_config is None:
         from src.infrastructure.config_loader import load_settings_section
@@ -299,7 +368,10 @@ def prepare_planned_llm_call(
     requested_phase = str(phase or "default")
     requested_purpose = (
         str(purpose or "").strip()
-        or str((optimizer_settings.get("purpose_overrides") or {}).get(requested_phase) or "").strip()
+        or str(
+            (optimizer_settings.get("purpose_overrides") or {}).get(requested_phase)
+            or ""
+        ).strip()
         or requested_phase
         or "default"
     )
@@ -308,7 +380,9 @@ def prepare_planned_llm_call(
     if requested_phase in phase_overrides:
         planner_enabled = bool(phase_overrides.get(requested_phase))
 
-    resolved_engine = llm_engine or get_llm_service(requested_purpose, llm_config=llm_config)
+    resolved_engine = llm_engine or get_llm_service(
+        requested_purpose, llm_config=llm_config
+    )
     if resolved_engine is None or not hasattr(resolved_engine, "generate"):
         return PlannedLLMCall(
             phase=requested_phase,
@@ -319,6 +393,7 @@ def prepare_planned_llm_call(
             policy_source="missing_llm_engine",
             cache_hit_likelihood=cache_hit_likelihood,
             fallback_path="rules_engine",
+            max_input_tokens=normalized_max_input_tokens,
             role_profile=role_profile,
             kv_cache_descriptor=kv_cache_descriptor,
         )
@@ -331,8 +406,11 @@ def prepare_planned_llm_call(
             purpose=requested_purpose,
             llm_service=resolved_engine,
             enabled=False,
-            policy_source="models.llm.small_model_optimizer.disabled" if not planner_enabled else "empty_dossier",
+            policy_source="models.llm.small_model_optimizer.disabled"
+            if not planner_enabled
+            else "empty_dossier",
             cache_hit_likelihood=cache_hit_likelihood,
+            max_input_tokens=normalized_max_input_tokens,
             role_profile=role_profile,
             kv_cache_descriptor=kv_cache_descriptor,
         )
@@ -363,9 +441,11 @@ def prepare_planned_llm_call(
         cache_hit_likelihood=cache_hit_likelihood,
         plan=plan,
         fallback_path=fallback_path,
+        max_input_tokens=normalized_max_input_tokens,
         role_profile=role_profile,
         kv_cache_descriptor=kv_cache_descriptor,
     )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 抽象接口
@@ -453,15 +533,20 @@ class APILLMEngine(LLMService):
 
         def _do_sync_request() -> str:
             try:
-                with urllib_request.urlopen(req, timeout=self.timeout_seconds) as response:
+                with urllib_request.urlopen(
+                    req, timeout=self.timeout_seconds
+                ) as response:
                     return response.read().decode("utf-8")
             except urllib_error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-                raise RuntimeError(f"LLM API HTTP 错误: status={exc.code}, detail={detail}") from exc
+                raise RuntimeError(
+                    f"LLM API HTTP 错误: status={exc.code}, detail={detail}"
+                ) from exc
             except urllib_error.URLError as exc:
                 raise RuntimeError(f"LLM API 请求失败: {exc.reason}") from exc
 
         import asyncio
+
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -479,14 +564,18 @@ class APILLMEngine(LLMService):
             async def _breaker_wrapper():
                 # 显式挂入线程中，避免阻塞临时 loop 的内部事件
                 return await asyncio.to_thread(_do_sync_request)
-            
+
             try:
                 # 开启严格的熔断与上下文超时控制
                 body = asyncio.run(
-                    asyncio.wait_for(_breaker_wrapper(), timeout=self.timeout_seconds + 5.0)
+                    asyncio.wait_for(
+                        _breaker_wrapper(), timeout=self.timeout_seconds + 5.0
+                    )
                 )
             except asyncio.TimeoutError:
-                raise RuntimeError("LLM 推演超时，已触发基于 asyncio 熔断保护 (Circuit Breaker Timeout)")
+                raise RuntimeError(
+                    "LLM 推演超时，已触发基于 asyncio 熔断保护 (Circuit Breaker Timeout)"
+                )
 
         data = json.loads(body)
 
@@ -535,7 +624,11 @@ class CachedLLMService(LLMService):
     ):
         self._engine = engine
         self._cache_enabled = cache_enabled
-        self._cache = _DiskCache(cache_dir, ttl_seconds=cache_ttl_seconds) if cache_enabled else None
+        self._cache = (
+            _DiskCache(cache_dir, ttl_seconds=cache_ttl_seconds)
+            if cache_enabled
+            else None
+        )
         self._hits = 0
         self._misses = 0
         self._purpose = str(purpose or "default")
@@ -595,7 +688,9 @@ class CachedLLMService(LLMService):
         self._misses += 1
         logger.debug("LLM 缓存未命中，调用模型推理… (misses=%d)", self._misses)
         response = self._engine.generate(prompt, system_prompt)
-        self._cache.put(key, response, prompt, system_prompt, model_id, temperature, max_tokens)
+        self._cache.put(
+            key, response, prompt, system_prompt, model_id, temperature, max_tokens
+        )
         return response
 
     def _resolve_model_id(self) -> str:
@@ -674,10 +769,13 @@ class CachedLLMService(LLMService):
             max_tokens=max_tokens,
             verbose=verbose,
         )
-        return cls(engine, cache_dir=cache_dir,
-                   cache_ttl_seconds=cache_ttl_seconds,
-                   cache_enabled=cache_enabled,
-                   purpose=purpose)
+        return cls(
+            engine,
+            cache_dir=cache_dir,
+            cache_ttl_seconds=cache_ttl_seconds,
+            cache_enabled=cache_enabled,
+            purpose=purpose,
+        )
 
     @classmethod
     def from_api_config(
@@ -733,13 +831,21 @@ class CachedLLMService(LLMService):
 
         if mode == "api":
             api_url = gc.get("api_url") or lc.get("api_url") or lc.get("api_base_url")
-            model = gc.get("api_model") or gc.get("model") or lc.get("api_model") or lc.get("model") or lc.get("name")
+            model = (
+                gc.get("api_model")
+                or gc.get("model")
+                or lc.get("api_model")
+                or lc.get("model")
+                or lc.get("name")
+            )
             if not api_url:
                 raise ValueError("API 模式缺少 api_url/api_base_url 配置")
             if not model:
                 raise ValueError("API 模式缺少 model/api_model 配置")
             api_key = gc.get("api_key") or lc.get("api_key")
-            timeout_seconds = float(gc.get("timeout_seconds", lc.get("timeout_seconds", 60.0)))
+            timeout_seconds = float(
+                gc.get("timeout_seconds", lc.get("timeout_seconds", 60.0))
+            )
             temperature = float(gc.get("temperature", lc.get("temperature", 0.3)))
             max_tokens = int(gc.get("max_tokens", lc.get("max_tokens", 1024)))
             return cls.from_api_config(
@@ -759,7 +865,9 @@ class CachedLLMService(LLMService):
 
         return cls.from_engine_config(
             model_path=gc.get("model_path") or lc.get("path"),
-            n_gpu_layers=int(gc.get("n_gpu_layers", lc.get("n_gpu_layers", DEFAULT_N_GPU_LAYERS))),
+            n_gpu_layers=int(
+                gc.get("n_gpu_layers", lc.get("n_gpu_layers", DEFAULT_N_GPU_LAYERS))
+            ),
             n_ctx=int(gc.get("n_ctx", 4096)),
             temperature=float(gc.get("temperature", lc.get("temperature", 0.15))),
             max_tokens=int(gc.get("max_tokens", lc.get("max_tokens", 1024))),
@@ -835,12 +943,14 @@ def get_llm_service(
     # 适配性检查 — §10.1 职责分配策略
     try:
         from src.infra.llm_task_policy import check_suitability
+
         check_suitability(purpose)
     except Exception:  # pragma: no cover — 策略模块不可用时静默
         pass
 
     if llm_config is None:
         from src.infrastructure.config_loader import load_settings_section
+
         llm_config = load_settings_section("models.llm", default={})
 
     overrides = _LLM_PURPOSE_PROFILES.get(purpose, {})

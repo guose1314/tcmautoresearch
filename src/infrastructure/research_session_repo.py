@@ -65,7 +65,9 @@ from src.research.observe_philology import (
 )
 from src.research.review_workbench import (
     OBSERVE_PHILOLOGY_WORKBENCH_REVIEW_ARTIFACT,
+    build_philology_review_learning_feedback_record,
     normalize_observe_review_workbench_decision,
+    normalize_observe_review_workbench_decisions,
     upsert_observe_review_workbench_artifact_content,
     upsert_observe_review_workbench_artifact_content_batch,
 )
@@ -127,6 +129,15 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
         return datetime.fromisoformat(str(value))
     except (ValueError, TypeError):
         return None
+
+
+def _as_aware_utc(value: Any) -> Optional[datetime]:
+    parsed = _parse_datetime(value)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None or parsed.tzinfo.utcoffset(parsed) is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _graph_asset_subgraphs(graph_assets: Mapping[str, Any] | None) -> List[str]:
@@ -321,6 +332,78 @@ class ResearchSessionRepository:
             return
         with self._db.session_scope() as managed_session:
             yield managed_session
+
+    def _append_learning_feedback_row(
+        self,
+        db_session: Session,
+        rs: ResearchSession,
+        cycle_id: str,
+        record: Mapping[str, Any],
+        *,
+        phase_execution_id: Optional[Any] = None,
+        contract_version: Optional[str] = None,
+    ) -> None:
+        normalized = normalize_learning_feedback_record(dict(record or {}))
+        metadata = dict(normalized.get("metadata") or {})
+        metadata.setdefault(
+            "contract_version",
+            str(contract_version or LEARNING_FEEDBACK_CONTRACT_VERSION),
+        )
+        record_phase_execution_id: Optional[uuid.UUID] = None
+        raw_phase_execution_id = (
+            normalized.get("phase_execution_id") or phase_execution_id
+        )
+        if raw_phase_execution_id:
+            record_phase_execution_id = uuid.UUID(str(raw_phase_execution_id))
+
+        db_session.add(
+            ResearchLearningFeedback(
+                session_id=rs.id,
+                cycle_id=cycle_id,
+                phase_execution_id=record_phase_execution_id,
+                feedback_scope=str(
+                    normalized.get("feedback_scope") or "phase_assessment"
+                ),
+                source_phase=str(normalized.get("source_phase") or "reflect"),
+                target_phase=str(normalized.get("target_phase") or "").strip() or None,
+                feedback_status=str(normalized.get("feedback_status") or "tracked"),
+                overall_score=normalized.get("overall_score"),
+                grade_level=str(normalized.get("grade_level") or "").strip() or None,
+                cycle_trend=str(normalized.get("cycle_trend") or "").strip() or None,
+                issue_count=max(int(normalized.get("issue_count") or 0), 0),
+                weakness_count=max(int(normalized.get("weakness_count") or 0), 0),
+                strength_count=max(int(normalized.get("strength_count") or 0), 0),
+                strategy_changed=bool(normalized.get("strategy_changed")),
+                strategy_before_fingerprint=str(
+                    normalized.get("strategy_before_fingerprint") or ""
+                ).strip()
+                or None,
+                strategy_after_fingerprint=str(
+                    normalized.get("strategy_after_fingerprint") or ""
+                ).strip()
+                or None,
+                recorded_phase_names=list(normalized.get("recorded_phase_names") or []),
+                weak_phase_names=list(normalized.get("weak_phase_names") or []),
+                quality_dimensions_json=_json_dumps(
+                    normalized.get("quality_dimensions"), "{}"
+                ),
+                issues_json=_json_dumps(normalized.get("issues"), "[]"),
+                improvement_priorities_json=_json_dumps(
+                    normalized.get("improvement_priorities"), "[]"
+                ),
+                replay_feedback_json=_json_dumps(
+                    normalized.get("replay_feedback"), "{}"
+                ),
+                details_json=_json_dumps(normalized.get("details"), "{}"),
+                metadata_json=_json_dumps(metadata, "{}"),
+                prompt_version=(
+                    str(normalized.get("prompt_version") or "").strip() or None
+                ),
+                schema_version=(
+                    str(normalized.get("schema_version") or "").strip() or None
+                ),
+            )
+        )
 
     # ---- 会话 CRUD -------------------------------------------------------
 
@@ -786,71 +869,13 @@ class ResearchSessionRepository:
             )
             if rs is None:
                 return None
-            normalized = normalize_learning_feedback_record(dict(record or {}))
-            metadata = dict(normalized.get("metadata") or {})
-            metadata.setdefault(
-                "contract_version",
-                str(contract_version or LEARNING_FEEDBACK_CONTRACT_VERSION),
-            )
-            record_phase_execution_id: Optional[uuid.UUID] = None
-            raw_phase_execution_id = (
-                normalized.get("phase_execution_id") or phase_execution_id
-            )
-            if raw_phase_execution_id:
-                record_phase_execution_id = uuid.UUID(str(raw_phase_execution_id))
-
-            db_session.add(
-                ResearchLearningFeedback(
-                    session_id=rs.id,
-                    cycle_id=cycle_id,
-                    phase_execution_id=record_phase_execution_id,
-                    feedback_scope=str(
-                        normalized.get("feedback_scope") or "phase_assessment"
-                    ),
-                    source_phase=str(normalized.get("source_phase") or "reflect"),
-                    target_phase=str(normalized.get("target_phase") or "").strip()
-                    or None,
-                    feedback_status=str(normalized.get("feedback_status") or "tracked"),
-                    overall_score=normalized.get("overall_score"),
-                    grade_level=str(normalized.get("grade_level") or "").strip()
-                    or None,
-                    cycle_trend=str(normalized.get("cycle_trend") or "").strip()
-                    or None,
-                    issue_count=max(int(normalized.get("issue_count") or 0), 0),
-                    weakness_count=max(int(normalized.get("weakness_count") or 0), 0),
-                    strength_count=max(int(normalized.get("strength_count") or 0), 0),
-                    strategy_changed=bool(normalized.get("strategy_changed")),
-                    strategy_before_fingerprint=str(
-                        normalized.get("strategy_before_fingerprint") or ""
-                    ).strip()
-                    or None,
-                    strategy_after_fingerprint=str(
-                        normalized.get("strategy_after_fingerprint") or ""
-                    ).strip()
-                    or None,
-                    recorded_phase_names=list(
-                        normalized.get("recorded_phase_names") or []
-                    ),
-                    weak_phase_names=list(normalized.get("weak_phase_names") or []),
-                    quality_dimensions_json=_json_dumps(
-                        normalized.get("quality_dimensions"), "{}"
-                    ),
-                    issues_json=_json_dumps(normalized.get("issues"), "[]"),
-                    improvement_priorities_json=_json_dumps(
-                        normalized.get("improvement_priorities"), "[]"
-                    ),
-                    replay_feedback_json=_json_dumps(
-                        normalized.get("replay_feedback"), "{}"
-                    ),
-                    details_json=_json_dumps(normalized.get("details"), "{}"),
-                    metadata_json=_json_dumps(metadata, "{}"),
-                    prompt_version=(
-                        str(normalized.get("prompt_version") or "").strip() or None
-                    ),
-                    schema_version=(
-                        str(normalized.get("schema_version") or "").strip() or None
-                    ),
-                )
+            self._append_learning_feedback_row(
+                db_session,
+                rs,
+                cycle_id,
+                record,
+                phase_execution_id=phase_execution_id,
+                contract_version=contract_version,
             )
             db_session.flush()
             stored_records = self._list_learning_feedback_records(db_session, cycle_id)
@@ -1290,19 +1315,19 @@ class ResearchSessionRepository:
         *,
         now: Optional[datetime] = None,
     ) -> Dict[str, Any]:
-        reference_now = now or datetime.now(timezone.utc)
-        claimed_at = row.claimed_at
+        reference_now = _as_aware_utc(now) or datetime.now(timezone.utc)
+        claimed_at = _as_aware_utc(row.claimed_at)
+        created_at = _as_aware_utc(row.created_at)
+        due_at = _as_aware_utc(row.due_at)
         backlog_age_seconds = None
         if claimed_at is not None:
             backlog_age_seconds = max(0.0, (reference_now - claimed_at).total_seconds())
-        elif row.created_at is not None:
-            backlog_age_seconds = max(
-                0.0, (reference_now - row.created_at).total_seconds()
-            )
+        elif created_at is not None:
+            backlog_age_seconds = max(0.0, (reference_now - created_at).total_seconds())
         is_overdue = bool(
-            row.due_at is not None
+            due_at is not None
             and row.queue_status != "completed"
-            and row.due_at < reference_now
+            and due_at < reference_now
         )
         reviewer_label = row.assignee or "未认领"
         return {
@@ -1849,6 +1874,18 @@ class ResearchSessionRepository:
                 artifact.size_bytes = size_bytes
                 artifact.metadata_json = _json_dumps(metadata, "{}")
 
+            feedback_record = build_philology_review_learning_feedback_record(
+                normalized_decision
+            )
+            if feedback_record:
+                self._append_learning_feedback_row(
+                    db_session,
+                    rs,
+                    cycle_id,
+                    feedback_record,
+                    phase_execution_id=phase_execution.id,
+                )
+
             db_session.flush()
             return self._artifact_to_dict(artifact)
 
@@ -1923,6 +1960,22 @@ class ResearchSessionRepository:
                 artifact.content_json = _json_dumps(content, "{}")
                 artifact.size_bytes = size_bytes
                 artifact.metadata_json = _json_dumps(metadata, "{}")
+
+            for normalized_decision in normalize_observe_review_workbench_decisions(
+                decisions
+            ):
+                feedback_record = build_philology_review_learning_feedback_record(
+                    normalized_decision
+                )
+                if not feedback_record:
+                    continue
+                self._append_learning_feedback_row(
+                    db_session,
+                    rs,
+                    cycle_id,
+                    feedback_record,
+                    phase_execution_id=phase_execution.id,
+                )
 
             db_session.flush()
             return self._artifact_to_dict(artifact)

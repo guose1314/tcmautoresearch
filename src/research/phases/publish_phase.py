@@ -17,6 +17,15 @@ except Exception:
     CitationManager = None
 
 try:
+    from src.generation.citation_evidence_synthesizer import (
+        CitationEvidenceSynthesizer,
+        summarize_citation_grounding,
+    )
+except Exception:
+    CitationEvidenceSynthesizer = None
+    summarize_citation_grounding = None
+
+try:
     from src.generation.paper_writer import PaperWriter
 except Exception:
     PaperWriter = None
@@ -82,7 +91,15 @@ _PUBLISH_LLM_ANALYSIS_MODULE_ALIASES: Dict[str, tuple[str, ...]] = (
         "complexity_dynamics": ("complexity_dynamics", "complexity_nonlinear_dynamics"),
         "research_scoring_panel": ("research_scoring_panel",),
         "summary_analysis": ("summary_analysis",),
+        "publish_graph_context": ("publish_graph_context",),
+        "graph_rag_citations": ("graph_rag_citations",),
     }
+)
+_PUBLISH_LLM_ANALYSIS_MODULE_ALIASES.setdefault(
+    "publish_graph_context", ("publish_graph_context",)
+)
+_PUBLISH_LLM_ANALYSIS_MODULE_ALIASES.setdefault(
+    "graph_rag_citations", ("graph_rag_citations",)
 )
 
 _REMOVED_PUBLISH_ANALYSIS_ALIAS_FIELDS: tuple[str, ...] = (
@@ -250,12 +267,49 @@ class PublishPhaseMixin:
             )
             if isinstance(paper_result, dict)
             else {},
+            "publish_graph_context": copy.deepcopy(
+                paper_context.get("publish_graph_context", {})
+            ),
         }
+
+        publish_graph_context = (
+            paper_context.get("publish_graph_context")
+            if isinstance(paper_context.get("publish_graph_context"), dict)
+            else {}
+        )
+        graph_rag_citations = (
+            paper_context.get("graph_rag_citations")
+            if isinstance(paper_context.get("graph_rag_citations"), list)
+            else []
+        )
+        citation_grounding_records = (
+            paper_context.get("citation_grounding_records")
+            if isinstance(paper_context.get("citation_grounding_records"), list)
+            else []
+        )
+        citation_grounding_summary = (
+            paper_context.get("citation_grounding_summary")
+            if isinstance(paper_context.get("citation_grounding_summary"), dict)
+            else self._summarize_publish_citation_grounding(citation_grounding_records)
+        )
 
         metadata = {
             "publication_count": len(publications),
             "deliverable_count": len(deliverables),
             "citation_count": citation_result.get("citation_count", 0),
+            "publish_graph_context": copy.deepcopy(publish_graph_context),
+            "graph_rag_citation_count": len(graph_rag_citations),
+            "unsupported_claim_warning_count": int(
+                publish_graph_context.get("unsupported_claim_warning_count") or 0
+            ),
+            "publish_graph_trace_counts": copy.deepcopy(
+                publish_graph_context.get("trace_counts") or {}
+            ),
+            "citation_grounding_summary": copy.deepcopy(citation_grounding_summary),
+            "citation_grounding_record_count": len(citation_grounding_records),
+            "unsupported_citation_grounding_count": int(
+                citation_grounding_summary.get("unsupported_count") or 0
+            ),
             "paper_section_count": paper_result.get("section_count", 0)
             if isinstance(paper_result, dict)
             else 0,
@@ -418,6 +472,10 @@ class PublishPhaseMixin:
                 "output_files": merged_output_files,
                 "analysis_results": paper_context.get("analysis_results", {}),
                 "research_artifact": paper_context.get("research_artifact", {}),
+                "publish_graph_context": copy.deepcopy(publish_graph_context),
+                "graph_rag_citations": copy.deepcopy(graph_rag_citations),
+                "citation_grounding_records": copy.deepcopy(citation_grounding_records),
+                "citation_grounding_summary": copy.deepcopy(citation_grounding_summary),
                 "evidence_protocol": evidence_protocol,
             },
             artifacts=merged_output_files,
@@ -941,6 +999,45 @@ class PublishPhaseMixin:
                 research_artifact["evidence"] = list(
                     evidence_protocol.get("evidence_records") or []
                 )
+        publish_graph_context = self._build_publish_graph_context(
+            cycle,
+            context,
+            observe_result,
+            analyze_result,
+            analyze_results,
+            evidence_protocol,
+            citation_records,
+            citation_result,
+        )
+        graph_rag_citations = list(
+            publish_graph_context.get("graph_rag_citations") or []
+        )
+        observe_philology = self._resolve_publish_observe_philology(
+            context,
+            observe_result,
+        )
+        citation_grounding_records = self._build_publish_citation_grounding_records(
+            evidence_protocol=evidence_protocol,
+            citation_records=citation_records,
+            observe_philology=observe_philology,
+            graph_rag_context=publish_graph_context,
+        )
+        citation_grounding_summary = self._summarize_publish_citation_grounding(
+            citation_grounding_records
+        )
+        if publish_graph_context:
+            research_artifact["publish_graph_context"] = copy.deepcopy(
+                publish_graph_context
+            )
+            research_artifact["graph_rag_citations"] = copy.deepcopy(
+                graph_rag_citations
+            )
+        research_artifact["citation_grounding_records"] = copy.deepcopy(
+            citation_grounding_records
+        )
+        research_artifact["citation_grounding_summary"] = copy.deepcopy(
+            citation_grounding_summary
+        )
         research_artifact = self._enrich_publish_research_artifact(
             research_artifact,
             statistical_analysis,
@@ -968,6 +1065,19 @@ class PublishPhaseMixin:
             evidence_protocol,
             similar_formula_graph_evidence_summary,
             llm_analysis_context,
+        )
+        if publish_graph_context:
+            analysis_results_payload["publish_graph_context"] = copy.deepcopy(
+                publish_graph_context
+            )
+            analysis_results_payload["graph_rag_citations"] = copy.deepcopy(
+                graph_rag_citations
+            )
+        analysis_results_payload["citation_grounding_records"] = copy.deepcopy(
+            citation_grounding_records
+        )
+        analysis_results_payload["citation_grounding_summary"] = copy.deepcopy(
+            citation_grounding_summary
         )
         output_dir = (
             context.get("paper_output_dir")
@@ -1041,6 +1151,16 @@ class PublishPhaseMixin:
             "analysis_results": analysis_results_payload,
             "research_artifact": research_artifact,
             "llm_analysis_context": llm_analysis_context,
+            "publish_graph_context": publish_graph_context,
+            "graph_rag_citations": graph_rag_citations,
+            "citation_grounding_records": citation_grounding_records,
+            "citation_grounding_summary": citation_grounding_summary,
+            "traceability": copy.deepcopy(
+                publish_graph_context.get("traceability") or {}
+            ),
+            "unsupported_claim_warning_count": int(
+                publish_graph_context.get("unsupported_claim_warning_count") or 0
+            ),
             "phase_dossiers": phase_dossiers,
             "phase_dossier_texts": phase_dossier_texts,
             "observe_dossier": observe_dossier,
@@ -1069,6 +1189,569 @@ class PublishPhaseMixin:
         if isinstance(context.get("figure_paths"), list):
             paper_context["figure_paths"] = context.get("figure_paths")
         return paper_context
+
+    def _build_publish_graph_context(
+        self,
+        cycle: "ResearchCycle",
+        context: Dict[str, Any],
+        observe_result: Dict[str, Any],
+        analyze_result: Dict[str, Any],
+        analyze_results: Dict[str, Any],
+        evidence_protocol: Dict[str, Any],
+        citation_records: List[Dict[str, Any]],
+        citation_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        traces: Dict[str, List[Dict[str, Any]]] = {
+            "EvidenceClaim": [],
+            "VersionWitness": [],
+            "CitationRecord": [],
+        }
+        warnings: List[str] = []
+
+        explicit_context = context.get("publish_graph_context")
+        if isinstance(explicit_context, dict):
+            self._merge_publish_graph_traces(traces, explicit_context.get("traces"))
+            for warning in explicit_context.get("warnings") or []:
+                text = str(warning or "").strip()
+                if text and text not in warnings:
+                    warnings.append(text)
+
+        graph_rag_enabled = context.get("enable_publish_graph_rag") is not False
+        query = self._resolve_publish_graph_query(cycle, context)
+        cycle_id = str(getattr(cycle, "cycle_id", "") or "").strip()
+        claim_ids = self._extract_publish_claim_ids(evidence_protocol)
+
+        if graph_rag_enabled:
+            claim_payload, claim_warning = self._retrieve_publish_graph_rag_payload(
+                context,
+                cycle_id=cycle_id,
+                query=query,
+                asset_type="claim",
+                entity_ids=claim_ids,
+            )
+            if claim_warning:
+                warnings.append(claim_warning)
+            traces["EvidenceClaim"].extend(
+                self._build_publish_graph_trace_items(
+                    "EvidenceClaim",
+                    claim_payload,
+                )
+            )
+
+            witness_payload, witness_warning = self._retrieve_publish_graph_rag_payload(
+                context,
+                cycle_id=cycle_id,
+                query=query,
+                asset_type="witness",
+                entity_ids=self._extract_publish_witness_ids(
+                    citation_records,
+                    observe_result,
+                ),
+            )
+            if witness_warning:
+                warnings.append(witness_warning)
+            traces["VersionWitness"].extend(
+                self._build_publish_graph_trace_items(
+                    "VersionWitness",
+                    witness_payload,
+                )
+            )
+        else:
+            warnings.append("publish_graph_rag_disabled")
+
+        traces["CitationRecord"].extend(
+            self._build_publish_citation_record_traces(
+                cycle_id,
+                citation_records,
+                citation_result,
+            )
+        )
+        traces = self._dedupe_publish_graph_traces(traces)
+        graph_rag_citations = self._build_publish_graph_rag_citations(traces)
+        traceability = self._build_publish_graph_traceability(traces)
+        unsupported_claim_warning_count = self._count_unsupported_publish_claims(
+            claim_ids,
+            traces.get("EvidenceClaim") or [],
+        )
+
+        graph_trace_count = len(traces.get("EvidenceClaim") or []) + len(
+            traces.get("VersionWitness") or []
+        )
+        if graph_trace_count <= 0 and "missing_graph_trace" not in warnings:
+            warnings.append("missing_graph_trace")
+        if unsupported_claim_warning_count > 0:
+            warning = f"unsupported_claims:{unsupported_claim_warning_count}"
+            if warning not in warnings:
+                warnings.append(warning)
+
+        trace_counts = {key: len(value) for key, value in traces.items()}
+        status = "applied" if graph_trace_count > 0 else "degraded"
+        if not graph_rag_enabled:
+            status = "disabled"
+        return {
+            "contract_version": "publish-graph-context-v1",
+            "status": status,
+            "reason": "retrieved" if graph_trace_count > 0 else "missing_graph_trace",
+            "cycle_id": cycle_id,
+            "query": query,
+            "traces": traces,
+            "trace_counts": trace_counts,
+            "traceability": traceability,
+            "graph_rag_citations": graph_rag_citations,
+            "unsupported_claim_warning_count": unsupported_claim_warning_count,
+            "warnings": warnings,
+            "source": "publish_phase",
+        }
+
+    def _retrieve_publish_graph_rag_payload(
+        self,
+        context: Dict[str, Any],
+        *,
+        cycle_id: str,
+        query: str,
+        asset_type: str,
+        entity_ids: List[str],
+    ) -> tuple[Dict[str, Any], str]:
+        runner = context.get("publish_graph_rag_runner") or context.get(
+            "graph_rag_runner"
+        )
+        if runner is None:
+            try:
+                from src.llm.graph_rag import GraphRAG
+            except Exception as exc:  # noqa: BLE001
+                return {}, f"graph_rag_unavailable:{asset_type}:{exc}"
+            driver = getattr(self.pipeline, "neo4j_driver", None) or context.get(
+                "neo4j_driver"
+            )
+            token_budget = int(
+                context.get("publish_graph_rag_token_budget")
+                or context.get("graph_rag_token_budget")
+                or 4000
+            )
+            runner = GraphRAG(neo4j_driver=driver, token_budget=token_budget)
+
+        try:
+            result = runner.retrieve(
+                "local",
+                query,
+                asset_type=asset_type,
+                entity_ids=entity_ids or None,
+                cycle_id=cycle_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {}, f"graph_rag_retrieve_failed:{asset_type}:{exc}"
+        if hasattr(result, "to_dict"):
+            payload = result.to_dict()
+        elif isinstance(result, dict):
+            payload = dict(result)
+        else:
+            payload = {}
+        return payload if isinstance(payload, dict) else {}, ""
+
+    def _build_publish_graph_trace_items(
+        self,
+        trace_type: str,
+        payload: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        if not isinstance(payload, dict):
+            return []
+        traceability = (
+            payload.get("traceability")
+            if isinstance(payload.get("traceability"), dict)
+            else {}
+        )
+        citations = (
+            payload.get("citations")
+            if isinstance(payload.get("citations"), list)
+            else []
+        )
+        node_ids = [
+            str(item) for item in traceability.get("node_ids") or [] if str(item)
+        ]
+        body = str(payload.get("body") or "").strip()
+        items: List[Dict[str, Any]] = []
+        if citations:
+            for index, citation in enumerate(citations):
+                if not isinstance(citation, dict):
+                    continue
+                trace_id = str(
+                    citation.get("id")
+                    or (node_ids[index] if index < len(node_ids) else "")
+                    or ""
+                ).strip()
+                if not trace_id:
+                    continue
+                items.append(
+                    {
+                        "trace_type": trace_type,
+                        "id": trace_id,
+                        "label": str(citation.get("type") or trace_type),
+                        "asset_type": str(payload.get("asset_type") or ""),
+                        "citation": copy.deepcopy(citation),
+                        "traceability": copy.deepcopy(traceability),
+                        "body": body[:600],
+                    }
+                )
+        elif node_ids:
+            for node_id in node_ids:
+                items.append(
+                    {
+                        "trace_type": trace_type,
+                        "id": node_id,
+                        "label": trace_type,
+                        "asset_type": str(payload.get("asset_type") or ""),
+                        "citation": {},
+                        "traceability": copy.deepcopy(traceability),
+                        "body": body[:600],
+                    }
+                )
+        return items
+
+    def _build_publish_citation_record_traces(
+        self,
+        cycle_id: str,
+        citation_records: List[Dict[str, Any]],
+        citation_result: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        entries = (
+            citation_result.get("entries")
+            if isinstance(citation_result, dict)
+            and isinstance(citation_result.get("entries"), list)
+            else []
+        )
+        source_rows = entries or citation_records or []
+        traces: List[Dict[str, Any]] = []
+        for index, row in enumerate(source_rows, start=1):
+            if not isinstance(row, dict):
+                continue
+            base = (
+                citation_records[index - 1]
+                if index - 1 < len(citation_records)
+                and isinstance(citation_records[index - 1], dict)
+                else {}
+            )
+            record = {**dict(base), **dict(row)}
+            source_ref = str(
+                record.get("source_ref")
+                or record.get("url")
+                or record.get("doi")
+                or record.get("urn")
+                or ""
+            ).strip()
+            title = str(record.get("title") or record.get("name") or "").strip()
+            citation_id = str(
+                record.get("citation_id")
+                or record.get("id")
+                or source_ref
+                or title
+                or f"citation-{index}"
+            ).strip()
+            traces.append(
+                {
+                    "trace_type": "CitationRecord",
+                    "id": citation_id,
+                    "title": title,
+                    "authors": copy.deepcopy(record.get("authors") or []),
+                    "year": record.get("year") or record.get("publication_year"),
+                    "source_ref": source_ref,
+                    "source_type": str(record.get("source_type") or "").strip(),
+                    "traceability": {
+                        "citation_record_id": citation_id,
+                        "source_ref": source_ref,
+                        "source_type": str(record.get("source_type") or "").strip(),
+                        "cycle_id": cycle_id,
+                    },
+                    "record": copy.deepcopy(record),
+                }
+            )
+        return traces
+
+    def _merge_publish_graph_traces(
+        self,
+        traces: Dict[str, List[Dict[str, Any]]],
+        raw_traces: Any,
+    ) -> None:
+        if not isinstance(raw_traces, dict):
+            return
+        for trace_type in ("EvidenceClaim", "VersionWitness", "CitationRecord"):
+            values = raw_traces.get(trace_type)
+            if isinstance(values, list):
+                traces[trace_type].extend(
+                    copy.deepcopy(item) for item in values if isinstance(item, dict)
+                )
+
+    def _dedupe_publish_graph_traces(
+        self,
+        traces: Dict[str, List[Dict[str, Any]]],
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        deduped: Dict[str, List[Dict[str, Any]]] = {}
+        for trace_type, items in traces.items():
+            seen: set[str] = set()
+            deduped[trace_type] = []
+            for item in items or []:
+                if not isinstance(item, dict):
+                    continue
+                identity = str(item.get("id") or item.get("source_ref") or "").strip()
+                key = f"{trace_type}:{identity or len(seen)}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped[trace_type].append(copy.deepcopy(item))
+        return deduped
+
+    def _build_publish_graph_rag_citations(
+        self,
+        traces: Dict[str, List[Dict[str, Any]]],
+    ) -> List[Dict[str, Any]]:
+        citations: List[Dict[str, Any]] = []
+        for trace_type in ("EvidenceClaim", "VersionWitness", "CitationRecord"):
+            for item in traces.get(trace_type) or []:
+                citation = {
+                    "trace_type": trace_type,
+                    "id": str(item.get("id") or "").strip(),
+                    "label": str(
+                        item.get("title") or item.get("label") or item.get("id") or ""
+                    ).strip(),
+                    "source_ref": str(item.get("source_ref") or "").strip(),
+                    "traceability": copy.deepcopy(item.get("traceability") or {}),
+                }
+                if item.get("asset_type"):
+                    citation["asset_type"] = item.get("asset_type")
+                citations.append(citation)
+        return citations
+
+    def _build_publish_graph_traceability(
+        self,
+        traces: Dict[str, List[Dict[str, Any]]],
+    ) -> Dict[str, Any]:
+        aggregate: Dict[str, Any] = {
+            "node_ids": [],
+            "relationship_ids": [],
+            "source_phases": [],
+            "cycle_ids": [],
+            "citation_record_ids": [],
+            "source_refs": [],
+            "trace_types": [],
+        }
+        for trace_type, items in traces.items():
+            if items:
+                self._append_publish_unique(aggregate["trace_types"], trace_type)
+            for item in items or []:
+                traceability = (
+                    item.get("traceability") if isinstance(item, dict) else {}
+                )
+                if not isinstance(traceability, dict):
+                    traceability = {}
+                for key in (
+                    "node_ids",
+                    "relationship_ids",
+                    "source_phases",
+                    "cycle_ids",
+                ):
+                    for value in traceability.get(key) or []:
+                        self._append_publish_unique(aggregate[key], value)
+                for source_key, target_key in (
+                    ("node_id", "node_ids"),
+                    ("relationship_id", "relationship_ids"),
+                    ("source_phase", "source_phases"),
+                    ("cycle_id", "cycle_ids"),
+                ):
+                    self._append_publish_unique(
+                        aggregate[target_key], traceability.get(source_key)
+                    )
+                self._append_publish_unique(
+                    aggregate["citation_record_ids"],
+                    traceability.get("citation_record_id"),
+                )
+                self._append_publish_unique(
+                    aggregate["source_refs"],
+                    traceability.get("source_ref") or item.get("source_ref"),
+                )
+        return aggregate
+
+    def _extract_publish_claim_ids(
+        self,
+        evidence_protocol: Dict[str, Any],
+    ) -> List[str]:
+        claim_ids: List[str] = []
+        if not isinstance(evidence_protocol, dict):
+            return claim_ids
+        for claim in evidence_protocol.get("claims") or []:
+            if not isinstance(claim, dict):
+                continue
+            claim_id = str(
+                claim.get("claim_id")
+                or claim.get("id")
+                or claim.get("evidence_claim_id")
+                or ""
+            ).strip()
+            if claim_id:
+                self._append_publish_unique(claim_ids, claim_id)
+        return claim_ids
+
+    def _extract_publish_witness_ids(
+        self,
+        citation_records: List[Dict[str, Any]],
+        observe_result: Dict[str, Any],
+    ) -> List[str]:
+        witness_ids: List[str] = []
+        for record in citation_records or []:
+            if not isinstance(record, dict):
+                continue
+            for key in ("witness_key", "source_ref", "urn", "id"):
+                self._append_publish_unique(witness_ids, record.get(key))
+        textual_criticism = get_phase_value(observe_result, "textual_criticism")
+        if isinstance(textual_criticism, dict):
+            for verdict in textual_criticism.get("verdicts") or []:
+                if not isinstance(verdict, dict):
+                    continue
+                for key in ("witness_key", "catalog_id", "document_urn"):
+                    self._append_publish_unique(witness_ids, verdict.get(key))
+        return witness_ids
+
+    def _count_unsupported_publish_claims(
+        self,
+        claim_ids: List[str],
+        evidence_claim_traces: List[Dict[str, Any]],
+    ) -> int:
+        if not claim_ids:
+            return 0
+        unsupported = 0
+        trace_ids = [
+            str(item.get("id") or "").strip() for item in evidence_claim_traces
+        ]
+        for claim_id in claim_ids:
+            if not any(
+                trace_id == claim_id or trace_id.endswith(f"::{claim_id}")
+                for trace_id in trace_ids
+            ):
+                unsupported += 1
+        return unsupported
+
+    def _resolve_publish_graph_query(
+        self,
+        cycle: "ResearchCycle",
+        context: Dict[str, Any],
+    ) -> str:
+        for key in (
+            "publish_graph_rag_query",
+            "graph_rag_query",
+            "research_question",
+            "question",
+        ):
+            text = str(context.get(key) or "").strip()
+            if text:
+                return text
+        return str(
+            getattr(cycle, "research_objective", "")
+            or getattr(cycle, "description", "")
+            or getattr(cycle, "cycle_name", "")
+            or ""
+        ).strip()
+
+    @staticmethod
+    def _append_publish_unique(items: List[str], value: Any) -> None:
+        text = str(value or "").strip()
+        if text and text not in items:
+            items.append(text)
+
+    def _resolve_publish_observe_philology(
+        self,
+        context: Dict[str, Any],
+        observe_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        for source in (context, observe_result, get_phase_results(observe_result)):
+            if not isinstance(source, dict):
+                continue
+            for key in (
+                "observe_philology",
+                "philology_assets",
+                "textual_criticism",
+            ):
+                value = source.get(key)
+                if isinstance(value, dict) and value:
+                    payload[key] = copy.deepcopy(value)
+
+        ingestion_pipeline = get_phase_value(observe_result, "ingestion_pipeline", {})
+        if isinstance(ingestion_pipeline, dict):
+            aggregate = ingestion_pipeline.get("aggregate")
+            if isinstance(aggregate, dict):
+                philology_assets = aggregate.get("philology_assets")
+                if isinstance(philology_assets, dict) and philology_assets:
+                    payload.setdefault(
+                        "philology_assets", copy.deepcopy(philology_assets)
+                    )
+            documents = ingestion_pipeline.get("documents")
+            if isinstance(documents, list):
+                document_assets = [
+                    copy.deepcopy(item.get("philology_assets"))
+                    for item in documents
+                    if isinstance(item, dict)
+                    and isinstance(item.get("philology_assets"), dict)
+                ]
+                if document_assets:
+                    payload["document_philology_assets"] = document_assets
+        return payload
+
+    def _build_publish_citation_grounding_records(
+        self,
+        *,
+        evidence_protocol: Dict[str, Any],
+        citation_records: List[Dict[str, Any]],
+        observe_philology: Dict[str, Any],
+        graph_rag_context: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        if CitationEvidenceSynthesizer is None:
+            return []
+        try:
+            synthesizer = CitationEvidenceSynthesizer()
+            records = synthesizer.synthesize(
+                evidence_protocol=evidence_protocol,
+                citation_records=citation_records,
+                observe_philology=observe_philology,
+                graph_rag_context=graph_rag_context,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.pipeline.logger.warning(
+                "Publish 阶段构建 CitationGroundingRecord 失败: %s", exc
+            )
+            return []
+        grounding_records: List[Dict[str, Any]] = []
+        for record in records or []:
+            if hasattr(record, "to_dict"):
+                payload = record.to_dict()
+            elif isinstance(record, dict):
+                payload = dict(record)
+            else:
+                continue
+            grounding_records.append(copy.deepcopy(payload))
+        return grounding_records
+
+    def _summarize_publish_citation_grounding(
+        self,
+        records: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if callable(summarize_citation_grounding):
+            return summarize_citation_grounding(records)
+        counts = {
+            "strong": 0,
+            "moderate": 0,
+            "weak": 0,
+            "unsupported": 0,
+        }
+        for record in records or []:
+            level = str(record.get("support_level") or "unsupported").strip()
+            if level not in counts:
+                level = "unsupported"
+            counts[level] += 1
+        total = sum(counts.values())
+        return {
+            "record_count": total,
+            "support_level_counts": counts,
+            "unsupported_count": counts["unsupported"],
+            "supported_count": total - counts["unsupported"],
+        }
 
     def _resolve_publish_selected_hypothesis(
         self,
@@ -1140,6 +1823,22 @@ class PublishPhaseMixin:
             "citations": citation_result.get("entries", []),
             "research_artifact": paper_context.get("research_artifact", {}),
             "analysis_results": paper_context.get("analysis_results", {}),
+            "publish_graph_context": copy.deepcopy(
+                paper_context.get("publish_graph_context", {})
+            ),
+            "graph_rag_citations": copy.deepcopy(
+                paper_context.get("graph_rag_citations", [])
+            ),
+            "citation_grounding_records": copy.deepcopy(
+                paper_context.get("citation_grounding_records", [])
+            ),
+            "citation_grounding_summary": copy.deepcopy(
+                paper_context.get("citation_grounding_summary", {})
+            ),
+            "traceability": copy.deepcopy(paper_context.get("traceability", {})),
+            "unsupported_claim_warning_count": int(
+                paper_context.get("unsupported_claim_warning_count") or 0
+            ),
             "output_files": merged_output_files,
         }
         phase_results = {
@@ -1188,6 +1887,27 @@ class PublishPhaseMixin:
                 "cycle_name": cycle.cycle_name,
                 "research_scope": cycle.research_scope,
                 "researchers": cycle.researchers,
+                "publish_graph_context": copy.deepcopy(
+                    paper_context.get("publish_graph_context", {})
+                ),
+                "graph_rag_citation_count": len(
+                    paper_context.get("graph_rag_citations")
+                    if isinstance(paper_context.get("graph_rag_citations"), list)
+                    else []
+                ),
+                "citation_grounding_summary": copy.deepcopy(
+                    paper_context.get("citation_grounding_summary", {})
+                ),
+                "unsupported_citation_grounding_count": int(
+                    (paper_context.get("citation_grounding_summary", {}) or {}).get(
+                        "unsupported_count", 0
+                    )
+                    if isinstance(paper_context.get("citation_grounding_summary"), dict)
+                    else 0
+                ),
+                "unsupported_claim_warning_count": int(
+                    paper_context.get("unsupported_claim_warning_count") or 0
+                ),
                 "generated_by": "publish_phase",
             },
             "phase_results": phase_results,
@@ -2169,6 +2889,9 @@ class PublishPhaseMixin:
             ),
             "llm_analysis_context": self._stringify_publish_planner_value(
                 paper_context.get("llm_analysis_context"), limit=500
+            ),
+            "publish_graph_context": self._stringify_publish_planner_value(
+                paper_context.get("publish_graph_context"), limit=700
             ),
             "reference_snapshot": "\n".join(
                 line.strip()

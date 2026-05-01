@@ -7,6 +7,7 @@ Create Date: 2026-04-28 00:00:00.000000
 T6.1 — Transactional Outbox：与业务表同事务写入 ``outbox_events``，由后台 worker
 异步消费并投影到 Neo4j；失败 ≥ 5 次的事件归档至 ``outbox_dlq``。
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -25,7 +26,9 @@ def upgrade() -> None:
     is_postgres = bind.dialect.name == "postgresql"
 
     if is_postgres:
-        from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+        from sqlalchemy.dialects.postgresql import JSONB
+        from sqlalchemy.dialects.postgresql import UUID as PGUUID
+
         json_type = JSONB
         uuid_type = PGUUID(as_uuid=True)
     else:
@@ -39,7 +42,9 @@ def upgrade() -> None:
         sa.Column("aggregate_id", sa.String(length=128), nullable=False),
         sa.Column("event_type", sa.String(length=96), nullable=False),
         sa.Column("payload", json_type, nullable=False),
-        sa.Column("status", sa.String(length=16), nullable=False, server_default="pending"),
+        sa.Column(
+            "status", sa.String(length=16), nullable=False, server_default="pending"
+        ),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=is_postgres),

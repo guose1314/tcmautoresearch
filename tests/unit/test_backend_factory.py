@@ -55,6 +55,15 @@ class _FakeNeo4jDriver:
         self.closed = True
 
 
+class _FakeOutboxStore:
+    def __init__(self, _db_manager):
+        self.events = []
+
+    def enqueue(self, **kwargs):
+        self.events.append(kwargs)
+        return "event-1"
+
+
 class TestBackendFactoryPasswordResolution(unittest.TestCase):
     def setUp(self):
         self.original_db_password = os.environ.get("TCM_DB_PASSWORD")
@@ -127,9 +136,12 @@ class TestBackendFactoryPasswordResolution(unittest.TestCase):
             },
         }
 
-        with patch("src.storage.backend_factory.DatabaseManager", _FakeDatabaseManager), patch(
-            "src.storage.neo4j_driver.Neo4jDriver",
-            _FakeNeo4jDriver,
+        with (
+            patch("src.storage.backend_factory.DatabaseManager", _FakeDatabaseManager),
+            patch(
+                "src.storage.neo4j_driver.Neo4jDriver",
+                _FakeNeo4jDriver,
+            ),
         ):
             factory = StorageBackendFactory(config)
             report = factory.initialize()
@@ -142,6 +154,26 @@ class TestBackendFactoryPasswordResolution(unittest.TestCase):
             _FakeNeo4jDriver.instances[0].auth,
             ("neo4j", "explicit-neo4j-password"),
         )
+
+    def test_factory_enqueue_graph_projection_uses_pg_outbox_store(self):
+        factory = StorageBackendFactory({"database": {"type": "sqlite"}})
+        factory._initialized = True
+        factory._db_manager = object()
+
+        with patch("src.storage.outbox.PgOutboxStore", _FakeOutboxStore):
+            event_id = factory.enqueue_graph_projection(
+                "cycle-1",
+                "observe",
+                {"nodes": [], "edges": []},
+                "cycle-1:observe:graph",
+            )
+
+        self.assertEqual(event_id, "event-1")
+        self.assertEqual(len(factory.outbox_store.events), 1)
+        event = factory.outbox_store.events[0]
+        self.assertEqual(event["event_type"], "neo4j.graph_projection.upsert")
+        self.assertEqual(event["aggregate_type"], "graph_projection")
+        self.assertEqual(event["payload"]["cycle_id"], "cycle-1")
 
 
 if __name__ == "__main__":

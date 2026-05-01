@@ -11,6 +11,9 @@ output:
 logging:
   file: "./logs/test/tcmautoresearch.log"
 
+graph_rag:
+  default_enabled: true
+
 models:
   llm:
     cache_dir: "./cache/llm/test"

@@ -9,6 +9,7 @@ import importlib as _importlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .citation_grounding_evaluator import MarkdownClaimBlock
     from .evidence_grader import (
         BiasRiskAssessment,
         EvidenceGrader,
@@ -29,6 +30,22 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "QualityAssessor": ("src.quality.quality_assessor", "QualityAssessor"),
     "QualityScore": ("src.quality.quality_assessor", "QualityScore"),
     "ComplianceReport": ("src.quality.quality_assessor", "ComplianceReport"),
+    "MarkdownClaimBlock": (
+        "src.quality.citation_grounding_evaluator",
+        "MarkdownClaimBlock",
+    ),
+    "evaluate_citation_grounding": (
+        "src.quality.citation_grounding_evaluator",
+        "evaluate_citation_grounding",
+    ),
+    "extract_citation_keys": (
+        "src.quality.citation_grounding_evaluator",
+        "extract_citation_keys",
+    ),
+    "extract_markdown_claim_blocks": (
+        "src.quality.citation_grounding_evaluator",
+        "extract_markdown_claim_blocks",
+    ),
     "StudyGRADEAssessment": ("src.quality.evidence_grader", "StudyGRADEAssessment"),
     "StudyRecord": ("src.quality.evidence_grader", "StudyRecord"),
 }

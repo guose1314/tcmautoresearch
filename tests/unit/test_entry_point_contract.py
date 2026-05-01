@@ -10,6 +10,9 @@
 
 import unittest
 import warnings
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class TestEntryPointExports(unittest.TestCase):
@@ -33,6 +36,15 @@ class TestEntryPointExports(unittest.TestCase):
         self.assertTrue(callable(ResearchOrchestrator))
         self.assertTrue(callable(run_research))
 
+    def test_runtime_service_does_not_import_deprecated_orchestrator(self):
+        runtime_path = (
+            REPO_ROOT / "src" / "orchestration" / "research_runtime_service.py"
+        )
+        source = runtime_path.read_text(encoding="utf-8")
+
+        self.assertNotIn("from src.orchestration.research_orchestrator import", source)
+        self.assertIn("from src.orchestration.orchestration_contract import", source)
+
     def test_run_research_emits_deprecation_warning(self):
         from src.orchestration import run_research
 
@@ -43,7 +55,9 @@ class TestEntryPointExports(unittest.TestCase):
             except Exception:
                 pass  # 不关心执行结果，只验证 warning
 
-        deprecation_warnings = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        deprecation_warnings = [
+            w for w in caught if issubclass(w.category, DeprecationWarning)
+        ]
         self.assertTrue(
             len(deprecation_warnings) >= 1,
             f"期望 DeprecationWarning，但实际收到: {[w.category.__name__ for w in caught]}",
@@ -59,7 +73,11 @@ class TestCanonicalPhaseDefaults(unittest.TestCase):
             CANONICAL_OBSERVE_DEFAULTS,
         )
 
-        required_keys = {"data_source", "use_local_corpus", "run_preprocess_and_extract"}
+        required_keys = {
+            "data_source",
+            "use_local_corpus",
+            "run_preprocess_and_extract",
+        }
         self.assertTrue(required_keys.issubset(CANONICAL_OBSERVE_DEFAULTS.keys()))
 
     def test_canonical_publish_defaults_have_required_keys(self):

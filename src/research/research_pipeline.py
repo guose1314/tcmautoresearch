@@ -46,9 +46,12 @@ _OPTIONAL_RUNTIME_IMPORTS = {
     "OutputGenerator": ("src.generation.output_formatter", "OutputGenerator"),
     "ReportGenerator": ("src.generation.report_generator", "ReportGenerator"),
     "PhilologyService": ("src.analysis.philology_service", "PhilologyService"),
-    "AdvancedEntityExtractor": ("src.analysis.entity_extractor", "AdvancedEntityExtractor"),
+    "AdvancedEntityExtractor": (
+        "src.analysis.entity_extractor",
+        "AdvancedEntityExtractor",
+    ),
     "DocumentPreprocessor": ("src.analysis.preprocessor", "DocumentPreprocessor"),
-    "SemanticGraphBuilder": ("src.analysis.semantic_graph", "SemanticGraphBuilder"),
+    "SemanticGraphBuilder": ("src.analysis.semantic_graph", "SemanticGraphService"),
     "ReasoningEngine": ("src.analysis.reasoning_engine", "ReasoningEngine"),
 }
 
@@ -79,6 +82,7 @@ def _build_unavailable_module(symbol_name: str):
     _UnavailableModule._copilot_unavailable_placeholder = True
     return _UnavailableModule
 
+
 # 供单测 patch 的符号；导入失败时在运行时再惰性加载。
 
 
@@ -88,7 +92,9 @@ def _try_import(module_path: str, symbol: str, fallback=None):
         mod = import_module(module_path)
         return getattr(mod, symbol)
     except Exception as exc:
-        logger.warning("可选依赖 %s.%s 导入失败，降级为 stub: %s", module_path, symbol, exc)
+        logger.warning(
+            "可选依赖 %s.%s 导入失败，降级为 stub: %s", module_path, symbol, exc
+        )
         return fallback
 
 
@@ -98,18 +104,25 @@ CitationManager = _try_import("src.generation.citation_manager", "CitationManage
 PaperWriter = _try_import("src.generation.paper_writer", "PaperWriter")
 OutputGenerator = _try_import("src.generation.output_formatter", "OutputGenerator")
 ReportGenerator = _try_import("src.generation.report_generator", "ReportGenerator")
-SelfLearningEngine = _try_import("src.learning.self_learning_engine", "SelfLearningEngine")
+SelfLearningEngine = _try_import(
+    "src.learning.self_learning_engine", "SelfLearningEngine"
+)
 
 # 分析模块 — 延迟导入，支持依赖注入
 PhilologyService = _try_import("src.analysis.philology_service", "PhilologyService")
-AdvancedEntityExtractor = _try_import("src.analysis.entity_extractor", "AdvancedEntityExtractor")
+AdvancedEntityExtractor = _try_import(
+    "src.analysis.entity_extractor", "AdvancedEntityExtractor"
+)
 DocumentPreprocessor = _try_import("src.analysis.preprocessor", "DocumentPreprocessor")
 SemanticGraphBuilder = _try_import(
-    "src.analysis.semantic_graph", "SemanticGraphBuilder",
-    fallback=_build_unavailable_module("SemanticGraphBuilder"),
+    "src.analysis.semantic_graph",
+    "SemanticGraphService",
+    fallback=_build_unavailable_module("SemanticGraphService"),
 )
+SemanticGraphService = SemanticGraphBuilder
 ReasoningEngine = _try_import(
-    "src.analysis.reasoning_engine", "ReasoningEngine",
+    "src.analysis.reasoning_engine",
+    "ReasoningEngine",
     fallback=_build_unavailable_module("ReasoningEngine"),
 )
 
@@ -127,7 +140,8 @@ class ResearchPipeline:
     DocumentPreprocessor = DocumentPreprocessor
     PhilologyService = PhilologyService
     AdvancedEntityExtractor = AdvancedEntityExtractor
-    SemanticGraphBuilder = SemanticGraphBuilder
+    SemanticGraphService = SemanticGraphService
+    SemanticGraphBuilder = SemanticGraphService
     ReasoningEngine = ReasoningEngine
     PaperWriter = PaperWriter
     OutputGenerator = OutputGenerator
@@ -165,7 +179,9 @@ class ResearchPipeline:
         self.config = config or {}
         self._injected_storage_factory = storage_factory
         self.event_bus = EventBus()
-        self.module_factory = ModuleFactory.from_config(self.config.get("module_factory") or {})
+        self.module_factory = ModuleFactory.from_config(
+            self.config.get("module_factory") or {}
+        )
 
         # 保存注入的实例，供工厂优先使用
         self._injected: Dict[str, Any] = {}
@@ -219,9 +235,13 @@ class ResearchPipeline:
         self.executor = get_global_executor(max_workers=max_workers or 4)
         self.logger = logging.getLogger(__name__)
         self._failed_operations: List[Dict[str, Any]] = []
-        minimum_stable_completion_rate = self.config.get("minimum_stable_completion_rate")
+        minimum_stable_completion_rate = self.config.get(
+            "minimum_stable_completion_rate"
+        )
         if minimum_stable_completion_rate is None:
-            minimum_stable_completion_rate = learned_runtime_parameters.get("quality_threshold", 0.8)
+            minimum_stable_completion_rate = learned_runtime_parameters.get(
+                "quality_threshold", 0.8
+            )
         self._metadata: Dict[str, Any] = {
             "phase_history": [],
             "phase_timings": {},
@@ -237,7 +257,9 @@ class ResearchPipeline:
                 self.config.get("persist_failed_cycles", True),
             ),
             "minimum_stable_completion_rate": float(minimum_stable_completion_rate),
-            "export_contract_version": self.config.get("export_contract_version", "d44.v1"),
+            "export_contract_version": self.config.get(
+                "export_contract_version", "d44.v1"
+            ),
         }
 
         self.session_manager = StudySessionManager(self._governance_config)
@@ -261,13 +283,16 @@ class ResearchPipeline:
         self.hypothesis_engine.initialize()
 
         self.phase_orchestrator = PhaseOrchestrator(
-            self, storage_factory=self._injected_storage_factory,
+            self,
+            storage_factory=self._injected_storage_factory,
         )
         self.phase_handlers = ResearchPhaseHandlers(self)
         self.orchestrator = ResearchPipelineOrchestrator(self, self.phase_handlers)
 
         # Port adapters — bounded-context interfaces (Phase 2)
-        self.collection_port = DefaultCollectionAdapter(self.module_factory, self.config)
+        self.collection_port = DefaultCollectionAdapter(
+            self.module_factory, self.config
+        )
         self.analysis_port = DefaultAnalysisAdapter(self.module_factory)
         self.research_port = DefaultResearchAdapter(self.hypothesis_engine)
         self.quality_port = DefaultQualityAdapter(self.quality_assessor)
@@ -281,8 +306,10 @@ class ResearchPipeline:
             # 若有注入实例，优先使用（忽略后续传入的 config）
             injected = self._injected.get(key)
             if injected is not None:
+
                 def _injected_provider(cfg: Dict[str, Any], _inst=injected):
                     return _inst
+
                 self.module_factory.register(key, _injected_provider)
                 continue
 
@@ -332,7 +359,9 @@ class ResearchPipeline:
     def refresh_learning_runtime_feedback(self) -> Dict[str, Any]:
         learning_engine = self.config.get("self_learning_engine")
         strategy: Dict[str, Any] = {}
-        if learning_engine is not None and hasattr(learning_engine, "get_learning_strategy"):
+        if learning_engine is not None and hasattr(
+            learning_engine, "get_learning_strategy"
+        ):
             try:
                 raw_strategy = learning_engine.get_learning_strategy()
                 if isinstance(raw_strategy, dict):
@@ -349,7 +378,9 @@ class ResearchPipeline:
                 for key, value in tuned_parameters.items():
                     self.config.setdefault(key, value)
 
-        if learning_engine is not None and hasattr(learning_engine, "build_previous_iteration_feedback"):
+        if learning_engine is not None and hasattr(
+            learning_engine, "build_previous_iteration_feedback"
+        ):
             try:
                 previous_feedback = learning_engine.build_previous_iteration_feedback()
             except Exception as exc:
@@ -380,7 +411,8 @@ class ResearchPipeline:
         Called once at cycle start so all phases share the same baseline.
         """
         self._learning_strategy_snapshot = build_strategy_snapshot(
-            None, self.config,
+            None,
+            self.config,
         )
         self._learning_phase_manifests = []
         return dict(self._learning_strategy_snapshot)
@@ -394,11 +426,13 @@ class ResearchPipeline:
 
     def build_learning_application_summary(self) -> Dict[str, Any]:
         """Build a cycle-level summary of all strategy applications across phases."""
-        phases_applied = [
-            m for m in self._learning_phase_manifests if m.get("applied")
-        ]
+        phases_applied = [m for m in self._learning_phase_manifests if m.get("applied")]
         total_decisions = sum(m.get("decision_count", 0) for m in phases_applied)
-        fingerprints = {m.get("strategy_fingerprint") for m in phases_applied if m.get("strategy_fingerprint")}
+        fingerprints = {
+            m.get("strategy_fingerprint")
+            for m in phases_applied
+            if m.get("strategy_fingerprint")
+        }
         return {
             "snapshot_fingerprint": self._learning_strategy_snapshot.get("fingerprint"),
             "phases_with_strategy": [m.get("phase") for m in phases_applied],
@@ -411,7 +445,9 @@ class ResearchPipeline:
 
     @staticmethod
     def _is_unavailable_default_module_class(candidate: Any) -> bool:
-        return candidate is None or bool(getattr(candidate, "_copilot_unavailable_placeholder", False))
+        return candidate is None or bool(
+            getattr(candidate, "_copilot_unavailable_placeholder", False)
+        )
 
     def _resolve_default_module_class(self, symbol_name: str) -> Any:
         cls = globals().get(symbol_name)
@@ -429,7 +465,10 @@ class ResearchPipeline:
         except Exception as exc:
             self.logger.warning(
                 "运行时惰性加载 %s (%s.%s) 失败，降级为 stub: %s",
-                symbol_name, module_name, attribute_name, exc,
+                symbol_name,
+                module_name,
+                attribute_name,
+                exc,
             )
             return cls
 
@@ -443,7 +482,9 @@ class ResearchPipeline:
     def _initialize_cycle_tracking(self, cycle: ResearchCycle) -> None:
         self.session_manager.initialize_cycle_tracking(cycle)
 
-    def _mark_cycle_failed(self, cycle: ResearchCycle, phase_name: str, error: str) -> None:
+    def _mark_cycle_failed(
+        self, cycle: ResearchCycle, phase_name: str, error: str
+    ) -> None:
         self.session_manager.mark_cycle_failed(cycle, phase_name, error)
 
     def _build_cycle_analysis_summary(self, cycle: ResearchCycle) -> Dict[str, Any]:
@@ -527,7 +568,9 @@ class ResearchPipeline:
     def get_phase_handler(self, phase_name: str) -> Any:
         return self.phase_orchestrator.get_handler(phase_name)
 
-    def _call_phase_handler_method(self, phase_name: str, method_name: str, *args: Any, **kwargs: Any) -> Any:
+    def _call_phase_handler_method(
+        self, phase_name: str, method_name: str, *args: Any, **kwargs: Any
+    ) -> Any:
         handler = self.get_phase_handler(phase_name)
         method = getattr(handler, method_name, None)
         if method is None:
@@ -581,10 +624,14 @@ class ResearchPipeline:
             error,
         )
 
-    def _validate_research_phase_request(self, cycle_id: str) -> Optional[Dict[str, Any]]:
+    def _validate_research_phase_request(
+        self, cycle_id: str
+    ) -> Optional[Dict[str, Any]]:
         return self.phase_orchestrator._validate_research_phase_request(cycle_id)
 
-    def _advance_research_cycle_phase(self, research_cycle: ResearchCycle, phase: ResearchPhase) -> None:
+    def _advance_research_cycle_phase(
+        self, research_cycle: ResearchCycle, phase: ResearchPhase
+    ) -> None:
         self.phase_orchestrator._advance_research_cycle_phase(research_cycle, phase)
 
     def _build_phase_execution(
@@ -609,7 +656,9 @@ class ResearchPipeline:
         phase_execution: Dict[str, Any],
         phase_result: Dict[str, Any],
     ) -> None:
-        self.phase_orchestrator._sync_phase_history_entry(phase_entry, phase_execution, phase_result)
+        self.phase_orchestrator._sync_phase_history_entry(
+            phase_entry, phase_execution, phase_result
+        )
 
     def _apply_phase_result(
         self,
@@ -619,7 +668,9 @@ class ResearchPipeline:
     ) -> None:
         self.phase_orchestrator._apply_phase_result(research_cycle, phase, phase_result)
 
-    def _record_phase_success(self, cycle_id: str, phase: ResearchPhase, start_time: float) -> None:
+    def _record_phase_success(
+        self, cycle_id: str, phase: ResearchPhase, start_time: float
+    ) -> None:
         self.phase_orchestrator._record_phase_success(cycle_id, phase, start_time)
 
     def _handle_phase_execution_failure(
@@ -629,7 +680,9 @@ class ResearchPipeline:
         start_time: float,
         exc: Exception,
     ) -> Dict[str, Any]:
-        return self.phase_orchestrator._handle_phase_execution_failure(cycle_id, phase, start_time, exc)
+        return self.phase_orchestrator._handle_phase_execution_failure(
+            cycle_id, phase, start_time, exc
+        )
 
     def _execute_phase_internal(
         self,
@@ -639,8 +692,12 @@ class ResearchPipeline:
     ) -> Dict[str, Any]:
         return self.phase_orchestrator._execute_phase_internal(phase, cycle, context)
 
-    def _collect_observe_corpus_if_enabled(self, context: Dict[str, Any]) -> Dict[str, Any] | None:
-        return self._call_phase_handler_method("observe", "_collect_observe_corpus_if_enabled", context)
+    def _collect_observe_corpus_if_enabled(
+        self, context: Dict[str, Any]
+    ) -> Dict[str, Any] | None:
+        return self._call_phase_handler_method(
+            "observe", "_collect_observe_corpus_if_enabled", context
+        )
 
     def _build_observe_metadata(
         self,
@@ -663,42 +720,90 @@ class ResearchPipeline:
         )
 
     def _should_collect_ctext_corpus(self, context: Dict[str, Any]) -> bool:
-        return bool(self._call_phase_handler_method("observe", "_should_collect_ctext_corpus", context))
+        return bool(
+            self._call_phase_handler_method(
+                "observe", "_should_collect_ctext_corpus", context
+            )
+        )
 
     def _should_collect_local_corpus(self, context: Dict[str, Any]) -> bool:
-        return bool(self._call_phase_handler_method("observe", "_should_collect_local_corpus", context))
+        return bool(
+            self._call_phase_handler_method(
+                "observe", "_should_collect_local_corpus", context
+            )
+        )
 
-    def _collect_local_observation_corpus(self, context: Dict[str, Any]) -> Dict[str, Any] | None:
-        return self._call_phase_handler_method("observe", "_collect_local_observation_corpus", context)
+    def _collect_local_observation_corpus(
+        self, context: Dict[str, Any]
+    ) -> Dict[str, Any] | None:
+        return self._call_phase_handler_method(
+            "observe", "_collect_local_observation_corpus", context
+        )
 
     def _resolve_observe_data_source(self, context: Dict[str, Any]) -> str:
-        return str(self._call_phase_handler_method("observe", "_resolve_observe_data_source", context))
+        return str(
+            self._call_phase_handler_method(
+                "observe", "_resolve_observe_data_source", context
+            )
+        )
 
     def _resolve_whitelist_groups(self, context: Dict[str, Any]) -> List[str]:
-        return list(self._call_phase_handler_method("observe", "_resolve_whitelist_groups", context))
+        return list(
+            self._call_phase_handler_method(
+                "observe", "_resolve_whitelist_groups", context
+            )
+        )
 
-    def _collect_ctext_observation_corpus(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        return self._call_phase_handler_method("observe", "_collect_ctext_observation_corpus", context)
+    def _collect_ctext_observation_corpus(
+        self, context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        return self._call_phase_handler_method(
+            "observe", "_collect_ctext_observation_corpus", context
+        )
 
-    def _run_observe_ingestion_pipeline(self, corpus_result: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        return self._call_phase_handler_method("observe", "_run_observe_ingestion_pipeline", corpus_result, context)
+    def _run_observe_ingestion_pipeline(
+        self, corpus_result: Dict[str, Any], context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        return self._call_phase_handler_method(
+            "observe", "_run_observe_ingestion_pipeline", corpus_result, context
+        )
 
-    def _extract_corpus_text_entries(self, corpus_result: Dict[str, Any]) -> List[Dict[str, str]]:
-        return list(self._call_phase_handler_method("observe", "_extract_corpus_text_entries", corpus_result))
+    def _extract_corpus_text_entries(
+        self, corpus_result: Dict[str, Any]
+    ) -> List[Dict[str, str]]:
+        return list(
+            self._call_phase_handler_method(
+                "observe", "_extract_corpus_text_entries", corpus_result
+            )
+        )
 
     def _should_run_observe_ingestion(self, context: Dict[str, Any]) -> bool:
-        return bool(self._call_phase_handler_method("observe", "_should_run_observe_ingestion", context))
+        return bool(
+            self._call_phase_handler_method(
+                "observe", "_should_run_observe_ingestion", context
+            )
+        )
 
     def _should_run_observe_literature(self, context: Dict[str, Any]) -> bool:
-        return bool(self._call_phase_handler_method("observe", "_should_run_observe_literature", context))
+        return bool(
+            self._call_phase_handler_method(
+                "observe", "_should_run_observe_literature", context
+            )
+        )
 
-    def _run_observe_literature_pipeline(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        return self._call_phase_handler_method("observe", "_run_observe_literature_pipeline", context)
+    def _run_observe_literature_pipeline(
+        self, context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        return self._call_phase_handler_method(
+            "observe", "_run_observe_literature_pipeline", context
+        )
 
     def _should_run_clinical_gap_analysis(self, context: Dict[str, Any]) -> bool:
         return bool(self.phase_orchestrator._should_run_clinical_gap_analysis(context))
 
-    def _extract_literature_summaries(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _extract_literature_summaries(
+        self, records: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         return self.phase_orchestrator._extract_literature_summaries(records)
 
     def _build_evidence_matrix(
@@ -727,11 +832,15 @@ class ResearchPipeline:
 
         phase_orchestrator_module.CachedLLMService = CachedLLMService
         phase_orchestrator_module.GapAnalyzer = GapAnalyzer
-        return self.phase_orchestrator._run_clinical_gap_analysis(evidence_matrix, summaries, context)
+        return self.phase_orchestrator._run_clinical_gap_analysis(
+            evidence_matrix, summaries, context
+        )
 
     def cleanup(self) -> bool:
         try:
-            if self.self_learning_engine is not None and hasattr(self.self_learning_engine, "cleanup"):
+            if self.self_learning_engine is not None and hasattr(
+                self.self_learning_engine, "cleanup"
+            ):
                 self.self_learning_engine.cleanup()
             self.hypothesis_engine.cleanup()
             self.phase_orchestrator.close_storage_factory()

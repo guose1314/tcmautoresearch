@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
-from src.orchestration.research_orchestrator import OrchestrationResult
+from src.orchestration.orchestration_contract import OrchestrationResult
 from src.orchestration.research_runtime_service import ResearchRuntimeService
 
 

@@ -1,7 +1,7 @@
 import unittest
 from importlib import import_module
 
-from src.orchestration.research_orchestrator import OrchestrationResult
+from src.orchestration.orchestration_contract import OrchestrationResult
 from src.orchestration.research_runtime_service import (
     ResearchRuntimeResult,
     ResearchRuntimeService,
@@ -65,7 +65,9 @@ class _FakePipeline:
                     "output_files": {"markdown": "output/research.md"},
                 }
             )
-            result["artifacts"] = [{"name": "markdown", "path": "output/research.md", "type": "file"}]
+            result["artifacts"] = [
+                {"name": "markdown", "path": "output/research.md", "type": "file"}
+            ]
             result["metadata"].update({"report_count": 1, "report_error_count": 0})
         self.cycle.phase_executions[phase] = {"result": result}
         return result
@@ -95,7 +97,8 @@ class _FakePipeline:
             "cycle_id": cycle.cycle_id,
             "cycle_name": cycle.cycle_name,
             "phase_executions": {
-                phase.value: payload for phase, payload in cycle.phase_executions.items()
+                phase.value: payload
+                for phase, payload in cycle.phase_executions.items()
             },
         }
 
@@ -157,7 +160,10 @@ class TestResearchRuntimeService(unittest.TestCase):
         self.assertEqual(orchestration.cycle_id, "cycle-runtime-1")
         self.assertEqual(list(result.phase_results.keys()), ["observe", "publish"])
         self.assertIn("observe", result.cycle_snapshot["phase_executions"])
-        self.assertEqual(result.phase_results["observe"]["metadata"]["received_question"], "桂枝汤研究")
+        self.assertEqual(
+            result.phase_results["observe"]["metadata"]["received_question"],
+            "桂枝汤研究",
+        )
         self.assertIn("statistical_analysis", orchestration.analysis_results)
         self.assertIn("evidence", orchestration.research_artifact)
         self.assertEqual([name for name, _payload in events][-1], "job_completed")
@@ -186,9 +192,13 @@ class TestResearchRuntimeService(unittest.TestCase):
         finally:
             research_pipeline_module.ResearchPipeline = original_pipeline
 
-        publish_context = result.phase_results["publish"]["metadata"]["received_phase_context"]
+        publish_context = result.phase_results["publish"]["metadata"][
+            "received_phase_context"
+        ]
         self.assertEqual(publish_context["report_output_formats"], ["markdown", "docx"])
-        self.assertEqual(publish_context["report_output_dir"], "output/research_reports")
+        self.assertEqual(
+            publish_context["report_output_dir"], "output/research_reports"
+        )
         self.assertFalse(publish_context["allow_pipeline_citation_fallback"])
 
     def test_run_result_can_build_session_result_contract(self):
@@ -217,8 +227,12 @@ class TestResearchRuntimeService(unittest.TestCase):
             session_result["metadata"]["cycle_name"],
             result.orchestration_result.pipeline_metadata["cycle_name"],
         )
-        self.assertEqual(session_result["report_outputs"]["markdown"], "output/research.md")
-        self.assertEqual(session_result["reports"]["output_files"]["markdown"], "output/research.md")
+        self.assertEqual(
+            session_result["report_outputs"]["markdown"], "output/research.md"
+        )
+        self.assertEqual(
+            session_result["reports"]["output_files"]["markdown"], "output/research.md"
+        )
         self.assertEqual(session_result["reports"]["report_count"], 1)
         self.assertEqual(session_result["deliverables"], ["Markdown 论文初稿"])
         self.assertIn("statistical_analysis", session_result["analysis_results"])
@@ -248,7 +262,13 @@ class TestResearchRuntimeService(unittest.TestCase):
                         "research_artifact": {"evidence": [{"id": "ev-2"}]},
                         "output_files": {"imrd_markdown": "output/imrd.md"},
                     },
-                    "artifacts": [{"name": "imrd_markdown", "path": "output/imrd.md", "type": "file"}],
+                    "artifacts": [
+                        {
+                            "name": "imrd_markdown",
+                            "path": "output/imrd.md",
+                            "type": "file",
+                        }
+                    ],
                     "metadata": {"report_count": 1, "report_error_count": 0},
                     "error": None,
                 }
@@ -269,8 +289,12 @@ class TestResearchRuntimeService(unittest.TestCase):
         session_result = runtime_result.session_result
 
         self.assertEqual(session_result["analysis_summary"]["status"], "stable")
-        self.assertEqual(session_result["metadata"]["analysis_summary"]["deliverable_count"], 1)
-        self.assertEqual(session_result["report_outputs"]["imrd_markdown"], "output/imrd.md")
+        self.assertEqual(
+            session_result["metadata"]["analysis_summary"]["deliverable_count"], 1
+        )
+        self.assertEqual(
+            session_result["report_outputs"]["imrd_markdown"], "output/imrd.md"
+        )
         self.assertEqual(session_result["reports"]["report_count"], 1)
         self.assertEqual(session_result["deliverables"], ["Markdown IMRD 报告"])
 
@@ -293,8 +317,13 @@ class TestResearchRuntimeService(unittest.TestCase):
 
         self.assertEqual(service.phase_names, ["observe"])
         self.assertEqual(list(result.phase_results.keys()), ["observe"])
-        self.assertEqual(result.orchestration_result.pipeline_metadata["scope"], "中医药")
-        self.assertRegex(result.orchestration_result.pipeline_metadata["cycle_name"], r"^research_\d+$")
+        self.assertEqual(
+            result.orchestration_result.pipeline_metadata["scope"], "中医药"
+        )
+        self.assertRegex(
+            result.orchestration_result.pipeline_metadata["cycle_name"],
+            r"^research_\d+$",
+        )
 
     def test_run_supports_timestamp_cycle_name_strategy(self):
         service = ResearchRuntimeService(
@@ -389,7 +418,9 @@ class TestResearchRuntimeService(unittest.TestCase):
         self.assertEqual(orchestration.status, "completed")
         self.assertEqual(orchestration.phases[1].phase, "experiment_execution")
         self.assertEqual(orchestration.phases[1].status, "skipped")
-        self.assertEqual(result.phase_results["experiment_execution"]["status"], "skipped")
+        self.assertEqual(
+            result.phase_results["experiment_execution"]["status"], "skipped"
+        )
 
     def test_run_injects_learning_strategy_into_phase_context(self):
         service = ResearchRuntimeService(
@@ -417,10 +448,18 @@ class TestResearchRuntimeService(unittest.TestCase):
         finally:
             research_pipeline_module.ResearchPipeline = original_pipeline
 
-        observe_context = result.phase_results["observe"]["metadata"]["received_phase_context"]
+        observe_context = result.phase_results["observe"]["metadata"][
+            "received_phase_context"
+        ]
         self.assertEqual(
-            observe_context["learning_strategy"]["tuned_parameters"]["quality_threshold"],
+            observe_context["learning_strategy"]["tuned_parameters"][
+                "quality_threshold"
+            ],
             0.74,
         )
-        self.assertEqual(observe_context["previous_iteration_feedback"]["iteration_number"], 3)
-        self.assertTrue(result.orchestration_result.pipeline_metadata["learning_strategy_active"])
+        self.assertEqual(
+            observe_context["previous_iteration_feedback"]["iteration_number"], 3
+        )
+        self.assertTrue(
+            result.orchestration_result.pipeline_metadata["learning_strategy_active"]
+        )

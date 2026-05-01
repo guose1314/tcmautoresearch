@@ -23,7 +23,7 @@ from typing import Any, Dict, FrozenSet, Mapping, Optional
 # Schema version — bump on every breaking label/relationship/property change
 # ═══════════════════════════════════════════════════════════════════════
 
-GRAPH_SCHEMA_VERSION = "1.2.0"
+GRAPH_SCHEMA_VERSION = "1.3.0"
 
 _SCHEMA_META_LABEL = "GraphSchemaMeta"
 _SCHEMA_META_NODE_ID = "graph_schema_meta::singleton"
@@ -54,6 +54,8 @@ class NodeLabel(str, Enum):
     CATALOG = "Catalog"
     VERSION_LINEAGE = "VersionLineage"
     VERSION_WITNESS = "VersionWitness"
+    VERSION_LINEAGE_DIFF = "VersionLineageDiff"
+    VARIANT_READING = "VariantReading"
     EXEGESIS_ENTRY = "ExegesisEntry"
     EXEGESIS_TERM = "ExegesisTerm"
     FRAGMENT_CANDIDATE = "FragmentCandidate"
@@ -112,6 +114,8 @@ class RelType(str, Enum):
     OBSERVED_WITNESS = "OBSERVED_WITNESS"
     BELONGS_TO_LINEAGE = "BELONGS_TO_LINEAGE"
     HAS_VERSION = "HAS_VERSION"
+    COMPARES_WITNESS = "COMPARES_WITNESS"
+    HAS_VARIANT_READING = "HAS_VARIANT_READING"
     HAS_EXEGESIS = "HAS_EXEGESIS"
     HAS_FRAGMENT_CANDIDATE = "HAS_FRAGMENT_CANDIDATE"
     ATTESTS_TO = "ATTESTS_TO"
@@ -151,186 +155,579 @@ class RelType(str, Enum):
 # Property whitelist per label
 # ═══════════════════════════════════════════════════════════════════════
 
-_COMMON_TEMPORAL_PROPS: FrozenSet[str] = frozenset({
-    "created_at", "updated_at", "started_at", "completed_at",
-})
+_COMMON_TEMPORAL_PROPS: FrozenSet[str] = frozenset(
+    {
+        "created_at",
+        "updated_at",
+        "started_at",
+        "completed_at",
+    }
+)
 
-_COMMON_CYCLE_PROPS: FrozenSet[str] = frozenset({
-    "cycle_id", "phase", "phase_execution_id",
-})
+_COMMON_CYCLE_PROPS: FrozenSet[str] = frozenset(
+    {
+        "cycle_id",
+        "phase",
+        "phase_execution_id",
+    }
+)
 
 _ALLOWED_PROPERTIES: Dict[NodeLabel, FrozenSet[str]] = {
-    NodeLabel.RESEARCH_SESSION: _COMMON_TEMPORAL_PROPS | frozenset({
-        "cycle_id", "cycle_name", "status", "current_phase",
-        "research_objective", "research_scope", "duration",
-    }),
-    NodeLabel.RESEARCH_PHASE_EXECUTION: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
-        "status", "duration", "error_detail",
-    }),
-    NodeLabel.RESEARCH_ARTIFACT: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
-        "name", "artifact_type", "description", "file_path",
-        "mime_type", "size_bytes",
-    }),
-    NodeLabel.HYPOTHESIS: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
-        "hypothesis_id", "title", "description", "domain",
-        "confidence", "status", "validation_plan",
-        "supporting_signal_count", "contradiction_signal_count",
-    }),
-    NodeLabel.EVIDENCE: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
-        "evidence_id", "title", "source", "evidence_grade",
-        "confidence", "provenance_type", "document_id",
-        "source_type", "source_ref", "relation_type",
-        "source_entity", "target_entity", "excerpt",
-        "document_title", "work_title", "version_lineage_key",
-        "witness_key",
-    }),
-    NodeLabel.EVIDENCE_CLAIM: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
-        "claim_id", "claim_text", "confidence", "evidence_grade",
-        "evidence_ids", "source_entity", "target_entity",
-        "relation_type", "support_count", "review_status",
-        "needs_manual_review", "reviewer", "reviewed_at",
-        "decision_basis", "work_title", "document_title",
-        "version_lineage_key", "witness_key",
-    }),
-    NodeLabel.CATALOG: frozenset({
-        "catalog_id", "title", "source", "classification",
-        "review_status", "needs_manual_review", "reviewer",
-        "reviewed_at", "decision_basis",
-    }),
-    NodeLabel.VERSION_LINEAGE: frozenset({
-        "version_lineage_key", "work_fragment_key", "work_title",
-        "fragment_title", "dynasty", "author", "edition",
-        "lineage_id_source", "review_status", "needs_manual_review",
-        "reviewer", "reviewed_at", "decision_basis",
-    }),
-    NodeLabel.VERSION_WITNESS: _COMMON_TEMPORAL_PROPS | frozenset({
-        "witness_key", "version_lineage_key", "work_fragment_key",
-        "catalog_id", "work_title", "fragment_title",
-        "dynasty", "author", "edition", "source_type", "source_ref",
-        "document_id", "document_urn", "document_title",
-        "cycle_id", "phase_execution_id", "review_status",
-        "needs_manual_review", "reviewer", "reviewed_at", "decision_basis",
-    }),
-    NodeLabel.EXEGESIS_ENTRY: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
-        "exegesis_id", "canonical", "label", "definition", "definition_source",
-        "semantic_scope", "observed_forms", "configured_variants", "sources",
-        "source_refs", "notes", "dynasty_usage", "disambiguation_basis",
-        "review_status", "needs_manual_review", "reviewer", "reviewed_at",
-        "decision_basis",
-        "exegesis_notes", "document_urn", "document_title", "work_title",
-        "version_lineage_key", "witness_key",
-    }),
-    NodeLabel.EXEGESIS_TERM: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
-        "exegesis_id", "canonical", "label", "definition", "definition_source",
-        "semantic_scope", "observed_forms", "configured_variants", "sources",
-        "source_refs", "notes", "dynasty_usage", "disambiguation_basis",
-        "review_status", "needs_manual_review", "reviewer", "reviewed_at",
-        "decision_basis", "exegesis_notes", "document_urn", "document_title",
-        "work_title", "version_lineage_key", "witness_key",
-    }),
-    NodeLabel.FRAGMENT_CANDIDATE: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
-        "candidate_id", "candidate_kind", "fragment_title", "document_title",
-        "document_urn", "source_type", "witness_title", "witness_urn",
-        "work_title", "version_lineage_key", "witness_key", "match_score",
-        "confidence", "review_status", "needs_manual_review", "reviewer",
-        "reviewed_at", "decision_basis", "reconstruction_basis", "source_refs", "asset_key",
-        "text_preview",
-    }),
-    NodeLabel.TEXTUAL_EVIDENCE_CHAIN: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
-        "claim_id", "claim_text", "claim_type", "confidence", "evidence_grade",
-        "evidence_ids", "source_entity", "target_entity", "relation_type",
-        "support_count", "review_status", "needs_manual_review", "reviewer",
-        "reviewed_at", "decision_basis", "work_title", "document_title",
-        "version_lineage_key", "witness_key",
-    }),
-    NodeLabel.FORMULA: frozenset({
-        "name", "type", "confidence", "alternative_names",
-        "description", "entity_metadata_json",
-    }),
-    NodeLabel.HERB: frozenset({
-        "name", "type", "confidence", "alternative_names",
-        "description", "entity_metadata_json", "formula_canonical",
-        "source_formula", "source_exegesis_id", "formula_role",
-    }),
-    NodeLabel.SYNDROME: frozenset({
-        "name", "type", "confidence", "alternative_names",
-        "description", "entity_metadata_json",
-    }),
-    NodeLabel.SYMPTOM: frozenset({
-        "name", "type", "confidence", "alternative_names",
-        "description", "entity_metadata_json", "symptom_category",
-        "manifestation_source", "syndrome_canonical", "source_syndrome",
-        "source_exegesis_id",
-    }),
-    NodeLabel.EFFICACY: frozenset({
-        "name", "type", "confidence", "alternative_names",
-        "description", "entity_metadata_json", "herb_canonical",
-        "source_herb", "source_exegesis_id",
-    }),
-    NodeLabel.TARGET: frozenset({
-        "name", "type", "confidence", "description",
-    }),
-    NodeLabel.PATHWAY: frozenset({
-        "name", "type", "confidence", "description",
-    }),
-    NodeLabel.PROPERTY: frozenset({
-        "name", "type", "confidence", "description", "entity_metadata_json",
-        "source_exegesis_id", "syndrome_canonical", "source_syndrome",
-    }),
-    NodeLabel.TASTE: frozenset({
-        "name", "type", "confidence", "description", "entity_metadata_json",
-    }),
-    NodeLabel.MERIDIAN: frozenset({
-        "name", "type", "confidence", "description", "entity_metadata_json",
-    }),
-    NodeLabel.ENTITY: frozenset({
-        "name", "entity_type", "confidence", "position", "length",
-        "alternative_names", "description",
-        "cycle_id", "phase_execution_id",
-        "document_id", "document_urn", "document_title",
-        "created_at", "updated_at",
-    }),
-    NodeLabel.GRAPH_SCHEMA_META: frozenset({
-        "schema_version", "bootstrapped_at", "updated_at",
-        "node_label_count", "rel_type_count",
-    }),
-    NodeLabel.RHYME_WITNESS: _COMMON_TEMPORAL_PROPS | _COMMON_CYCLE_PROPS | frozenset({
-        "rhyme_id", "canonical", "label", "fanqie", "middle_chinese",
-        "old_chinese", "rhyme_group", "tone", "initial", "final",
-        "source_refs", "witness_refs", "notes", "exegesis_id",
-        "work_title", "document_title", "version_lineage_key", "witness_key",
-        "review_status", "needs_manual_review", "reviewer",
-        "reviewed_at", "decision_basis",
-    }),
-    NodeLabel.SCHOOL: _COMMON_TEMPORAL_PROPS | frozenset({
-        "school_id", "name", "alternative_names", "description",
-        "founding_dynasty", "core_doctrine", "representative_figures",
-        "representative_works", "lineage_summary", "source_refs",
-        "review_status", "needs_manual_review", "reviewer",
-        "reviewed_at", "decision_basis",
-    }),
+    NodeLabel.RESEARCH_SESSION: _COMMON_TEMPORAL_PROPS
+    | frozenset(
+        {
+            "cycle_id",
+            "cycle_name",
+            "status",
+            "current_phase",
+            "research_objective",
+            "research_scope",
+            "duration",
+        }
+    ),
+    NodeLabel.RESEARCH_PHASE_EXECUTION: _COMMON_TEMPORAL_PROPS
+    | _COMMON_CYCLE_PROPS
+    | frozenset(
+        {
+            "status",
+            "duration",
+            "error_detail",
+        }
+    ),
+    NodeLabel.RESEARCH_ARTIFACT: _COMMON_TEMPORAL_PROPS
+    | _COMMON_CYCLE_PROPS
+    | frozenset(
+        {
+            "name",
+            "artifact_type",
+            "description",
+            "file_path",
+            "mime_type",
+            "size_bytes",
+        }
+    ),
+    NodeLabel.HYPOTHESIS: _COMMON_TEMPORAL_PROPS
+    | _COMMON_CYCLE_PROPS
+    | frozenset(
+        {
+            "hypothesis_id",
+            "title",
+            "description",
+            "domain",
+            "confidence",
+            "status",
+            "validation_plan",
+            "supporting_signal_count",
+            "contradiction_signal_count",
+        }
+    ),
+    NodeLabel.EVIDENCE: _COMMON_TEMPORAL_PROPS
+    | _COMMON_CYCLE_PROPS
+    | frozenset(
+        {
+            "evidence_id",
+            "title",
+            "source",
+            "evidence_grade",
+            "confidence",
+            "provenance_type",
+            "document_id",
+            "source_type",
+            "source_ref",
+            "relation_type",
+            "source_entity",
+            "target_entity",
+            "excerpt",
+            "document_title",
+            "work_title",
+            "version_lineage_key",
+            "witness_key",
+        }
+    ),
+    NodeLabel.EVIDENCE_CLAIM: _COMMON_TEMPORAL_PROPS
+    | _COMMON_CYCLE_PROPS
+    | frozenset(
+        {
+            "claim_id",
+            "claim_text",
+            "confidence",
+            "evidence_grade",
+            "evidence_ids",
+            "source_entity",
+            "target_entity",
+            "relation_type",
+            "support_count",
+            "review_status",
+            "needs_manual_review",
+            "reviewer",
+            "reviewed_at",
+            "decision_basis",
+            "work_title",
+            "document_title",
+            "version_lineage_key",
+            "witness_key",
+        }
+    ),
+    NodeLabel.CATALOG: frozenset(
+        {
+            "catalog_id",
+            "title",
+            "source",
+            "classification",
+            "review_status",
+            "needs_manual_review",
+            "reviewer",
+            "reviewed_at",
+            "decision_basis",
+        }
+    ),
+    NodeLabel.VERSION_LINEAGE: frozenset(
+        {
+            "version_lineage_key",
+            "work_fragment_key",
+            "work_title",
+            "fragment_title",
+            "dynasty",
+            "author",
+            "edition",
+            "lineage_id_source",
+            "review_status",
+            "needs_manual_review",
+            "reviewer",
+            "reviewed_at",
+            "decision_basis",
+        }
+    ),
+    NodeLabel.VERSION_WITNESS: _COMMON_TEMPORAL_PROPS
+    | frozenset(
+        {
+            "witness_key",
+            "version_lineage_key",
+            "work_fragment_key",
+            "catalog_id",
+            "work_title",
+            "fragment_title",
+            "dynasty",
+            "author",
+            "edition",
+            "source_type",
+            "source_ref",
+            "document_id",
+            "document_urn",
+            "document_title",
+            "cycle_id",
+            "phase_execution_id",
+            "review_status",
+            "needs_manual_review",
+            "reviewer",
+            "reviewed_at",
+            "decision_basis",
+        }
+    ),
+    NodeLabel.VERSION_LINEAGE_DIFF: _COMMON_TEMPORAL_PROPS
+    | _COMMON_CYCLE_PROPS
+    | frozenset(
+        {
+            "diff_id",
+            "version_lineage_key",
+            "base_witness",
+            "target_witness",
+            "variant_reading_count",
+            "high_impact_count",
+            "impact_distribution_json",
+            "evidence_refs",
+            "summary_note",
+        }
+    ),
+    NodeLabel.VARIANT_READING: _COMMON_TEMPORAL_PROPS
+    | _COMMON_CYCLE_PROPS
+    | frozenset(
+        {
+            "reading_id",
+            "diff_id",
+            "version_lineage_key",
+            "base_witness",
+            "target_witness",
+            "base_text",
+            "variant_text",
+            "normalized_meaning",
+            "impact_level",
+            "evidence_ref",
+            "position",
+            "notes",
+        }
+    ),
+    NodeLabel.EXEGESIS_ENTRY: _COMMON_TEMPORAL_PROPS
+    | _COMMON_CYCLE_PROPS
+    | frozenset(
+        {
+            "exegesis_id",
+            "canonical",
+            "label",
+            "definition",
+            "definition_source",
+            "semantic_scope",
+            "observed_forms",
+            "configured_variants",
+            "sources",
+            "source_refs",
+            "notes",
+            "dynasty_usage",
+            "disambiguation_basis",
+            "review_status",
+            "needs_manual_review",
+            "reviewer",
+            "reviewed_at",
+            "decision_basis",
+            "exegesis_notes",
+            "document_urn",
+            "document_title",
+            "work_title",
+            "version_lineage_key",
+            "witness_key",
+        }
+    ),
+    NodeLabel.EXEGESIS_TERM: _COMMON_TEMPORAL_PROPS
+    | _COMMON_CYCLE_PROPS
+    | frozenset(
+        {
+            "exegesis_id",
+            "canonical",
+            "label",
+            "definition",
+            "definition_source",
+            "semantic_scope",
+            "observed_forms",
+            "configured_variants",
+            "sources",
+            "source_refs",
+            "notes",
+            "dynasty_usage",
+            "disambiguation_basis",
+            "review_status",
+            "needs_manual_review",
+            "reviewer",
+            "reviewed_at",
+            "decision_basis",
+            "exegesis_notes",
+            "document_urn",
+            "document_title",
+            "work_title",
+            "version_lineage_key",
+            "witness_key",
+        }
+    ),
+    NodeLabel.FRAGMENT_CANDIDATE: _COMMON_TEMPORAL_PROPS
+    | _COMMON_CYCLE_PROPS
+    | frozenset(
+        {
+            "candidate_id",
+            "candidate_kind",
+            "fragment_title",
+            "document_title",
+            "document_urn",
+            "source_type",
+            "witness_title",
+            "witness_urn",
+            "work_title",
+            "version_lineage_key",
+            "witness_key",
+            "match_score",
+            "confidence",
+            "review_status",
+            "needs_manual_review",
+            "reviewer",
+            "reviewed_at",
+            "decision_basis",
+            "reconstruction_basis",
+            "source_refs",
+            "asset_key",
+            "text_preview",
+        }
+    ),
+    NodeLabel.TEXTUAL_EVIDENCE_CHAIN: _COMMON_TEMPORAL_PROPS
+    | _COMMON_CYCLE_PROPS
+    | frozenset(
+        {
+            "claim_id",
+            "claim_text",
+            "claim_type",
+            "confidence",
+            "evidence_grade",
+            "evidence_ids",
+            "source_entity",
+            "target_entity",
+            "relation_type",
+            "support_count",
+            "review_status",
+            "needs_manual_review",
+            "reviewer",
+            "reviewed_at",
+            "decision_basis",
+            "work_title",
+            "document_title",
+            "version_lineage_key",
+            "witness_key",
+        }
+    ),
+    NodeLabel.FORMULA: frozenset(
+        {
+            "name",
+            "type",
+            "confidence",
+            "alternative_names",
+            "description",
+            "entity_metadata_json",
+        }
+    ),
+    NodeLabel.HERB: frozenset(
+        {
+            "name",
+            "type",
+            "confidence",
+            "alternative_names",
+            "description",
+            "entity_metadata_json",
+            "formula_canonical",
+            "source_formula",
+            "source_exegesis_id",
+            "formula_role",
+        }
+    ),
+    NodeLabel.SYNDROME: frozenset(
+        {
+            "name",
+            "type",
+            "confidence",
+            "alternative_names",
+            "description",
+            "entity_metadata_json",
+        }
+    ),
+    NodeLabel.SYMPTOM: frozenset(
+        {
+            "name",
+            "type",
+            "confidence",
+            "alternative_names",
+            "description",
+            "entity_metadata_json",
+            "symptom_category",
+            "manifestation_source",
+            "syndrome_canonical",
+            "source_syndrome",
+            "source_exegesis_id",
+        }
+    ),
+    NodeLabel.EFFICACY: frozenset(
+        {
+            "name",
+            "type",
+            "confidence",
+            "alternative_names",
+            "description",
+            "entity_metadata_json",
+            "herb_canonical",
+            "source_herb",
+            "source_exegesis_id",
+        }
+    ),
+    NodeLabel.TARGET: frozenset(
+        {
+            "name",
+            "type",
+            "confidence",
+            "description",
+        }
+    ),
+    NodeLabel.PATHWAY: frozenset(
+        {
+            "name",
+            "type",
+            "confidence",
+            "description",
+        }
+    ),
+    NodeLabel.PROPERTY: frozenset(
+        {
+            "name",
+            "type",
+            "confidence",
+            "description",
+            "entity_metadata_json",
+            "source_exegesis_id",
+            "syndrome_canonical",
+            "source_syndrome",
+        }
+    ),
+    NodeLabel.TASTE: frozenset(
+        {
+            "name",
+            "type",
+            "confidence",
+            "description",
+            "entity_metadata_json",
+        }
+    ),
+    NodeLabel.MERIDIAN: frozenset(
+        {
+            "name",
+            "type",
+            "confidence",
+            "description",
+            "entity_metadata_json",
+        }
+    ),
+    NodeLabel.ENTITY: frozenset(
+        {
+            "name",
+            "entity_type",
+            "confidence",
+            "position",
+            "length",
+            "alternative_names",
+            "description",
+            "cycle_id",
+            "phase_execution_id",
+            "document_id",
+            "document_urn",
+            "document_title",
+            "created_at",
+            "updated_at",
+        }
+    ),
+    NodeLabel.GRAPH_SCHEMA_META: frozenset(
+        {
+            "schema_version",
+            "bootstrapped_at",
+            "updated_at",
+            "node_label_count",
+            "rel_type_count",
+        }
+    ),
+    NodeLabel.RHYME_WITNESS: _COMMON_TEMPORAL_PROPS
+    | _COMMON_CYCLE_PROPS
+    | frozenset(
+        {
+            "rhyme_id",
+            "canonical",
+            "label",
+            "fanqie",
+            "middle_chinese",
+            "old_chinese",
+            "rhyme_group",
+            "tone",
+            "initial",
+            "final",
+            "source_refs",
+            "witness_refs",
+            "notes",
+            "exegesis_id",
+            "work_title",
+            "document_title",
+            "version_lineage_key",
+            "witness_key",
+            "review_status",
+            "needs_manual_review",
+            "reviewer",
+            "reviewed_at",
+            "decision_basis",
+        }
+    ),
+    NodeLabel.SCHOOL: _COMMON_TEMPORAL_PROPS
+    | frozenset(
+        {
+            "school_id",
+            "name",
+            "alternative_names",
+            "description",
+            "founding_dynasty",
+            "core_doctrine",
+            "representative_figures",
+            "representative_works",
+            "lineage_summary",
+            "source_refs",
+            "review_status",
+            "needs_manual_review",
+            "reviewer",
+            "reviewed_at",
+            "decision_basis",
+        }
+    ),
 }
 
-_COMMON_REL_PROPS: FrozenSet[str] = frozenset({
-    "cycle_id", "phase",
-})
+_COMMON_REL_PROPS: FrozenSet[str] = frozenset(
+    {
+        "cycle_id",
+        "phase",
+    }
+)
 
 _ALLOWED_REL_PROPERTIES: Dict[RelType, FrozenSet[str]] = {
-    RelType.EXPLAINS_HERB: _COMMON_REL_PROPS | frozenset({
-        "herb_canonical", "source_herb", "source_exegesis_id", "semantic_scope", "provenance_kind",
-    }),
-    RelType.EXPLAINS_FORMULA: _COMMON_REL_PROPS | frozenset({
-        "formula_canonical", "source_formula", "source_exegesis_id", "semantic_scope", "provenance_kind",
-    }),
-    RelType.RHYMES_WITH: _COMMON_REL_PROPS | frozenset({
-        "rhyme_group", "phonetic_basis", "source_refs", "confidence",
-    }),
-    RelType.BELONGS_TO_SCHOOL: _COMMON_REL_PROPS | frozenset({
-        "role", "period", "source_refs", "confidence",
-    }),
-    RelType.MENTORSHIP: _COMMON_REL_PROPS | frozenset({
-        "mentor_role", "apprentice_role", "period", "source_refs", "confidence",
-    }),
+    RelType.EXPLAINS_HERB: _COMMON_REL_PROPS
+    | frozenset(
+        {
+            "herb_canonical",
+            "source_herb",
+            "source_exegesis_id",
+            "semantic_scope",
+            "provenance_kind",
+        }
+    ),
+    RelType.EXPLAINS_FORMULA: _COMMON_REL_PROPS
+    | frozenset(
+        {
+            "formula_canonical",
+            "source_formula",
+            "source_exegesis_id",
+            "semantic_scope",
+            "provenance_kind",
+        }
+    ),
+    RelType.RHYMES_WITH: _COMMON_REL_PROPS
+    | frozenset(
+        {
+            "rhyme_group",
+            "phonetic_basis",
+            "source_refs",
+            "confidence",
+        }
+    ),
+    RelType.BELONGS_TO_SCHOOL: _COMMON_REL_PROPS
+    | frozenset(
+        {
+            "role",
+            "period",
+            "source_refs",
+            "confidence",
+        }
+    ),
+    RelType.MENTORSHIP: _COMMON_REL_PROPS
+    | frozenset(
+        {
+            "mentor_role",
+            "apprentice_role",
+            "period",
+            "source_refs",
+            "confidence",
+        }
+    ),
+    RelType.COMPARES_WITNESS: _COMMON_REL_PROPS
+    | frozenset(
+        {
+            "role",
+            "diff_id",
+            "version_lineage_key",
+        }
+    ),
+    RelType.HAS_VARIANT_READING: _COMMON_REL_PROPS
+    | frozenset(
+        {
+            "diff_id",
+            "reading_id",
+            "impact_level",
+        }
+    ),
 }
 
 
@@ -381,6 +778,7 @@ def get_schema_summary() -> Dict[str, Any]:
 def build_schema_meta_node_properties() -> Dict[str, Any]:
     """构造 GraphSchemaMeta 节点属性。"""
     from datetime import datetime
+
     return {
         "schema_version": GRAPH_SCHEMA_VERSION,
         "bootstrapped_at": datetime.now().isoformat(),
@@ -436,7 +834,12 @@ class GraphSchemaDriftError(RuntimeError):
 def is_strict_mode_enabled(env_value: Optional[str] = None) -> bool:
     """Return True iff ``TCM__GRAPH_SCHEMA_STRICT`` env var (or *env_value*) is truthy."""
     import os
-    raw = env_value if env_value is not None else os.environ.get(GRAPH_SCHEMA_STRICT_ENV, "")
+
+    raw = (
+        env_value
+        if env_value is not None
+        else os.environ.get(GRAPH_SCHEMA_STRICT_ENV, "")
+    )
     return str(raw or "").strip().lower() in {"1", "true", "yes", "on", "strict"}
 
 

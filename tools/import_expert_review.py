@@ -30,6 +30,10 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from src.infrastructure.persistence import DatabaseManager
 from src.infrastructure.research_session_repo import ResearchSessionRepository
+from src.learning.expert_review_consensus import (
+    normalize_dispute_flag,
+    normalize_review_confidence,
+)
 
 logger = logging.getLogger("tools.import_expert_review")
 
@@ -85,20 +89,34 @@ def build_feedback_record(
     target_phase: str = "hypothesis",
 ) -> Dict[str, Any]:
     grade = str(record["expert_grade"]).strip().upper()
-    severity = GRADE_TO_SEVERITY[grade]
     overall_score = GRADE_TO_SCORE[grade]
     expert_notes = str(record.get("expert_notes") or "").strip()
     expert_review_id = str(record.get("expert_review_id") or "").strip()
 
     hypothesis_id = str(record.get("hypothesis_id") or "").strip()
+    claim_id = str(record.get("claim_id") or hypothesis_id).strip()
     statement = str(record.get("hypothesis_statement") or "").strip()
-    methodology_tag = str(record.get("methodology_tag") or "").strip().lower() or "evidence_based"
+    methodology_tag = (
+        str(record.get("methodology_tag") or "").strip().lower() or "evidence_based"
+    )
     model_grade = str(record.get("evidence_grade") or "").strip().upper()
+    reviewer_id = str(record.get("reviewer_id") or "").strip()
+    review_round = _normalize_review_round(record.get("review_round"))
+    blind_group = str(record.get("blind_group") or "").strip()
+    confidence = normalize_review_confidence(record.get("confidence"))
+    dispute_flag = normalize_dispute_flag(record.get("dispute_flag"))
+    consensus_group_id = str(
+        record.get("consensus_group_id") or ""
+    ).strip() or _build_default_consensus_group_id(record, claim_id, expert_review_id)
+    expert_review_identity = _build_expert_review_identity(record)
 
     # 专家偏置规则：当 expert_grade 比 model evidence_grade 严格更低时，记一条违规以拉响 bias
     grade_order = {"A": 4, "B": 3, "C": 2, "D": 1}
     violations: List[Dict[str, Any]] = []
-    downgraded = bool(model_grade) and grade_order.get(grade, 2) < grade_order.get(model_grade, 2)
+    downgraded = bool(model_grade) and grade_order.get(grade, 2) < grade_order.get(
+        model_grade, 2
+    )
+    severity = "high" if dispute_flag else GRADE_TO_SEVERITY[grade]
     if downgraded:
         violations.append(
             {
@@ -115,6 +133,14 @@ def build_feedback_record(
                 "expert_review_id": expert_review_id,
             }
         )
+    if dispute_flag:
+        violations.append(
+            {
+                "rule_id": "expert_dispute:flagged",
+                "severity": "high",
+                "expert_review_id": expert_review_id,
+            }
+        )
 
     issue_fields: List[str] = ["hypothesis"]
     if methodology_tag:
@@ -127,9 +153,11 @@ def build_feedback_record(
         "feedback_status": "tracked",
         "overall_score": overall_score,
         "grade_level": grade,
-        "weakness_count": 1 if grade in {"C", "D"} else 0,
+        "weakness_count": 1 if grade in {"C", "D"} or dispute_flag else 0,
         "strength_count": 1 if grade in {"A", "B"} else 0,
-        "weak_phase_names": [target_phase] if grade in {"C", "D"} else [],
+        "weak_phase_names": [target_phase]
+        if grade in {"C", "D"} or dispute_flag
+        else [],
         "recorded_phase_names": [target_phase],
         "details": {
             "expert_grade": grade,
@@ -137,8 +165,15 @@ def build_feedback_record(
             "model_evidence_grade": model_grade or None,
             "downgraded_by_expert": downgraded,
             "hypothesis_id": hypothesis_id,
+            "claim_id": claim_id or None,
             "hypothesis_statement": statement,
             "methodology_tag": methodology_tag,
+            "reviewer_id": reviewer_id or None,
+            "review_round": review_round,
+            "blind_group": blind_group or None,
+            "confidence": confidence,
+            "dispute_flag": dispute_flag,
+            "consensus_group_id": consensus_group_id,
             "four_pass_collation": record.get("four_pass_collation") or {},
             "evidence_bundle": list(record.get("evidence_bundle") or []),
         },
@@ -146,6 +181,15 @@ def build_feedback_record(
             "origin": "expert_review",
             "weight": float(weight),
             "expert_review_id": expert_review_id,
+            "expert_review_identity": expert_review_identity,
+            "reviewer_id": reviewer_id or None,
+            "review_round": review_round,
+            "blind_group": blind_group or None,
+            "confidence": confidence,
+            "dispute_flag": dispute_flag,
+            "consensus_group_id": consensus_group_id,
+            "claim_id": claim_id or None,
+            "hypothesis_id": hypothesis_id or None,
             "severity": severity,
             "source_phase": "hypothesis",
             "issue_fields": issue_fields,
@@ -161,7 +205,9 @@ def build_feedback_record(
 # ---------------------------------------------------------------------------
 
 
-def _existing_expert_review_ids(repo: ResearchSessionRepository, cycle_id: str) -> set[str]:
+def _existing_expert_review_ids(
+    repo: ResearchSessionRepository, cycle_id: str
+) -> set[str]:
     try:
         page = repo.list_learning_feedback(
             cycle_id=cycle_id,
@@ -174,9 +220,11 @@ def _existing_expert_review_ids(repo: ResearchSessionRepository, cycle_id: str) 
     seen: set[str] = set()
     for item in (page or {}).get("items", []) or []:
         meta = item.get("metadata") if isinstance(item.get("metadata"), Mapping) else {}
-        rid = str(meta.get("expert_review_id") or "").strip()
-        if rid:
-            seen.add(rid)
+        identity = str(
+            meta.get("expert_review_identity") or meta.get("expert_review_id") or ""
+        ).strip()
+        if identity:
+            seen.add(identity)
     return seen
 
 
@@ -229,8 +277,8 @@ def _import_records_with_repo(
         cycle_id = str(record["cycle_id"]).strip()
         if cycle_id not in seen_per_cycle:
             seen_per_cycle[cycle_id] = _existing_expert_review_ids(repo, cycle_id)
-        review_id = str(record.get("expert_review_id") or "").strip()
-        if review_id and review_id in seen_per_cycle[cycle_id]:
+        review_identity = _build_expert_review_identity(record)
+        if review_identity and review_identity in seen_per_cycle[cycle_id]:
             duplicate += 1
             continue
 
@@ -250,8 +298,8 @@ def _import_records_with_repo(
             continue
         inserted += 1
         cycles_touched.add(cycle_id)
-        if review_id:
-            seen_per_cycle[cycle_id].add(review_id)
+        if review_identity:
+            seen_per_cycle[cycle_id].add(review_identity)
 
     return {
         "input": str(input_path),
@@ -263,8 +311,46 @@ def _import_records_with_repo(
     }
 
 
+def _normalize_review_round(value: Any) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_default_consensus_group_id(
+    record: Mapping[str, Any],
+    claim_id: str,
+    expert_review_id: str,
+) -> str:
+    cycle_id = str(record.get("cycle_id") or "").strip()
+    target_id = claim_id or expert_review_id or "review"
+    return f"{cycle_id}:{target_id}" if cycle_id else target_id
+
+
+def _build_expert_review_identity(record: Mapping[str, Any]) -> str:
+    cycle_id = str(record.get("cycle_id") or "").strip()
+    expert_review_id = str(record.get("expert_review_id") or "").strip()
+    hypothesis_id = str(record.get("hypothesis_id") or "").strip()
+    reviewer_id = str(record.get("reviewer_id") or "").strip()
+    review_round = _normalize_review_round(record.get("review_round"))
+    blind_group = str(record.get("blind_group") or "").strip()
+    base = expert_review_id or f"{cycle_id}:{hypothesis_id}"
+    if reviewer_id or review_round is not None or blind_group:
+        return (
+            f"{base}|reviewer={reviewer_id or 'unknown'}"
+            f"|round={review_round if review_round is not None else 'unknown'}"
+            f"|blind={blind_group or 'unknown'}"
+        )
+    return base
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--connection-string", required=True, help="SQLAlchemy URL")
     parser.add_argument("--input", required=True, help="带 expert_grade 的 JSONL 文件")
     parser.add_argument(
@@ -284,7 +370,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = _build_parser().parse_args(argv)
-    logging.basicConfig(level=args.log_level, format="%(asctime)s %(levelname)s %(name)s :: %(message)s")
+    logging.basicConfig(
+        level=args.log_level, format="%(asctime)s %(levelname)s %(name)s :: %(message)s"
+    )
     summary = import_records(
         connection_string=args.connection_string,
         input_path=Path(args.input),

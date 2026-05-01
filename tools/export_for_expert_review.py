@@ -130,9 +130,9 @@ def extract_four_pass_collation(snapshot: Mapping[str, Any]) -> Dict[str, Any]:
 def build_review_records(snapshot: Mapping[str, Any]) -> List[Dict[str, Any]]:
     """对单个 cycle 的 snapshot，输出可批注的 review record 列表。"""
     cycle_id = str(snapshot.get("cycle_id") or "").strip()
-    research_topic = (
-        str(snapshot.get("research_objective") or snapshot.get("cycle_name") or "").strip()
-    )
+    research_topic = str(
+        snapshot.get("research_objective") or snapshot.get("cycle_name") or ""
+    ).strip()
     collation = extract_four_pass_collation(snapshot)
     hypotheses = extract_hypotheses(snapshot)
 
@@ -170,15 +170,31 @@ def _make_record(
     hypothesis: Mapping[str, Any],
     four_pass: Mapping[str, Any],
 ) -> Dict[str, Any]:
-    hypothesis_id = str(
-        hypothesis.get("id") or hypothesis.get("hypothesis_id") or hypothesis.get("statement", "")[:32]
-    ) or "hyp"
-    statement = str(hypothesis.get("statement") or hypothesis.get("description") or "").strip()
-    methodology_tag = str(
-        hypothesis.get("methodology_tag") or hypothesis.get("methodology") or "evidence_based"
-    ).strip().lower() or "evidence_based"
+    hypothesis_id = (
+        str(
+            hypothesis.get("id")
+            or hypothesis.get("hypothesis_id")
+            or hypothesis.get("statement", "")[:32]
+        )
+        or "hyp"
+    )
+    statement = str(
+        hypothesis.get("statement") or hypothesis.get("description") or ""
+    ).strip()
+    methodology_tag = (
+        str(
+            hypothesis.get("methodology_tag")
+            or hypothesis.get("methodology")
+            or "evidence_based"
+        )
+        .strip()
+        .lower()
+        or "evidence_based"
+    )
     evidence_grade = str(hypothesis.get("evidence_grade") or "C").strip().upper() or "C"
-    evidence_bundle = list(hypothesis.get("evidence_bundle") or hypothesis.get("evidence") or [])
+    evidence_bundle = list(
+        hypothesis.get("evidence_bundle") or hypothesis.get("evidence") or []
+    )
 
     review_id_seed = f"{cycle_id}|{hypothesis_id}"
     expert_review_id = (
@@ -234,11 +250,17 @@ def _summarize_collation(four_pass: Mapping[str, Any]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_cycle_ids(repo: ResearchSessionRepository, args: argparse.Namespace) -> List[str]:
+def _resolve_cycle_ids(
+    repo: ResearchSessionRepository, args: argparse.Namespace
+) -> List[str]:
     if args.cycle_ids:
         return [c.strip() for c in args.cycle_ids.split(",") if c.strip()]
     # 全表 fallback：取最近 limit 条
-    listing = repo.list_sessions(limit=int(args.limit or 50)) if hasattr(repo, "list_sessions") else None
+    listing = (
+        repo.list_sessions(limit=int(args.limit or 50))
+        if hasattr(repo, "list_sessions")
+        else None
+    )
     if not isinstance(listing, Mapping):
         return []
     cycle_ids: List[str] = []
@@ -292,14 +314,18 @@ def export(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--connection-string", required=True, help="SQLAlchemy URL")
     parser.add_argument(
         "--cycle-ids",
         default="",
         help="逗号分隔的 cycle_id 列表；省略时取 list_sessions() 最近 --limit 条",
     )
-    parser.add_argument("--limit", type=int, default=50, help="未指定 cycle_ids 时的回填数量上限")
+    parser.add_argument(
+        "--limit", type=int, default=50, help="未指定 cycle_ids 时的回填数量上限"
+    )
     parser.add_argument("--output", required=True, help="输出 JSONL 文件路径")
     parser.add_argument("--log-level", default="INFO")
     return parser
@@ -307,7 +333,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = _build_parser().parse_args(argv)
-    logging.basicConfig(level=args.log_level, format="%(asctime)s %(levelname)s %(name)s :: %(message)s")
+    logging.basicConfig(
+        level=args.log_level, format="%(asctime)s %(levelname)s %(name)s :: %(message)s"
+    )
     db = DatabaseManager(args.connection_string)
     db.init_db()
     repo = ResearchSessionRepository(db)

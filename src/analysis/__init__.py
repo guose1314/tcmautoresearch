@@ -7,7 +7,8 @@
 * :class:`DocumentPreprocessor`  — 文档预处理（jieba + opencc）
 * :class:`PhilologyService`      — 文献学服务（术语标准化/版本对勘）
 * :class:`AdvancedEntityExtractor` — TCM 实体抽取
-* :class:`SemanticGraphBuilder`  — 语义图构建
+* :class:`SemanticGraphService`  — 语义图主建图 facade
+* :class:`SemanticGraphBuilder`  — 语义图兼容实现
 * :class:`ReasoningEngine`       — 推理分析
 * :class:`DataMiningService`     — 关联规则/聚类/频繁项集挖掘
 * :class:`MultimodalFusionEngine` — 多模态融合
@@ -43,7 +44,7 @@ if TYPE_CHECKING:
     from src.analysis.preprocessor import DocumentPreprocessor
     from src.analysis.reasoning_engine import ReasoningEngine
     from src.analysis.research_scoring import ResearchScoringPanel
-    from src.analysis.semantic_graph import SemanticGraphBuilder
+    from src.analysis.semantic_graph import SemanticGraphBuilder, SemanticGraphService
     from src.analysis.summary_analysis import SummaryAnalysisEngine
     from src.analysis.supramolecular import SupramolecularPhysicochemicalAnalyzer
     from src.research.gap_analyzer import GapAnalysisRequest, GapAnalyzer
@@ -54,28 +55,56 @@ if TYPE_CHECKING:
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "DocumentPreprocessor": ("src.analysis.preprocessor", "DocumentPreprocessor"),
     "PhilologyService": ("src.analysis.philology_service", "PhilologyService"),
-    "AdvancedEntityExtractor": ("src.analysis.entity_extractor", "AdvancedEntityExtractor"),
+    "AdvancedEntityExtractor": (
+        "src.analysis.entity_extractor",
+        "AdvancedEntityExtractor",
+    ),
+    "SemanticGraphService": ("src.analysis.semantic_graph", "SemanticGraphService"),
     "SemanticGraphBuilder": ("src.analysis.semantic_graph", "SemanticGraphBuilder"),
     "ReasoningEngine": ("src.analysis.reasoning_engine", "ReasoningEngine"),
     "DataMiningService": ("src.analysis.data_mining", "DataMiningService"),
-    "MultimodalFusionEngine": ("src.analysis.multimodal_fusion", "MultimodalFusionEngine"),
+    "MultimodalFusionEngine": (
+        "src.analysis.multimodal_fusion",
+        "MultimodalFusionEngine",
+    ),
     "FusionStrategy": ("src.analysis.multimodal_fusion", "FusionStrategy"),
-    "FormulaStructureAnalyzer": ("src.analysis.formula_structure", "FormulaStructureAnalyzer"),
+    "FormulaStructureAnalyzer": (
+        "src.analysis.formula_structure",
+        "FormulaStructureAnalyzer",
+    ),
     "FormulaComparator": ("src.analysis.formula_comparator", "FormulaComparator"),
     "HerbTemperature": ("src.analysis.herb_properties", "HerbTemperature"),
     "MeridianType": ("src.analysis.herb_properties", "MeridianType"),
     "HerbPropertyDatabase": ("src.analysis.herb_properties", "HerbPropertyDatabase"),
     "PharmacologicalData": ("src.analysis.pharmacology", "PharmacologicalData"),
-    "ModernPharmacologyDatabase": ("src.analysis.pharmacology", "ModernPharmacologyDatabase"),
-    "NetworkPharmacologySystemBiologyAnalyzer": ("src.analysis.network_pharmacology", "NetworkPharmacologySystemBiologyAnalyzer"),
-    "SupramolecularPhysicochemicalAnalyzer": ("src.analysis.supramolecular", "SupramolecularPhysicochemicalAnalyzer"),
-    "ClassicalLiteratureArchaeologyAnalyzer": ("src.analysis.knowledge_archaeology", "ClassicalLiteratureArchaeologyAnalyzer"),
-    "ComplexityNonlinearDynamicsAnalyzer": ("src.analysis.complexity_dynamics", "ComplexityNonlinearDynamicsAnalyzer"),
+    "ModernPharmacologyDatabase": (
+        "src.analysis.pharmacology",
+        "ModernPharmacologyDatabase",
+    ),
+    "NetworkPharmacologySystemBiologyAnalyzer": (
+        "src.analysis.network_pharmacology",
+        "NetworkPharmacologySystemBiologyAnalyzer",
+    ),
+    "SupramolecularPhysicochemicalAnalyzer": (
+        "src.analysis.supramolecular",
+        "SupramolecularPhysicochemicalAnalyzer",
+    ),
+    "ClassicalLiteratureArchaeologyAnalyzer": (
+        "src.analysis.knowledge_archaeology",
+        "ClassicalLiteratureArchaeologyAnalyzer",
+    ),
+    "ComplexityNonlinearDynamicsAnalyzer": (
+        "src.analysis.complexity_dynamics",
+        "ComplexityNonlinearDynamicsAnalyzer",
+    ),
     "ResearchScoringPanel": ("src.analysis.research_scoring", "ResearchScoringPanel"),
     "SummaryAnalysisEngine": ("src.analysis.summary_analysis", "SummaryAnalysisEngine"),
     "GapAnalyzer": ("src.research.gap_analyzer", "GapAnalyzer"),
     "GapAnalysisRequest": ("src.research.gap_analyzer", "GapAnalysisRequest"),
-    "IntegratedResearchAnalyzer": ("src.semantic_modeling.methods.integrated_analyzer", "IntegratedResearchAnalyzer"),
+    "IntegratedResearchAnalyzer": (
+        "src.semantic_modeling.methods.integrated_analyzer",
+        "IntegratedResearchAnalyzer",
+    ),
 }
 
 __all__ = list(_LAZY_IMPORTS.keys())

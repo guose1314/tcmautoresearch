@@ -5,7 +5,6 @@ from src.research.research_pipeline import ResearchPhase, ResearchPipeline
 
 
 class TestResearchPipelineObserve(unittest.TestCase):
-
     @patch("src.research.research_pipeline.OutputGenerator.cleanup")
     @patch("src.research.research_pipeline.OutputGenerator.execute")
     @patch("src.research.research_pipeline.OutputGenerator.initialize")
@@ -60,15 +59,24 @@ class TestResearchPipelineObserve(unittest.TestCase):
         mock_sem_execute.return_value = {
             "semantic_graph": {
                 "nodes": [
-                    {"id": "formula:补中益气汤", "data": {"name": "补中益气汤", "type": "formula"}},
+                    {
+                        "id": "formula:补中益气汤",
+                        "data": {"name": "补中益气汤", "type": "formula"},
+                    },
                     {"id": "target:IL6", "data": {"name": "IL6", "type": "target"}},
-                    {"id": "pathway:JAK-STAT", "data": {"name": "JAK-STAT", "type": "pathway"}},
+                    {
+                        "id": "pathway:JAK-STAT",
+                        "data": {"name": "JAK-STAT", "type": "pathway"},
+                    },
                 ],
                 "edges": [
                     {
                         "source": "target:IL6",
                         "target": "pathway:JAK-STAT",
-                        "attributes": {"relationship_type": "participates_in", "confidence": 0.8},
+                        "attributes": {
+                            "relationship_type": "participates_in",
+                            "confidence": 0.8,
+                        },
                     }
                 ],
             },
@@ -110,7 +118,13 @@ class TestResearchPipelineObserve(unittest.TestCase):
             {
                 "sources": ["local"],
                 "stats": {"total_documents": 1},
-                "documents": [{"text": "补中益气汤调控 IL6 并影响 JAK-STAT", "urn": "doc:1", "title": "doc1"}],
+                "documents": [
+                    {
+                        "text": "补中益气汤调控 IL6 并影响 JAK-STAT",
+                        "urn": "doc:1",
+                        "title": "doc1",
+                    }
+                ],
             },
             {
                 "max_texts": 1,
@@ -119,10 +133,18 @@ class TestResearchPipelineObserve(unittest.TestCase):
         )
 
         aggregate_relationships = result["aggregate"]["semantic_relationships"]
-        relation_keys = {(item["source"], item["type"], item["target"]) for item in aggregate_relationships}
+        relation_keys = {
+            (item["source"], item["type"], item["target"])
+            for item in aggregate_relationships
+        }
         self.assertIn(("补中益气汤", "associated_target", "IL6"), relation_keys)
         self.assertIn(("IL6", "participates_in", "JAK-STAT"), relation_keys)
-        self.assertTrue(any(item["metadata"]["source"] == "observe_reasoning_engine" for item in aggregate_relationships))
+        self.assertTrue(
+            any(
+                item["metadata"]["source"] == "observe_reasoning_engine"
+                for item in aggregate_relationships
+            )
+        )
 
     def test_relationship_conflict_resolution_prefers_priority_and_confidence(self):
         pipeline = ResearchPipeline({})
@@ -136,7 +158,10 @@ class TestResearchPipelineObserve(unittest.TestCase):
                     "type": "associated_target",
                     "source_type": "herb",
                     "target_type": "target",
-                    "metadata": {"confidence": 0.91, "source": "observe_semantic_graph"},
+                    "metadata": {
+                        "confidence": 0.91,
+                        "source": "observe_semantic_graph",
+                    },
                 }
             ],
             [
@@ -146,7 +171,10 @@ class TestResearchPipelineObserve(unittest.TestCase):
                     "type": "associated_target",
                     "source_type": "herb",
                     "target_type": "target",
-                    "metadata": {"confidence": 0.74, "source": "observe_reasoning_engine"},
+                    "metadata": {
+                        "confidence": 0.74,
+                        "source": "observe_reasoning_engine",
+                    },
                 }
             ],
         )
@@ -156,9 +184,13 @@ class TestResearchPipelineObserve(unittest.TestCase):
         self.assertEqual(relation["metadata"]["source"], "observe_reasoning_engine")
         self.assertEqual(relation["metadata"]["confidence"], 0.91)
         self.assertIn("observe_semantic_graph", relation["metadata"]["merged_sources"])
-        self.assertIn("observe_reasoning_engine", relation["metadata"]["merged_sources"])
+        self.assertIn(
+            "observe_reasoning_engine", relation["metadata"]["merged_sources"]
+        )
 
-    def test_relationship_conflict_resolution_can_prefer_confidence_by_relation_type(self):
+    def test_relationship_conflict_resolution_can_prefer_confidence_by_relation_type(
+        self,
+    ):
         pipeline = ResearchPipeline(
             {
                 "relationship_conflict_resolution": {
@@ -178,7 +210,10 @@ class TestResearchPipelineObserve(unittest.TestCase):
                     "type": "associated_target",
                     "source_type": "herb",
                     "target_type": "target",
-                    "metadata": {"confidence": 0.91, "source": "observe_semantic_graph"},
+                    "metadata": {
+                        "confidence": 0.91,
+                        "source": "observe_semantic_graph",
+                    },
                 }
             ],
             [
@@ -188,7 +223,10 @@ class TestResearchPipelineObserve(unittest.TestCase):
                     "type": "associated_target",
                     "source_type": "herb",
                     "target_type": "target",
-                    "metadata": {"confidence": 0.74, "source": "observe_reasoning_engine"},
+                    "metadata": {
+                        "confidence": 0.74,
+                        "source": "observe_reasoning_engine",
+                    },
                 }
             ],
         )
@@ -205,10 +243,7 @@ class TestResearchPipelineObserve(unittest.TestCase):
     @patch("src.research.research_pipeline.CTextCorpusCollector.execute")
     @patch("src.research.research_pipeline.CTextCorpusCollector.initialize")
     def test_observe_phase_auto_collects_ctext_whitelist(
-        self,
-        mock_initialize,
-        mock_execute,
-        mock_cleanup
+        self, mock_initialize, mock_execute, mock_cleanup
     ):
         mock_initialize.return_value = True
         mock_cleanup.return_value = True
@@ -219,10 +254,10 @@ class TestResearchPipelineObserve(unittest.TestCase):
                 "document_count": 2,
                 "chapter_count": 10,
                 "line_count": 100,
-                "char_count": 2000
+                "char_count": 2000,
             },
             "errors": [],
-            "output_file": "data/ctext/ctext_corpus_mock.json"
+            "output_file": "data/ctext/ctext_corpus_mock.json",
         }
 
         pipeline = ResearchPipeline(
@@ -236,8 +271,8 @@ class TestResearchPipelineObserve(unittest.TestCase):
                     "whitelist": {
                         "enabled": True,
                         "path": "data/ctext_whitelist.json",
-                        "default_groups": ["four_books", "tcm_classics"]
-                    }
+                        "default_groups": ["four_books", "tcm_classics"],
+                    },
                 }
             }
         )
@@ -247,16 +282,20 @@ class TestResearchPipelineObserve(unittest.TestCase):
             description="测试观察阶段自动采集",
             objective="验证白名单拉取接入 observe",
             scope="语料采集",
-            researchers=["tester"]
+            researchers=["tester"],
         )
         self.assertTrue(pipeline.start_research_cycle(cycle.cycle_id))
 
-        result = pipeline.execute_research_phase(cycle.cycle_id, ResearchPhase.OBSERVE, {})
+        result = pipeline.execute_research_phase(
+            cycle.cycle_id, ResearchPhase.OBSERVE, {}
+        )
 
         self.assertEqual(result["phase"], "observe")
         self.assertTrue(result["metadata"]["auto_collected_ctext"])
         self.assertEqual(result["metadata"]["data_source"], "ctext_whitelist")
-        self.assertEqual(result["metadata"]["ctext_groups"], ["four_books", "tcm_classics"])
+        self.assertEqual(
+            result["metadata"]["ctext_groups"], ["four_books", "tcm_classics"]
+        )
         self.assertEqual(result["corpus_collection"]["stats"]["document_count"], 2)
         self.assertIn("标准语料白名单", result["findings"][0])
 
@@ -264,7 +303,9 @@ class TestResearchPipelineObserve(unittest.TestCase):
         execute_context = mock_execute.call_args.args[0]
         self.assertTrue(execute_context["use_whitelist"])
         self.assertEqual(execute_context["whitelist_path"], "data/ctext_whitelist.json")
-        self.assertEqual(execute_context["whitelist_groups"], ["four_books", "tcm_classics"])
+        self.assertEqual(
+            execute_context["whitelist_groups"], ["four_books", "tcm_classics"]
+        )
 
     @patch("src.research.research_pipeline.OutputGenerator.cleanup")
     @patch("src.research.research_pipeline.OutputGenerator.execute")
@@ -283,11 +324,21 @@ class TestResearchPipelineObserve(unittest.TestCase):
     @patch("src.research.research_pipeline.DocumentPreprocessor.initialize")
     def test_observe_ingestion_includes_output_generation(
         self,
-        mock_pre_init, mock_pre_exec, mock_pre_clean,
-        mock_ex_init, mock_ex_exec, mock_ex_clean,
-        mock_sem_init, mock_sem_exec, mock_sem_clean,
-        mock_reason_init, mock_reason_exec, mock_reason_clean,
-        mock_out_init, mock_out_exec, mock_out_clean,
+        mock_pre_init,
+        mock_pre_exec,
+        mock_pre_clean,
+        mock_ex_init,
+        mock_ex_exec,
+        mock_ex_clean,
+        mock_sem_init,
+        mock_sem_exec,
+        mock_sem_clean,
+        mock_reason_init,
+        mock_reason_exec,
+        mock_reason_clean,
+        mock_out_init,
+        mock_out_exec,
+        mock_out_clean,
     ):
         """OutputGenerator is the 5th module — verify it runs and its output appears in results."""
         mock_pre_init.return_value = True
@@ -306,7 +357,11 @@ class TestResearchPipelineObserve(unittest.TestCase):
         mock_sem_clean.return_value = True
         mock_sem_exec.return_value = {
             "semantic_graph": {"nodes": [], "edges": []},
-            "graph_statistics": {"nodes_count": 1, "edges_count": 0, "relationships_by_type": {}},
+            "graph_statistics": {
+                "nodes_count": 1,
+                "edges_count": 0,
+                "relationships_by_type": {},
+            },
         }
 
         mock_reason_init.return_value = True
@@ -329,7 +384,9 @@ class TestResearchPipelineObserve(unittest.TestCase):
             {
                 "sources": ["local"],
                 "stats": {"total_documents": 1},
-                "documents": [{"text": "黄芪补中益气", "urn": "doc:test", "title": "test"}],
+                "documents": [
+                    {"text": "黄芪补中益气", "urn": "doc:test", "title": "test"}
+                ],
             },
             {"max_texts": 1, "max_chars_per_text": 500},
         )
@@ -337,7 +394,9 @@ class TestResearchPipelineObserve(unittest.TestCase):
         self.assertEqual(result["processed_document_count"], 1)
         doc = result["documents"][0]
         self.assertIsNotNone(doc.get("output_generation"))
-        self.assertEqual(doc["output_generation"]["quality_metrics"]["entities_extracted"], 1)
+        self.assertEqual(
+            doc["output_generation"]["quality_metrics"]["entities_extracted"], 1
+        )
 
         agg = result["aggregate"]
         self.assertEqual(len(agg["output_quality_metrics"]), 1)
@@ -363,11 +422,19 @@ class TestResearchPipelineObserve(unittest.TestCase):
     @patch("src.research.research_pipeline.DocumentPreprocessor.initialize")
     def test_observe_ingestion_degrades_when_output_generator_init_fails(
         self,
-        mock_pre_init, mock_pre_exec, mock_pre_clean,
-        mock_ex_init, mock_ex_exec, mock_ex_clean,
-        mock_sem_init, mock_sem_exec, mock_sem_clean,
-        mock_reason_init, mock_reason_clean,
-        mock_out_init, mock_out_clean,
+        mock_pre_init,
+        mock_pre_exec,
+        mock_pre_clean,
+        mock_ex_init,
+        mock_ex_exec,
+        mock_ex_clean,
+        mock_sem_init,
+        mock_sem_exec,
+        mock_sem_clean,
+        mock_reason_init,
+        mock_reason_clean,
+        mock_out_init,
+        mock_out_clean,
     ):
         """Pipeline should still succeed if OutputGenerator initialization fails."""
         mock_pre_init.return_value = True
@@ -386,7 +453,11 @@ class TestResearchPipelineObserve(unittest.TestCase):
         mock_sem_clean.return_value = True
         mock_sem_exec.return_value = {
             "semantic_graph": {"nodes": [], "edges": []},
-            "graph_statistics": {"nodes_count": 0, "edges_count": 0, "relationships_by_type": {}},
+            "graph_statistics": {
+                "nodes_count": 0,
+                "edges_count": 0,
+                "relationships_by_type": {},
+            },
         }
 
         mock_reason_init.return_value = True
@@ -428,11 +499,21 @@ class TestResearchPipelineObserve(unittest.TestCase):
     @patch("src.research.research_pipeline.DocumentPreprocessor.initialize")
     def test_observe_ingestion_degrades_when_reasoning_execution_fails(
         self,
-        mock_pre_init, mock_pre_exec, mock_pre_clean,
-        mock_ex_init, mock_ex_exec, mock_ex_clean,
-        mock_sem_init, mock_sem_exec, mock_sem_clean,
-        mock_reason_init, mock_reason_exec, mock_reason_clean,
-        mock_out_init, mock_out_exec, mock_out_clean,
+        mock_pre_init,
+        mock_pre_exec,
+        mock_pre_clean,
+        mock_ex_init,
+        mock_ex_exec,
+        mock_ex_clean,
+        mock_sem_init,
+        mock_sem_exec,
+        mock_sem_clean,
+        mock_reason_init,
+        mock_reason_exec,
+        mock_reason_clean,
+        mock_out_init,
+        mock_out_exec,
+        mock_out_clean,
     ):
         mock_pre_init.return_value = True
         mock_pre_clean.return_value = True
@@ -450,7 +531,11 @@ class TestResearchPipelineObserve(unittest.TestCase):
         mock_sem_clean.return_value = True
         mock_sem_exec.return_value = {
             "semantic_graph": {"nodes": [], "edges": []},
-            "graph_statistics": {"nodes_count": 0, "edges_count": 0, "relationships_by_type": {}},
+            "graph_statistics": {
+                "nodes_count": 0,
+                "edges_count": 0,
+                "relationships_by_type": {},
+            },
         }
 
         mock_reason_init.return_value = True
@@ -471,7 +556,9 @@ class TestResearchPipelineObserve(unittest.TestCase):
             {
                 "sources": ["local"],
                 "stats": {"total_documents": 1},
-                "documents": [{"text": "测试文本", "urn": "doc:reason-fail", "title": "fail"}],
+                "documents": [
+                    {"text": "测试文本", "urn": "doc:reason-fail", "title": "fail"}
+                ],
             },
             {"max_texts": 1, "max_chars_per_text": 500},
         )
@@ -479,7 +566,9 @@ class TestResearchPipelineObserve(unittest.TestCase):
         self.assertEqual(result["processed_document_count"], 1)
         self.assertNotIn("error", result)
         self.assertEqual(result["aggregate"]["reasoning_summary"], {})
-        self.assertEqual(result["aggregate"]["output_quality_metrics"], [{"entities_extracted": 1}])
+        self.assertEqual(
+            result["aggregate"]["output_quality_metrics"], [{"entities_extracted": 1}]
+        )
         self.assertIn("keep going", result["aggregate"]["output_recommendations"])
 
     @patch("src.research.research_pipeline.OutputGenerator.cleanup")
@@ -497,11 +586,19 @@ class TestResearchPipelineObserve(unittest.TestCase):
     @patch("src.research.research_pipeline.DocumentPreprocessor.initialize")
     def test_observe_ingestion_emits_philology_outputs(
         self,
-        mock_pre_init, mock_pre_exec, mock_pre_clean,
-        mock_ex_init, mock_ex_exec, mock_ex_clean,
-        mock_sem_init, mock_sem_exec, mock_sem_clean,
-        mock_reason_init, mock_reason_clean,
-        mock_out_init, mock_out_clean,
+        mock_pre_init,
+        mock_pre_exec,
+        mock_pre_clean,
+        mock_ex_init,
+        mock_ex_exec,
+        mock_ex_clean,
+        mock_sem_init,
+        mock_sem_exec,
+        mock_sem_clean,
+        mock_reason_init,
+        mock_reason_clean,
+        mock_out_init,
+        mock_out_clean,
     ):
         mock_pre_init.return_value = True
         mock_pre_clean.return_value = True
@@ -517,15 +614,27 @@ class TestResearchPipelineObserve(unittest.TestCase):
             "entities": [{"name": "黄芪", "type": "herb", "confidence": 0.95}]
             if "黄芪" in context.get("processed_text", "")
             else [],
-            "statistics": {"by_type": {"herb": 1} if "黄芪" in context.get("processed_text", "") else {}},
-            "confidence_scores": {"average_confidence": 0.95 if "黄芪" in context.get("processed_text", "") else 0.0},
+            "statistics": {
+                "by_type": {"herb": 1}
+                if "黄芪" in context.get("processed_text", "")
+                else {}
+            },
+            "confidence_scores": {
+                "average_confidence": 0.95
+                if "黄芪" in context.get("processed_text", "")
+                else 0.0
+            },
         }
 
         mock_sem_init.return_value = True
         mock_sem_clean.return_value = True
         mock_sem_exec.return_value = {
             "semantic_graph": {"nodes": [], "edges": []},
-            "graph_statistics": {"nodes_count": 1, "edges_count": 0, "relationships_by_type": {}},
+            "graph_statistics": {
+                "nodes_count": 1,
+                "edges_count": 0,
+                "relationships_by_type": {},
+            },
         }
 
         mock_reason_init.return_value = False
@@ -588,47 +697,102 @@ class TestResearchPipelineObserve(unittest.TestCase):
         self.assertGreaterEqual(result["aggregate"]["philology_document_count"], 2)
         self.assertGreaterEqual(result["aggregate"]["recognized_term_count"], 2)
         self.assertGreaterEqual(result["aggregate"]["orthographic_variant_count"], 1)
-        self.assertGreaterEqual(result["aggregate"]["terminology_standard_table_count"], 2)
-        self.assertGreaterEqual(result["aggregate"]["version_collation_difference_count"], 1)
-        self.assertGreaterEqual(result["aggregate"]["version_collation_witness_count"], 1)
+        self.assertGreaterEqual(
+            result["aggregate"]["terminology_standard_table_count"], 2
+        )
+        self.assertGreaterEqual(
+            result["aggregate"]["version_collation_difference_count"], 1
+        )
+        self.assertGreaterEqual(
+            result["aggregate"]["version_collation_witness_count"], 1
+        )
         self.assertGreaterEqual(result["aggregate"]["collation_entry_count"], 1)
         self.assertGreaterEqual(result["aggregate"]["fragment_candidate_count"], 1)
-        self.assertGreaterEqual(result["aggregate"]["citation_source_candidate_count"], 1)
+        self.assertGreaterEqual(
+            result["aggregate"]["citation_source_candidate_count"], 1
+        )
         self.assertGreaterEqual(result["aggregate"]["philology_asset_count"], 5)
-        self.assertTrue(any("版本对勘" in note for note in result["aggregate"]["philology_notes"]))
-        self.assertTrue(any("辑佚候选" in note for note in result["aggregate"]["philology_notes"]))
+        self.assertTrue(
+            any("版本对勘" in note for note in result["aggregate"]["philology_notes"])
+        )
+        self.assertTrue(
+            any("辑佚候选" in note for note in result["aggregate"]["philology_notes"])
+        )
 
         aggregate_assets = result["aggregate"]["philology_assets"]
-        self.assertEqual(len(aggregate_assets["terminology_standard_table"]), result["aggregate"]["terminology_standard_table_count"])
-        self.assertEqual(len(aggregate_assets["collation_entries"]), result["aggregate"]["collation_entry_count"])
-        self.assertEqual(len(aggregate_assets["fragment_candidates"]), result["aggregate"]["fragment_candidate_count"])
+        self.assertEqual(
+            len(aggregate_assets["terminology_standard_table"]),
+            result["aggregate"]["terminology_standard_table_count"],
+        )
+        self.assertEqual(
+            len(aggregate_assets["collation_entries"]),
+            result["aggregate"]["collation_entry_count"],
+        )
+        self.assertEqual(
+            len(aggregate_assets["fragment_candidates"]),
+            result["aggregate"]["fragment_candidate_count"],
+        )
         self.assertEqual(
             len(aggregate_assets["citation_source_candidates"]),
             result["aggregate"]["citation_source_candidate_count"],
         )
-        self.assertEqual(aggregate_assets["annotation_report"]["summary"]["processed_document_count"], 2)
-        self.assertGreaterEqual(aggregate_assets["annotation_report"]["summary"]["fragment_candidate_count"], 1)
+        self.assertEqual(
+            aggregate_assets["annotation_report"]["summary"][
+                "processed_document_count"
+            ],
+            2,
+        )
+        self.assertGreaterEqual(
+            aggregate_assets["annotation_report"]["summary"][
+                "fragment_candidate_count"
+            ],
+            1,
+        )
 
         first_doc = result["documents"][0]
         self.assertIn("philology", first_doc)
         self.assertIn("philology_assets", first_doc)
-        self.assertGreaterEqual(first_doc["philology"]["term_standardization"]["recognized_term_count"], 1)
-        self.assertGreaterEqual(first_doc["philology"]["version_collation"]["difference_count"], 1)
-        self.assertGreaterEqual(first_doc["philology"]["fragment_reconstruction"]["fragment_candidate_count"], 1)
-        self.assertGreaterEqual(first_doc["philology"]["term_standardization"]["terminology_standard_table_count"], 1)
-        self.assertGreaterEqual(first_doc["philology"]["version_collation"]["collation_entry_count"], 1)
+        self.assertGreaterEqual(
+            first_doc["philology"]["term_standardization"]["recognized_term_count"], 1
+        )
+        self.assertGreaterEqual(
+            first_doc["philology"]["version_collation"]["difference_count"], 1
+        )
+        self.assertGreaterEqual(
+            first_doc["philology"]["fragment_reconstruction"][
+                "fragment_candidate_count"
+            ],
+            1,
+        )
+        self.assertGreaterEqual(
+            first_doc["philology"]["term_standardization"][
+                "terminology_standard_table_count"
+            ],
+            1,
+        )
+        self.assertGreaterEqual(
+            first_doc["philology"]["version_collation"]["collation_entry_count"], 1
+        )
         self.assertEqual(
-            first_doc["philology"]["version_collation"]["witnesses"][0]["selection_strategy"],
+            first_doc["philology"]["version_collation"]["witnesses"][0][
+                "selection_strategy"
+            ],
             "work_fragment_key",
         )
 
-        first_term_row = first_doc["philology"]["term_standardization"]["terminology_standard_table"][0]
+        first_term_row = first_doc["philology"]["term_standardization"][
+            "terminology_standard_table"
+        ][0]
         self.assertIn("canonical", first_term_row)
         self.assertIn("observed_forms", first_term_row)
-        first_collation_entry = first_doc["philology"]["version_collation"]["collation_entries"][0]
+        first_collation_entry = first_doc["philology"]["version_collation"][
+            "collation_entries"
+        ][0]
         self.assertIn("judgement", first_collation_entry)
         self.assertIn("base_context", first_collation_entry)
-        first_fragment_candidate = first_doc["philology"]["fragment_reconstruction"]["fragment_candidates"][0]
+        first_fragment_candidate = first_doc["philology"]["fragment_reconstruction"][
+            "fragment_candidates"
+        ][0]
         self.assertIn("fragment_candidate_id", first_fragment_candidate)
         self.assertIn("match_score", first_fragment_candidate)
         self.assertIn("reconstruction_basis", first_fragment_candidate)
@@ -717,24 +881,33 @@ class TestResearchPipelineObserve(unittest.TestCase):
                     ],
                     "annotation_report": {
                         "summary": {"processed_document_count": 1},
-                        "documents": [{"document_title": "补血汤宋本", "collation_entry_count": 1}],
+                        "documents": [
+                            {"document_title": "补血汤宋本", "collation_entry_count": 1}
+                        ],
                     },
                 },
             },
         }
 
-        with patch.object(observe_handler, "_collect_observe_corpus_if_enabled", return_value=None), patch.object(
-            observe_handler,
-            "_run_observe_literature_if_enabled",
-            return_value=None,
-        ), patch.object(
-            observe_handler,
-            "_run_observe_ingestion_if_enabled",
-            return_value=ingestion_result,
-        ), patch.object(
-            observe_handler,
-            "_build_observe_metadata",
-            return_value={"philology_artifacts": True},
+        with (
+            patch.object(
+                observe_handler, "_collect_observe_corpus_if_enabled", return_value=None
+            ),
+            patch.object(
+                observe_handler,
+                "_run_observe_literature_if_enabled",
+                return_value=None,
+            ),
+            patch.object(
+                observe_handler,
+                "_run_observe_ingestion_if_enabled",
+                return_value=ingestion_result,
+            ),
+            patch.object(
+                observe_handler,
+                "_build_observe_metadata",
+                return_value={"philology_artifacts": True},
+            ),
         ):
             result = pipeline.phase_handlers.execute_observe_phase(cycle, {})
 
@@ -742,7 +915,9 @@ class TestResearchPipelineObserve(unittest.TestCase):
         self.assertEqual(len(result["artifacts"]), 4)
         self.assertIn("graph_assets", result["results"])
         self.assertIn("philology_subgraph", result["results"]["graph_assets"])
-        self.assertGreater(result["results"]["graph_assets"]["philology_subgraph"]["node_count"], 0)
+        self.assertGreater(
+            result["results"]["graph_assets"]["philology_subgraph"]["node_count"], 0
+        )
         self.assertIn("philology_subgraph", result["metadata"]["graph_asset_subgraphs"])
         artifact_names = {item["name"] for item in result["artifacts"]}
         self.assertEqual(
@@ -754,21 +929,48 @@ class TestResearchPipelineObserve(unittest.TestCase):
                 "observe_philology_catalog_summary",
             },
         )
-        terminology_artifact = next(item for item in result["artifacts"] if item["name"] == "observe_philology_terminology_table")
+        terminology_artifact = next(
+            item
+            for item in result["artifacts"]
+            if item["name"] == "observe_philology_terminology_table"
+        )
         self.assertEqual(terminology_artifact["artifact_type"], "dataset")
         self.assertEqual(terminology_artifact["content"]["row_count"], 1)
-        report_artifact = next(item for item in result["artifacts"] if item["name"] == "observe_philology_annotation_report")
+        report_artifact = next(
+            item
+            for item in result["artifacts"]
+            if item["name"] == "observe_philology_annotation_report"
+        )
         self.assertEqual(report_artifact["artifact_type"], "report")
-        self.assertEqual(report_artifact["content"]["summary"]["processed_document_count"], 1)
-        catalog_artifact = next(item for item in result["artifacts"] if item["name"] == "observe_philology_catalog_summary")
+        self.assertEqual(
+            report_artifact["content"]["summary"]["processed_document_count"], 1
+        )
+        catalog_artifact = next(
+            item
+            for item in result["artifacts"]
+            if item["name"] == "observe_philology_catalog_summary"
+        )
         self.assertEqual(catalog_artifact["artifact_type"], "dataset")
-        self.assertEqual(catalog_artifact["content"]["summary"]["catalog_document_count"], 1)
-        self.assertEqual(catalog_artifact["content"]["summary"]["version_lineage_count"], 1)
-        self.assertEqual(catalog_artifact["content"]["summary"]["exegesis_entry_count"], 1)
-        exegesis_entry = catalog_artifact["content"]["documents"][0]["exegesis_entries"][0]
-        self.assertEqual(exegesis_entry["definition_source"], "structured_tcm_knowledge")
+        self.assertEqual(
+            catalog_artifact["content"]["summary"]["catalog_document_count"], 1
+        )
+        self.assertEqual(
+            catalog_artifact["content"]["summary"]["version_lineage_count"], 1
+        )
+        self.assertEqual(
+            catalog_artifact["content"]["summary"]["exegesis_entry_count"], 1
+        )
+        exegesis_entry = catalog_artifact["content"]["documents"][0][
+            "exegesis_entries"
+        ][0]
+        self.assertEqual(
+            exegesis_entry["definition_source"], "structured_tcm_knowledge"
+        )
         self.assertIn("补气", exegesis_entry["definition"])
-        self.assertIn("TCMRelationshipDefinitions.HERB_EFFICACY_MAP", exegesis_entry["source_refs"])
+        self.assertIn(
+            "TCMRelationshipDefinitions.HERB_EFFICACY_MAP",
+            exegesis_entry["source_refs"],
+        )
 
     @patch("src.research.research_pipeline.OutputGenerator.cleanup")
     @patch("src.research.research_pipeline.OutputGenerator.initialize")
@@ -801,7 +1003,9 @@ class TestResearchPipelineObserve(unittest.TestCase):
     ):
         mock_pre_init.return_value = True
         mock_pre_clean.return_value = True
-        mock_pre_exec.side_effect = lambda context: {"processed_text": context["raw_text"]}
+        mock_pre_exec.side_effect = lambda context: {
+            "processed_text": context["raw_text"]
+        }
 
         mock_ex_init.return_value = True
         mock_ex_clean.return_value = True
@@ -823,11 +1027,18 @@ class TestResearchPipelineObserve(unittest.TestCase):
                     {
                         "source": "herb:黄芪",
                         "target": "other:噪声实体",
-                        "attributes": {"relationship_type": "related_to", "confidence": 0.61},
+                        "attributes": {
+                            "relationship_type": "related_to",
+                            "confidence": 0.61,
+                        },
                     }
                 ],
             },
-            "graph_statistics": {"nodes_count": 2, "edges_count": 1, "relationships_by_type": {"related_to": {"count": 1}}},
+            "graph_statistics": {
+                "nodes_count": 2,
+                "edges_count": 1,
+                "relationships_by_type": {"related_to": {"count": 1}},
+            },
         }
 
         mock_reason_init.return_value = True
@@ -860,10 +1071,24 @@ class TestResearchPipelineObserve(unittest.TestCase):
         self.assertEqual(result["processed_document_count"], 4)
         self.assertEqual(result["aggregate"]["total_entities"], 4)
         self.assertEqual(result["aggregate"]["semantic_relationships"], [])
-        self.assertEqual({entity["name"] for entity in result["aggregate"]["entities"]}, {"黄芪"})
-        self.assertTrue(all(document["entity_count"] == 1 for document in result["documents"]))
-        self.assertTrue(all(document["entities"][0]["name"] == "黄芪" for document in result["documents"]))
-        self.assertTrue(all(document.get("output_generation") is None for document in result["documents"]))
+        self.assertEqual(
+            {entity["name"] for entity in result["aggregate"]["entities"]}, {"黄芪"}
+        )
+        self.assertTrue(
+            all(document["entity_count"] == 1 for document in result["documents"])
+        )
+        self.assertTrue(
+            all(
+                document["entities"][0]["name"] == "黄芪"
+                for document in result["documents"]
+            )
+        )
+        self.assertTrue(
+            all(
+                document.get("output_generation") is None
+                for document in result["documents"]
+            )
+        )
         mock_reason_init.assert_not_called()
         mock_out_init.assert_not_called()
 
@@ -876,26 +1101,32 @@ class TestReviewAuditTrail(unittest.TestCase):
             upsert_observe_catalog_review_artifact_content,
         )
 
-        first = upsert_observe_catalog_review_artifact_content({}, {
-            "scope": "version_lineage",
-            "version_lineage_key": "伤寒论|宋版",
-            "review_status": "pending",
-            "reviewer": "张三",
-            "reviewed_at": "2026-04-15T10:00:00",
-            "decision_basis": "初审",
-        })
+        first = upsert_observe_catalog_review_artifact_content(
+            {},
+            {
+                "scope": "version_lineage",
+                "version_lineage_key": "伤寒论|宋版",
+                "review_status": "pending",
+                "reviewer": "张三",
+                "reviewed_at": "2026-04-15T10:00:00",
+                "decision_basis": "初审",
+            },
+        )
         self.assertEqual(first["decision_count"], 1)
         decision_v1 = first["decisions"][0]
         self.assertNotIn("decision_history", decision_v1)
 
-        second = upsert_observe_catalog_review_artifact_content(first, {
-            "scope": "version_lineage",
-            "version_lineage_key": "伤寒论|宋版",
-            "review_status": "accepted",
-            "reviewer": "李四",
-            "reviewed_at": "2026-04-16T12:00:00",
-            "decision_basis": "复核通过",
-        })
+        second = upsert_observe_catalog_review_artifact_content(
+            first,
+            {
+                "scope": "version_lineage",
+                "version_lineage_key": "伤寒论|宋版",
+                "review_status": "accepted",
+                "reviewer": "李四",
+                "reviewed_at": "2026-04-16T12:00:00",
+                "decision_basis": "复核通过",
+            },
+        )
         self.assertEqual(second["decision_count"], 1)
         decision_v2 = second["decisions"][0]
         self.assertEqual(decision_v2["review_status"], "accepted")
@@ -910,27 +1141,36 @@ class TestReviewAuditTrail(unittest.TestCase):
             upsert_observe_review_workbench_artifact_content,
         )
 
-        v1 = upsert_observe_review_workbench_artifact_content({}, {
-            "asset_type": "terminology_row",
-            "asset_key": "黄芪|本草药名",
-            "review_status": "pending",
-            "reviewer": "A",
-            "reviewed_at": "2026-04-10T00:00:00",
-        })
-        v2 = upsert_observe_review_workbench_artifact_content(v1, {
-            "asset_type": "terminology_row",
-            "asset_key": "黄芪|本草药名",
-            "review_status": "needs_source",
-            "reviewer": "B",
-            "reviewed_at": "2026-04-11T00:00:00",
-        })
-        v3 = upsert_observe_review_workbench_artifact_content(v2, {
-            "asset_type": "terminology_row",
-            "asset_key": "黄芪|本草药名",
-            "review_status": "accepted",
-            "reviewer": "C",
-            "reviewed_at": "2026-04-12T00:00:00",
-        })
+        v1 = upsert_observe_review_workbench_artifact_content(
+            {},
+            {
+                "asset_type": "terminology_row",
+                "asset_key": "黄芪|本草药名",
+                "review_status": "pending",
+                "reviewer": "A",
+                "reviewed_at": "2026-04-10T00:00:00",
+            },
+        )
+        v2 = upsert_observe_review_workbench_artifact_content(
+            v1,
+            {
+                "asset_type": "terminology_row",
+                "asset_key": "黄芪|本草药名",
+                "review_status": "needs_source",
+                "reviewer": "B",
+                "reviewed_at": "2026-04-11T00:00:00",
+            },
+        )
+        v3 = upsert_observe_review_workbench_artifact_content(
+            v2,
+            {
+                "asset_type": "terminology_row",
+                "asset_key": "黄芪|本草药名",
+                "review_status": "accepted",
+                "reviewer": "C",
+                "reviewed_at": "2026-04-12T00:00:00",
+            },
+        )
         decision = v3["decisions"][0]
         self.assertEqual(decision["review_status"], "accepted")
         self.assertEqual(decision["reviewer"], "C")
@@ -944,29 +1184,39 @@ class TestReviewAuditTrail(unittest.TestCase):
             upsert_observe_catalog_review_artifact_content_batch,
         )
 
-        existing = upsert_observe_catalog_review_artifact_content({}, {
-            "scope": "version_lineage",
-            "version_lineage_key": "K1",
-            "review_status": "pending",
-            "reviewer": "用户1",
-        })
-        result = upsert_observe_catalog_review_artifact_content_batch(existing, [
+        existing = upsert_observe_catalog_review_artifact_content(
+            {},
             {
                 "scope": "version_lineage",
                 "version_lineage_key": "K1",
-                "review_status": "accepted",
-                "reviewer": "用户2",
+                "review_status": "pending",
+                "reviewer": "用户1",
             },
-            {
-                "scope": "version_lineage",
-                "version_lineage_key": "K2",
-                "review_status": "rejected",
-                "reviewer": "用户2",
-            },
-        ])
+        )
+        result = upsert_observe_catalog_review_artifact_content_batch(
+            existing,
+            [
+                {
+                    "scope": "version_lineage",
+                    "version_lineage_key": "K1",
+                    "review_status": "accepted",
+                    "reviewer": "用户2",
+                },
+                {
+                    "scope": "version_lineage",
+                    "version_lineage_key": "K2",
+                    "review_status": "rejected",
+                    "reviewer": "用户2",
+                },
+            ],
+        )
         self.assertEqual(result["decision_count"], 2)
-        k1 = next(d for d in result["decisions"] if d.get("version_lineage_key") == "K1")
-        k2 = next(d for d in result["decisions"] if d.get("version_lineage_key") == "K2")
+        k1 = next(
+            d for d in result["decisions"] if d.get("version_lineage_key") == "K1"
+        )
+        k2 = next(
+            d for d in result["decisions"] if d.get("version_lineage_key") == "K2"
+        )
         self.assertEqual(k1["review_status"], "accepted")
         self.assertIn("decision_history", k1)
         self.assertEqual(k1["decision_history"][0]["reviewer"], "用户1")
@@ -978,23 +1228,55 @@ class TestReviewAuditTrail(unittest.TestCase):
             upsert_observe_review_workbench_artifact_content_batch,
         )
 
-        result = upsert_observe_review_workbench_artifact_content_batch({}, [
-            {
-                "asset_type": "claim",
-                "asset_key": "c1",
-                "review_status": "accepted",
-                "reviewer": "审核员",
-            },
-            {
-                "asset_type": "collation_entry",
-                "asset_key": "col1",
-                "review_status": "rejected",
-                "reviewer": "审核员",
-            },
-        ])
+        result = upsert_observe_review_workbench_artifact_content_batch(
+            {},
+            [
+                {
+                    "asset_type": "claim",
+                    "asset_key": "c1",
+                    "review_status": "accepted",
+                    "reviewer": "审核员",
+                },
+                {
+                    "asset_type": "collation_entry",
+                    "asset_key": "col1",
+                    "review_status": "rejected",
+                    "reviewer": "审核员",
+                },
+            ],
+        )
         self.assertEqual(result["decision_count"], 2)
         types = {d["asset_type"] for d in result["decisions"]}
         self.assertEqual(types, {"claim", "collation_entry"})
+
+    def test_exegesis_entry_review_builds_philology_feedback_record(self):
+        from src.research.review_workbench import (
+            build_philology_review_learning_feedback_record,
+            upsert_observe_review_workbench_artifact_content,
+        )
+
+        decision = {
+            "asset_type": "exegesis_entry",
+            "asset_key": "exegesis::黄芪",
+            "review_status": "rejected",
+            "reviewer": "审核员",
+            "reason": "未核对宋本 witness",
+            "term": "黄芪",
+        }
+        content = upsert_observe_review_workbench_artifact_content({}, decision)
+        self.assertEqual(content["decision_count"], 1)
+        self.assertEqual(content["decisions"][0]["asset_type"], "exegesis_entry")
+
+        record = build_philology_review_learning_feedback_record(decision)
+        self.assertEqual(record["feedback_scope"], "philology_review")
+        self.assertEqual(record["details"]["asset_kind"], "exegesis_entry")
+        self.assertEqual(record["details"]["asset_id"], "exegesis::黄芪")
+        self.assertEqual(record["details"]["decision"], "rejected")
+        self.assertEqual(record["details"]["target_phase"], "observe")
+        self.assertIn(
+            "此类术语需优先检查版本 witness",
+            record["metadata"]["issue_fields"],
+        )
 
 
 class TestExpandedExegesisAuthoritySources(unittest.TestCase):
@@ -1006,7 +1288,9 @@ class TestExpandedExegesisAuthoritySources(unittest.TestCase):
         )
 
         result = _build_structured_knowledge_exegesis_definition(
-            "气虚证", category="syndrome", label="证候术语",
+            "气虚证",
+            category="syndrome",
+            label="证候术语",
         )
         self.assertEqual(result["definition_source"], "structured_tcm_knowledge")
         self.assertIn("元气不足", result["definition"])
@@ -1019,7 +1303,9 @@ class TestExpandedExegesisAuthoritySources(unittest.TestCase):
         )
 
         result = _build_structured_knowledge_exegesis_definition(
-            "君臣佐使", category="theory", label="理论术语",
+            "君臣佐使",
+            category="theory",
+            label="理论术语",
         )
         self.assertEqual(result["definition_source"], "structured_tcm_knowledge")
         self.assertIn("君药治主症", result["definition"])
@@ -1031,7 +1317,9 @@ class TestExpandedExegesisAuthoritySources(unittest.TestCase):
         )
 
         result = _build_structured_knowledge_exegesis_definition(
-            "不存在证", category="syndrome", label="证候术语",
+            "不存在证",
+            category="syndrome",
+            label="证候术语",
         )
         self.assertEqual(result, {})
 
@@ -1041,7 +1329,9 @@ class TestExpandedExegesisAuthoritySources(unittest.TestCase):
         )
 
         result = _build_structured_knowledge_exegesis_definition(
-            "不存在术语", category="theory", label="理论术语",
+            "不存在术语",
+            category="theory",
+            label="理论术语",
         )
         self.assertEqual(result, {})
 
@@ -1060,8 +1350,12 @@ class TestExpandedExegesisAuthoritySources(unittest.TestCase):
     def test_exegesis_source_rank_covers_all_levels(self):
         from src.research.observe_philology import _exegesis_definition_source_rank
 
-        self.assertEqual(_exegesis_definition_source_rank("config_terminology_standard"), 4)
-        self.assertEqual(_exegesis_definition_source_rank("structured_tcm_knowledge"), 3)
+        self.assertEqual(
+            _exegesis_definition_source_rank("config_terminology_standard"), 4
+        )
+        self.assertEqual(
+            _exegesis_definition_source_rank("structured_tcm_knowledge"), 3
+        )
         self.assertEqual(_exegesis_definition_source_rank("terminology_note"), 2)
         self.assertEqual(_exegesis_definition_source_rank("canonical_fallback"), 1)
         self.assertEqual(_exegesis_definition_source_rank(""), 0)
@@ -1072,7 +1366,9 @@ class TestExpandedExegesisAuthoritySources(unittest.TestCase):
         )
 
         result = _build_structured_knowledge_exegesis_definition(
-            "黄芪", category="herb", label="本草药名",
+            "黄芪",
+            category="herb",
+            label="本草药名",
         )
         self.assertEqual(result["definition_source"], "structured_tcm_knowledge")
         self.assertIn("补气", result["definition"])
@@ -1083,7 +1379,9 @@ class TestExpandedExegesisAuthoritySources(unittest.TestCase):
         )
 
         result = _build_structured_knowledge_exegesis_definition(
-            "四君子汤", category="formula", label="方剂名",
+            "四君子汤",
+            category="formula",
+            label="方剂名",
         )
         self.assertEqual(result["definition_source"], "structured_tcm_knowledge")
         self.assertIn("君药", result["definition"])
@@ -1097,7 +1395,12 @@ class TestWorkbenchReviewWriteback(unittest.TestCase):
 
         raw = {
             "terminology_standard_table": [
-                {"document_urn": "urn:doc:001", "document_title": "本草纲目", "canonical": "黄芪", "label": "本草术语"},
+                {
+                    "document_urn": "urn:doc:001",
+                    "document_title": "本草纲目",
+                    "canonical": "黄芪",
+                    "label": "本草术语",
+                },
             ],
             "review_workbench_decisions": [
                 {
@@ -1177,7 +1480,11 @@ class TestWorkbenchReviewWriteback(unittest.TestCase):
 
         raw = {
             "terminology_standard_table": [
-                {"document_urn": "urn:doc:001", "canonical": "黄芪", "label": "本草术语"},
+                {
+                    "document_urn": "urn:doc:001",
+                    "canonical": "黄芪",
+                    "label": "本草术语",
+                },
             ],
             "review_workbench_decisions": [
                 {
@@ -1231,7 +1538,11 @@ class TestPhilologyServiceExegesisEnrichment(unittest.TestCase):
         return svc
 
     def _get_terminology_rows(self, result):
-        return result.get("philology", {}).get("term_standardization", {}).get("terminology_standard_table", [])
+        return (
+            result.get("philology", {})
+            .get("term_standardization", {})
+            .get("terminology_standard_table", [])
+        )
 
     def test_terminology_row_has_exegesis_fields(self):
         svc = self._build_service()
@@ -1252,10 +1563,12 @@ class TestPhilologyServiceExegesisEnrichment(unittest.TestCase):
     def test_herb_gets_structured_definition_when_no_config(self):
         from src.analysis.philology_service import PhilologyService
 
-        svc = PhilologyService({
-            "enable_version_collation": False,
-            "enable_fragment_reconstruction": False,
-        })
+        svc = PhilologyService(
+            {
+                "enable_version_collation": False,
+                "enable_fragment_reconstruction": False,
+            }
+        )
         svc.initialize()
         result = svc.execute({"raw_text": "黄芪能补气固表"})
         rows = self._get_terminology_rows(result)
@@ -1279,7 +1592,10 @@ class TestPhilologyServiceExegesisEnrichment(unittest.TestCase):
         class TestDict:
             def lookup(self, canonical, *, category=""):
                 if canonical == "黄芪":
-                    return {"definition": "外部字典释义", "definition_source": "external_dictionary"}
+                    return {
+                        "definition": "外部字典释义",
+                        "definition_source": "external_dictionary",
+                    }
                 return {}
 
         svc = self._build_service(
@@ -1335,16 +1651,18 @@ class TestObserveExegesisNotesIntegration(unittest.TestCase):
     def test_normalize_exegesis_entries_preserves_exegesis_notes(self):
         from src.research.observe_philology import _normalize_exegesis_entries
 
-        entries = _normalize_exegesis_entries([
-            {
-                "canonical": "黄芪",
-                "label": "本草药名",
-                "definition": "补气固表",
-                "definition_source": "structured_tcm_knowledge",
-                "semantic_scope": "本草药名",
-                "exegesis_notes": "「黄芪」释义来源：结构化知识库",
-            },
-        ])
+        entries = _normalize_exegesis_entries(
+            [
+                {
+                    "canonical": "黄芪",
+                    "label": "本草药名",
+                    "definition": "补气固表",
+                    "definition_source": "structured_tcm_knowledge",
+                    "semantic_scope": "本草药名",
+                    "exegesis_notes": "「黄芪」释义来源：结构化知识库",
+                },
+            ]
+        )
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["exegesis_notes"], "「黄芪」释义来源：结构化知识库")
 

@@ -73,7 +73,9 @@ class SelfLearningEngine(BaseModule):
         self.min_performance_for_improvement = self.config.get(
             "min_performance_for_improvement", 0.8
         )
-        self._ewma_alpha = float(self.config.get("ewma_alpha", self._EWMA_DEFAULT_ALPHA))
+        self._ewma_alpha = float(
+            self.config.get("ewma_alpha", self._EWMA_DEFAULT_ALPHA)
+        )
         self._ewma_score: Optional[float] = None
         self._pattern_recognizer = None
         self._adaptive_tuner = None
@@ -103,7 +105,9 @@ class SelfLearningEngine(BaseModule):
             self.logger.warning("PatternRecognizer 初始化失败，跳过模式识别")
 
         try:
-            from src.learning.policy_adjuster_internals.adaptive_tuner import AdaptiveTuner
+            from src.learning.policy_adjuster_internals.adaptive_tuner import (
+                AdaptiveTuner,
+            )
 
             self._adaptive_tuner = AdaptiveTuner(
                 performance_target=self.config.get("performance_target", 0.80)
@@ -153,14 +157,18 @@ class SelfLearningEngine(BaseModule):
                 tuned_parameters = self._adaptive_tuner.step(
                     {
                         "performance": self._ewma_score,
-                        "quality": float(context.get("quality_score", self._ewma_score)),
+                        "quality": float(
+                            context.get("quality_score", self._ewma_score)
+                        ),
                         "confidence": float(context.get("confidence_score", 0.5)),
                     }
                 )
                 if "learning_threshold" in tuned_parameters:
                     self.learning_threshold = tuned_parameters["learning_threshold"]
                 if "quality_threshold" in tuned_parameters:
-                    self.min_performance_for_improvement = tuned_parameters["quality_threshold"]
+                    self.min_performance_for_improvement = tuned_parameters[
+                        "quality_threshold"
+                    ]
             except Exception as exc:
                 self.logger.warning("自适应调参执行失败: %s", exc)
 
@@ -191,7 +199,8 @@ class SelfLearningEngine(BaseModule):
             self._ewma_score = performance
         else:
             self._ewma_score = (
-                self._ewma_alpha * performance + (1 - self._ewma_alpha) * self._ewma_score
+                self._ewma_alpha * performance
+                + (1 - self._ewma_alpha) * self._ewma_score
             )
 
         record = LearningRecord(
@@ -332,7 +341,9 @@ class SelfLearningEngine(BaseModule):
                 dims = {
                     "completeness": float(quality_score.get("completeness", 0.0)),
                     "consistency": float(quality_score.get("consistency", 0.0)),
-                    "evidence_quality": float(quality_score.get("evidence_quality", 0.0)),
+                    "evidence_quality": float(
+                        quality_score.get("evidence_quality", 0.0)
+                    ),
                 }
                 grade = quality_score.get("grade_level", "unknown")
             else:
@@ -359,7 +370,8 @@ class SelfLearningEngine(BaseModule):
                 self._ewma_score = overall
             else:
                 self._ewma_score = (
-                    self._ewma_alpha * overall + (1 - self._ewma_alpha) * self._ewma_score
+                    self._ewma_alpha * overall
+                    + (1 - self._ewma_alpha) * self._ewma_score
                 )
 
             # 维度趋势追踪
@@ -370,14 +382,16 @@ class SelfLearningEngine(BaseModule):
             if len(self.performance_history) > 2000:
                 self.performance_history.pop(0)
 
-            self.model_improvement_log.append({
-                "type": "quality_assessment",
-                "phase": phase,
-                "overall_score": overall,
-                "grade": grade,
-                "dimensions": dims,
-                "timestamp": datetime.now().isoformat(),
-            })
+            self.model_improvement_log.append(
+                {
+                    "type": "quality_assessment",
+                    "phase": phase,
+                    "overall_score": overall,
+                    "grade": grade,
+                    "dimensions": dims,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
             self._cap_improvement_log()
             self._save_dirty = True
             return True
@@ -385,7 +399,9 @@ class SelfLearningEngine(BaseModule):
             self.logger.warning("learn_from_quality_assessment 失败: %s", exc)
             return False
 
-    def learn_from_cycle_reflection(self, cycle_assessment: Dict[str, Any]) -> Dict[str, Any]:
+    def learn_from_cycle_reflection(
+        self, cycle_assessment: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """从 QualityAssessor.assess_cycle_for_reflection() 的完整循环评估学习。
 
         Args:
@@ -411,11 +427,13 @@ class SelfLearningEngine(BaseModule):
             # 分析薄弱阶段并生成学习优先级
             weak_phases = []
             for w in weaknesses:
-                weak_phases.append({
-                    "phase": w.get("phase", "unknown"),
-                    "score": w.get("score", 0.0),
-                    "issues": w.get("issues", [])[:5],
-                })
+                weak_phases.append(
+                    {
+                        "phase": w.get("phase", "unknown"),
+                        "score": w.get("score", 0.0),
+                        "issues": w.get("issues", [])[:5],
+                    }
+                )
 
             # 基于薄弱阶段生成改进优先级
             improvement_priorities = self._derive_improvement_priorities(
@@ -443,19 +461,26 @@ class SelfLearningEngine(BaseModule):
                 "tuned_parameters": tuned_parameters,
             }
 
-            self.model_improvement_log.append({
-                "type": "cycle_reflection",
-                "overall_score": overall,
-                "recorded_phases": recorded_phases,
-                "weak_phase_count": len(weak_phases),
-                "timestamp": datetime.now().isoformat(),
-            })
+            self.model_improvement_log.append(
+                {
+                    "type": "cycle_reflection",
+                    "overall_score": overall,
+                    "recorded_phases": recorded_phases,
+                    "weak_phase_count": len(weak_phases),
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
             self._cap_improvement_log()
             self._save_dirty = True
             return summary
         except Exception as exc:
             self.logger.warning("learn_from_cycle_reflection 失败: %s", exc)
-            return {"recorded_phases": [], "weak_phases": [], "improvement_priorities": [], "cycle_trend": "unknown"}
+            return {
+                "recorded_phases": [],
+                "weak_phases": [],
+                "improvement_priorities": [],
+                "cycle_trend": "unknown",
+            }
 
     def get_phase_performance(self, phase: str) -> Dict[str, Any]:
         """获取指定阶段的历史性能摘要。"""
@@ -519,7 +544,8 @@ class SelfLearningEngine(BaseModule):
     def _compute_cycle_trend(self, current_overall: float) -> str:
         """基于近期历史判断循环质量趋势。"""
         cycle_logs = [
-            entry for entry in self.model_improvement_log
+            entry
+            for entry in self.model_improvement_log
             if entry.get("type") == "cycle_reflection"
         ]
         if len(cycle_logs) < 2:
@@ -638,7 +664,8 @@ class SelfLearningEngine(BaseModule):
             return {}
 
         cycle_logs = [
-            entry for entry in self.model_improvement_log
+            entry
+            for entry in self.model_improvement_log
             if entry.get("type") == "cycle_reflection"
         ]
         last_cycle = cycle_logs[-1] if cycle_logs else {}
@@ -656,7 +683,11 @@ class SelfLearningEngine(BaseModule):
             else None,
             "cycle_reflection_count": len(cycle_logs),
             "last_updated_at": last_cycle.get("timestamp")
-            or (self.model_improvement_log[-1].get("timestamp") if self.model_improvement_log else None),
+            or (
+                self.model_improvement_log[-1].get("timestamp")
+                if self.model_improvement_log
+                else None
+            ),
             "tuned_parameters": tuned_parameters,
         }
         if last_cycle:
@@ -672,31 +703,34 @@ class SelfLearningEngine(BaseModule):
         """
         if not insight_data:
             return
-            
+
         record = LearningRecord(
             task_id=f"graph_mining_{datetime.now().strftime('%Y%m%d%H%M%S')}",
             input_data={"source": "graph_pattern_miner", "pattern_type": "extraction"},
             output_data=insight_data,
             performance=1.0,
             timestamp=datetime.now().isoformat(),
-            phase="Phase_4_Graph_Mining"
+            phase="Phase_4_Graph_Mining",
         )
         self.learning_records.append(record)
-        
-        self.model_improvement_log.append({
-            "timestamp": datetime.now().isoformat(),
-            "source": "graph_mining",
-            "type": "relation_discovery",
-            "insight": insight_data,
-            "applied": False
-        })
-        
+
+        self.model_improvement_log.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "source": "graph_mining",
+                "type": "relation_discovery",
+                "insight": insight_data,
+                "applied": False,
+            }
+        )
+
         if self._pattern_recognizer:
             self._pattern_recognizer.analyze({"graph_mining_insight": insight_data})
-            
-        self.logger.info(f"Registered new graph insight from miner: {insight_data.get('description', '')}")
-        self._save_learning_data()
 
+        self.logger.info(
+            f"Registered new graph insight from miner: {insight_data.get('description', '')}"
+        )
+        self._save_learning_data()
 
     def get_dynamic_few_shot_context(self, limit: int = 3) -> tuple[str, list[str]]:
         """
@@ -706,15 +740,19 @@ class SelfLearningEngine(BaseModule):
         insights = []
         task_ids = []
         for r in reversed(self.learning_records):
-            if r.performance >= 0.8 and r.phase == "Phase_4_Graph_Mining" and r.output_data:
+            if (
+                r.performance >= 0.8
+                and r.phase == "Phase_4_Graph_Mining"
+                and r.output_data
+            ):
                 insights.append(r.output_data)
                 task_ids.append(r.task_id)
             if len(insights) >= limit:
                 break
-                
+
         if not insights:
             return "", []
-            
+
         context_parts = ["【Historical Successful Insights】"]
         for idx, insight in enumerate(insights, 1):
             desc = insight.get("description", "Unknown pattern")
@@ -726,7 +764,7 @@ class SelfLearningEngine(BaseModule):
             context_parts.append(f"Observation: {desc}")
             context_parts.append(f"Reasoning/Data: {reasoning}")
             context_parts.append("")
-            
+
         return "\n".join(context_parts), task_ids
 
     def apply_few_shot_feedback(self, task_ids: list[str], score: float) -> None:
@@ -738,53 +776,70 @@ class SelfLearningEngine(BaseModule):
         """
         if not task_ids:
             return
-            
+
         for r in reversed(self.learning_records):
             if r.task_id in task_ids:
                 old_perf = r.performance
                 # Update rule performance via EWMA-like adjusting
                 r.performance = round(old_perf * 0.7 + score * 0.3, 4)
-                
+
                 # Check for eviction
                 if r.performance < 0.5:
-                    self.logger.info(f"剔除表现差的规律 (降权): {r.task_id} (New Score: {r.performance})")
+                    self.logger.info(
+                        f"剔除表现差的规律 (降权): {r.task_id} (New Score: {r.performance})"
+                    )
                     # r.performance 已经低于0.8，因此自然被降权剔除出 future few-shot choices
                 elif r.performance >= 0.85:
-                    self.logger.info(f"固化高分规律为基线: {r.task_id} (New Score: {r.performance})")
-                    r.phase = "Phase_4_Graph_Mining" # 强化 Baseline 标签
+                    self.logger.info(
+                        f"固化高分规律为基线: {r.task_id} (New Score: {r.performance})"
+                    )
+                    r.phase = "Phase_4_Graph_Mining"  # 强化 Baseline 标签
                     # --- Persistence Trigger ---
                     try:
                         from src.core.architecture import ModuleRegistry
                         from src.learning.expert_feedback_loop import ExpertFeedbackLoop
+
                         # 尝试拿到持久化需要的组件（若注册中心里配了Neo4j等组件）
-                        neo4j_info = ModuleRegistry.get_instance().get_module('neo4j_driver')
-                        n_driver = neo4j_info.instance if (neo4j_info and hasattr(neo4j_info, 'instance')) else None
+                        neo4j_info = ModuleRegistry.get_instance().get_module(
+                            "neo4j_driver"
+                        )
+                        n_driver = (
+                            neo4j_info.instance
+                            if (neo4j_info and hasattr(neo4j_info, "instance"))
+                            else None
+                        )
                         hitl = ExpertFeedbackLoop(neo4j_driver=n_driver)
                         # 将挖掘到并初筛后表现优异的策略发送到审核池中供 Web 端把关
-                        hitl.persist_strategy(r.task_id, r.output_data, status="pending_review")
+                        hitl.persist_strategy(
+                            r.task_id, r.output_data, status="pending_review"
+                        )
                     except Exception as e:
                         self.logger.warning(f"HITL strategy persistence fault: {e}")
                     # ---------------------------
-                    
+
         self._save_dirty = True
 
     def get_dynamic_few_shot_examples(self, limit: int = 3) -> str:
         """
         Phase 4 Step 3: Dynamic Few-Shot Synthesis
-        Extract past successful learning insights and mold them into a few-shot string 
+        Extract past successful learning insights and mold them into a few-shot string
         to be injected into LLM contexts.
         """
         # Filter latest successful insights
         insights = []
         for r in reversed(self.learning_records):
-            if r.performance >= 0.8 and r.phase == "Phase_4_Graph_Mining" and r.output_data:
+            if (
+                r.performance >= 0.8
+                and r.phase == "Phase_4_Graph_Mining"
+                and r.output_data
+            ):
                 insights.append(r.output_data)
             if len(insights) >= limit:
                 break
-                
+
         if not insights:
             return ""
-            
+
         context_parts = ["【Historical Successful Insights】"]
         for idx, insight in enumerate(insights, 1):
             desc = insight.get("description", "Unknown pattern")
@@ -796,7 +851,7 @@ class SelfLearningEngine(BaseModule):
             context_parts.append(f"Observation: {desc}")
             context_parts.append(f"Reasoning/Data: {reasoning}")
             context_parts.append("")
-            
+
         return "\n".join(context_parts)
 
     def build_previous_iteration_feedback(self) -> Dict[str, Any]:
@@ -811,7 +866,9 @@ class SelfLearningEngine(BaseModule):
             "learning_summary": {
                 "recorded_phases": list(strategy.get("recorded_phases") or []),
                 "weak_phase_count": int(strategy.get("weak_phase_count", 0)),
-                "cycle_trend": self._compute_cycle_trend(float(last_cycle_score or 0.0)),
+                "cycle_trend": self._compute_cycle_trend(
+                    float(last_cycle_score or 0.0)
+                ),
                 "tuned_parameters": dict(strategy.get("tuned_parameters") or {}),
             },
         }
@@ -879,7 +936,9 @@ class SelfLearningEngine(BaseModule):
             with open(pkl_path, "rb") as f:
                 data = _pickle.load(f)  # noqa: S301
             self._apply_loaded_data(data)
-            self.logger.info("从 pickle 迁移了 %d 条学习记录", len(self.learning_records))
+            self.logger.info(
+                "从 pickle 迁移了 %d 条学习记录", len(self.learning_records)
+            )
             self._save_dirty = True
             self._save_learning_data()
         except Exception as exc:
@@ -908,7 +967,9 @@ class SelfLearningEngine(BaseModule):
 
     def _cap_improvement_log(self) -> None:
         if len(self.model_improvement_log) > self._MAX_IMPROVEMENT_LOG:
-            self.model_improvement_log = self.model_improvement_log[-self._MAX_IMPROVEMENT_LOG:]
+            self.model_improvement_log = self.model_improvement_log[
+                -self._MAX_IMPROVEMENT_LOG :
+            ]
 
     def _do_cleanup(self) -> bool:
         try:

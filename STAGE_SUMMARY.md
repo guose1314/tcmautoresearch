@@ -2,6 +2,65 @@
 
 <!-- markdownlint-configure-file {"MD022": false, "MD024": false, "MD032": false, "MD060": false} -->
 
+## 阶段性收口（2026-05-XX）
+
+同步说明（2026-05-XX）：
+
+- 本节取代下方 2026-04-28 条目，成为当前总续接入口；本轮收口不再讨论在线 distill，而是聚焦研究主链里已经打通并实测过的“三上下文 + outbox + GraphRAG”。
+- 本文中的“三上下文”统一指：`CollationContext`（四校）、`CatalogContext`（Topic / BELONGS_TO_TOPIC 投影）、`LFITL`（Learning Feedback Into The Loop）。`transactional outbox` 与 `GraphRAG` 单列，因为它们分别是图投影主链与 analyze 检索主链的横切基础设施。
+- 下方结论只引用已跑过的验收面：T7.1 五篇经典七阶段 E2E、T7.2 双盲专家复核导出/导入闭环、T6.1-T6.3 outbox focused validation、T5.5 GraphRAG 三档摘要与 traceability 测试。
+
+### 本轮收口目标
+
+- 让 Observe / Analyze / Reflect / 图投影不再依赖零散旁路，而是分别收口到可指认的上下文与基础设施：四校走 `CollationContext`，主题归档走 `CatalogContext`，下一轮 prompt 偏置走 `LFITL`，图写入走 `transactional outbox`，图检索走 `GraphRAG`。
+- 用一条可复现的七阶段主链证明：假说、证据分级、Topic 归档、IMRD 输出和 outbox drain 已能在同一条 runtime service 调度链里闭环，而不是靠手工拼装。
+- 用双盲专家复核闭环证明：导出给专家批注的 jsonl 可以反向沉淀进 PostgreSQL `research_learning_feedback`，并在下一轮 `prepare_cycle()` 中显式表现为 prompt bias。
+
+### 当前已落地成果
+
+#### 1. 三上下文已经落到研究主链，不再只是孤立组件
+
+- `CollationContext` 已通过 `ObservePhase` 正式接线，四校策略固定为 `cross / intra / external / rational`，不再需要在 observe 侧手工拼接多份校勘结果。
+- `CatalogContext` 已成为 topic 归档的唯一投影面；T7.1 的七阶段 E2E 不是直接写图，而是通过 outbox worker 把 Topic 归档事件异步投到 `BELONGS_TO_TOPIC`，避免 PG 成功但图写半途失败时的主链分叉。
+- `LFITL` 已从“Reflect 结果可查看”推进到“专家反馈可驱动下一轮提示偏置”：T7.2 新增的 expert review export/import 脚本会把专家结论写回 `research_learning_feedback`，再由 `ExpertReviewFeedbackRepo` 适配进 `LearningLoopOrchestrator.prepare_cycle()` 的 `prompt_bias_blocks`。
+
+#### 2. Outbox 主链已从存储模式变成可监督、可恢复、可在 E2E 中观察的运行链
+
+- T6.1 已把 PG 侧业务写入与 `outbox_events` 放进同一事务，并补齐 `outbox_dlq`、重试计数和状态机，图投影不再依赖“请求线程顺手写 Neo4j”的弱一致性路径。
+- T6.3 给 outbox worker 增加了独立 CLI 与 watchdog 监督；已实测 worker 被杀后可在约 3 秒内自动拉起，且与 web 进程分离，不会把 Topic 投影责任继续塞回 API 线程。
+- T7.1 的验收不是只看 PG 内有事件，而是显式断言 5 篇 fixture 跑完后 `outbox_events.status='processed'`，这意味着 Topic 投影主链在 runtime smoke 中已经真实 drain 过一轮。
+
+#### 3. GraphRAG 已具备三档摘要检索，并且 Analyze 侧接线边界清晰
+
+- `GraphRAG` 当前只保留三类问题面：`global`（全库 `CommunitySummary` 拼接）、`community`（按 `topic_keys` 过滤）、`local`（按 `entity_ids` 取 1-hop 子图）；问题类型和返回契约已经被单测锁定。
+- Token 预算已有显式守门：默认单 query `<= 8000`，超预算时会截断并返回 `truncated=true`，避免 analyze 阶段把图上下文无限放大成新的 LLM 成本黑洞。
+- `AnalyzePhase` 只在 `enable_graph_rag` 为真时注入 `graph_rag_context` / `metadata.graph_rag`，因此后续如果继续扩展 GraphRAG，应该围绕这一注入点演进，而不是再新增平行的图检索入口。
+
+#### 4. T7.1 + T7.2 已把“主链能跑”推进到“主链可复验、可学习”
+
+- T7.1 七阶段冒烟使用 5 篇真实体量较小的经典文献 fixture，通过 `ResearchRuntimeService.run()` 跑通 `observe → hypothesis → analyze → publish` 等完整链路，并同时验证 `methodology_tag / evidence_grade` 回传、5 份 IMRD 报告落盘、Topic 关系经 outbox 正常处理。
+- T7.2 双盲专家复核把“人工 review”从口头流程变成结构化闭环：先导出假说 + 四校结论 + 证据等级到 jsonl，再导入专家给出的 `expert_grade / expert_notes`，最终以高权重 `expert_review` 记录回写 PG；重复导入同一批 jsonl 会被 `expert_review_id` 幂等跳过。
+- 这两条验收串起来后的直接含义是：主链现在不仅能产出结果，也能把专家修正重新折返成下一轮 prompt 偏置，而不是把 expert review 停留在文件夹或人工备注里。
+
+### 关键验证记录
+
+- T7.1：`tests/e2e/test_seven_phase_pipeline.py` 已对 5 篇 fixture 跑通七阶段主链，验收点包括 `status=completed`、7 个 phase 齐全、`BELONGS_TO_TOPIC` 写入出现、`outbox_events` 全部 `processed`、IMRD 报告 5 份独立落盘。
+- T7.2：`tests/integration_tests/test_expert_review_roundtrip.py` 已验证 5 条 expert review `export → annotate → import` 完整闭环、二次导入幂等、`research_learning_feedback` 中新增 5 条 `feedback_scope="expert_review"` 记录，且下一轮 `prompt_bias_blocks["hypothesis"]` 可见 `expert_review` 偏置。
+- Outbox 监督：T6.3 已手工验证 worker 异常退出后约 3 秒自动重启；Topic 投影责任从此可归因到独立 worker，而不是归因到 web 请求线程。
+- GraphRAG：`tests/unit/test_graph_rag.py` 已锁定 `global / community / local` 三档检索、token budget 截断和 `CommunitySummary` 构建契约；`tests/integration_tests/test_graph_rag_traceability.py` 继续兜住链路追溯面。
+
+### 当前续接锚点
+
+- 如果继续推进“四校 → 假说 → 主题归档”主链，事实源应依次看 `CollationContext`、`ResearchRuntimeService.run()`、`PgOutboxStore / OutboxWorker`、`CatalogContext`；不要重新引入“阶段里直接写 Neo4j”的旁路。
+- 如果继续推进“专家意见 → 下一轮 prompt 偏置”，事实源应看 `tools/export_for_expert_review.py`、`tools/import_expert_review.py`、`research_learning_feedback.feedback_scope="expert_review"` 和 `ExpertReviewFeedbackRepo.recent()`；不要再单独追加一套 prompt 配置文件或手工 bias 文本。
+- 如果继续推进 GraphRAG，事实源应看 `GraphRAG.retrieve()` 三档契约与 `AnalyzePhase._apply_graph_rag()` 注入点；新增 retrieval scope 之前，先明确它属于 `global / community / local` 哪一类缺口，而不是把 question type 继续摊平。
+- 如果继续推进运行稳定性，优先守住 outbox supervisor 与 focused smoke：七阶段 E2E 和 expert review roundtrip 已经是当前最便宜的回归面，新的改动先过这两层，再考虑扩展更重的全量链路。
+
+### 提交边界说明
+
+- 本节收口覆盖的事实边界是：三上下文（Catalog / Collation / LFITL）、transactional outbox、GraphRAG 三档摘要、T7.1 七阶段 E2E、T7.2 双盲专家复核闭环。
+- 本节不试图复述更早的 distill / 批处理 / 无监督增强治理；这些内容以下方 2026-04-28 条目为准。本节只负责给当前研究主链的续接者一个最近、最短、最可执行的入口。
+
 ## 阶段性收口（2026-04-28）
 
 同步说明（2026-04-28）：

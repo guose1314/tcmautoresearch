@@ -48,11 +48,13 @@ class TestSelfLearningEngineShim(unittest.TestCase):
             LearningRecord,
             SelfLearningEngine,
         )
+
         self.assertTrue(hasattr(SelfLearningEngine, "learn_from_cycle_reflection"))
         self.assertTrue(hasattr(LearningRecord, "to_dict"))
 
     def test_adaptive_tuner_shim_reexports(self) -> None:
         from src.learning.adaptive_tuner import AdaptiveTuner
+
         tuner = AdaptiveTuner()
         self.assertIn("learning_threshold", tuner.current_values())
 
@@ -60,7 +62,8 @@ class TestSelfLearningEngineShim(unittest.TestCase):
         path = REPO_ROOT / "src" / "learning" / "self_learning_engine.py"
         line_count = sum(1 for _ in path.open(encoding="utf-8"))
         self.assertLess(
-            line_count, 100,
+            line_count,
+            100,
             f"self_learning_engine.py 必须 <100 行 (当前 {line_count})",
         )
 
@@ -79,7 +82,8 @@ class TestSelfLearningEngineShim(unittest.TestCase):
             except (UnicodeDecodeError, OSError):
                 continue
         self.assertEqual(
-            offenders, [],
+            offenders,
+            [],
             f"主链不得直接 import self_learning_engine; 命中: {offenders}",
         )
 

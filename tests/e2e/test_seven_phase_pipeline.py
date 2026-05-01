@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import unittest
 from copy import deepcopy
 from importlib import import_module
-import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Dict, List
@@ -169,7 +169,8 @@ class _SevenPhaseRuntimePipeline:
             "cycle_id": cycle.cycle_id,
             "cycle_name": cycle.cycle_name,
             "phase_executions": {
-                phase.value: payload for phase, payload in cycle.phase_executions.items()
+                phase.value: payload
+                for phase, payload in cycle.phase_executions.items()
             },
         }
 
@@ -193,7 +194,9 @@ class SevenPhasePipelineE2ETest(unittest.TestCase):
         "reflect",
     ]
 
-    def test_five_selected_classics_walkthrough_with_pg_neo4j_imrd_and_outbox(self) -> None:
+    def test_five_selected_classics_walkthrough_with_pg_neo4j_imrd_and_outbox(
+        self,
+    ) -> None:
         with TemporaryDirectory() as tmp_dir:
             db_path = Path(tmp_dir) / "seven_phase.sqlite3"
             db_manager = DatabaseManager(f"sqlite:///{db_path}")
@@ -206,7 +209,9 @@ class SevenPhasePipelineE2ETest(unittest.TestCase):
             report_generator.initialize()
             try:
                 processed_event_ids: List[str] = []
-                research_pipeline_module = import_module("src.research.research_pipeline")
+                research_pipeline_module = import_module(
+                    "src.research.research_pipeline"
+                )
                 original_pipeline = research_pipeline_module.ResearchPipeline
 
                 def _handle_event(event: Dict) -> None:
@@ -227,7 +232,9 @@ class SevenPhasePipelineE2ETest(unittest.TestCase):
                 try:
                     for index, fixture_name in enumerate(self.FIXTURE_FILES, start=1):
                         fixture_path = self.FIXTURE_DIR / fixture_name
-                        self.assertTrue(fixture_path.exists(), f"fixture missing: {fixture_name}")
+                        self.assertTrue(
+                            fixture_path.exists(), f"fixture missing: {fixture_name}"
+                        )
                         raw_text = fixture_path.read_text(encoding="utf-8")
                         self.assertLessEqual(fixture_path.stat().st_size, 50 * 1024)
                         self.assertTrue(raw_text.strip())
@@ -242,7 +249,9 @@ class SevenPhasePipelineE2ETest(unittest.TestCase):
                             feasibility=0.83,
                             evidence_support=0.81,
                             confidence=0.8,
-                            source_gap_type="classification_gap" if index % 2 else "philology_gap",
+                            source_gap_type="classification_gap"
+                            if index % 2
+                            else "philology_gap",
                             source_entities=[topic],
                             methodology_tag=infer_methodology_tag(
                                 "classification_gap" if index % 2 else "philology_gap"
@@ -286,24 +295,40 @@ class SevenPhasePipelineE2ETest(unittest.TestCase):
                         finally:
                             runtime.close()
 
-                        self.assertEqual(result.orchestration_result.status, "completed")
+                        self.assertEqual(
+                            result.orchestration_result.status, "completed"
+                        )
                         self.assertEqual(len(result.orchestration_result.phases), 7)
                         self.assertTrue(
-                            all(phase.status == "completed" for phase in result.orchestration_result.phases)
+                            all(
+                                phase.status == "completed"
+                                for phase in result.orchestration_result.phases
+                            )
                         )
                         self.assertEqual(
                             hypothesis.methodology_tag,
-                            result.phase_results["hypothesis"]["results"]["hypotheses"][0]["methodology_tag"],
+                            result.phase_results["hypothesis"]["results"]["hypotheses"][
+                                0
+                            ]["methodology_tag"],
                         )
                         self.assertEqual(
                             hypothesis.evidence_grade,
-                            result.phase_results["hypothesis"]["results"]["hypotheses"][0]["evidence_grade"],
+                            result.phase_results["hypothesis"]["results"]["hypotheses"][
+                                0
+                            ]["evidence_grade"],
                         )
-                        self.assertIn("statistical_analysis", result.orchestration_result.analysis_results)
-                        self.assertIn("evidence", result.orchestration_result.research_artifact)
+                        self.assertIn(
+                            "statistical_analysis",
+                            result.orchestration_result.analysis_results,
+                        )
+                        self.assertIn(
+                            "evidence", result.orchestration_result.research_artifact
+                        )
 
                         report_path = Path(
-                            result.phase_results["publish"]["results"]["output_files"]["markdown"]
+                            result.phase_results["publish"]["results"]["output_files"][
+                                "markdown"
+                            ]
                         )
                         self.assertTrue(report_path.exists(), "IMRD markdown 未落盘")
 
@@ -411,7 +436,9 @@ class SevenPhasePipelineE2ETest(unittest.TestCase):
                     "deliverables": ["imrd_markdown"],
                     "abstract": f"{hypothesis.title} 的结构化研究摘要",
                     "analysis_results": {"statistical_analysis": {"p_value": 0.03}},
-                    "research_artifact": {"evidence": [{"id": hypothesis.hypothesis_id}]},
+                    "research_artifact": {
+                        "evidence": [{"id": hypothesis.hypothesis_id}]
+                    },
                     "output_files": {},
                 },
                 "metadata": {},

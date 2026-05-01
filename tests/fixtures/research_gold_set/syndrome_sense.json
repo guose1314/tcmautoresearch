@@ -1,0 +1,53 @@
+{
+  "case_id": "syndrome_sense_xiaoke",
+  "category": "syndrome_sense",
+  "category_label": "病证术语义项",
+  "input": {
+    "query": "消渴术语在病名与证候义项之间的区分",
+    "source_ref": "jingui_xiaoke_context"
+  },
+  "expected": {
+    "entities": [
+      {"type": "disease_term", "name": "消渴"},
+      {"type": "syndrome_sense", "name": "津伤燥热"},
+      {"type": "symptom", "name": "口渴"}
+    ],
+    "relationships": [
+      {"type": "has_sense", "source": "消渴", "target": "津伤燥热"},
+      {"type": "manifests_as", "source": "津伤燥热", "target": "口渴"}
+    ],
+    "philology_verdict": {
+      "status": "context_disambiguated",
+      "confidence": 0.86
+    },
+    "citation_support": [
+      {
+        "claim_id": "claim_sense_xiaoke_jinshang",
+        "supported": true,
+        "citation_keys": ["jingui_xiaoke_context"]
+      }
+    ]
+  },
+  "actual": {
+    "entities": [
+      {"type": "disease_term", "name": "消渴"},
+      {"type": "syndrome_sense", "name": "津伤燥热"},
+      {"type": "symptom", "name": "口渴"}
+    ],
+    "relationships": [
+      {"type": "has_sense", "source": "消渴", "target": "津伤燥热"},
+      {"type": "manifests_as", "source": "津伤燥热", "target": "口渴"}
+    ],
+    "philology_verdict": {
+      "status": "context_disambiguated",
+      "confidence": 0.86
+    },
+    "citation_support": [
+      {
+        "claim_id": "claim_sense_xiaoke_jinshang",
+        "supported": true,
+        "citation_keys": ["jingui_xiaoke_context"]
+      }
+    ]
+  }
+}

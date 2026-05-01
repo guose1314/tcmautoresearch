@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib
 import logging
 import os
@@ -25,7 +26,10 @@ _SECTION_ORDER = ["introduction", "methods", "results", "discussion", "conclusio
 _TCM_EXTRA_SECTION_ORDER = ["formula_interpretation", "pattern_analysis", "commentary"]
 PAPER_TEMPLATE_DEFAULT = "imrd"
 PAPER_TEMPLATE_TCM = "tcm"
-SUPPORTED_PAPER_TEMPLATES: tuple[str, ...] = (PAPER_TEMPLATE_DEFAULT, PAPER_TEMPLATE_TCM)
+SUPPORTED_PAPER_TEMPLATES: tuple[str, ...] = (
+    PAPER_TEMPLATE_DEFAULT,
+    PAPER_TEMPLATE_TCM,
+)
 _ZH_SECTION_TITLES = {
     "introduction": "1 引言（Introduction）",
     "methods": "2 方法（Methods）",
@@ -62,12 +66,17 @@ _LLM_ANALYSIS_MODULE_ALIASES: Dict[str, tuple[str, ...]] = {
     "formula_comparisons": ("formula_comparisons",),
     "herb_properties_analysis": ("herb_properties_analysis", "herb_properties"),
     "pharmacology_integration": ("pharmacology_integration",),
-    "network_pharmacology": ("network_pharmacology", "network_pharmacology_systems_biology"),
+    "network_pharmacology": (
+        "network_pharmacology",
+        "network_pharmacology_systems_biology",
+    ),
     "supramolecular_physicochemistry": ("supramolecular_physicochemistry",),
     "knowledge_archaeology": ("knowledge_archaeology",),
     "complexity_dynamics": ("complexity_dynamics", "complexity_nonlinear_dynamics"),
     "research_scoring_panel": ("research_scoring_panel",),
     "summary_analysis": ("summary_analysis",),
+    "publish_graph_context": ("publish_graph_context",),
+    "graph_rag_citations": ("graph_rag_citations",),
 }
 _LLM_ANALYSIS_MODULE_LABELS_ZH = {
     "research_perspectives": "研究视角",
@@ -80,6 +89,8 @@ _LLM_ANALYSIS_MODULE_LABELS_ZH = {
     "complexity_dynamics": "复杂性动力学",
     "research_scoring_panel": "研究评分",
     "summary_analysis": "总结分析",
+    "publish_graph_context": "图谱引用追溯",
+    "graph_rag_citations": "GraphRAG 引文",
 }
 
 
@@ -117,31 +128,52 @@ class PaperDraft:
 class PaperWriter(BaseModule):
     """论文撰写器 — 生成 IMRD 结构论文初稿。"""
 
-    def __init__(self, config: Optional[Dict[str, Any]]=None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__("paper_writer", config)
-        self.output_dir = os.path.abspath(str(self.config.get("output_dir", "output/papers")))
+        self.output_dir = os.path.abspath(
+            str(self.config.get("output_dir", "output/papers"))
+        )
         self.language = str(self.config.get("language", "zh")).lower()
         self.default_formats = self._normalize_formats(
-            self.config.get("output_formats") or self.config.get("output_format") or ["markdown", "docx"]
+            self.config.get("output_formats")
+            or self.config.get("output_format")
+            or ["markdown", "docx"]
         )
         self.include_conclusion = bool(self.config.get("include_conclusion", True))
-        self.reference_format = str(self.config.get("reference_format", "GB/T 7714-2015"))
+        self.reference_format = str(
+            self.config.get("reference_format", "GB/T 7714-2015")
+        )
         self.embed_figures = bool(self.config.get("embed_figures", False))
-        self.enable_iterative_refinement = bool(self.config.get("enable_iterative_refinement", True))
-        self.template = self._coerce_template(self.config.get("template", PAPER_TEMPLATE_DEFAULT))
-        self.max_revision_rounds = self._coerce_iteration_limit(self.config.get("max_revision_rounds", 2))
+        self.enable_iterative_refinement = bool(
+            self.config.get("enable_iterative_refinement", True)
+        )
+        self.template = self._coerce_template(
+            self.config.get("template", PAPER_TEMPLATE_DEFAULT)
+        )
+        self.max_revision_rounds = self._coerce_iteration_limit(
+            self.config.get("max_revision_rounds", 2)
+        )
         self.min_revision_rounds = self._coerce_iteration_limit(
             self.config.get("min_revision_rounds", 1),
             upper=self.max_revision_rounds,
         )
-        self.review_score_threshold = self._coerce_score_threshold(self.config.get("review_score_threshold", 0.86))
-        self.min_section_characters = max(120, self._coerce_iteration_limit(self.config.get("min_section_characters", 220), maximum=2000))
+        self.review_score_threshold = self._coerce_score_threshold(
+            self.config.get("review_score_threshold", 0.86)
+        )
+        self.min_section_characters = max(
+            120,
+            self._coerce_iteration_limit(
+                self.config.get("min_section_characters", 220), maximum=2000
+            ),
+        )
         self._Document: Any = None
         self._DocumentType: Any = None
         self._WD_ALIGN_CENTER: Any = None
         self._Pt: Any = None
         self._Inches: Any = None
-        self._citation_manager = CitationManager({"format": self.reference_format, "include_abstract": False})
+        self._citation_manager = CitationManager(
+            {"format": self.reference_format, "include_abstract": False}
+        )
 
     def _do_initialize(self) -> bool:
         os.makedirs(self.output_dir, exist_ok=True)
@@ -158,14 +190,22 @@ class PaperWriter(BaseModule):
             self._Inches = getattr(shared_module, "Inches", None)
         except Exception as exc:
             self._Document = None
-            logger.warning("PaperWriter 未能加载 python-docx，DOCX 导出将不可用: %s", exc)
+            logger.warning(
+                "PaperWriter 未能加载 python-docx，DOCX 导出将不可用: %s", exc
+            )
         logger.info("PaperWriter 初始化完成: output_dir=%s", self.output_dir)
         return True
 
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         initial_draft = self.build_draft(context)
-        draft, iteration_history, review_summary = self._run_iterative_refinement(initial_draft, context)
-        formats = self._normalize_formats(context.get("output_formats") or context.get("output_format") or self.default_formats)
+        draft, iteration_history, review_summary = self._run_iterative_refinement(
+            initial_draft, context
+        )
+        formats = self._normalize_formats(
+            context.get("output_formats")
+            or context.get("output_format")
+            or self.default_formats
+        )
         output_files = self.export_draft(draft, formats=formats, context=context)
         return {
             "success": True,
@@ -203,17 +243,27 @@ class PaperWriter(BaseModule):
             if section_type == "conclusion" and not self.include_conclusion:
                 continue
             title_text = self._section_title(section_type, language)
-            content = section_overrides.get(section_type) or self._generate_section_content(section_type, context, title, language, references)
+            content = section_overrides.get(
+                section_type
+            ) or self._generate_section_content(
+                section_type, context, title, language, references
+            )
             sections.append(
                 PaperSection(
                     section_type=section_type,
                     title=title_text,
                     content=content.strip(),
-                    references=self._section_reference_markers(section_type, references),
+                    references=self._section_reference_markers(
+                        section_type, references
+                    ),
                 )
             )
 
         abstract_text = self._resolve_abstract(context, title, sections, language)
+        publish_graph_context = self._resolve_publish_graph_context(context)
+        graph_rag_citations = self._resolve_graph_rag_citations(
+            context, publish_graph_context
+        )
         metadata = {
             "language": language,
             "generated_at": datetime.now().isoformat(),
@@ -224,6 +274,11 @@ class PaperWriter(BaseModule):
             "figure_paths": self._resolve_figure_paths(context),
             "section_overrides": sorted(section_overrides.keys()),
             "template": template,
+            "publish_graph_context": copy.deepcopy(publish_graph_context),
+            "graph_rag_citation_count": len(graph_rag_citations),
+            "unsupported_claim_warning_count": int(
+                publish_graph_context.get("unsupported_claim_warning_count") or 0
+            ),
         }
         return PaperDraft(
             title=title,
@@ -241,19 +296,27 @@ class PaperWriter(BaseModule):
         context: Dict[str, Any],
     ) -> tuple[PaperDraft, List[Dict[str, Any]], Dict[str, Any]]:
         enabled_flag = context.get("enable_iterative_refinement")
-        enabled = self.enable_iterative_refinement if enabled_flag is None else bool(enabled_flag)
+        enabled = (
+            self.enable_iterative_refinement
+            if enabled_flag is None
+            else bool(enabled_flag)
+        )
         if not enabled:
             return draft, [], self._make_disabled_refinement_summary()
 
         max_rounds = self._coerce_iteration_limit(
-            context.get("max_revision_rounds") or context.get("paper_revision_rounds") or self.max_revision_rounds,
+            context.get("max_revision_rounds")
+            or context.get("paper_revision_rounds")
+            or self.max_revision_rounds,
         )
         min_rounds = self._coerce_iteration_limit(
             context.get("min_revision_rounds") or self.min_revision_rounds,
             upper=max_rounds,
         )
         score_threshold = self._coerce_score_threshold(
-            context.get("review_score_threshold") if context.get("review_score_threshold") is not None else self.review_score_threshold
+            context.get("review_score_threshold")
+            if context.get("review_score_threshold") is not None
+            else self.review_score_threshold
         )
 
         current_draft = self._clone_draft(draft)
@@ -262,9 +325,8 @@ class PaperWriter(BaseModule):
         for round_index in range(1, max_rounds + 1):
             review = self._review_draft(current_draft, context, round_index)
             score = float(review.get("score") or 0.0)
-            should_continue = (
-                round_index < max_rounds
-                and (score < score_threshold or round_index < min_rounds)
+            should_continue = round_index < max_rounds and (
+                score < score_threshold or round_index < min_rounds
             )
 
             applied_revisions: List[str] = []
@@ -328,32 +390,51 @@ class PaperWriter(BaseModule):
         context: Dict[str, Any],
         round_index: int,
     ) -> Dict[str, Any]:
-        language = str(draft.metadata.get("language") or context.get("language") or self.language or "zh").lower()
-        expected_sections = [item for item in _SECTION_ORDER if item != "conclusion" or self.include_conclusion]
+        language = str(
+            draft.metadata.get("language")
+            or context.get("language")
+            or self.language
+            or "zh"
+        ).lower()
+        expected_sections = [
+            item
+            for item in _SECTION_ORDER
+            if item != "conclusion" or self.include_conclusion
+        ]
         section_map = {section.section_type: section for section in draft.sections}
-        missing_sections = [item for item in expected_sections if item not in section_map]
+        missing_sections = [
+            item for item in expected_sections if item not in section_map
+        ]
         short_sections = [
             section.section_type
             for section in draft.sections
             if len(str(section.content or "").strip()) < self.min_section_characters
         ]
         abstract_length = len(str(draft.abstract or "").strip())
-        reference_count = len([ref for ref in draft.references if str(ref or "").strip()])
-        keyword_count = len([keyword for keyword in draft.keywords if str(keyword or "").strip()])
+        reference_count = len(
+            [ref for ref in draft.references if str(ref or "").strip()]
+        )
+        keyword_count = len(
+            [keyword for keyword in draft.keywords if str(keyword or "").strip()]
+        )
 
-        structure_score = max(0.0, 1.0 - len(missing_sections) / max(1, len(expected_sections)))
+        structure_score = max(
+            0.0, 1.0 - len(missing_sections) / max(1, len(expected_sections))
+        )
         depth_score = max(0.0, 1.0 - len(short_sections) / max(1, len(draft.sections)))
-        abstract_score = min(1.0, abstract_length / float(self._minimum_abstract_characters(language)))
+        abstract_score = min(
+            1.0, abstract_length / float(self._minimum_abstract_characters(language))
+        )
         reference_target = 5 if language == "en" else 4
         reference_score = min(1.0, reference_count / float(reference_target))
         keyword_score = min(1.0, keyword_count / 4.0)
 
         score = round(
             0.30 * structure_score
-            +0.30 * depth_score
-            +0.20 * abstract_score
-            +0.15 * reference_score
-            +0.05 * keyword_score,
+            + 0.30 * depth_score
+            + 0.20 * abstract_score
+            + 0.15 * reference_score
+            + 0.05 * keyword_score,
             3,
         )
 
@@ -371,7 +452,12 @@ class PaperWriter(BaseModule):
         }
 
         issues, suggestions = self._collect_review_issues(
-            language, missing_sections, short_sections, abstract_length, reference_count, keyword_count,
+            language,
+            missing_sections,
+            short_sections,
+            abstract_length,
+            reference_count,
+            keyword_count,
         )
 
         return {
@@ -383,40 +469,51 @@ class PaperWriter(BaseModule):
         }
 
     def _collect_review_issues(
-        self, language: str,
-        missing_sections: List[str], short_sections: List[str],
-        abstract_length: int, reference_count: int, keyword_count: int,
+        self,
+        language: str,
+        missing_sections: List[str],
+        short_sections: List[str],
+        abstract_length: int,
+        reference_count: int,
+        keyword_count: int,
     ) -> tuple[List[Dict[str, Any]], List[str]]:
         issues: List[Dict[str, Any]] = []
         suggestions: List[str] = []
         if missing_sections:
             issues.append({"code": "missing_sections", "detail": missing_sections})
             suggestions.append(
-                "Add missing IMRD sections to complete manuscript structure." if language == "en"
+                "Add missing IMRD sections to complete manuscript structure."
+                if language == "en"
                 else "补全缺失章节，确保 IMRD 结构完整。"
             )
         if short_sections:
             issues.append({"code": "short_sections", "detail": short_sections})
             suggestions.append(
-                "Expand short sections with clearer methods, evidence chains, and interpretation details." if language == "en"
+                "Expand short sections with clearer methods, evidence chains, and interpretation details."
+                if language == "en"
                 else "扩展过短章节，补充方法细节、证据链和解释逻辑。"
             )
         if abstract_length < self._minimum_abstract_characters(language):
             issues.append({"code": "abstract_too_short", "detail": abstract_length})
             suggestions.append(
-                "Regenerate abstract to include background, methods, key results, and conclusion." if language == "en"
+                "Regenerate abstract to include background, methods, key results, and conclusion."
+                if language == "en"
                 else "重写摘要，补全背景、方法、核心结果和结论信息。"
             )
         if reference_count < 2:
-            issues.append({"code": "insufficient_references", "detail": reference_count})
+            issues.append(
+                {"code": "insufficient_references", "detail": reference_count}
+            )
             suggestions.append(
-                "Increase reference coverage to support claims in results and discussion." if language == "en"
+                "Increase reference coverage to support claims in results and discussion."
+                if language == "en"
                 else "补充参考文献覆盖，支撑结果与讨论中的关键论断。"
             )
         if keyword_count < 3:
             issues.append({"code": "insufficient_keywords", "detail": keyword_count})
             suggestions.append(
-                "Add at least three representative keywords for indexing." if language == "en"
+                "Add at least three representative keywords for indexing."
+                if language == "en"
                 else "补充至少 3 个代表性关键词，提升检索与索引质量。"
             )
         return issues, suggestions
@@ -429,20 +526,31 @@ class PaperWriter(BaseModule):
         round_index: int,
     ) -> tuple[PaperDraft, List[str]]:
         revised = self._clone_draft(draft)
-        language = str(revised.metadata.get("language") or context.get("language") or self.language or "zh").lower()
+        language = str(
+            revised.metadata.get("language")
+            or context.get("language")
+            or self.language
+            or "zh"
+        ).lower()
         raw_metrics = review.get("metrics") if isinstance(review, dict) else None
         metrics: Dict[str, Any] = raw_metrics if isinstance(raw_metrics, dict) else {}
         protected_sections = set(revised.metadata.get("section_overrides") or [])
         applied: List[str] = []
 
-        applied += self._revise_expand_short_sections(revised, metrics, context, language, round_index, protected_sections)
-        applied += self._revise_add_missing_sections(revised, metrics, context, language, round_index)
+        applied += self._revise_expand_short_sections(
+            revised, metrics, context, language, round_index, protected_sections
+        )
+        applied += self._revise_add_missing_sections(
+            revised, metrics, context, language, round_index
+        )
         applied += self._revise_abstract(revised, metrics, context, language)
         applied += self._revise_references(revised, metrics, context)
         applied += self._revise_keywords(revised, metrics, context)
 
         if not applied and revised.sections:
-            applied += self._revise_enhance_fallback(revised, context, language, round_index, protected_sections)
+            applied += self._revise_enhance_fallback(
+                revised, context, language, round_index, protected_sections
+            )
 
         updated_metadata = dict(revised.metadata)
         updated_metadata["last_revision_round"] = round_index
@@ -452,41 +560,66 @@ class PaperWriter(BaseModule):
         return revised, applied
 
     def _revise_expand_short_sections(
-        self, revised: PaperDraft, metrics: Dict[str, Any],
-        context: Dict[str, Any], language: str, round_index: int,
+        self,
+        revised: PaperDraft,
+        metrics: Dict[str, Any],
+        context: Dict[str, Any],
+        language: str,
+        round_index: int,
         protected_sections: set,
     ) -> List[str]:
         applied: List[str] = []
         short_sections = set(metrics.get("short_sections") or [])
         for section in revised.sections:
-            if section.section_type not in short_sections or section.section_type in protected_sections:
+            if (
+                section.section_type not in short_sections
+                or section.section_type in protected_sections
+            ):
                 continue
-            addition = self._build_revision_paragraph(section.section_type, context, language, round_index)
+            addition = self._build_revision_paragraph(
+                section.section_type, context, language, round_index
+            )
             if not addition:
                 continue
-            section.content = f"{str(section.content or '').rstrip()}\n\n{addition}".strip()
+            section.content = (
+                f"{str(section.content or '').rstrip()}\n\n{addition}".strip()
+            )
             applied.append(f"扩展章节: {section.section_type}")
         return applied
 
     def _revise_add_missing_sections(
-        self, revised: PaperDraft, metrics: Dict[str, Any],
-        context: Dict[str, Any], language: str, round_index: int,
+        self,
+        revised: PaperDraft,
+        metrics: Dict[str, Any],
+        context: Dict[str, Any],
+        language: str,
+        round_index: int,
     ) -> List[str]:
         applied: List[str] = []
         missing_sections = list(metrics.get("missing_sections") or [])
         for section_type in missing_sections:
             if section_type == "conclusion" and not self.include_conclusion:
                 continue
-            content = self._generate_section_content(section_type, context, revised.title, language, revised.references)
+            content = self._generate_section_content(
+                section_type, context, revised.title, language, revised.references
+            )
             if len(str(content or "").strip()) < self.min_section_characters:
-                addition = self._build_revision_paragraph(section_type, context, language, round_index)
-                content = f"{str(content or '').strip()}\n\n{addition}".strip() if addition else str(content or "").strip()
+                addition = self._build_revision_paragraph(
+                    section_type, context, language, round_index
+                )
+                content = (
+                    f"{str(content or '').strip()}\n\n{addition}".strip()
+                    if addition
+                    else str(content or "").strip()
+                )
             revised.sections.append(
                 PaperSection(
                     section_type=section_type,
                     title=self._section_title(section_type, language),
                     content=content,
-                    references=self._section_reference_markers(section_type, revised.references),
+                    references=self._section_reference_markers(
+                        section_type, revised.references
+                    ),
                 )
             )
             applied.append(f"补全章节: {section_type}")
@@ -495,16 +628,25 @@ class PaperWriter(BaseModule):
         return applied
 
     def _revise_abstract(
-        self, revised: PaperDraft, metrics: Dict[str, Any],
-        context: Dict[str, Any], language: str,
+        self,
+        revised: PaperDraft,
+        metrics: Dict[str, Any],
+        context: Dict[str, Any],
+        language: str,
     ) -> List[str]:
-        if int(metrics.get("abstract_length") or 0) < self._minimum_abstract_characters(language):
+        if int(metrics.get("abstract_length") or 0) < self._minimum_abstract_characters(
+            language
+        ):
             revised_abstract_context = {**context, "abstract": ""}
-            revised.abstract = self._resolve_abstract(revised_abstract_context, revised.title, revised.sections, language)
+            revised.abstract = self._resolve_abstract(
+                revised_abstract_context, revised.title, revised.sections, language
+            )
             return ["重写摘要"]
         return []
 
-    def _revise_references(self, revised: PaperDraft, metrics: Dict[str, Any], context: Dict[str, Any]) -> List[str]:
+    def _revise_references(
+        self, revised: PaperDraft, metrics: Dict[str, Any], context: Dict[str, Any]
+    ) -> List[str]:
         if int(metrics.get("reference_count") or 0) >= 2:
             return []
         candidates = self._resolve_references(context)
@@ -518,7 +660,9 @@ class PaperWriter(BaseModule):
             return ["补充参考文献"]
         return []
 
-    def _revise_keywords(self, revised: PaperDraft, metrics: Dict[str, Any], context: Dict[str, Any]) -> List[str]:
+    def _revise_keywords(
+        self, revised: PaperDraft, metrics: Dict[str, Any], context: Dict[str, Any]
+    ) -> List[str]:
         if int(metrics.get("keyword_count") or 0) >= 3:
             return []
         keyword_candidates = self._resolve_keywords(context)
@@ -533,20 +677,34 @@ class PaperWriter(BaseModule):
         return []
 
     def _revise_enhance_fallback(
-        self, revised: PaperDraft, context: Dict[str, Any],
-        language: str, round_index: int, protected_sections: set,
+        self,
+        revised: PaperDraft,
+        context: Dict[str, Any],
+        language: str,
+        round_index: int,
+        protected_sections: set,
     ) -> List[str]:
         section = next(
-            (item for item in revised.sections if item.section_type not in protected_sections),
+            (
+                item
+                for item in revised.sections
+                if item.section_type not in protected_sections
+            ),
             revised.sections[0],
         )
-        addition = self._build_revision_paragraph(section.section_type, context, language, round_index)
+        addition = self._build_revision_paragraph(
+            section.section_type, context, language, round_index
+        )
         if addition:
-            section.content = f"{str(section.content or '').rstrip()}\n\n{addition}".strip()
+            section.content = (
+                f"{str(section.content or '').rstrip()}\n\n{addition}".strip()
+            )
             return [f"增强章节: {section.section_type}"]
         return []
 
-    def _summarize_review_issues(self, history: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _summarize_review_issues(
+        self, history: Sequence[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         bucket: Dict[str, int] = {}
         for entry in history:
             for issue in entry.get("issues") or []:
@@ -554,7 +712,9 @@ class PaperWriter(BaseModule):
                 bucket[code] = bucket.get(code, 0) + 1
         return [
             {"code": code, "count": count}
-            for code, count in sorted(bucket.items(), key=lambda item: (-item[1], item[0]))
+            for code, count in sorted(
+                bucket.items(), key=lambda item: (-item[1], item[0])
+            )
         ]
 
     def _build_revision_paragraph(
@@ -573,7 +733,10 @@ class PaperWriter(BaseModule):
                 "discussion": f"Revision round {round_index} broadens implication analysis, highlights limitations, and aligns findings with downstream validation priorities.",
                 "conclusion": f"Revision round {round_index} refines the concluding claims to match reported evidence scope and practical manuscript deliverables.",
             }
-            return templates_en.get(section_type, f"Revision round {round_index} enhances the {section_type} section by improving evidence coherence and narrative completeness.")
+            return templates_en.get(
+                section_type,
+                f"Revision round {round_index} enhances the {section_type} section by improving evidence coherence and narrative completeness.",
+            )
 
         templates_zh = {
             "introduction": f"第 {round_index} 轮修订补充了研究背景与问题界定，围绕“{objective}”进一步明确证据缺口与研究动机。",
@@ -582,7 +745,10 @@ class PaperWriter(BaseModule):
             "discussion": f"第 {round_index} 轮修订完善了讨论深度，补充了局限性说明与后续验证方向。",
             "conclusion": f"第 {round_index} 轮修订收敛了结论表达，使结论与证据范围、研究目标及交付产物保持一致。",
         }
-        return templates_zh.get(section_type, f"第 {round_index} 轮修订增强了本节叙事完整性，补充了证据链说明与关键结论支撑。")
+        return templates_zh.get(
+            section_type,
+            f"第 {round_index} 轮修订增强了本节叙事完整性，补充了证据链说明与关键结论支撑。",
+        )
 
     def _clone_draft(self, draft: PaperDraft) -> PaperDraft:
         return PaperDraft(
@@ -603,11 +769,16 @@ class PaperWriter(BaseModule):
             metadata=dict(draft.metadata),
         )
 
-    def _sort_sections_by_order(self, sections: Sequence[PaperSection]) -> List[PaperSection]:
+    def _sort_sections_by_order(
+        self, sections: Sequence[PaperSection]
+    ) -> List[PaperSection]:
         order_map = {name: index for index, name in enumerate(_SECTION_ORDER)}
         return sorted(
             list(sections),
-            key=lambda item: (order_map.get(item.section_type, len(order_map)), item.section_type),
+            key=lambda item: (
+                order_map.get(item.section_type, len(order_map)),
+                item.section_type,
+            ),
         )
 
     def _minimum_abstract_characters(self, language: str) -> int:
@@ -617,9 +788,9 @@ class PaperWriter(BaseModule):
         self,
         value: Any,
         *,
-        minimum: int=1,
-        maximum: int=6,
-        upper: Optional[int]=None,
+        minimum: int = 1,
+        maximum: int = 6,
+        upper: Optional[int] = None,
     ) -> int:
         if upper is not None:
             maximum = min(maximum, max(minimum, int(upper)))
@@ -640,19 +811,25 @@ class PaperWriter(BaseModule):
         self,
         draft: PaperDraft,
         formats: Sequence[str],
-        context: Optional[Dict[str, Any]]=None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, str]:
         exec_context = context or {}
-        output_dir = os.path.abspath(str(exec_context.get("output_dir") or self.output_dir))
+        output_dir = os.path.abspath(
+            str(exec_context.get("output_dir") or self.output_dir)
+        )
         os.makedirs(output_dir, exist_ok=True)
         file_stem = self._resolve_file_stem(exec_context, draft.title)
         outputs: Dict[str, str] = {}
         for fmt in formats:
             if fmt == "markdown":
-                path = self._resolve_output_path(exec_context, output_dir, file_stem, fmt)
+                path = self._resolve_output_path(
+                    exec_context, output_dir, file_stem, fmt
+                )
                 outputs[fmt] = self._export_markdown(draft, path)
             elif fmt == "docx":
-                path = self._resolve_output_path(exec_context, output_dir, file_stem, fmt)
+                path = self._resolve_output_path(
+                    exec_context, output_dir, file_stem, fmt
+                )
                 outputs[fmt] = self._export_docx(draft, path, exec_context)
             else:
                 raise ValueError(f"不支持的论文输出格式: {fmt}")
@@ -715,10 +892,14 @@ class PaperWriter(BaseModule):
                 derived.append(text)
         return derived
 
-    def _derive_keywords_from_mining(self, context: Dict[str, Any], existing: List[str]) -> List[str]:
+    def _derive_keywords_from_mining(
+        self, context: Dict[str, Any], existing: List[str]
+    ) -> List[str]:
         derived = list(existing)
         data_mining = self._resolve_data_mining_result(context)
-        cluster_summary = list(data_mining.get("clustering", {}).get("cluster_summary", []) or [])
+        cluster_summary = list(
+            data_mining.get("clustering", {}).get("cluster_summary", []) or []
+        )
         if cluster_summary:
             top_items = list(cluster_summary[0].get("top_items", []) or [])
             for item in top_items:
@@ -730,9 +911,15 @@ class PaperWriter(BaseModule):
     def _resolve_references(self, context: Dict[str, Any]) -> List[str]:
         explicit_references = context.get("formatted_references")
         if isinstance(explicit_references, str) and explicit_references.strip():
-            return [line.strip() for line in explicit_references.splitlines() if line.strip()]
+            return [
+                line.strip()
+                for line in explicit_references.splitlines()
+                if line.strip()
+            ]
         if isinstance(explicit_references, list):
-            return [str(item).strip() for item in explicit_references if str(item).strip()]
+            return [
+                str(item).strip() for item in explicit_references if str(item).strip()
+            ]
 
         raw_records = (
             context.get("citation_records")
@@ -743,11 +930,15 @@ class PaperWriter(BaseModule):
         if not raw_records:
             return []
 
-        citation_result = self._citation_manager.execute({"records": raw_records, "format": self.reference_format})
+        citation_result = self._citation_manager.execute(
+            {"records": raw_records, "format": self.reference_format}
+        )
         formatted = citation_result.get("formatted_references", "")
         return [line.strip() for line in str(formatted).splitlines() if line.strip()]
 
-    def _extract_literature_records(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _extract_literature_records(
+        self, context: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
         literature_pipeline = get_phase_value(context, "literature_pipeline")
         if isinstance(literature_pipeline, dict):
             records = literature_pipeline.get("records")
@@ -755,14 +946,18 @@ class PaperWriter(BaseModule):
                 return [record for record in records if isinstance(record, dict)]
         analysis_results = get_phase_value(context, "analysis_results")
         if isinstance(analysis_results, dict):
-            literature_pipeline = get_phase_value(analysis_results, "literature_pipeline")
+            literature_pipeline = get_phase_value(
+                analysis_results, "literature_pipeline"
+            )
             if isinstance(literature_pipeline, dict):
                 records = literature_pipeline.get("records")
                 if isinstance(records, list):
                     return [record for record in records if isinstance(record, dict)]
         return []
 
-    def _resolve_section_overrides(self, context: Dict[str, Any], language: str) -> Dict[str, str]:
+    def _resolve_section_overrides(
+        self, context: Dict[str, Any], language: str
+    ) -> Dict[str, str]:
         overrides: Dict[str, str] = {}
         for key in _SECTION_ORDER:
             value = context.get(key)
@@ -776,8 +971,12 @@ class PaperWriter(BaseModule):
             overrides["abstract"] = abstract_override.strip()
         return overrides
 
-    def _parse_sections_payload(self, context: Dict[str, Any], overrides: Dict[str, str]) -> None:
-        sections_payload = context.get("sections") or context.get("paper_sections") or []
+    def _parse_sections_payload(
+        self, context: Dict[str, Any], overrides: Dict[str, str]
+    ) -> None:
+        sections_payload = (
+            context.get("sections") or context.get("paper_sections") or []
+        )
         if isinstance(sections_payload, dict):
             sections_iterable = [sections_payload]
         else:
@@ -785,7 +984,14 @@ class PaperWriter(BaseModule):
         for item in sections_iterable:
             if not isinstance(item, dict):
                 continue
-            section_type = self._normalize_section_type(str(item.get("section_type") or item.get("type") or item.get("name") or ""))
+            section_type = self._normalize_section_type(
+                str(
+                    item.get("section_type")
+                    or item.get("type")
+                    or item.get("name")
+                    or ""
+                )
+            )
             content = str(item.get("content") or "").strip()
             if section_type and content:
                 overrides[section_type] = content
@@ -818,15 +1024,23 @@ class PaperWriter(BaseModule):
         if isinstance(explicit, str) and explicit.strip():
             return explicit.strip()
 
-        objective = str(context.get("objective") or "围绕中医古籍与现代证据的协同分析").strip()
+        objective = str(
+            context.get("objective") or "围绕中医古籍与现代证据的协同分析"
+        ).strip()
         record_count = len(self._extract_literature_records(context))
         evidence_count = len(self._resolve_evidence(context))
         mining = self._resolve_data_mining_result(context)
         rule_count = len(mining.get("association_rules", {}).get("rules", []) or [])
-        cluster_count = len(mining.get("clustering", {}).get("cluster_summary", []) or [])
-        methods_line = "本研究采用格式转换、信息统一化、实体抽取、语义分析与数据挖掘联合流程。"
+        cluster_count = len(
+            mining.get("clustering", {}).get("cluster_summary", []) or []
+        )
+        methods_line = (
+            "本研究采用格式转换、信息统一化、实体抽取、语义分析与数据挖掘联合流程。"
+        )
         results_line = f"共整合 {record_count} 条文献记录、{evidence_count} 条证据记录，识别 {rule_count} 条候选关联规则与 {cluster_count} 个聚类模式。"
-        conclusion_line = "结果为中医古籍研究提供了结构化证据基础，并支持后续科研论文与图表生成。"
+        conclusion_line = (
+            "结果为中医古籍研究提供了结构化证据基础，并支持后续科研论文与图表生成。"
+        )
 
         if language == "en":
             return (
@@ -873,11 +1087,17 @@ class PaperWriter(BaseModule):
         language: str,
         references: Sequence[str],
     ) -> str:
-        objective = str(context.get("objective") or "阐明中医古籍证据与现代研究之间的关联").strip()
+        objective = str(
+            context.get("objective") or "阐明中医古籍证据与现代研究之间的关联"
+        ).strip()
         research_domain = str(context.get("research_domain") or "中医古籍研究").strip()
         gap = self._resolve_gap_summary(context)
         record_count = len(self._extract_literature_records(context))
-        reference_note = f"当前纳入 {record_count} 条文献记录作为研究背景支持。" if record_count else "现有研究背景主要来自多源文献与古籍证据。"
+        reference_note = (
+            f"当前纳入 {record_count} 条文献记录作为研究背景支持。"
+            if record_count
+            else "现有研究背景主要来自多源文献与古籍证据。"
+        )
         if language == "en":
             return (
                 f"This draft manuscript focuses on {research_domain.lower()} and is organized around the objective of {objective}. "
@@ -901,11 +1121,25 @@ class PaperWriter(BaseModule):
         figure_paths = self._resolve_figure_paths(context)
         mining = self._resolve_data_mining_result(context)
         analysis_results = self._resolve_analysis_results(context)
-        evidence_protocol = analysis_results.get("evidence_protocol") if isinstance(analysis_results, dict) else {}
-        evidence_record_count = len(evidence_protocol.get("evidence_records") or []) if isinstance(evidence_protocol, dict) else 0
-        claim_count = len(evidence_protocol.get("claims") or []) if isinstance(evidence_protocol, dict) else 0
+        evidence_protocol = (
+            analysis_results.get("evidence_protocol")
+            if isinstance(analysis_results, dict)
+            else {}
+        )
+        evidence_record_count = (
+            len(evidence_protocol.get("evidence_records") or [])
+            if isinstance(evidence_protocol, dict)
+            else 0
+        )
+        claim_count = (
+            len(evidence_protocol.get("claims") or [])
+            if isinstance(evidence_protocol, dict)
+            else 0
+        )
         mining_methods = list(mining.get("methods_executed") or [])
-        protocol_text = self._build_evidence_protocol_text(language, evidence_record_count, claim_count)
+        protocol_text = self._build_evidence_protocol_text(
+            language, evidence_record_count, claim_count
+        )
         if language == "en":
             return (
                 f"A structured analytical workflow was used for {title}. "
@@ -915,19 +1149,28 @@ class PaperWriter(BaseModule):
                 f"All outputs were organized into a manuscript-ready IMRD structure for reproducible reporting."
                 f"{protocol_text}"
             )
-        methods = ["格式转换", "信息统一化", "实体抽取", "语义分析", "数据挖掘", "结果格式化"]
+        methods = [
+            "格式转换",
+            "信息统一化",
+            "实体抽取",
+            "语义分析",
+            "数据挖掘",
+            "结果格式化",
+        ]
         if figure_paths:
             methods.append("科研图片生成")
         methods_text = "、".join(methods)
         return (
             f"本研究采用结构化研究流程，对与{title}相关的古籍文本和现代文献进行整合分析。"
-            f"数据来源包括{ '、'.join(sources) if sources else '古籍文本与现代数据库文献' }。"
+            f"数据来源包括{'、'.join(sources) if sources else '古籍文本与现代数据库文献'}。"
             f"整体流程涵盖{methods_text}等步骤，确保原始资料、分析结果与最终初稿之间保持可追溯关联。"
-            f"数据挖掘环节主要执行{ '、'.join(mining_methods) if mining_methods else '关联规则与聚类分析' }，并将结果纳入论文叙事。"
+            f"数据挖掘环节主要执行{'、'.join(mining_methods) if mining_methods else '关联规则与聚类分析'}，并将结果纳入论文叙事。"
             f"{protocol_text}"
         )
 
-    def _build_evidence_protocol_text(self, language: str, evidence_record_count: int, claim_count: int) -> str:
+    def _build_evidence_protocol_text(
+        self, language: str, evidence_record_count: int, claim_count: int
+    ) -> str:
         if not (evidence_record_count or claim_count):
             return ""
         if language == "en":
@@ -953,35 +1196,69 @@ class PaperWriter(BaseModule):
         analysis_results = self._resolve_analysis_results(context)
         statistical_analysis = self._resolve_statistical_analysis(context)
         evidence_grade_summary = self._resolve_evidence_grade_summary(context)
-        llm_analysis_modules = self._resolve_llm_analysis_modules(context, analysis_results)
+        llm_analysis_modules = self._resolve_llm_analysis_modules(
+            context, analysis_results
+        )
         rule_count = len(mining.get("association_rules", {}).get("rules", []) or [])
-        cluster_summary = list(mining.get("clustering", {}).get("cluster_summary", []) or [])
+        cluster_summary = list(
+            mining.get("clustering", {}).get("cluster_summary", []) or []
+        )
         figure_paths = self._resolve_figure_paths(context)
-        graph_evidence_section = self._build_similar_formula_graph_evidence_section(context, language)
-        analysis_note = self._build_analysis_result_note(language, statistical_analysis, analysis_results)
-        evidence_grade_note = self._build_evidence_grade_result_note(language, evidence_grade_summary)
-        llm_context_note = self._build_llm_analysis_context_note(language, llm_analysis_modules)
+        graph_evidence_section = self._build_similar_formula_graph_evidence_section(
+            context, language
+        )
+        analysis_note = self._build_analysis_result_note(
+            language, statistical_analysis, analysis_results
+        )
+        evidence_grade_note = self._build_evidence_grade_result_note(
+            language, evidence_grade_summary
+        )
+        llm_context_note = self._build_llm_analysis_context_note(
+            language, llm_analysis_modules
+        )
         top_cluster_text = self._build_top_cluster_text(cluster_summary)
         base = self._assemble_results_text(
-            language, len(entities), len(evidence), rule_count,
-            cluster_summary, top_cluster_text, analysis_note,
-            evidence_grade_note, llm_context_note, figure_paths,
+            language,
+            len(entities),
+            len(evidence),
+            rule_count,
+            cluster_summary,
+            top_cluster_text,
+            analysis_note,
+            evidence_grade_note,
+            llm_context_note,
+            figure_paths,
         )
-        return f"{base}\n\n{graph_evidence_section}".strip() if graph_evidence_section else base
+        return (
+            f"{base}\n\n{graph_evidence_section}".strip()
+            if graph_evidence_section
+            else base
+        )
 
     def _build_top_cluster_text(self, cluster_summary: List[Any]) -> str:
         if not cluster_summary:
             return ""
         first_cluster = cluster_summary[0]
-        top_items = [item.get("item") for item in list(first_cluster.get("top_items", []) or [])[:3] if item.get("item")]
+        top_items = [
+            item.get("item")
+            for item in list(first_cluster.get("top_items", []) or [])[:3]
+            if item.get("item")
+        ]
         if top_items:
             return f"其中最主要的聚类特征集中在{'、'.join(top_items)}。"
         return ""
 
     def _assemble_results_text(
-        self, language: str, entity_count: int, evidence_count: int,
-        rule_count: int, cluster_summary: List[Any], top_cluster_text: str,
-        analysis_note: str, evidence_grade_note: str, llm_context_note: str,
+        self,
+        language: str,
+        entity_count: int,
+        evidence_count: int,
+        rule_count: int,
+        cluster_summary: List[Any],
+        top_cluster_text: str,
+        analysis_note: str,
+        evidence_grade_note: str,
+        llm_context_note: str,
         figure_paths: List[str],
     ) -> str:
         if language == "en":
@@ -997,14 +1274,18 @@ class PaperWriter(BaseModule):
             f"{top_cluster_text}{analysis_note}{evidence_grade_note}{llm_context_note}{figure_note} 这些结果为后续结果展示、图表引用和讨论部分的证据解释提供了结构化支撑。"
         )
 
-    def _build_similar_formula_graph_evidence_section(self, context: Dict[str, Any], language: str) -> str:
+    def _build_similar_formula_graph_evidence_section(
+        self, context: Dict[str, Any], language: str
+    ) -> str:
         summary = self._resolve_similar_formula_graph_evidence_summary(context)
         matches = list(summary.get("matches") or [])
         if not matches:
             return ""
 
         top_matches = matches[:3]
-        heading = "Class-like Formula Graph Evidence" if language == "en" else "类方图谱证据"
+        heading = (
+            "Class-like Formula Graph Evidence" if language == "en" else "类方图谱证据"
+        )
         lines = [heading]
         for match in top_matches:
             lines.append(self._format_formula_graph_match(match, language))
@@ -1016,13 +1297,43 @@ class PaperWriter(BaseModule):
         formula_a = match.get("formula_name", "")
         formula_b = match.get("similar_formula_name", "")
         if language == "en":
-            shared_herbs = ", ".join(str(item) for item in list(match.get("shared_herbs") or []) if item) or "none"
-            shared_syndromes = ", ".join(str(item) for item in list(match.get("shared_syndromes") or []) if item) or "none"
-            similarity_text = f", similarity score {similarity_score:.2f}" if isinstance(similarity_score, (int, float)) else ""
+            shared_herbs = (
+                ", ".join(
+                    str(item) for item in list(match.get("shared_herbs") or []) if item
+                )
+                or "none"
+            )
+            shared_syndromes = (
+                ", ".join(
+                    str(item)
+                    for item in list(match.get("shared_syndromes") or [])
+                    if item
+                )
+                or "none"
+            )
+            similarity_text = (
+                f", similarity score {similarity_score:.2f}"
+                if isinstance(similarity_score, (int, float))
+                else ""
+            )
             return f"- {formula_a} vs {formula_b}: graph evidence score {score:.2f}{similarity_text}; shared herbs {shared_herbs}; shared syndromes {shared_syndromes}."
-        shared_herbs = "、".join(str(item) for item in list(match.get("shared_herbs") or []) if item) or "暂无"
-        shared_syndromes = "、".join(str(item) for item in list(match.get("shared_syndromes") or []) if item) or "暂无"
-        similarity_text = f"，embedding 相似度 {float(similarity_score):.2f}" if isinstance(similarity_score, (int, float)) else ""
+        shared_herbs = (
+            "、".join(
+                str(item) for item in list(match.get("shared_herbs") or []) if item
+            )
+            or "暂无"
+        )
+        shared_syndromes = (
+            "、".join(
+                str(item) for item in list(match.get("shared_syndromes") or []) if item
+            )
+            or "暂无"
+        )
+        similarity_text = (
+            f"，embedding 相似度 {float(similarity_score):.2f}"
+            if isinstance(similarity_score, (int, float))
+            else ""
+        )
         return f"- {formula_a} 与 {formula_b} 的图谱证据分数为 {score:.2f}{similarity_text}；共享药物包括 {shared_herbs}；共享证候包括 {shared_syndromes}。"
 
     def _build_discussion(
@@ -1038,29 +1349,42 @@ class PaperWriter(BaseModule):
         recommendations = self._resolve_recommendations(context)
         evidence_grade_summary = self._resolve_evidence_grade_summary(context)
         llm_analysis_modules = self._resolve_llm_analysis_modules(context)
-        association_rules = list(mining.get("association_rules", {}).get("rules", []) or [])
+        association_rules = list(
+            mining.get("association_rules", {}).get("rules", []) or []
+        )
         high_rule = association_rules[0] if association_rules else None
         rule_text = ""
         if high_rule:
             antecedent = "、".join(high_rule.get("antecedent", []))
             consequent = "、".join(high_rule.get("consequent", []))
-            rule_text = f"关联规则提示 {antecedent} 与 {consequent} 之间存在稳定共现关系。"
+            rule_text = (
+                f"关联规则提示 {antecedent} 与 {consequent} 之间存在稳定共现关系。"
+            )
         limitation = self._resolve_limitations_text(context)
         hypothesis_text = ""
         if hypothesis:
             hypothesis_text = f"已有假设结果进一步提示：{hypothesis}。"
         hypothesis_audit_text = self._build_hypothesis_audit_text(context, language)
-        evidence_grade_text = self._build_evidence_grade_discussion_text(language, evidence_grade_summary)
-        quality_text = self._build_quality_discussion_text(language, quality_metrics, recommendations)
-        llm_discussion_text = self._build_llm_analysis_discussion_text(language, llm_analysis_modules)
+        evidence_grade_text = self._build_evidence_grade_discussion_text(
+            language, evidence_grade_summary
+        )
+        quality_text = self._build_quality_discussion_text(
+            language, quality_metrics, recommendations
+        )
+        llm_discussion_text = self._build_llm_analysis_discussion_text(
+            language, llm_analysis_modules
+        )
+        graph_citation_text = self._build_graph_citation_discussion_text(
+            language, context
+        )
         if language == "en":
             return (
                 f"The manuscript draft suggests that integrated evidence processing can improve coherence between classical knowledge and modern analysis. "
-                f"{rule_text} {hypothesis_text}{hypothesis_audit_text}{evidence_grade_text}{quality_text}{llm_discussion_text} A key limitation is that {limitation}"
+                f"{rule_text} {hypothesis_text}{hypothesis_audit_text}{evidence_grade_text}{quality_text}{llm_discussion_text}{graph_citation_text} A key limitation is that {limitation}"
             )
         return (
             f"讨论部分表明，将古籍知识、现代文献与结构化分析结果整合到统一写作框架中，有助于提升科研叙事的一致性与可追溯性。"
-            f"{rule_text}{hypothesis_text}{hypothesis_audit_text}{evidence_grade_text}{quality_text}{llm_discussion_text}{limitation} 因此，本初稿更适合作为投稿前的研究骨架和专家协作底稿，而非最终定稿。"
+            f"{rule_text}{hypothesis_text}{hypothesis_audit_text}{evidence_grade_text}{quality_text}{llm_discussion_text}{graph_citation_text}{limitation} 因此，本初稿更适合作为投稿前的研究骨架和专家协作底稿，而非最终定稿。"
         )
 
     def _build_conclusion(
@@ -1070,14 +1394,12 @@ class PaperWriter(BaseModule):
         language: str,
         references: Sequence[str],
     ) -> str:
-        objective = str(context.get("objective") or "构建可复用的中医古籍研究写作流程").strip()
+        objective = str(
+            context.get("objective") or "构建可复用的中医古籍研究写作流程"
+        ).strip()
         if language == "en":
-            return (
-                f"In conclusion, this IMRD draft operationalizes {objective} and provides a manuscript-ready scaffold for subsequent expert revision, figure integration, and journal submission."
-            )
-        return (
-            f"综上，本服务围绕“{objective}”生成了可直接修订的 IMRD 论文初稿，能够把证据、数据挖掘结果与图表产物汇聚为统一稿件，为后续学术投稿提供基础。"
-        )
+            return f"In conclusion, this IMRD draft operationalizes {objective} and provides a manuscript-ready scaffold for subsequent expert revision, figure integration, and journal submission."
+        return f"综上，本服务围绕“{objective}”生成了可直接修订的 IMRD 论文初稿，能够把证据、数据挖掘结果与图表产物汇聚为统一稿件，为后续学术投稿提供基础。"
 
     # ── 中医论文模板（template="tcm" 启用） ────────────────────────────
 
@@ -1101,7 +1423,9 @@ class PaperWriter(BaseModule):
         if formulas:
             first = formulas[0]
             if isinstance(first, dict):
-                primary_formula = str(first.get("name") or first.get("canonical") or "").strip()
+                primary_formula = str(
+                    first.get("name") or first.get("canonical") or ""
+                ).strip()
             else:
                 primary_formula = str(first).strip()
         herb_names: List[str] = []
@@ -1112,7 +1436,9 @@ class PaperWriter(BaseModule):
                 name = str(item or "").strip()
             if name and name not in herb_names:
                 herb_names.append(name)
-        head_herbs = "、".join(herb_names[:5]) if herb_names else "（待补充君臣佐使药味）"
+        head_herbs = (
+            "、".join(herb_names[:5]) if herb_names else "（待补充君臣佐使药味）"
+        )
         if language == "en":
             formula_text = primary_formula or "the principal formula"
             return (
@@ -1187,15 +1513,25 @@ class PaperWriter(BaseModule):
     def _resolve_gap_summary(self, context: Dict[str, Any]) -> str:
         gap_payload = context.get("gap_analysis") or context.get("clinical_gap") or {}
         if isinstance(gap_payload, dict):
-            summary = gap_payload.get("summary") or gap_payload.get("gap_summary") or gap_payload.get("description")
+            summary = (
+                gap_payload.get("summary")
+                or gap_payload.get("gap_summary")
+                or gap_payload.get("description")
+            )
             if isinstance(summary, str) and summary.strip():
-                return summary.strip() + ("。" if not summary.strip().endswith("。") else "")
-        return "当前研究仍需进一步明确古籍理论、现代证据与可验证科研问题之间的映射路径。"
+                return summary.strip() + (
+                    "。" if not summary.strip().endswith("。") else ""
+                )
+        return (
+            "当前研究仍需进一步明确古籍理论、现代证据与可验证科研问题之间的映射路径。"
+        )
 
     def _resolve_source_list(self, context: Dict[str, Any]) -> List[str]:
         sources = []
         for record in self._extract_literature_records(context):
-            source = record.get("source") or record.get("journal") or record.get("venue")
+            source = (
+                record.get("source") or record.get("journal") or record.get("venue")
+            )
             text = str(source or "").strip()
             if text and text not in sources:
                 sources.append(text)
@@ -1219,11 +1555,17 @@ class PaperWriter(BaseModule):
         return nested if isinstance(nested, dict) else {}
 
     def _resolve_hypothesis(self, context: Dict[str, Any]) -> str:
-        hypothesis = get_phase_value(context, "hypothesis") or get_phase_value(context, "hypotheses") or []
+        hypothesis = (
+            get_phase_value(context, "hypothesis")
+            or get_phase_value(context, "hypotheses")
+            or []
+        )
         if isinstance(hypothesis, str):
             return hypothesis.strip()
         if isinstance(hypothesis, dict):
-            return str(hypothesis.get("title") or hypothesis.get("statement") or "").strip()
+            return str(
+                hypothesis.get("title") or hypothesis.get("statement") or ""
+            ).strip()
         if isinstance(hypothesis, list) and hypothesis:
             first = hypothesis[0]
             if isinstance(first, dict):
@@ -1234,7 +1576,9 @@ class PaperWriter(BaseModule):
             return self._resolve_hypothesis(research_artifact)
         return ""
 
-    def _build_hypothesis_audit_text(self, context: Dict[str, Any], language: str) -> str:
+    def _build_hypothesis_audit_text(
+        self, context: Dict[str, Any], language: str
+    ) -> str:
         summary = self._resolve_hypothesis_audit_summary(context)
         if not summary:
             return ""
@@ -1248,21 +1592,33 @@ class PaperWriter(BaseModule):
         relationship_count = int(summary.get("relationship_count") or 0)
 
         if language == "en":
-            source_text = ", ".join(merged_sources) if merged_sources else "multiple evidence channels"
-            relation_text = f" across {relationship_count} audited relations" if relationship_count else ""
+            source_text = (
+                ", ".join(merged_sources)
+                if merged_sources
+                else "multiple evidence channels"
+            )
+            relation_text = (
+                f" across {relationship_count} audited relations"
+                if relationship_count
+                else ""
+            )
             return (
                 f"Audit evidence indicates a mechanism-chain completeness score of {mechanism_score:.2f}"
                 f" with merged relation sources from {source_text}{relation_text}. "
             )
 
         source_text = "、".join(merged_sources) if merged_sources else "多源关系证据"
-        relation_text = f"，共覆盖 {relationship_count} 条审计关系" if relationship_count else ""
+        relation_text = (
+            f"，共覆盖 {relationship_count} 条审计关系" if relationship_count else ""
+        )
         return (
             f"假设审计显示，当前优先假设的机制链完整性评分为 {mechanism_score:.2f}，"
             f"关系证据融合自 {source_text}{relation_text}。"
         )
 
-    def _resolve_hypothesis_audit_summary(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _resolve_hypothesis_audit_summary(
+        self, context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         direct = get_phase_value(context, "hypothesis_audit_summary")
         if isinstance(direct, dict) and direct:
             return direct
@@ -1282,7 +1638,9 @@ class PaperWriter(BaseModule):
                     return nested
         return {}
 
-    def _resolve_evidence_grade_summary(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _resolve_evidence_grade_summary(
+        self, context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         direct = get_phase_value(context, "evidence_grade_summary")
         if isinstance(direct, dict) and direct:
             return direct
@@ -1300,10 +1658,14 @@ class PaperWriter(BaseModule):
 
         output_data = self._resolve_output_data(context)
         if isinstance(output_data, dict):
-            resolved = self._extract_evidence_grade_summary(get_phase_value(output_data, "analysis_results"))
+            resolved = self._extract_evidence_grade_summary(
+                get_phase_value(output_data, "analysis_results")
+            )
             if resolved:
                 return resolved
-            resolved = self._extract_evidence_grade_summary(get_phase_value(output_data, "research_artifact"))
+            resolved = self._extract_evidence_grade_summary(
+                get_phase_value(output_data, "research_artifact")
+            )
             if resolved:
                 return resolved
         return {}
@@ -1327,7 +1689,9 @@ class PaperWriter(BaseModule):
                 return nested
         return {}
 
-    def _normalize_evidence_grade_summary(self, evidence_grade: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_evidence_grade_summary(
+        self, evidence_grade: Dict[str, Any]
+    ) -> Dict[str, Any]:
         bias_distribution: Dict[str, int] = {}
         for key, value in (evidence_grade.get("bias_risk_distribution") or {}).items():
             try:
@@ -1376,7 +1740,11 @@ class PaperWriter(BaseModule):
             evidence_protocol = analysis_results.get("evidence_protocol")
             if isinstance(evidence_protocol, dict):
                 yield evidence_protocol.get("evidence_records")
-        nested_reasoning = analysis_results.get("reasoning_results", {}) if isinstance(analysis_results, dict) else {}
+        nested_reasoning = (
+            analysis_results.get("reasoning_results", {})
+            if isinstance(analysis_results, dict)
+            else {}
+        )
         if isinstance(nested_reasoning, dict):
             yield nested_reasoning.get("evidence_records")
         research_artifact = self._resolve_research_artifact(context)
@@ -1439,7 +1807,11 @@ class PaperWriter(BaseModule):
             return direct
 
         analysis_results = self._resolve_analysis_results(context)
-        nested = analysis_results.get("llm_analysis_context") if isinstance(analysis_results, dict) else None
+        nested = (
+            analysis_results.get("llm_analysis_context")
+            if isinstance(analysis_results, dict)
+            else None
+        )
         if isinstance(nested, dict) and nested:
             return nested
         return {}
@@ -1447,13 +1819,17 @@ class PaperWriter(BaseModule):
     def _resolve_llm_analysis_modules(
         self,
         context: Dict[str, Any],
-        analysis_results: Optional[Dict[str, Any]]=None,
+        analysis_results: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if analysis_results is None:
             analysis_results = self._resolve_analysis_results(context)
 
         llm_analysis_context = self._resolve_llm_analysis_context(context)
-        direct_modules = llm_analysis_context.get("analysis_modules") if isinstance(llm_analysis_context, dict) else None
+        direct_modules = (
+            llm_analysis_context.get("analysis_modules")
+            if isinstance(llm_analysis_context, dict)
+            else None
+        )
 
         containers: List[Any] = [
             direct_modules,
@@ -1529,7 +1905,9 @@ class PaperWriter(BaseModule):
 
         total_count = len(_LLM_ANALYSIS_MODULE_ALIASES)
         if language == "en":
-            preview = ", ".join(module_name.replace("_", " ") for module_name in populated[:4])
+            preview = ", ".join(
+                module_name.replace("_", " ") for module_name in populated[:4]
+            )
             if len(populated) > 4:
                 preview = f"{preview}, ..."
             return (
@@ -1554,14 +1932,109 @@ class PaperWriter(BaseModule):
         language: str,
         analysis_modules: Dict[str, Any],
     ) -> str:
-        has_summary = self._has_analysis_payload((analysis_modules or {}).get("summary_analysis"))
-        has_scoring = self._has_analysis_payload((analysis_modules or {}).get("research_scoring_panel"))
+        has_summary = self._has_analysis_payload(
+            (analysis_modules or {}).get("summary_analysis")
+        )
+        has_scoring = self._has_analysis_payload(
+            (analysis_modules or {}).get("research_scoring_panel")
+        )
         if not has_summary and not has_scoring:
             return ""
 
         if language == "en":
             return " The discussion also cross-checked summary analysis and research scoring outputs to keep claims aligned with quantitative evidence."
         return "讨论还结合总结分析与研究评分结果对关键论断进行了交叉校验，确保结论与量化证据一致。"
+
+    def _build_graph_citation_discussion_text(
+        self,
+        language: str,
+        context: Dict[str, Any],
+    ) -> str:
+        publish_graph_context = self._resolve_publish_graph_context(context)
+        if not publish_graph_context:
+            return ""
+        trace_counts = publish_graph_context.get("trace_counts")
+        if not isinstance(trace_counts, dict):
+            traces = publish_graph_context.get("traces")
+            trace_counts = {
+                trace_type: len(values)
+                for trace_type, values in (traces or {}).items()
+                if isinstance(values, list)
+            }
+        evidence_claim_count = int(trace_counts.get("EvidenceClaim") or 0)
+        version_witness_count = int(trace_counts.get("VersionWitness") or 0)
+        citation_record_count = int(trace_counts.get("CitationRecord") or 0)
+        unsupported_count = int(
+            publish_graph_context.get("unsupported_claim_warning_count") or 0
+        )
+        if (
+            evidence_claim_count <= 0
+            and version_witness_count <= 0
+            and citation_record_count <= 0
+            and unsupported_count <= 0
+        ):
+            return ""
+
+        if language == "en":
+            warning_text = (
+                f" {unsupported_count} manuscript claims still lack graph-backed support and should be reviewed before submission."
+                if unsupported_count
+                else ""
+            )
+            return (
+                f" Graph traceability links {evidence_claim_count} evidence claims, "
+                f"{version_witness_count} version witnesses, and {citation_record_count} citation records to the draft discussion."
+                f"{warning_text}"
+            )
+
+        warning_text = (
+            f"仍有 {unsupported_count} 条论断缺少图谱证据支撑，投稿前需进一步复核。"
+            if unsupported_count
+            else ""
+        )
+        return (
+            f"图谱引用追溯已将 {evidence_claim_count} 条 EvidenceClaim、"
+            f"{version_witness_count} 条 VersionWitness 与 {citation_record_count} 条 CitationRecord "
+            f"纳入讨论依据。{warning_text}"
+        )
+
+    def _resolve_publish_graph_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        direct = get_phase_value(context, "publish_graph_context")
+        if isinstance(direct, dict) and direct:
+            return direct
+
+        analysis_results = self._resolve_analysis_results(context)
+        nested = get_phase_value(analysis_results, "publish_graph_context")
+        if isinstance(nested, dict) and nested:
+            return nested
+
+        research_artifact = get_phase_value(context, "research_artifact")
+        if isinstance(research_artifact, dict):
+            nested = get_phase_value(research_artifact, "publish_graph_context")
+            if isinstance(nested, dict) and nested:
+                return nested
+        return {}
+
+    def _resolve_graph_rag_citations(
+        self,
+        context: Dict[str, Any],
+        publish_graph_context: Dict[str, Any] | None = None,
+    ) -> List[Dict[str, Any]]:
+        direct = get_phase_value(context, "graph_rag_citations")
+        if isinstance(direct, list):
+            return [dict(item) for item in direct if isinstance(item, dict)]
+
+        graph_context = publish_graph_context or self._resolve_publish_graph_context(
+            context
+        )
+        nested = (
+            graph_context.get("graph_rag_citations")
+            if isinstance(graph_context, dict)
+            else []
+        )
+        if isinstance(nested, list):
+            return [dict(item) for item in nested if isinstance(item, dict)]
+        return []
 
     def _resolve_statistical_analysis(self, context: Dict[str, Any]) -> Dict[str, Any]:
         analysis_results = self._resolve_analysis_results(context)
@@ -1590,30 +2063,50 @@ class PaperWriter(BaseModule):
         if isinstance(recommendations, list):
             return [str(item).strip() for item in recommendations if str(item).strip()]
         analysis_results = self._resolve_analysis_results(context)
-        recommendations = analysis_results.get("recommendations") if isinstance(analysis_results, dict) else None
+        recommendations = (
+            analysis_results.get("recommendations")
+            if isinstance(analysis_results, dict)
+            else None
+        )
         if isinstance(recommendations, list):
             return [str(item).strip() for item in recommendations if str(item).strip()]
         output_data = self._resolve_output_data(context)
-        nested_recommendations = get_phase_value(output_data, "recommendations") if isinstance(output_data, dict) else None
+        nested_recommendations = (
+            get_phase_value(output_data, "recommendations")
+            if isinstance(output_data, dict)
+            else None
+        )
         if isinstance(nested_recommendations, list):
-            return [str(item).strip() for item in nested_recommendations if str(item).strip()]
+            return [
+                str(item).strip()
+                for item in nested_recommendations
+                if str(item).strip()
+            ]
         return []
 
     def _resolve_limitations_text(self, context: Dict[str, Any]) -> str:
         statistical_analysis = self._resolve_statistical_analysis(context)
-        raw_limitations = statistical_analysis.get("limitations") if isinstance(statistical_analysis, dict) else None
+        raw_limitations = (
+            statistical_analysis.get("limitations")
+            if isinstance(statistical_analysis, dict)
+            else None
+        )
         if not raw_limitations and not is_phase_result_payload(context):
             raw_limitations = context.get("limitations")
 
         if isinstance(raw_limitations, str):
             limitation_text = raw_limitations.strip()
         elif isinstance(raw_limitations, (list, tuple, set)):
-            limitation_text = "；".join(str(item).strip() for item in raw_limitations if str(item).strip())
+            limitation_text = "；".join(
+                str(item).strip() for item in raw_limitations if str(item).strip()
+            )
         else:
             limitation_text = ""
 
         if not limitation_text:
-            limitation_text = "当前结果仍依赖自动化抽取与结构化规则，尚需结合专家复核与外部验证"
+            limitation_text = (
+                "当前结果仍依赖自动化抽取与结构化规则，尚需结合专家复核与外部验证"
+            )
         if not limitation_text.endswith(("。", ".")):
             limitation_text = f"{limitation_text}。"
         return limitation_text
@@ -1632,8 +2125,15 @@ class PaperWriter(BaseModule):
         effect_size = statistical_analysis.get("effect_size")
         significance = statistical_analysis.get("statistical_significance")
 
-        has_signal = significance is True or p_value is not None or confidence_level is not None or effect_size is not None
-        metric_bits = self._format_statistical_metric_bits(language, p_value, confidence_level, effect_size)
+        has_signal = (
+            significance is True
+            or p_value is not None
+            or confidence_level is not None
+            or effect_size is not None
+        )
+        metric_bits = self._format_statistical_metric_bits(
+            language, p_value, confidence_level, effect_size
+        )
 
         fragments: List[str] = []
         if language == "en":
@@ -1658,16 +2158,27 @@ class PaperWriter(BaseModule):
         return "".join(fragments).strip()
 
     def _format_statistical_metric_bits(
-        self, language: str,
-        p_value: Any, confidence_level: Any, effect_size: Any,
+        self,
+        language: str,
+        p_value: Any,
+        confidence_level: Any,
+        effect_size: Any,
     ) -> List[str]:
         bits: List[str] = []
         if p_value is not None:
             bits.append(f"p={p_value}")
         if confidence_level is not None:
-            bits.append(f"confidence level {confidence_level}" if language == "en" else f"置信水平 {confidence_level}")
+            bits.append(
+                f"confidence level {confidence_level}"
+                if language == "en"
+                else f"置信水平 {confidence_level}"
+            )
         if effect_size is not None:
-            bits.append(f"effect size {effect_size}" if language == "en" else f"效应量 {effect_size}")
+            bits.append(
+                f"effect size {effect_size}"
+                if language == "en"
+                else f"效应量 {effect_size}"
+            )
         return bits
 
     def _build_evidence_grade_result_note(
@@ -1682,19 +2193,29 @@ class PaperWriter(BaseModule):
         if study_count <= 0:
             return ""
 
-        overall_grade_raw = str(evidence_grade_summary.get("overall_grade") or "").strip().lower()
+        overall_grade_raw = (
+            str(evidence_grade_summary.get("overall_grade") or "").strip().lower()
+        )
         overall_grade = self._format_grade_label(overall_grade_raw, language)
         try:
             overall_score = float(evidence_grade_summary.get("overall_score") or 0.0)
         except (TypeError, ValueError):
             overall_score = 0.0
 
-        bias_bits = self._format_bias_distribution_bits(evidence_grade_summary, language)
-        return self._assemble_evidence_grade_sentence(language, study_count, overall_grade, overall_score, bias_bits)
+        bias_bits = self._format_bias_distribution_bits(
+            evidence_grade_summary, language
+        )
+        return self._assemble_evidence_grade_sentence(
+            language, study_count, overall_grade, overall_score, bias_bits
+        )
 
-    def _format_bias_distribution_bits(self, evidence_grade_summary: Dict[str, Any], language: str) -> List[str]:
+    def _format_bias_distribution_bits(
+        self, evidence_grade_summary: Dict[str, Any], language: str
+    ) -> List[str]:
         bits: List[str] = []
-        for key, value in sorted((evidence_grade_summary.get("bias_risk_distribution") or {}).items()):
+        for key, value in sorted(
+            (evidence_grade_summary.get("bias_risk_distribution") or {}).items()
+        ):
             try:
                 count = int(value)
             except (TypeError, ValueError):
@@ -1704,12 +2225,18 @@ class PaperWriter(BaseModule):
             if language == "en":
                 bits.append(f"{count} {key}")
             else:
-                bits.append(f"{self._format_bias_label(str(key), language)}风险 {count} 项")
+                bits.append(
+                    f"{self._format_bias_label(str(key), language)}风险 {count} 项"
+                )
         return bits
 
     def _assemble_evidence_grade_sentence(
-        self, language: str, study_count: int,
-        overall_grade: str, overall_score: float, bias_bits: List[str],
+        self,
+        language: str,
+        study_count: int,
+        overall_grade: str,
+        overall_score: float,
+        bias_bits: List[str],
     ) -> str:
         if language == "en":
             sentence = f"GRADE assessment across {study_count} studies indicated overall evidence certainty of {overall_grade}"
@@ -1740,7 +2267,9 @@ class PaperWriter(BaseModule):
         if study_count <= 0:
             return ""
 
-        overall_grade = str(evidence_grade_summary.get("overall_grade") or "").strip().lower()
+        overall_grade = (
+            str(evidence_grade_summary.get("overall_grade") or "").strip().lower()
+        )
         if language == "en":
             if overall_grade in {"high", "moderate"}:
                 return " The GRADE profile suggests that the current narrative is supported by at least moderate evidence certainty."
@@ -1748,7 +2277,9 @@ class PaperWriter(BaseModule):
 
         if overall_grade in {"high", "moderate"}:
             return "GRADE 证据谱提示当前结论已获得至少中等强度的文献支持，但仍需持续跟踪高偏倚来源。"
-        return "GRADE 证据谱提示当前结论仍受低确定性证据限制，后续应优先补充更高质量研究。"
+        return (
+            "GRADE 证据谱提示当前结论仍受低确定性证据限制，后续应优先补充更高质量研究。"
+        )
 
     def _build_quality_discussion_text(
         self,
@@ -1756,21 +2287,45 @@ class PaperWriter(BaseModule):
         quality_metrics: Dict[str, Any],
         recommendations: List[str],
     ) -> str:
-        confidence_score = quality_metrics.get("confidence_score") if isinstance(quality_metrics, dict) else None
-        completeness = quality_metrics.get("completeness") if isinstance(quality_metrics, dict) else None
+        confidence_score = (
+            quality_metrics.get("confidence_score")
+            if isinstance(quality_metrics, dict)
+            else None
+        )
+        completeness = (
+            quality_metrics.get("completeness")
+            if isinstance(quality_metrics, dict)
+            else None
+        )
         recommendation_text = "；".join(recommendations[:2]) if recommendations else ""
-        metric_bits = self._format_quality_metric_bits(language, confidence_score, completeness)
-        return self._assemble_quality_discussion(language, metric_bits, recommendation_text)
+        metric_bits = self._format_quality_metric_bits(
+            language, confidence_score, completeness
+        )
+        return self._assemble_quality_discussion(
+            language, metric_bits, recommendation_text
+        )
 
-    def _format_quality_metric_bits(self, language: str, confidence_score: Any, completeness: Any) -> List[str]:
+    def _format_quality_metric_bits(
+        self, language: str, confidence_score: Any, completeness: Any
+    ) -> List[str]:
         bits: List[str] = []
         if confidence_score is not None:
-            bits.append(f"confidence score {confidence_score}" if language == "en" else f"置信分数 {confidence_score}")
+            bits.append(
+                f"confidence score {confidence_score}"
+                if language == "en"
+                else f"置信分数 {confidence_score}"
+            )
         if completeness is not None:
-            bits.append(f"completeness {completeness}" if language == "en" else f"完整度 {completeness}")
+            bits.append(
+                f"completeness {completeness}"
+                if language == "en"
+                else f"完整度 {completeness}"
+            )
         return bits
 
-    def _assemble_quality_discussion(self, language: str, metric_bits: List[str], recommendation_text: str) -> str:
+    def _assemble_quality_discussion(
+        self, language: str, metric_bits: List[str], recommendation_text: str
+    ) -> str:
         if language == "en":
             parts: List[str] = []
             if metric_bits:
@@ -1795,7 +2350,9 @@ class PaperWriter(BaseModule):
             return risk_level
         return _BIAS_LABELS_ZH.get(risk_level, risk_level)
 
-    def _resolve_similar_formula_graph_evidence_summary(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _resolve_similar_formula_graph_evidence_summary(
+        self, context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         value = get_phase_value(context, "similar_formula_graph_evidence_summary")
         if isinstance(value, dict):
             return value
@@ -1806,21 +2363,36 @@ class PaperWriter(BaseModule):
             if isinstance(value, dict):
                 return value
 
-        for container in (self._resolve_analysis_results(context), self._resolve_output_data(context)):
+        for container in (
+            self._resolve_analysis_results(context),
+            self._resolve_output_data(context),
+        ):
             if isinstance(container, dict):
                 nested_artifact = get_phase_value(container, "research_artifact")
                 if isinstance(nested_artifact, dict):
-                    value = nested_artifact.get("similar_formula_graph_evidence_summary")
+                    value = nested_artifact.get(
+                        "similar_formula_graph_evidence_summary"
+                    )
                     if isinstance(value, dict):
                         return value
         return {}
 
     def _resolve_figure_paths(self, context: Dict[str, Any]) -> List[str]:
         if isinstance(context.get("figure_paths"), list):
-            return [str(path).strip() for path in context.get("figure_paths", []) if str(path).strip()]
+            return [
+                str(path).strip()
+                for path in context.get("figure_paths", [])
+                if str(path).strip()
+            ]
         figure_result = context.get("figure_result") or {}
-        if isinstance(figure_result, dict) and isinstance(figure_result.get("figure_paths"), list):
-            return [str(path).strip() for path in figure_result.get("figure_paths", []) if str(path).strip()]
+        if isinstance(figure_result, dict) and isinstance(
+            figure_result.get("figure_paths"), list
+        ):
+            return [
+                str(path).strip()
+                for path in figure_result.get("figure_paths", [])
+                if str(path).strip()
+            ]
         return []
 
     def _section_title(self, section_type: str, language: str) -> str:
@@ -1828,7 +2400,9 @@ class PaperWriter(BaseModule):
             return _EN_SECTION_TITLES.get(section_type, section_type.title())
         return _ZH_SECTION_TITLES.get(section_type, section_type.title())
 
-    def _section_reference_markers(self, section_type: str, references: Sequence[str]) -> List[str]:
+    def _section_reference_markers(
+        self, section_type: str, references: Sequence[str]
+    ) -> List[str]:
         if not references:
             return []
         if section_type == "introduction":
@@ -1861,7 +2435,9 @@ class PaperWriter(BaseModule):
         return normalized or ["markdown"]
 
     def _resolve_file_stem(self, context: Dict[str, Any], title: str) -> str:
-        file_stem = str(context.get("file_stem") or context.get("base_name") or "").strip()
+        file_stem = str(
+            context.get("file_stem") or context.get("base_name") or ""
+        ).strip()
         if file_stem:
             return file_stem
         output_file = str(context.get("output_file") or "").strip()
@@ -1869,12 +2445,24 @@ class PaperWriter(BaseModule):
             return os.path.splitext(os.path.basename(output_file))[0]
         return _slugify(title)
 
-    def _resolve_output_path(self, context: Dict[str, Any], output_dir: str, file_stem: str, fmt: str) -> str:
+    def _resolve_output_path(
+        self, context: Dict[str, Any], output_dir: str, file_stem: str, fmt: str
+    ) -> str:
         output_files = get_phase_artifact_map(context)
         if fmt in output_files:
             return os.path.abspath(str(output_files[fmt]))
         output_file = str(context.get("output_file") or "").strip()
-        if output_file and len(self._normalize_formats(context.get("output_formats") or context.get("output_format") or self.default_formats)) == 1:
+        if (
+            output_file
+            and len(
+                self._normalize_formats(
+                    context.get("output_formats")
+                    or context.get("output_format")
+                    or self.default_formats
+                )
+            )
+            == 1
+        ):
             return os.path.abspath(output_file)
         extension = ".md" if fmt == "markdown" else ".docx"
         return os.path.abspath(os.path.join(output_dir, f"{file_stem}{extension}"))
@@ -1885,7 +2473,9 @@ class PaperWriter(BaseModule):
         lines = [f"# {draft.title}", ""]
         lines.extend(self._build_markdown_front_matter(draft))
 
-        lines.extend([("## 摘要" if language != "en" else "## Abstract"), draft.abstract, ""])
+        lines.extend(
+            [("## 摘要" if language != "en" else "## Abstract"), draft.abstract, ""]
+        )
         keyword_label = "关键词" if language != "en" else "Keywords"
         lines.append(f"{keyword_label}：{'；'.join(draft.keywords)}")
         lines.append("")
@@ -1925,7 +2515,9 @@ class PaperWriter(BaseModule):
             lines.append("")
         return lines
 
-    def _export_docx(self, draft: PaperDraft, output_path: str, context: Dict[str, Any]) -> str:
+    def _export_docx(
+        self, draft: PaperDraft, output_path: str, context: Dict[str, Any]
+    ) -> str:
         if self._Document is None:
             raise ImportError("DOCX 导出依赖 python-docx，请先安装 python-docx")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -1936,7 +2528,9 @@ class PaperWriter(BaseModule):
 
         abstract_heading = "摘要" if language != "en" else "Abstract"
         keyword_label = "关键词" if language != "en" else "Keywords"
-        keyword_text = "；".join(draft.keywords) if language != "en" else "; ".join(draft.keywords)
+        keyword_text = (
+            "；".join(draft.keywords) if language != "en" else "; ".join(draft.keywords)
+        )
         document.add_heading(abstract_heading, level=1)
         document.add_paragraph(draft.abstract)
         document.add_paragraph(f"{keyword_label}：{keyword_text}")
@@ -1946,7 +2540,9 @@ class PaperWriter(BaseModule):
             for paragraph_text in self._split_paragraphs(section.content):
                 self._write_docx_section_block(document, paragraph_text)
 
-        self._write_docx_figures(document, list(draft.metadata.get("figure_paths") or []))
+        self._write_docx_figures(
+            document, list(draft.metadata.get("figure_paths") or [])
+        )
 
         ref_heading = "参考文献" if language != "en" else "References"
         document.add_heading(ref_heading, level=1)
@@ -1969,7 +2565,12 @@ class PaperWriter(BaseModule):
         author = str(draft.metadata.get("author") or "").strip()
         affiliation = str(draft.metadata.get("affiliation") or "").strip()
         journal = str(draft.metadata.get("journal") or "").strip()
-        for line in [author, affiliation, journal and f"Target journal: {journal}", f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M')}"]:
+        for line in [
+            author,
+            affiliation,
+            journal and f"Target journal: {journal}",
+            f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        ]:
             if not line:
                 continue
             paragraph = document.add_paragraph(line)
@@ -1980,7 +2581,9 @@ class PaperWriter(BaseModule):
             return
         document.add_heading("Figures", level=1)
         for index, path in enumerate(figure_paths, start=1):
-            paragraph = document.add_paragraph(f"Figure {index}: {os.path.basename(path)}")
+            paragraph = document.add_paragraph(
+                f"Figure {index}: {os.path.basename(path)}"
+            )
             if self.embed_figures and os.path.exists(path) and self._Inches is not None:
                 try:
                     document.add_picture(path, width=self._Inches(5.8))
@@ -1996,7 +2599,11 @@ class PaperWriter(BaseModule):
         font.name = "Times New Roman"
 
     def _split_paragraphs(self, content: str) -> List[str]:
-        parts = [segment.strip() for segment in re.split(r"\n{2,}", content) if segment.strip()]
+        parts = [
+            segment.strip()
+            for segment in re.split(r"\n{2,}", content)
+            if segment.strip()
+        ]
         return parts or [""]
 
     def _write_docx_section_block(self, document: Any, paragraph_text: str) -> None:

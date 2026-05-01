@@ -7,7 +7,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.infrastructure.monitoring import MonitoringService
-from src.infrastructure.persistence import DatabaseManager
+from src.infrastructure.persistence import (
+    DatabaseManager,
+    OutboxEventORM,
+    OutboxStatusEnum,
+)
 from src.infrastructure.research_session_repo import ResearchSessionRepository
 from src.research.phase_orchestrator import PhaseOrchestrator
 from src.research.study_session_manager import (
@@ -22,6 +26,7 @@ from src.storage.consistency import (
     STATUS_DISABLED,
     build_consistency_state,
 )
+from src.storage.outbox import GRAPH_PROJECTION_EVENT_TYPE
 from src.storage.transaction import TransactionCoordinator
 from tools.backfill_research_session_nodes import _build_backfill_report
 
@@ -330,24 +335,43 @@ class TestStructuredPersistVerification(unittest.TestCase):
         self.assertEqual(storage_persistence["mode"], "dual_write")
         self.assertEqual(storage_persistence["consistency_state"]["mode"], "dual_write")
         self.assertEqual(storage_persistence["neo4j_status"], "active")
+        self.assertEqual(storage_persistence["graph_projection_status"], "queued")
+        self.assertEqual(storage_persistence["graph_projection_mode"], "outbox")
         self.assertGreater(storage_persistence["graph_node_count"], 0)
         self.assertGreater(storage_persistence["graph_edge_count"], 0)
-        self.assertFalse(storage_persistence["eventual_consistency"]["graph_backfill_pending"])
+        self.assertFalse(
+            storage_persistence["eventual_consistency"]["graph_backfill_pending"]
+        )
+        self.assertTrue(
+            storage_persistence["eventual_consistency"]["graph_projection_pending"]
+        )
 
-        executed_queries = [query for query, _params in neo4j_driver.executed_queries]
-        self.assertTrue(any("ResearchSession" in query for query in executed_queries))
-        self.assertTrue(any("ResearchPhaseExecution" in query for query in executed_queries))
-        self.assertTrue(any("ResearchArtifact" in query for query in executed_queries))
-        self.assertTrue(any("VersionWitness" in query for query in executed_queries))
-        self.assertTrue(any("VersionLineage" in query for query in executed_queries))
+        self.assertEqual(neo4j_driver.executed_queries, [])
+        with self.db_manager.session_scope() as session:
+            rows = session.query(OutboxEventORM).all()
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            self.assertEqual(row.status, OutboxStatusEnum.PENDING.value)
+            self.assertEqual(row.event_type, GRAPH_PROJECTION_EVENT_TYPE)
+            payload = row.payload
+            self.assertEqual(payload["contract_version"], "graph-projection-outbox-v1")
+            graph_payload = payload["graph_payload"]
+            labels = {node["label"] for node in graph_payload["nodes"]}
+            self.assertIn("ResearchSession", labels)
+            self.assertIn("ResearchPhaseExecution", labels)
+            self.assertIn("ResearchArtifact", labels)
+            self.assertIn("VersionWitness", labels)
+            self.assertIn("VersionLineage", labels)
 
 
 class TestNeo4jDegradationExposureVerification(unittest.TestCase):
     def test_neo4j_disabled_is_exposed_as_pg_only(self):
-        factory = StorageBackendFactory({
-            "database": {"type": "postgresql"},
-            "neo4j": {"enabled": False},
-        })
+        factory = StorageBackendFactory(
+            {
+                "database": {"type": "postgresql"},
+                "neo4j": {"enabled": False},
+            }
+        )
         factory._initialized = True
         factory._db_manager = object()
 
@@ -358,10 +382,12 @@ class TestNeo4jDegradationExposureVerification(unittest.TestCase):
         self.assertNotEqual(state.neo4j_status, "active")
 
     def test_neo4j_init_failure_is_exposed_as_pg_only(self):
-        factory = StorageBackendFactory({
-            "database": {"type": "postgresql"},
-            "neo4j": {"enabled": True},
-        })
+        factory = StorageBackendFactory(
+            {
+                "database": {"type": "postgresql"},
+                "neo4j": {"enabled": True},
+            }
+        )
         factory._initialized = True
         factory._db_manager = object()
         factory._neo4j_driver = None
@@ -373,7 +399,9 @@ class TestNeo4jDegradationExposureVerification(unittest.TestCase):
         self.assertNotEqual(state.neo4j_status, "active")
 
     def test_driver_not_connected_is_not_misreported_by_monitoring(self):
-        service = MonitoringService(_FakeSettings(), SimpleNamespace(), _FakeJobManager())
+        service = MonitoringService(
+            _FakeSettings(), SimpleNamespace(), _FakeJobManager()
+        )
         degraded_state = build_consistency_state(
             initialized=True,
             db_type="postgresql",
@@ -383,10 +411,16 @@ class TestNeo4jDegradationExposureVerification(unittest.TestCase):
             neo4j_driver_connected=False,
         )
 
-        with patch.object(service, "_get_consistency_state_dict", return_value=degraded_state.to_dict()):
+        with patch.object(
+            service,
+            "_get_consistency_state_dict",
+            return_value=degraded_state.to_dict(),
+        ):
             persistence = service._build_persistence_summary()
 
-        self.assertEqual(persistence["structured_storage"]["consistency_state"]["mode"], "pg_only")
+        self.assertEqual(
+            persistence["structured_storage"]["consistency_state"]["mode"], "pg_only"
+        )
         self.assertNotEqual(
             persistence["structured_storage"]["consistency_state"]["neo4j_status"],
             "active",
@@ -406,14 +440,20 @@ class TestAnomalyVocabularyVerification(unittest.TestCase):
         self.assertTrue(result.needs_backfill)
         self.assertEqual(result.compensations_applied, 0)
         self.assertEqual(result.storage_mode, "dual_write")
-        self.assertTrue(any(item.startswith("failed:") for item in result.compensation_details))
+        self.assertTrue(
+            any(item.startswith("failed:") for item in result.compensation_details)
+        )
         self.assertIn("PostgreSQL commit 失败", result.error)
 
-    def test_schema_drift_and_backfill_pending_share_consistency_contract_across_surfaces(self):
-        factory = StorageBackendFactory({
-            "database": {"type": "postgresql"},
-            "neo4j": {"enabled": True},
-        })
+    def test_schema_drift_and_backfill_pending_share_consistency_contract_across_surfaces(
+        self,
+    ):
+        factory = StorageBackendFactory(
+            {
+                "database": {"type": "postgresql"},
+                "neo4j": {"enabled": True},
+            }
+        )
         factory._initialized = True
         factory._db_manager = SimpleNamespace(
             inspect_schema_drift=lambda: {
@@ -441,11 +481,19 @@ class TestAnomalyVocabularyVerification(unittest.TestCase):
                 "version_lineages": [],
             }
         )
-        service = MonitoringService(_FakeSettings(), SimpleNamespace(), _FakeJobManager())
-        with patch.object(service, "_get_consistency_state_dict", return_value=consistency_state.to_dict()):
+        service = MonitoringService(
+            _FakeSettings(), SimpleNamespace(), _FakeJobManager()
+        )
+        with patch.object(
+            service,
+            "_get_consistency_state_dict",
+            return_value=consistency_state.to_dict(),
+        ):
             persistence_summary = service._build_persistence_summary()
         backfill_report = _build_backfill_report(
-            settings=SimpleNamespace(environment="test", loaded_files=[], loaded_secret_files=[]),
+            settings=SimpleNamespace(
+                environment="test", loaded_files=[], loaded_secret_files=[]
+            ),
             init_report={
                 "db_type": "postgresql",
                 "pg_status": "active",
@@ -455,8 +503,14 @@ class TestAnomalyVocabularyVerification(unittest.TestCase):
             consistency_state=consistency_state.to_dict(),
             schema_summary={"expected_version": "1.1.0"},
             writeback_summary={"status": "active", "updated_document_count": 1},
-            philology_artifact_writeback_summary={"status": "active", "created_artifact_count": 1},
-            phase_graph_assets_writeback_summary={"status": "active", "updated_phase_count": 1},
+            philology_artifact_writeback_summary={
+                "status": "active",
+                "created_artifact_count": 1,
+            },
+            phase_graph_assets_writeback_summary={
+                "status": "active",
+                "updated_phase_count": 1,
+            },
             graph_summary={"status": "skipped", "node_count": 0, "edge_count": 0},
         )
 
@@ -470,14 +524,20 @@ class TestAnomalyVocabularyVerification(unittest.TestCase):
             runtime_eventual_consistency["reason"],
         )
         self.assertTrue(
-            persistence_summary["structured_storage"]["consistency_state"]["schema_drift_detected"]
+            persistence_summary["structured_storage"]["consistency_state"][
+                "schema_drift_detected"
+            ]
         )
         self.assertEqual(
             persistence_summary["structured_storage"]["consistency_state"]["mode"],
             MODE_PG_ONLY,
         )
-        self.assertTrue(backfill_report["storage"]["consistency_state"]["schema_drift_detected"])
-        self.assertEqual(backfill_report["storage"]["consistency_state"]["mode"], MODE_PG_ONLY)
+        self.assertTrue(
+            backfill_report["storage"]["consistency_state"]["schema_drift_detected"]
+        )
+        self.assertEqual(
+            backfill_report["storage"]["consistency_state"]["mode"], MODE_PG_ONLY
+        )
         self.assertIn("fields_written", backfill_report["backfill"])
 
 

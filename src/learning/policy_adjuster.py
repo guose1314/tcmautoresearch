@@ -26,7 +26,7 @@ import logging
 import threading
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone
 from typing import Any, Deque, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -98,9 +98,13 @@ class PolicyAdjuster:
         performance_target: float = 0.80,
     ) -> None:
         self._lock = threading.RLock()
-        self._evidence_policy = dict(initial_evidence_policy or _DEFAULT_EVIDENCE_POLICY)
+        self._evidence_policy = dict(
+            initial_evidence_policy or _DEFAULT_EVIDENCE_POLICY
+        )
         self._phase_thresholds: Dict[str, float] = {}
-        self._template_preferences = dict(initial_template_preferences or _DEFAULT_TEMPLATE_PREFERENCES)
+        self._template_preferences = dict(
+            initial_template_preferences or _DEFAULT_TEMPLATE_PREFERENCES
+        )
         self._history: Deque[PolicyVersion] = deque(maxlen=_MAX_POLICY_HISTORY)
         self._version_counter = 0
 
@@ -191,21 +195,29 @@ class PolicyAdjuster:
             overall_score = self._extract_score(cycle_assessment)
 
             # 1. 调整 evidence policy
-            evidence_changes = self._adjust_evidence_policy(overall_score, cycle_assessment, improvement_plan)
+            evidence_changes = self._adjust_evidence_policy(
+                overall_score, cycle_assessment, improvement_plan
+            )
             changes.extend(evidence_changes)
 
             # 2. 同步 phase_thresholds
             if current_tuned_parameters:
-                threshold_changes = self._sync_phase_thresholds(current_tuned_parameters)
+                threshold_changes = self._sync_phase_thresholds(
+                    current_tuned_parameters
+                )
                 changes.extend(threshold_changes)
 
             # 3. 调整 template preferences
-            template_changes = self._adjust_template_preferences(cycle_assessment, improvement_plan)
+            template_changes = self._adjust_template_preferences(
+                cycle_assessment, improvement_plan
+            )
             changes.extend(template_changes)
 
             # 4. 记录版本
             rationale = self._build_rationale(overall_score, changes)
-            self._record_version("reflect", cycle_score=overall_score, summary=rationale)
+            self._record_version(
+                "reflect", cycle_score=overall_score, summary=rationale
+            )
 
             return PolicyAdjustment(
                 evidence_policy=dict(self._evidence_policy),
@@ -248,9 +260,15 @@ class PolicyAdjuster:
             单次调用 ``phase_thresholds[key]`` 最大累计调整量。
         """
         with self._lock:
-            recommendations = (benchmark_summary or {}).get("learning_recommendations") or {}
-            template_adjustments = (recommendations.get("template_preference_adjustments") or {})
-            phase_threshold_adjustments = (recommendations.get("phase_threshold_adjustments") or {})
+            recommendations = (benchmark_summary or {}).get(
+                "learning_recommendations"
+            ) or {}
+            template_adjustments = (
+                recommendations.get("template_preference_adjustments") or {}
+            )
+            phase_threshold_adjustments = (
+                recommendations.get("phase_threshold_adjustments") or {}
+            )
 
             changes: List[Dict[str, Any]] = []
 
@@ -267,13 +285,15 @@ class PolicyAdjuster:
                 if new_val == old_val:
                     continue
                 self._template_preferences[str(framework_name)] = round(new_val, 4)
-                changes.append({
-                    "field": f"template_preferences.{framework_name}",
-                    "old": old_val,
-                    "new": new_val,
-                    "direction": "strengthen" if bounded_delta > 0 else "weaken",
-                    "source": "benchmark",
-                })
+                changes.append(
+                    {
+                        "field": f"template_preferences.{framework_name}",
+                        "old": old_val,
+                        "new": new_val,
+                        "direction": "strengthen" if bounded_delta > 0 else "weaken",
+                        "source": "benchmark",
+                    }
+                )
 
             for phase_name, threshold_payload in phase_threshold_adjustments.items():
                 if not isinstance(threshold_payload, dict):
@@ -285,23 +305,31 @@ class PolicyAdjuster:
                         continue
                     if delta == 0.0:
                         continue
-                    bounded_delta = max(-max_threshold_delta, min(max_threshold_delta, delta))
+                    bounded_delta = max(
+                        -max_threshold_delta, min(max_threshold_delta, delta)
+                    )
                     threshold_key = f"{phase_name}.{key}"
                     old_val = float(self._phase_thresholds.get(threshold_key, 0.0))
                     new_val = round(old_val + bounded_delta, 4)
                     self._phase_thresholds[threshold_key] = new_val
-                    changes.append({
-                        "field": f"phase_thresholds.{threshold_key}",
-                        "old": old_val,
-                        "new": new_val,
-                        "direction": "strengthen" if bounded_delta > 0 else "weaken",
-                        "source": "benchmark",
-                    })
+                    changes.append(
+                        {
+                            "field": f"phase_thresholds.{threshold_key}",
+                            "old": old_val,
+                            "new": new_val,
+                            "direction": "strengthen"
+                            if bounded_delta > 0
+                            else "weaken",
+                            "source": "benchmark",
+                        }
+                    )
 
             global_summary = (benchmark_summary or {}).get("global_summary") or {}
             quality_score = global_summary.get("average_quality_score")
             try:
-                quality_score_f = float(quality_score) if quality_score is not None else None
+                quality_score_f = (
+                    float(quality_score) if quality_score is not None else None
+                )
             except (TypeError, ValueError):
                 quality_score_f = None
 
@@ -315,7 +343,9 @@ class PolicyAdjuster:
                 f"changes={len(changes)}"
             )
 
-            self._record_version("benchmark", cycle_score=quality_score_f, summary=rationale)
+            self._record_version(
+                "benchmark", cycle_score=quality_score_f, summary=rationale
+            )
 
             return PolicyAdjustment(
                 evidence_policy=dict(self._evidence_policy),
@@ -389,40 +419,52 @@ class PolicyAdjuster:
         # 调整 min_confidence
         if direction != 0:
             new_confidence = old_confidence + direction * _CONFIDENCE_STEP
-            new_confidence = max(_CONFIDENCE_BOUNDS[0], min(_CONFIDENCE_BOUNDS[1], new_confidence))
+            new_confidence = max(
+                _CONFIDENCE_BOUNDS[0], min(_CONFIDENCE_BOUNDS[1], new_confidence)
+            )
             if new_confidence != old_confidence:
                 self._evidence_policy["min_confidence"] = round(new_confidence, 4)
-                changes.append({
-                    "field": "evidence_policy.min_confidence",
-                    "old": old_confidence,
-                    "new": new_confidence,
-                    "direction": "tighten" if direction > 0 else "loosen",
-                })
+                changes.append(
+                    {
+                        "field": "evidence_policy.min_confidence",
+                        "old": old_confidence,
+                        "new": new_confidence,
+                        "direction": "tighten" if direction > 0 else "loosen",
+                    }
+                )
 
         # 调整 min_evidence_grade
-        grade_idx = _EVIDENCE_GRADES.index(old_grade) if old_grade in _EVIDENCE_GRADES else 2
+        grade_idx = (
+            _EVIDENCE_GRADES.index(old_grade) if old_grade in _EVIDENCE_GRADES else 2
+        )
         if direction > 0 and grade_idx > 0:
             new_grade = _EVIDENCE_GRADES[grade_idx - 1]
             self._evidence_policy["min_evidence_grade"] = new_grade
-            changes.append({
-                "field": "evidence_policy.min_evidence_grade",
-                "old": old_grade,
-                "new": new_grade,
-                "direction": "tighten",
-            })
+            changes.append(
+                {
+                    "field": "evidence_policy.min_evidence_grade",
+                    "old": old_grade,
+                    "new": new_grade,
+                    "direction": "tighten",
+                }
+            )
         elif direction < 0 and grade_idx < len(_EVIDENCE_GRADES) - 1:
             new_grade = _EVIDENCE_GRADES[grade_idx + 1]
             self._evidence_policy["min_evidence_grade"] = new_grade
-            changes.append({
-                "field": "evidence_policy.min_evidence_grade",
-                "old": old_grade,
-                "new": new_grade,
-                "direction": "loosen",
-            })
+            changes.append(
+                {
+                    "field": "evidence_policy.min_evidence_grade",
+                    "old": old_grade,
+                    "new": new_grade,
+                    "direction": "loosen",
+                }
+            )
 
         return changes
 
-    def _sync_phase_thresholds(self, tuned_parameters: Dict[str, float]) -> List[Dict[str, Any]]:
+    def _sync_phase_thresholds(
+        self, tuned_parameters: Dict[str, float]
+    ) -> List[Dict[str, Any]]:
         """将 AdaptiveTuner 输出同步为 phase_thresholds。"""
         changes: List[Dict[str, Any]] = []
         for key, value in tuned_parameters.items():
@@ -430,12 +472,14 @@ class PolicyAdjuster:
                 continue
             old = self._phase_thresholds.get(key)
             if old != value:
-                changes.append({
-                    "field": f"phase_thresholds.{key}",
-                    "old": old,
-                    "new": value,
-                    "direction": "sync",
-                })
+                changes.append(
+                    {
+                        "field": f"phase_thresholds.{key}",
+                        "old": old,
+                        "new": value,
+                        "direction": "sync",
+                    }
+                )
                 self._phase_thresholds[key] = float(value)
         return changes
 
@@ -481,12 +525,14 @@ class PolicyAdjuster:
                 new_val = max(0.0, min(1.0, old_val + delta))
                 if new_val != old_val:
                     self._template_preferences[template_key] = round(new_val, 4)
-                    changes.append({
-                        "field": f"template_preferences.{template_key}",
-                        "old": old_val,
-                        "new": new_val,
-                        "direction": "strengthen" if delta > 0 else "weaken",
-                    })
+                    changes.append(
+                        {
+                            "field": f"template_preferences.{template_key}",
+                            "old": old_val,
+                            "new": new_val,
+                            "direction": "strengthen" if delta > 0 else "weaken",
+                        }
+                    )
 
         return changes
 
@@ -507,7 +553,9 @@ class PolicyAdjuster:
         content = f"{self._evidence_policy}{self._phase_thresholds}{self._template_preferences}"
         return hashlib.sha256(content.encode()).hexdigest()[:12]
 
-    def _record_version(self, trigger: str, cycle_score: Optional[float], summary: str) -> None:
+    def _record_version(
+        self, trigger: str, cycle_score: Optional[float], summary: str
+    ) -> None:
         """记录一个策略版本快照。"""
         self._version_counter += 1
         version = PolicyVersion(
@@ -522,7 +570,9 @@ class PolicyAdjuster:
         )
         self._history.append(version)
 
-    def _build_rationale(self, overall_score: float, changes: List[Dict[str, Any]]) -> str:
+    def _build_rationale(
+        self, overall_score: float, changes: List[Dict[str, Any]]
+    ) -> str:
         """构建调整理由摘要。"""
         if not changes:
             return f"cycle_score={overall_score:.2f}，无调整"

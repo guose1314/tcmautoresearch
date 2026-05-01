@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from fastapi import FastAPI
 
-from src.orchestration.research_orchestrator import OrchestrationResult, PhaseOutcome
+from src.orchestration.orchestration_contract import OrchestrationResult, PhaseOutcome
 from src.orchestration.research_runtime_service import ResearchRuntimeResult
 from src.web.ops import research_session_service
 
@@ -53,11 +53,13 @@ class _FakeRuntimeService:
 
     def run(self, topic, **kwargs):
         phases = list(self.config.get("phases") or [])
-        type(self).runs.append({
-            "topic": topic,
-            "config": deepcopy(self.config),
-            **deepcopy(kwargs),
-        })
+        type(self).runs.append(
+            {
+                "topic": topic,
+                "config": deepcopy(self.config),
+                **deepcopy(kwargs),
+            }
+        )
 
         phase_results = {}
         phase_executions = {}
@@ -70,7 +72,9 @@ class _FakeRuntimeService:
             if phase_name == "observe":
                 result["semantic_graph"] = {
                     "nodes": [{"id": "node-1", "name": "桂枝汤"}],
-                    "edges": [{"source": "node-1", "target": "node-2", "relation": "contains"}],
+                    "edges": [
+                        {"source": "node-1", "target": "node-2", "relation": "contains"}
+                    ],
                 }
                 result["graph_statistics"] = {"nodes_count": 1, "edges_count": 1}
             if phase_name == "publish":
@@ -94,9 +98,15 @@ class _FakeRuntimeService:
             phases=[
                 PhaseOutcome(
                     phase=phase_name,
-                    status="failed" if phase_name == target_phase and type(self).next_status in {"failed", "partial"} else "completed",
+                    status="failed"
+                    if phase_name == target_phase
+                    and type(self).next_status in {"failed", "partial"}
+                    else "completed",
                     duration_sec=1.0,
-                    error="boom" if phase_name == target_phase and type(self).next_status in {"failed", "partial"} else "",
+                    error="boom"
+                    if phase_name == target_phase
+                    and type(self).next_status in {"failed", "partial"}
+                    else "",
                 )
                 for phase_name in phases
             ],
@@ -135,7 +145,9 @@ class TestResearchSessionService(unittest.TestCase):
         )
         return app
 
-    def test_build_orchestrator_config_uses_runtime_assembly_when_job_manager_missing(self):
+    def test_build_orchestrator_config_uses_runtime_assembly_when_job_manager_missing(
+        self,
+    ):
         app = FastAPI()
         app.state.runtime_assembly = SimpleNamespace(
             orchestrator_config={
@@ -147,13 +159,18 @@ class TestResearchSessionService(unittest.TestCase):
         config = research_session_service._build_orchestrator_config(app)
 
         self.assertEqual(config["runtime_profile"], "web_research")
-        self.assertEqual(config["pipeline_config"]["models"]["llm"]["provider"], "local")
+        self.assertEqual(
+            config["pipeline_config"]["models"]["llm"]["provider"], "local"
+        )
 
     def test_create_research_session_persists_repository_backed_payload(self):
         repository = _FakeSessionRepository()
         app = self._build_app()
 
-        with patch("src.web.ops.research_session_service._get_repository", return_value=repository):
+        with patch(
+            "src.web.ops.research_session_service._get_repository",
+            return_value=repository,
+        ):
             created = research_session_service.create_research_session(
                 app,
                 cycle_name="测试研究",
@@ -166,8 +183,12 @@ class TestResearchSessionService(unittest.TestCase):
         self.assertEqual(created["status"], "pending")
         self.assertEqual(created["current_phase"], "observe")
         self.assertEqual(created["researchers"], ["alice"])
-        self.assertEqual(repository.created_payloads[0]["research_objective"], "测试目标")
-        self.assertEqual(repository.created_payloads[0]["metadata"]["completed_phases"], [])
+        self.assertEqual(
+            repository.created_payloads[0]["research_objective"], "测试目标"
+        )
+        self.assertEqual(
+            repository.created_payloads[0]["metadata"]["completed_phases"], []
+        )
         self.assertEqual(created["metadata"]["analysis_summary"]["status"], "pending")
 
     def test_list_research_sessions_reads_repository_summaries(self):
@@ -183,7 +204,10 @@ class TestResearchSessionService(unittest.TestCase):
         }
         app = self._build_app()
 
-        with patch("src.web.ops.research_session_service._get_repository", return_value=repository):
+        with patch(
+            "src.web.ops.research_session_service._get_repository",
+            return_value=repository,
+        ):
             summaries = research_session_service.list_research_sessions(app)
 
         self.assertEqual(len(summaries), 1)
@@ -233,7 +257,10 @@ class TestResearchSessionService(unittest.TestCase):
         }
         app = self._build_app()
 
-        with patch("src.web.ops.research_session_service._get_repository", return_value=repository):
+        with patch(
+            "src.web.ops.research_session_service._get_repository",
+            return_value=repository,
+        ):
             session = research_session_service.get_research_session(app, "cycle-1")
 
         self.assertIn("observe", session["phase_executions"])
@@ -258,7 +285,13 @@ class TestResearchSessionService(unittest.TestCase):
                     "output": {
                         "semantic_graph": {
                             "nodes": [{"id": "node-1"}],
-                            "edges": [{"source": "node-1", "target": "node-2", "relation": "contains"}],
+                            "edges": [
+                                {
+                                    "source": "node-1",
+                                    "target": "node-2",
+                                    "relation": "contains",
+                                }
+                            ],
                         },
                         "graph_statistics": {"nodes_count": 1, "edges_count": 1},
                     },
@@ -267,8 +300,13 @@ class TestResearchSessionService(unittest.TestCase):
         }
         app = self._build_app()
 
-        with patch("src.web.ops.research_session_service._get_repository", return_value=repository):
-            graph = research_session_service.get_research_observe_graph(app, "cycle-graph")
+        with patch(
+            "src.web.ops.research_session_service._get_repository",
+            return_value=repository,
+        ):
+            graph = research_session_service.get_research_observe_graph(
+                app, "cycle-graph"
+            )
 
         self.assertEqual(graph["statistics"]["nodes_count"], 1)
         self.assertEqual(graph["nodes"][0]["id"], "node-1")
@@ -291,9 +329,15 @@ class TestResearchSessionService(unittest.TestCase):
         }
         app = self._build_app()
 
-        with patch("src.web.ops.research_session_service._get_repository", return_value=repository), patch(
-            "src.web.ops.research_session_service.ResearchRuntimeService",
-            _FakeRuntimeService,
+        with (
+            patch(
+                "src.web.ops.research_session_service._get_repository",
+                return_value=repository,
+            ),
+            patch(
+                "src.web.ops.research_session_service.ResearchRuntimeService",
+                _FakeRuntimeService,
+            ),
         ):
             execution = research_session_service.execute_research_phase(
                 app,
@@ -303,22 +347,40 @@ class TestResearchSessionService(unittest.TestCase):
             )
 
         self.assertEqual(len(_FakeRuntimeService.instances), 1)
-        self.assertEqual(_FakeRuntimeService.instances[0].config["runtime_profile"], "web_research")
-        self.assertEqual(_FakeRuntimeService.instances[0].config["phases"], ["observe", "hypothesis"])
-        self.assertEqual(_FakeRuntimeService.instances[0].config["researchers"], ["alice"])
+        self.assertEqual(
+            _FakeRuntimeService.instances[0].config["runtime_profile"], "web_research"
+        )
+        self.assertEqual(
+            _FakeRuntimeService.instances[0].config["phases"], ["observe", "hypothesis"]
+        )
+        self.assertEqual(
+            _FakeRuntimeService.instances[0].config["researchers"], ["alice"]
+        )
         self.assertEqual(_FakeRuntimeService.runs[0]["cycle_id"], "cycle-1")
-        self.assertEqual(_FakeRuntimeService.runs[0]["phase_contexts"]["hypothesis"]["max_hypotheses"], 3)
+        self.assertEqual(
+            _FakeRuntimeService.runs[0]["phase_contexts"]["hypothesis"][
+                "max_hypotheses"
+            ],
+            3,
+        )
 
         cycle = execution["cycle"]
         self.assertEqual(cycle["status"], "active")
         self.assertEqual(cycle["current_phase"], "experiment")
         self.assertIn("observe", cycle["phase_executions"])
         self.assertIn("hypothesis", cycle["phase_executions"])
-        self.assertEqual(cycle["metadata"]["analysis_summary"]["completed_phases"], ["observe", "hypothesis"])
-        self.assertEqual(cycle["metadata"]["phase_contexts"]["hypothesis"]["max_hypotheses"], 3)
+        self.assertEqual(
+            cycle["metadata"]["analysis_summary"]["completed_phases"],
+            ["observe", "hypothesis"],
+        )
+        self.assertEqual(
+            cycle["metadata"]["phase_contexts"]["hypothesis"]["max_hypotheses"], 3
+        )
         self.assertEqual(execution["phase_result"]["phase"], "hypothesis")
 
-    def test_execute_research_phase_state_config_fallback_does_not_inject_local_runtime_profile(self):
+    def test_execute_research_phase_state_config_fallback_does_not_inject_local_runtime_profile(
+        self,
+    ):
         repository = _FakeSessionRepository()
         repository.sessions["cycle-1"] = {
             "cycle_id": "cycle-1",
@@ -336,15 +398,25 @@ class TestResearchSessionService(unittest.TestCase):
         app = FastAPI()
         app.state.config = {"models": {"llm": {"provider": "local"}}}
 
-        with patch("src.web.ops.research_session_service._get_repository", return_value=repository), patch(
-            "src.web.ops.research_session_service.ResearchRuntimeService",
-            _FakeRuntimeService,
+        with (
+            patch(
+                "src.web.ops.research_session_service._get_repository",
+                return_value=repository,
+            ),
+            patch(
+                "src.web.ops.research_session_service.ResearchRuntimeService",
+                _FakeRuntimeService,
+            ),
         ):
-            execution = research_session_service.execute_research_phase(app, "cycle-1", "observe")
+            execution = research_session_service.execute_research_phase(
+                app, "cycle-1", "observe"
+            )
 
         self.assertEqual(len(_FakeRuntimeService.instances), 1)
         self.assertEqual(
-            _FakeRuntimeService.instances[0].config["pipeline_config"]["models"]["llm"]["provider"],
+            _FakeRuntimeService.instances[0].config["pipeline_config"]["models"]["llm"][
+                "provider"
+            ],
             "local",
         )
         self.assertNotIn("runtime_profile", _FakeRuntimeService.instances[0].config)
@@ -384,15 +456,25 @@ class TestResearchSessionService(unittest.TestCase):
         }
         app = self._build_app()
 
-        with patch("src.web.ops.research_session_service._get_repository", return_value=repository), patch(
-            "src.web.ops.research_session_service.ResearchRuntimeService",
-            _FakeRuntimeService,
+        with (
+            patch(
+                "src.web.ops.research_session_service._get_repository",
+                return_value=repository,
+            ),
+            patch(
+                "src.web.ops.research_session_service.ResearchRuntimeService",
+                _FakeRuntimeService,
+            ),
         ):
             research_session_service.execute_research_phase(app, "cycle-1", "observe")
 
         pipeline_config = _FakeRuntimeService.instances[0].config["pipeline_config"]
-        self.assertEqual(pipeline_config["previous_iteration_feedback"]["iteration_number"], 4)
-        self.assertEqual(pipeline_config["learned_runtime_parameters"]["max_concurrent_tasks"], 5)
+        self.assertEqual(
+            pipeline_config["previous_iteration_feedback"]["iteration_number"], 4
+        )
+        self.assertEqual(
+            pipeline_config["learned_runtime_parameters"]["max_concurrent_tasks"], 5
+        )
 
 
 if __name__ == "__main__":

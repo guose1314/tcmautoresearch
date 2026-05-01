@@ -38,6 +38,7 @@ class _Phase(Enum):
 @dataclass
 class _FakeCycle:
     """Minimal ResearchCycle stand-in."""
+
     phase_executions: Dict[Any, Dict[str, Any]] = field(default_factory=dict)
 
 
@@ -52,7 +53,9 @@ class _FakePipeline:
         self.analysis_port = MagicMock()
         self._learning_phase_manifests: list = []
         # Default: reasoning engine creation fails → graceful fallback
-        self.analysis_port.create_reasoning_engine.side_effect = RuntimeError("no engine")
+        self.analysis_port.create_reasoning_engine.side_effect = RuntimeError(
+            "no engine"
+        )
 
     def register_phase_learning_manifest(self, manifest: Dict[str, Any]) -> None:
         self._learning_phase_manifests.append(manifest)
@@ -73,16 +76,40 @@ class _AnalyzeMixin(AnalyzePhaseMixin):
 
 def _sample_records() -> List[Dict[str, Any]]:
     return [
-        {"formula": "麻黄汤", "syndrome": "风寒", "herbs": ["麻黄", "桂枝", "杏仁", "甘草"]},
-        {"formula": "桂枝汤", "syndrome": "风寒", "herbs": ["桂枝", "芍药", "甘草", "生姜", "大枣"]},
-        {"formula": "小柴胡汤", "syndrome": "少阳", "herbs": ["柴胡", "黄芩", "半夏", "甘草"]},
+        {
+            "formula": "麻黄汤",
+            "syndrome": "风寒",
+            "herbs": ["麻黄", "桂枝", "杏仁", "甘草"],
+        },
+        {
+            "formula": "桂枝汤",
+            "syndrome": "风寒",
+            "herbs": ["桂枝", "芍药", "甘草", "生姜", "大枣"],
+        },
+        {
+            "formula": "小柴胡汤",
+            "syndrome": "少阳",
+            "herbs": ["柴胡", "黄芩", "半夏", "甘草"],
+        },
     ]
 
 
 def _sample_relationships() -> List[Dict[str, Any]]:
     return [
-        {"source": "麻黄", "source_type": "herb", "target": "风寒", "target_type": "syndrome", "type": "治疗"},
-        {"source": "桂枝", "source_type": "herb", "target": "风寒", "target_type": "syndrome", "type": "治疗"},
+        {
+            "source": "麻黄",
+            "source_type": "herb",
+            "target": "风寒",
+            "target_type": "syndrome",
+            "type": "治疗",
+        },
+        {
+            "source": "桂枝",
+            "source_type": "herb",
+            "target": "风寒",
+            "target_type": "syndrome",
+            "type": "治疗",
+        },
     ]
 
 
@@ -96,21 +123,32 @@ class TestAnalyzePhaseContract(unittest.TestCase):
 
     def test_return_has_required_keys(self):
         mixin = _AnalyzeMixin(_FakePipeline())
-        result = mixin.execute_analyze_phase(_FakeCycle(), {"analysis_records": _sample_records()})
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(), {"analysis_records": _sample_records()}
+        )
         for key in ("phase", "results", "metadata"):
             self.assertIn(key, result, f"missing key: {key}")
         self.assertEqual(result["phase"], "analyze")
 
     def test_metadata_has_required_fields(self):
         mixin = _AnalyzeMixin(_FakePipeline())
-        result = mixin.execute_analyze_phase(_FakeCycle(), {"analysis_records": _sample_records()})
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(), {"analysis_records": _sample_records()}
+        )
         md = result["metadata"]
-        for key in ("analysis_type", "significance_level", "record_count", "reasoning_engine_used"):
+        for key in (
+            "analysis_type",
+            "significance_level",
+            "record_count",
+            "reasoning_engine_used",
+        ):
             self.assertIn(key, md, f"missing metadata key: {key}")
 
     def test_results_include_reasoning_results_and_data_mining(self):
         mixin = _AnalyzeMixin(_FakePipeline())
-        result = mixin.execute_analyze_phase(_FakeCycle(), {"analysis_records": _sample_records()})
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(), {"analysis_records": _sample_records()}
+        )
         self.assertIn("reasoning_results", result["results"])
         self.assertIn("data_mining_result", result["results"])
         self.assertNotIn("reasoning_results", result)
@@ -118,8 +156,13 @@ class TestAnalyzePhaseContract(unittest.TestCase):
 
     def test_reasoning_results_read_from_standard_results_without_fallback(self):
         mixin = _AnalyzeMixin(_FakePipeline())
-        result = mixin.execute_analyze_phase(_FakeCycle(), {"analysis_records": _sample_records()})
-        self.assertEqual(get_phase_value(result, "reasoning_results", {}), result["results"]["reasoning_results"])
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(), {"analysis_records": _sample_records()}
+        )
+        self.assertEqual(
+            get_phase_value(result, "reasoning_results", {}),
+            result["results"]["reasoning_results"],
+        )
         self.assertEqual(get_phase_deprecated_fallbacks(result), [])
 
     def test_analysis_results_include_canonical_evidence_protocol(self):
@@ -176,8 +219,12 @@ class TestAnalyzePhaseContract(unittest.TestCase):
         self.assertEqual(protocol.get("contract_version"), "evidence-claim-v2")
         self.assertEqual(protocol["evidence_records"][0]["title"], "伤寒论")
         self.assertEqual(protocol["claims"][0]["source_entity"], "桂枝")
-        self.assertEqual(protocol["citation_records"][0]["source_ref"], "urn:shanghanlun")
-        self.assertEqual(protocol["evidence_grade_summary"]["overall_grade"], "moderate")
+        self.assertEqual(
+            protocol["citation_records"][0]["source_ref"], "urn:shanghanlun"
+        )
+        self.assertEqual(
+            protocol["evidence_grade_summary"]["overall_grade"], "moderate"
+        )
         self.assertTrue(result["metadata"]["evidence_protocol_generated"])
         self.assertEqual(result["metadata"]["evidence_record_count"], 1)
         self.assertEqual(result["metadata"]["evidence_claim_count"], 1)
@@ -189,10 +236,11 @@ class TestAnalyzePhaseContract(unittest.TestCase):
 
 
 class TestAnalyzeWithRecords(unittest.TestCase):
-
     def test_records_produce_data_mining_output(self):
         mixin = _AnalyzeMixin(_FakePipeline())
-        result = mixin.execute_analyze_phase(_FakeCycle(), {"analysis_records": _sample_records()})
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(), {"analysis_records": _sample_records()}
+        )
         dm = result["results"]["data_mining_result"]
         self.assertEqual(dm["record_count"], 3)
         self.assertGreater(dm["item_count"], 0)
@@ -201,7 +249,9 @@ class TestAnalyzeWithRecords(unittest.TestCase):
 
     def test_statistical_analysis_present_in_results(self):
         mixin = _AnalyzeMixin(_FakePipeline())
-        result = mixin.execute_analyze_phase(_FakeCycle(), {"analysis_records": _sample_records()})
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(), {"analysis_records": _sample_records()}
+        )
         sa = result["results"].get("statistical_analysis", {})
         self.assertIn("statistical_significance", sa)
         self.assertIn("confidence_level", sa)
@@ -219,7 +269,9 @@ class TestAnalyzeWithRecords(unittest.TestCase):
 
     def test_record_count_in_metadata(self):
         mixin = _AnalyzeMixin(_FakePipeline())
-        result = mixin.execute_analyze_phase(_FakeCycle(), {"analysis_records": _sample_records()})
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(), {"analysis_records": _sample_records()}
+        )
         self.assertEqual(result["metadata"]["record_count"], 3)
 
     def test_document_record_prefers_middle_for_fire_hemp(self):
@@ -281,15 +333,19 @@ class TestAnalyzeWithRecords(unittest.TestCase):
 
 
 class TestAnalyzeReasoningDegradation(unittest.TestCase):
-
     def test_reasoning_engine_unavailable_returns_empty(self):
         """analysis_port.create_reasoning_engine 抛异常时 reasoning_results 为空。"""
         pipeline = _FakePipeline()
-        pipeline.analysis_port.create_reasoning_engine.side_effect = RuntimeError("boom")
+        pipeline.analysis_port.create_reasoning_engine.side_effect = RuntimeError(
+            "boom"
+        )
         mixin = _AnalyzeMixin(pipeline)
         result = mixin.execute_analyze_phase(
             _FakeCycle(),
-            {"analysis_records": _sample_records(), "relationships": _sample_relationships()},
+            {
+                "analysis_records": _sample_records(),
+                "relationships": _sample_relationships(),
+            },
         )
         self.assertEqual(result["results"]["reasoning_results"], {})
         self.assertFalse(result["metadata"]["reasoning_engine_used"])
@@ -304,7 +360,10 @@ class TestAnalyzeReasoningDegradation(unittest.TestCase):
         mixin = _AnalyzeMixin(pipeline)
         result = mixin.execute_analyze_phase(
             _FakeCycle(),
-            {"analysis_records": _sample_records(), "relationships": _sample_relationships()},
+            {
+                "analysis_records": _sample_records(),
+                "relationships": _sample_relationships(),
+            },
         )
         self.assertEqual(result["results"]["reasoning_results"], {})
 
@@ -319,7 +378,10 @@ class TestAnalyzeReasoningDegradation(unittest.TestCase):
         mixin = _AnalyzeMixin(pipeline)
         result = mixin.execute_analyze_phase(
             _FakeCycle(),
-            {"analysis_records": _sample_records(), "relationships": _sample_relationships()},
+            {
+                "analysis_records": _sample_records(),
+                "relationships": _sample_relationships(),
+            },
         )
         self.assertEqual(result["results"]["reasoning_results"], {})
         mock_engine.cleanup.assert_called_once()
@@ -331,7 +393,6 @@ class TestAnalyzeReasoningDegradation(unittest.TestCase):
 
 
 class TestAnalyzeEmptyInput(unittest.TestCase):
-
     def test_empty_records_empty_context(self):
         """完全空的 context 不崩溃。"""
         mixin = _AnalyzeMixin(_FakePipeline())
@@ -361,10 +422,11 @@ class TestAnalyzeEmptyInput(unittest.TestCase):
 
 
 class TestAnalyzeEvidenceGrade(unittest.TestCase):
-
     def test_evidence_grade_not_generated_without_literature(self):
         mixin = _AnalyzeMixin(_FakePipeline())
-        result = mixin.execute_analyze_phase(_FakeCycle(), {"analysis_records": _sample_records()})
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(), {"analysis_records": _sample_records()}
+        )
         self.assertFalse(result["metadata"]["evidence_grade_generated"])
 
     def test_evidence_grade_error_recorded_in_metadata(self):
@@ -389,17 +451,24 @@ class TestAnalyzeEvidenceGrade(unittest.TestCase):
 
 
 class TestAnalyzeHypothesisFallback(unittest.TestCase):
-
     def test_fallback_synthesizes_records_from_hypotheses(self):
         """无直接记录但有 Hypothesis 阶段时合成分析记录。"""
-        cycle = _FakeCycle(phase_executions={
-            _Phase.OBSERVE: {"result": {}},
-            _Phase.HYPOTHESIS: {"result": {
-                "hypotheses": [
-                    {"title": "麻黄解表", "source_entities": ["麻黄", "桂枝"], "source_gap_type": "风寒"},
-                ],
-            }},
-        })
+        cycle = _FakeCycle(
+            phase_executions={
+                _Phase.OBSERVE: {"result": {}},
+                _Phase.HYPOTHESIS: {
+                    "result": {
+                        "hypotheses": [
+                            {
+                                "title": "麻黄解表",
+                                "source_entities": ["麻黄", "桂枝"],
+                                "source_gap_type": "风寒",
+                            },
+                        ],
+                    }
+                },
+            }
+        )
         mixin = _AnalyzeMixin(_FakePipeline())
         result = mixin.execute_analyze_phase(cycle, {})
         self.assertGreater(result["metadata"]["record_count"], 0)
@@ -413,11 +482,14 @@ class TestAnalyzeHypothesisFallback(unittest.TestCase):
 
 
 class TestAnalyzeLearningStrategy(unittest.TestCase):
-
     def test_learning_strategy_adjusts_significance_and_sample_threshold(self):
         mixin = _AnalyzeMixin(_FakePipeline())
         records = _sample_records() + [
-            {"formula": "四逆汤", "syndrome": "少阴", "herbs": ["附子", "干姜", "甘草"]},
+            {
+                "formula": "四逆汤",
+                "syndrome": "少阴",
+                "herbs": ["附子", "干姜", "甘草"],
+            },
         ]
 
         result = mixin.execute_analyze_phase(
@@ -433,7 +505,9 @@ class TestAnalyzeLearningStrategy(unittest.TestCase):
         self.assertTrue(
             any(
                 "建议至少 6" in limitation
-                for limitation in result["results"]["statistical_analysis"]["limitations"]
+                for limitation in result["results"]["statistical_analysis"][
+                    "limitations"
+                ]
             )
         )
 
@@ -457,7 +531,9 @@ class TestAnalyzeLearningStrategy(unittest.TestCase):
                         "metadata": {"confidence": 0.6},
                     }
                 ],
-                "learning_strategy": {"tuned_parameters": {"confidence_threshold": 0.8}},
+                "learning_strategy": {
+                    "tuned_parameters": {"confidence_threshold": 0.8}
+                },
             },
         )
 
@@ -478,6 +554,60 @@ class TestAnalyzeLearningStrategy(unittest.TestCase):
 
         self.assertFalse(result["metadata"]["evidence_grade_generated"])
         self.assertNotIn("evidence_grade_error", result["metadata"])
+
+
+class TestAnalyzeGraphRAGDefault(unittest.TestCase):
+    def test_default_calls_apply_graph_rag(self):
+        mixin = _AnalyzeMixin(_FakePipeline())
+        mixin._apply_graph_rag = MagicMock(  # type: ignore[method-assign]
+            return_value={
+                "status": "applied",
+                "reason": "retrieved",
+                "body": "图谱证据上下文",
+                "citations": [{"type": "Evidence", "id": "ev-1"}],
+            }
+        )
+
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(),
+            {"analysis_records": _sample_records()},
+        )
+
+        mixin._apply_graph_rag.assert_called_once()
+        self.assertEqual(result["metadata"]["graph_rag"]["status"], "applied")
+        self.assertEqual(result["metadata"]["graph_rag"]["body"], "图谱证据上下文")
+
+    def test_explicit_disable_skips_apply_graph_rag(self):
+        mixin = _AnalyzeMixin(_FakePipeline())
+        mixin._apply_graph_rag = MagicMock(  # type: ignore[method-assign]
+            return_value={"status": "applied"}
+        )
+
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(),
+            {"analysis_records": _sample_records(), "enable_graph_rag": False},
+        )
+
+        mixin._apply_graph_rag.assert_not_called()
+        self.assertEqual(result["metadata"]["graph_rag"]["status"], "disabled")
+        self.assertEqual(
+            result["metadata"]["graph_rag"]["reason"],
+            "explicit_context_disabled",
+        )
+
+    def test_missing_neo4j_driver_records_degraded_metadata(self):
+        mixin = _AnalyzeMixin(_FakePipeline())
+
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(),
+            {"analysis_records": _sample_records()},
+        )
+
+        graph_rag = result["metadata"]["graph_rag"]
+        self.assertEqual(graph_rag["status"], "degraded")
+        self.assertEqual(graph_rag["reason"], "missing_neo4j_driver")
+        self.assertEqual(graph_rag["body"], "")
+        self.assertEqual(graph_rag["citations"], [])
 
 
 if __name__ == "__main__":

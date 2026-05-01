@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
@@ -205,6 +206,44 @@ class TestGraphWeightUpdater(unittest.TestCase):
         self.assertEqual(result["applied"], 0)
         self.assertEqual(result["skipped"], 1)
 
+    def test_learning_insights_compile_to_weight_hints(self) -> None:
+        now = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        insights = [
+            {
+                "insight_id": "insight-boost",
+                "status": "active",
+                "insight_type": "evidence_weight",
+                "target_phase": "analyze",
+                "confidence": 0.91,
+                "description": "优先检索高复现证据链",
+                "evidence_refs_json": [
+                    {
+                        "node_ids": ["claim-boost"],
+                        "relationship_ids": ["rel-boost"],
+                    }
+                ],
+                "expires_at": (now + timedelta(days=1)).isoformat(),
+            },
+            {
+                "insight_id": "insight-low",
+                "status": "active",
+                "insight_type": "evidence_weight",
+                "confidence": 0.4,
+                "evidence_refs_json": [{"node_ids": ["claim-low"]}],
+            },
+        ]
+
+        hints = GraphWeightUpdater().build_weight_hints_from_insights(
+            insights,
+            min_confidence=0.7,
+            now=now,
+        )
+
+        self.assertEqual(len(hints), 1)
+        self.assertEqual(hints[0]["node_ids"], ["claim-boost"])
+        self.assertEqual(hints[0]["relationship_ids"], ["rel-boost"])
+        self.assertGreater(hints[0]["boost"], 1.0)
+
 
 # ---------------------------------------------------------------------------
 # PromptBiasCompiler
@@ -256,6 +295,44 @@ class TestPromptBiasCompiler(unittest.TestCase):
         runner_inputs = {"bias": "user-set"}
         compiler.inject(runner_inputs, "x", blocks)
         self.assertEqual(runner_inputs["bias"], "user-set")
+
+    def test_learning_insights_filter_active_confident_and_not_expired(self) -> None:
+        now = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        insights = [
+            {
+                "status": "active",
+                "insight_type": "prompt_bias",
+                "target_phase": "analyze",
+                "confidence": 0.86,
+                "description": "下一轮分析优先验证版本证据链",
+                "expires_at": (now + timedelta(days=1)).isoformat(),
+            },
+            {
+                "status": "active",
+                "insight_type": "evidence_weight",
+                "target_phase": "analyze",
+                "confidence": 0.3,
+                "description": "低置信度不应进入 prompt",
+            },
+            {
+                "status": "active",
+                "insight_type": "method_policy",
+                "target_phase": "publish",
+                "confidence": 0.93,
+                "description": "过期策略不应进入 prompt",
+                "expires_at": (now - timedelta(seconds=1)).isoformat(),
+            },
+        ]
+
+        blocks = PromptBiasCompiler().compile_learning_insights(
+            insights,
+            min_confidence=0.75,
+            now=now,
+        )
+
+        self.assertEqual(list(blocks), ["analyze"])
+        self.assertIn("下一轮分析优先验证版本证据链", blocks["analyze"]["bias_text"])
+        self.assertNotIn("低置信度", blocks["analyze"]["bias_text"])
 
 
 # ---------------------------------------------------------------------------

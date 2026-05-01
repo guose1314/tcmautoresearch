@@ -1,0 +1,49 @@
+{
+  "case_id": "herb_alias_maren_huomaren",
+  "category": "herb_alias",
+  "category_label": "药物别名",
+  "input": {
+    "query": "麻仁与火麻仁的药物别名归一",
+    "source_ref": "bencao_maren_alias"
+  },
+  "expected": {
+    "entities": [
+      {"type": "herb", "name": "火麻仁"},
+      {"type": "herb_alias", "name": "麻仁"}
+    ],
+    "relationships": [
+      {"type": "alias_of", "source": "麻仁", "target": "火麻仁"}
+    ],
+    "philology_verdict": {
+      "status": "accepted_alias",
+      "confidence": 0.91
+    },
+    "citation_support": [
+      {
+        "claim_id": "claim_alias_maren_huomaren",
+        "supported": true,
+        "citation_keys": ["bencao_maren_alias"]
+      }
+    ]
+  },
+  "actual": {
+    "entities": [
+      {"type": "herb", "name": "火麻仁"},
+      {"type": "herb_alias", "name": "麻仁"}
+    ],
+    "relationships": [
+      {"type": "alias_of", "source": "麻仁", "target": "火麻仁"}
+    ],
+    "philology_verdict": {
+      "status": "accepted_alias",
+      "confidence": 0.91
+    },
+    "citation_support": [
+      {
+        "claim_id": "claim_alias_maren_huomaren",
+        "supported": true,
+        "citation_keys": ["bencao_maren_alias"]
+      }
+    ]
+  }
+}

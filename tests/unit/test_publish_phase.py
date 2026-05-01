@@ -70,7 +70,9 @@ class _FakePipeline:
         self.output_port = MagicMock()
         self.analysis_port = MagicMock()
         self._learning_phase_manifests: list = []
-        self.analysis_port.create_reasoning_engine.side_effect = RuntimeError("no engine")
+        self.analysis_port.create_reasoning_engine.side_effect = RuntimeError(
+            "no engine"
+        )
         # Fallback class refs (used when output_port fails)
         self.CitationManager = None
         self.PaperWriter = None
@@ -100,7 +102,9 @@ class _FakePipeline:
             "paper_draft": {
                 "title": "Test Paper",
                 "abstract": "Abstract",
-                "sections": [{"section_type": "introduction", "title": "引言", "content": "..."}],
+                "sections": [
+                    {"section_type": "introduction", "title": "引言", "content": "..."}
+                ],
                 "keywords": ["中药"],
             },
             "language": "zh",
@@ -137,13 +141,36 @@ def _minimal_phase_executions():
     }
 
 
+class _FakeGraphRAGResult:
+    def __init__(self, payload: Dict[str, Any]):
+        self._payload = payload
+
+    def to_dict(self):
+        return dict(self._payload)
+
+
+class _FakePublishGraphRAGRunner:
+    def __init__(self, claim_payload=None, witness_payload=None):
+        self.claim_payload = claim_payload or {}
+        self.witness_payload = witness_payload or {}
+        self.calls: List[Dict[str, Any]] = []
+
+    def retrieve(self, scope, query, **kwargs):
+        self.calls.append({"scope": scope, "query": query, **kwargs})
+        asset_type = kwargs.get("asset_type")
+        if asset_type == "claim":
+            return _FakeGraphRAGResult(self.claim_payload)
+        if asset_type == "witness":
+            return _FakeGraphRAGResult(self.witness_payload)
+        return _FakeGraphRAGResult({})
+
+
 # ---------------------------------------------------------------------------
 # 1) 返回契约
 # ---------------------------------------------------------------------------
 
 
 class TestPublishPhaseContract(unittest.TestCase):
-
     def test_return_has_required_keys(self):
         handler = _make_handler()
         cycle = _FakeCycle(phase_executions=_minimal_phase_executions())
@@ -193,7 +220,6 @@ class TestPublishPhaseContract(unittest.TestCase):
 
 
 class TestPublishNormalPath(unittest.TestCase):
-
     def test_publish_records_section_planner_preview_for_deterministic_writer(self):
         handler = _make_handler()
         cycle = _FakeCycle(phase_executions=_minimal_phase_executions())
@@ -207,7 +233,9 @@ class TestPublishNormalPath(unittest.TestCase):
         self.assertTrue(planner["plan_only"])
         self.assertEqual(planner["writer_mode"], "deterministic")
         self.assertEqual(planner["section_count"], 1)
-        self.assertEqual(result["metadata"]["fallback_path"], "deterministic_paper_writer")
+        self.assertEqual(
+            result["metadata"]["fallback_path"], "deterministic_paper_writer"
+        )
         section_plans = result["metadata"]["publish_section_plans"]
         self.assertEqual(section_plans["sections"][0]["section_type"], "introduction")
         self.assertTrue(section_plans["sections"][0]["plan_only"])
@@ -246,8 +274,16 @@ class TestPublishNormalPath(unittest.TestCase):
                     "result": {
                         "results": {
                             "hypotheses": [
-                                {"hypothesis_id": "hyp-1", "title": "候选 1", "keywords": ["A"]},
-                                {"hypothesis_id": "hyp-2", "title": "候选 2", "keywords": ["B"]},
+                                {
+                                    "hypothesis_id": "hyp-1",
+                                    "title": "候选 1",
+                                    "keywords": ["A"],
+                                },
+                                {
+                                    "hypothesis_id": "hyp-2",
+                                    "title": "候选 2",
+                                    "keywords": ["B"],
+                                },
                             ]
                         },
                         "metadata": {"selected_hypothesis_id": "hyp-2"},
@@ -256,7 +292,10 @@ class TestPublishNormalPath(unittest.TestCase):
                 _Phase.EXPERIMENT: {
                     "result": {
                         "metadata": {"selected_hypothesis_id": "hyp-2"},
-                        "selected_hypothesis": {"hypothesis_id": "legacy", "title": "旧顶层假设"},
+                        "selected_hypothesis": {
+                            "hypothesis_id": "legacy",
+                            "title": "旧顶层假设",
+                        },
                     }
                 },
                 _Phase.ANALYZE: {"result": {}},
@@ -266,18 +305,30 @@ class TestPublishNormalPath(unittest.TestCase):
         result = handler.execute(cycle, {"citation_records": []})
 
         self.assertEqual(result["phase"], "publish")
-        paper_context = pipeline.output_port.create_paper_writer.return_value.execute.call_args.args[0]
+        paper_context = pipeline.output_port.create_paper_writer.return_value.execute.call_args.args[
+            0
+        ]
         self.assertEqual(paper_context["hypothesis"].get("hypothesis_id"), "hyp-2")
         self.assertEqual(paper_context["hypothesis"].get("title"), "候选 2")
 
-    def test_publish_ignores_legacy_top_level_reasoning_results_from_phase_result_context(self):
+    def test_publish_ignores_legacy_top_level_reasoning_results_from_phase_result_context(
+        self,
+    ):
         pipeline = _FakePipeline()
         handler = _make_handler(pipeline)
         cycle = _FakeCycle(
             phase_executions={
                 _Phase.OBSERVE: {"result": {}},
-                _Phase.HYPOTHESIS: {"result": {"results": {"hypotheses": []}, "metadata": {}, "error": None}},
-                _Phase.EXPERIMENT: {"result": {"results": {}, "metadata": {}, "error": None}},
+                _Phase.HYPOTHESIS: {
+                    "result": {
+                        "results": {"hypotheses": []},
+                        "metadata": {},
+                        "error": None,
+                    }
+                },
+                _Phase.EXPERIMENT: {
+                    "result": {"results": {}, "metadata": {}, "error": None}
+                },
                 _Phase.ANALYZE: {
                     "result": {
                         "phase": "analyze",
@@ -311,10 +362,17 @@ class TestPublishNormalPath(unittest.TestCase):
             },
         )
 
-        paper_context = pipeline.output_port.create_paper_writer.return_value.execute.call_args.args[0]
-        self.assertEqual(paper_context["reasoning_results"]["evidence_records"][0]["evidence_id"], "nested")
+        paper_context = pipeline.output_port.create_paper_writer.return_value.execute.call_args.args[
+            0
+        ]
+        self.assertEqual(
+            paper_context["reasoning_results"]["evidence_records"][0]["evidence_id"],
+            "nested",
+        )
 
-    def test_publish_prefers_nested_statistical_analysis_over_legacy_result_root_mirrors(self):
+    def test_publish_prefers_nested_statistical_analysis_over_legacy_result_root_mirrors(
+        self,
+    ):
         pipeline = _FakePipeline()
         handler = _make_handler(pipeline)
         analyze_result = {
@@ -333,8 +391,12 @@ class TestPublishNormalPath(unittest.TestCase):
         }
         analyze_results = analyze_result["results"]
 
-        statistical_analysis = handler._resolve_publish_statistical_analysis({}, analyze_result, analyze_results)
-        limitations = handler._resolve_publish_limitations({}, analyze_results, {"statistical_analysis": statistical_analysis})
+        statistical_analysis = handler._resolve_publish_statistical_analysis(
+            {}, analyze_result, analyze_results
+        )
+        limitations = handler._resolve_publish_limitations(
+            {}, analyze_results, {"statistical_analysis": statistical_analysis}
+        )
 
         self.assertEqual(statistical_analysis["confidence_level"], 0.93)
         self.assertEqual(limitations, ["nested limitation"])
@@ -345,8 +407,16 @@ class TestPublishNormalPath(unittest.TestCase):
         cycle = _FakeCycle(
             phase_executions={
                 _Phase.OBSERVE: {"result": {}},
-                _Phase.HYPOTHESIS: {"result": {"results": {"hypotheses": []}, "metadata": {}, "error": None}},
-                _Phase.EXPERIMENT: {"result": {"results": {}, "metadata": {}, "error": None}},
+                _Phase.HYPOTHESIS: {
+                    "result": {
+                        "results": {"hypotheses": []},
+                        "metadata": {},
+                        "error": None,
+                    }
+                },
+                _Phase.EXPERIMENT: {
+                    "result": {"results": {}, "metadata": {}, "error": None}
+                },
                 _Phase.ANALYZE: {
                     "result": {
                         "phase": "analyze",
@@ -363,9 +433,15 @@ class TestPublishNormalPath(unittest.TestCase):
                                 "record_count": 24,
                                 "transaction_count": 24,
                                 "item_count": 8,
-                                "methods_executed": ["frequency_chi_square", "association_rules", "clustering"],
+                                "methods_executed": [
+                                    "frequency_chi_square",
+                                    "association_rules",
+                                    "clustering",
+                                ],
                                 "frequency_chi_square": {
-                                    "chi_square_top": [{"herb": "桂枝", "syndrome": "营卫不和"}],
+                                    "chi_square_top": [
+                                        {"herb": "桂枝", "syndrome": "营卫不和"}
+                                    ],
                                     "herb_frequency": [{"herb": "桂枝", "count": 10}],
                                 },
                                 "association_rules": {
@@ -401,19 +477,27 @@ class TestPublishNormalPath(unittest.TestCase):
             "桂枝",
         )
         self.assertEqual(
-            analysis_results["data_mining_result"]["frequency_chi_square"]["chi_square_top"][0]["herb"],
+            analysis_results["data_mining_result"]["frequency_chi_square"][
+                "chi_square_top"
+            ][0]["herb"],
             "桂枝",
         )
         self.assertEqual(
-            analysis_results["data_mining_result"]["association_rules"]["rules"][0]["rule_id"],
+            analysis_results["data_mining_result"]["association_rules"]["rules"][0][
+                "rule_id"
+            ],
             "r-1",
         )
         self.assertEqual(
-            analysis_results["data_mining_result"]["clustering"]["cluster_summary"][0]["cluster"],
+            analysis_results["data_mining_result"]["clustering"]["cluster_summary"][0][
+                "cluster"
+            ],
             0,
         )
         self.assertEqual(
-            research_artifact["statistical_analysis"]["primary_association"]["syndrome"],
+            research_artifact["statistical_analysis"]["primary_association"][
+                "syndrome"
+            ],
             "营卫不和",
         )
         self.assertNotIn("analysis_results", result)
@@ -426,7 +510,6 @@ class TestPublishNormalPath(unittest.TestCase):
 
 
 class TestPublishDegradation(unittest.TestCase):
-
     def test_paper_writer_failure_doesnt_crash(self):
         """PaperWriter 执行失败时不崩溃。"""
         pipeline = _FakePipeline()
@@ -473,7 +556,6 @@ class TestPublishDegradation(unittest.TestCase):
 
 
 class TestPublishEmptyInput(unittest.TestCase):
-
     def test_empty_citation_records(self):
         """空 citation_records 不崩溃。"""
         handler = _make_handler()
@@ -502,7 +584,6 @@ class TestPublishEmptyInput(unittest.TestCase):
 
 
 class TestPublishDeliverablesDynamic(unittest.TestCase):
-
     def test_bibtex_available_adds_deliverable(self):
         pipeline = _FakePipeline()
         cm = MagicMock()
@@ -539,7 +620,6 @@ class TestPublishDeliverablesDynamic(unittest.TestCase):
 
 
 class TestPublishLearningStrategy(unittest.TestCase):
-
     def test_learning_strategy_can_disable_paper_and_report_generation(self):
         pipeline = _FakePipeline()
         handler = _make_handler(pipeline)
@@ -580,10 +660,14 @@ class TestPublishLearningStrategy(unittest.TestCase):
             },
         )
 
-        citation_records = pipeline.output_port.create_citation_manager.return_value.execute.call_args.args[0]["records"]
+        citation_records = pipeline.output_port.create_citation_manager.return_value.execute.call_args.args[
+            0
+        ]["records"]
         self.assertEqual(citation_records, [])
 
-    def test_learning_strategy_limits_local_citation_records_and_hides_evidence_grade(self):
+    def test_learning_strategy_limits_local_citation_records_and_hides_evidence_grade(
+        self,
+    ):
         pipeline = _FakePipeline()
         pipeline._extract_corpus_text_entries = MagicMock(
             return_value=[
@@ -594,7 +678,9 @@ class TestPublishLearningStrategy(unittest.TestCase):
         handler = _make_handler(pipeline)
         cycle = _FakeCycle(
             phase_executions={
-                _Phase.OBSERVE: {"result": {"results": {"corpus_collection": {"documents": [{}]}}}},
+                _Phase.OBSERVE: {
+                    "result": {"results": {"corpus_collection": {"documents": [{}]}}}
+                },
                 _Phase.HYPOTHESIS: {"result": {"results": {"hypotheses": []}}},
                 _Phase.EXPERIMENT: {"result": {"results": {}}},
                 _Phase.EXPERIMENT_EXECUTION: {"result": {"results": {}}},
@@ -620,12 +706,18 @@ class TestPublishLearningStrategy(unittest.TestCase):
             },
         )
 
-        citation_records = pipeline.output_port.create_citation_manager.return_value.execute.call_args.args[0]["records"]
+        citation_records = pipeline.output_port.create_citation_manager.return_value.execute.call_args.args[
+            0
+        ]["records"]
         self.assertEqual(len(citation_records), 12)
-        paper_context = pipeline.output_port.create_paper_writer.return_value.execute.call_args.args[0]
+        paper_context = pipeline.output_port.create_paper_writer.return_value.execute.call_args.args[
+            0
+        ]
         self.assertEqual(paper_context["evidence_grade_summary"], {})
 
-    def test_publish_preserves_analyze_evidence_protocol_without_structured_output(self):
+    def test_publish_preserves_analyze_evidence_protocol_without_structured_output(
+        self,
+    ):
         pipeline = _FakePipeline()
         handler = _make_handler(pipeline)
         cycle = _FakeCycle(
@@ -639,7 +731,12 @@ class TestPublishLearningStrategy(unittest.TestCase):
                             "reasoning_results": {
                                 "reasoning_results": {
                                     "entity_relationships": [
-                                        {"source": "桂枝", "target": "营卫", "type": "调和", "confidence": 0.88}
+                                        {
+                                            "source": "桂枝",
+                                            "target": "营卫",
+                                            "type": "调和",
+                                            "confidence": 0.88,
+                                        }
                                     ]
                                 }
                             },
@@ -664,15 +761,25 @@ class TestPublishLearningStrategy(unittest.TestCase):
             }
         )
 
-        result = handler.execute(cycle, {"generate_structured_output": False, "citation_records": []})
+        result = handler.execute(
+            cycle, {"generate_structured_output": False, "citation_records": []}
+        )
 
         analysis_results = result["results"]["analysis_results"]
         research_artifact = result["results"]["research_artifact"]
-        self.assertEqual(analysis_results["evidence_protocol"]["contract_version"], "evidence-claim-v2")
-        self.assertEqual(analysis_results["evidence_protocol"]["evidence_records"][0]["evidence_id"], "ev-1")
+        self.assertEqual(
+            analysis_results["evidence_protocol"]["contract_version"],
+            "evidence-claim-v2",
+        )
+        self.assertEqual(
+            analysis_results["evidence_protocol"]["evidence_records"][0]["evidence_id"],
+            "ev-1",
+        )
         self.assertEqual(research_artifact["evidence"][0]["evidence_id"], "ev-1")
 
-    def test_publish_derives_citation_records_from_evidence_protocol_when_sources_absent(self):
+    def test_publish_derives_citation_records_from_evidence_protocol_when_sources_absent(
+        self,
+    ):
         pipeline = _FakePipeline()
         handler = _make_handler(pipeline)
         cycle = _FakeCycle(
@@ -710,11 +817,195 @@ class TestPublishLearningStrategy(unittest.TestCase):
 
         handler.execute(cycle, {"allow_pipeline_citation_fallback": False})
 
-        citation_records = pipeline.output_port.create_citation_manager.return_value.execute.call_args.args[0]["records"]
+        citation_records = pipeline.output_port.create_citation_manager.return_value.execute.call_args.args[
+            0
+        ]["records"]
         self.assertEqual(len(citation_records), 1)
         self.assertEqual(citation_records[0]["title"], "伤寒论")
         self.assertEqual(citation_records[0]["source_ref"], "urn:shanghanlun")
         self.assertEqual(citation_records[0]["source_type"], "classical_text")
+
+    def test_publish_writes_graph_rag_traceability_to_paper_metadata_and_report_payload(
+        self,
+    ):
+        pipeline = _FakePipeline()
+        handler = _make_handler(pipeline)
+        graph_runner = _FakePublishGraphRAGRunner(
+            claim_payload={
+                "scope": "local",
+                "asset_type": "claim",
+                "body": "EvidenceClaim: 桂枝汤调和营卫",
+                "citations": [{"type": "EvidenceClaim", "id": "claim-1"}],
+                "traceability": {
+                    "node_ids": ["claim-1"],
+                    "relationship_ids": ["rel-claim-1"],
+                    "source_phases": ["analyze"],
+                    "cycle_ids": ["test_cycle_001"],
+                },
+            },
+            witness_payload={
+                "scope": "local",
+                "asset_type": "witness",
+                "body": "VersionWitness: 伤寒论校本",
+                "citations": [{"type": "VersionWitness", "id": "witness-1"}],
+                "traceability": {
+                    "node_ids": ["witness-1"],
+                    "relationship_ids": ["rel-witness-1"],
+                    "source_phases": ["observe"],
+                    "cycle_ids": ["test_cycle_001"],
+                },
+            },
+        )
+        cycle = _FakeCycle(
+            phase_executions={
+                **_minimal_phase_executions(),
+                _Phase.ANALYZE: {
+                    "result": {
+                        "phase": "analyze",
+                        "status": "completed",
+                        "results": {
+                            "reasoning_results": {},
+                            "evidence_protocol": {
+                                "contract_version": "evidence-claim-v2",
+                                "evidence_records": [
+                                    {
+                                        "evidence_id": "ev-1",
+                                        "title": "伤寒论",
+                                        "source_type": "classical_text",
+                                        "source_ref": "urn:shanghanlun",
+                                    }
+                                ],
+                                "claims": [{"claim_id": "claim-1"}],
+                            },
+                            "statistical_analysis": {},
+                        },
+                        "metadata": {},
+                        "error": None,
+                    }
+                },
+            }
+        )
+
+        result = handler.execute(
+            cycle,
+            {
+                "publish_graph_rag_runner": graph_runner,
+                "citation_records": [
+                    {
+                        "title": "伤寒论",
+                        "authors": ["张仲景"],
+                        "year": 210,
+                        "source_ref": "urn:shanghanlun",
+                        "source_type": "classical_text",
+                    }
+                ],
+            },
+        )
+
+        paper_context = pipeline.output_port.create_paper_writer.return_value.execute.call_args.args[
+            0
+        ]
+        publish_graph_context = paper_context["publish_graph_context"]
+        self.assertIn("graph_rag_citations", paper_context)
+        self.assertEqual(
+            publish_graph_context["traces"]["EvidenceClaim"][0]["id"],
+            "claim-1",
+        )
+        self.assertEqual(
+            publish_graph_context["traces"]["VersionWitness"][0]["id"],
+            "witness-1",
+        )
+        self.assertEqual(
+            publish_graph_context["traces"]["CitationRecord"][0]["source_ref"],
+            "urn:shanghanlun",
+        )
+        self.assertEqual(result["metadata"]["unsupported_claim_warning_count"], 0)
+        self.assertIn("publish_graph_context", result["metadata"])
+        self.assertGreaterEqual(result["metadata"]["graph_rag_citation_count"], 3)
+        self.assertEqual(
+            paper_context["citation_grounding_records"][0]["support_level"],
+            "strong",
+        )
+        self.assertEqual(
+            result["metadata"]["citation_grounding_summary"]["support_level_counts"][
+                "strong"
+            ],
+            1,
+        )
+        self.assertEqual(
+            result["results"]["citation_grounding_records"][0]["claim_id"],
+            "claim-1",
+        )
+
+        report_payload = pipeline.output_port.create_report_generator.return_value.generate_report.call_args.args[
+            0
+        ]
+        report_graph_context = report_payload["phase_results"]["publish"][
+            "publish_graph_context"
+        ]
+        self.assertIn("claim-1", report_graph_context["traceability"]["node_ids"])
+        self.assertEqual(
+            report_payload["metadata"]["unsupported_claim_warning_count"],
+            0,
+        )
+        self.assertEqual(
+            report_payload["phase_results"]["publish"]["citation_grounding_records"][0][
+                "support_level"
+            ],
+            "strong",
+        )
+
+    def test_publish_counts_unsupported_claims_when_graph_data_is_empty(self):
+        pipeline = _FakePipeline()
+        handler = _make_handler(pipeline)
+        graph_runner = _FakePublishGraphRAGRunner()
+        cycle = _FakeCycle(
+            phase_executions={
+                **_minimal_phase_executions(),
+                _Phase.ANALYZE: {
+                    "result": {
+                        "phase": "analyze",
+                        "status": "completed",
+                        "results": {
+                            "evidence_protocol": {
+                                "contract_version": "evidence-claim-v2",
+                                "evidence_records": [],
+                                "claims": [{"claim_id": "claim-no-graph"}],
+                            },
+                            "statistical_analysis": {},
+                        },
+                        "metadata": {},
+                        "error": None,
+                    }
+                },
+            }
+        )
+
+        result = handler.execute(
+            cycle,
+            {"publish_graph_rag_runner": graph_runner, "citation_records": []},
+        )
+
+        paper_context = pipeline.output_port.create_paper_writer.return_value.execute.call_args.args[
+            0
+        ]
+        self.assertEqual(result["metadata"]["unsupported_claim_warning_count"], 1)
+        self.assertEqual(
+            paper_context["publish_graph_context"]["unsupported_claim_warning_count"],
+            1,
+        )
+        self.assertIn(
+            "missing_graph_trace",
+            result["metadata"]["publish_graph_context"]["warnings"],
+        )
+        self.assertEqual(
+            result["results"]["citation_grounding_records"][0]["support_level"],
+            "unsupported",
+        )
+        self.assertEqual(
+            result["metadata"]["citation_grounding_summary"]["unsupported_count"],
+            1,
+        )
 
 
 class TestPublishFallbackQualityMetadata(unittest.TestCase):

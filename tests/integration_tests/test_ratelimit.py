@@ -100,7 +100,9 @@ class TestRateLimitMiddleware(unittest.TestCase):
         # 触发 429
         for _ in range(60):
             client.get("/api/analysis/sample", headers={"X-Forwarded-For": "10.0.0.4"})
-        resp = client.get("/api/analysis/sample", headers={"X-Forwarded-For": "10.0.0.4"})
+        resp = client.get(
+            "/api/analysis/sample", headers={"X-Forwarded-For": "10.0.0.4"}
+        )
         self.assertEqual(resp.status_code, 429)
         body = resp.json()
         self.assertEqual(body.get("error"), "rate_limit_exceeded")
@@ -121,8 +123,12 @@ class TestRateLimitMiddleware(unittest.TestCase):
         """不同 IP 应有独立限流计数。"""
         app = _build_app()
         client = TestClient(app)
-        ok_a, blocked_a = _drive(client, "/api/analysis/sample", total=60, ip="10.0.1.1")
-        ok_b, blocked_b = _drive(client, "/api/analysis/sample", total=60, ip="10.0.1.2")
+        ok_a, blocked_a = _drive(
+            client, "/api/analysis/sample", total=60, ip="10.0.1.1"
+        )
+        ok_b, blocked_b = _drive(
+            client, "/api/analysis/sample", total=60, ip="10.0.1.2"
+        )
         self.assertEqual(ok_a, 60)
         self.assertEqual(ok_b, 60)
         self.assertEqual(blocked_a, 0)
@@ -133,7 +139,9 @@ class TestRateLimitMiddleware(unittest.TestCase):
         app = _build_app()
         client = TestClient(app)
         # 打满 analysis
-        ok_a, blocked_a = _drive(client, "/api/analysis/sample", total=60, ip="10.0.2.1")
+        ok_a, blocked_a = _drive(
+            client, "/api/analysis/sample", total=60, ip="10.0.2.1"
+        )
         self.assertEqual(ok_a, 60)
         # catalog 不应被影响
         resp = client.get("/api/catalog/list", headers={"X-Forwarded-For": "10.0.2.1"})

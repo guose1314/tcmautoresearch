@@ -124,6 +124,7 @@ def install_rate_limiter(
     app.add_exception_handler(RateLimitExceeded, _exception_handler)
     logger.info(
         "rate limiter installed (rules=%s, default=%s)",
-        list(rules), default_limit,
+        list(rules),
+        default_limit,
     )
     return limiter

@@ -35,6 +35,22 @@ logger = logging.getLogger(__name__)
 
 _CYPHER_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+_LEGACY_SCHEMA_DDL: tuple[str, ...] = (
+    "CREATE CONSTRAINT herb_name_unique IF NOT EXISTS "
+    "FOR (h:Herb) REQUIRE h.name IS UNIQUE",
+    "CREATE CONSTRAINT literature_title_unique IF NOT EXISTS "
+    "FOR (l:Literature) REQUIRE l.title IS UNIQUE",
+    "CREATE CONSTRAINT prescription_name_unique IF NOT EXISTS "
+    "FOR (p:Prescription) REQUIRE p.name IS UNIQUE",
+    "CREATE CONSTRAINT symptom_name_unique IF NOT EXISTS "
+    "FOR (s:Symptom) REQUIRE s.name IS UNIQUE",
+    "CREATE CONSTRAINT pathogenesis_name_unique IF NOT EXISTS "
+    "FOR (p:Pathogenesis) REQUIRE p.name IS UNIQUE",
+    "CREATE FULLTEXT INDEX entity_text_index IF NOT EXISTS "
+    "FOR (n:Herb|Prescription|Symptom|Pathogenesis|Literature) "
+    "ON EACH [n.name, n.alias, n.title]",
+)
+
 
 def _safe_cypher_label(value: str) -> str:
     """校验 Cypher 标签/关系类型标识符，防止注入。
@@ -43,10 +59,42 @@ def _safe_cypher_label(value: str) -> str:
     因此必须在拼接前确保值仅含合法标识符字符。
     """
     if not isinstance(value, str) or not _CYPHER_IDENTIFIER_RE.match(value):
-        raise ValueError(
-            f"非法 Cypher 标识符: {value!r}，仅允许字母、数字和下划线"
-        )
+        raise ValueError(f"非法 Cypher 标识符: {value!r}，仅允许字母、数字和下划线")
     return value
+
+
+def _build_unique_constraint_cypher(spec: Dict[str, str]) -> str:
+    name = _safe_cypher_label(str(spec.get("name") or ""))
+    label = _safe_cypher_label(str(spec.get("label") or ""))
+    property_name = _safe_cypher_label(str(spec.get("property") or ""))
+    return (
+        "CREATE CONSTRAINT "
+        + name
+        + " IF NOT EXISTS FOR (n:"
+        + label
+        + ") REQUIRE n."
+        + property_name
+        + " IS UNIQUE"
+    )
+
+
+def _build_fulltext_index_cypher(spec: Dict[str, Any]) -> str:
+    name = _safe_cypher_label(str(spec.get("name") or ""))
+    label = _safe_cypher_label(str(spec.get("label") or ""))
+    properties = [
+        _safe_cypher_label(str(value or "")) for value in spec.get("properties") or []
+    ]
+    if not properties:
+        raise ValueError(f"全文索引缺少属性字段: {spec!r}")
+    return (
+        "CREATE FULLTEXT INDEX "
+        + name
+        + " IF NOT EXISTS FOR (n:"
+        + label
+        + ") ON EACH ["
+        + ", ".join(f"n.{property_name}" for property_name in properties)
+        + "]"
+    )
 
 
 def _get_neo4j_graph_database() -> Any:
@@ -60,6 +108,7 @@ def _get_neo4j_graph_database() -> Any:
 @dataclass
 class Neo4jNode:
     """Neo4j节点"""
+
     id: str
     label: str  # 节点类型：Formula, Herb, Syndrome, Efficacy
     properties: Dict[str, Any]
@@ -68,6 +117,7 @@ class Neo4jNode:
 @dataclass
 class Neo4jEdge:
     """Neo4j边"""
+
     source_id: str
     target_id: str
     relationship_type: str  # SOVEREIGN, MINISTER, TREATS, etc.
@@ -76,7 +126,7 @@ class Neo4jEdge:
 
 class Neo4jDriver:
     """Neo4j 驱动封装 - 支持图数据CRUD"""
-    
+
     def __init__(
         self,
         uri: str,
@@ -89,7 +139,7 @@ class Neo4jDriver:
     ):
         """
         初始化Neo4j驱动
-        
+
         Args:
             uri: 连接URI，例如 neo4j://localhost:7687
             auth: (用户名, 密码) 元组
@@ -107,7 +157,7 @@ class Neo4jDriver:
             "max_connection_lifetime": max_connection_lifetime,
         }
         self.driver = None
-    
+
     def connect(self):
         """建立连接（启用连接池）并引导 schema 元数据。"""
         try:
@@ -116,7 +166,9 @@ class Neo4jDriver:
                 self.uri,
                 auth=self.auth,
                 max_connection_pool_size=self._pool_config["max_connection_pool_size"],
-                connection_acquisition_timeout=self._pool_config["connection_acquisition_timeout"],
+                connection_acquisition_timeout=self._pool_config[
+                    "connection_acquisition_timeout"
+                ],
                 max_connection_lifetime=self._pool_config["max_connection_lifetime"],
             )
             # 验证连接
@@ -125,7 +177,8 @@ class Neo4jDriver:
                 result.consume()
             logger.info(
                 "Neo4j 连接成功: %s (pool_size=%d)",
-                self.uri, self._pool_config["max_connection_pool_size"],
+                self.uri,
+                self._pool_config["max_connection_pool_size"],
             )
             self._bootstrap_schema()
             self._setup_constraints_and_indexes()
@@ -142,23 +195,52 @@ class Neo4jDriver:
         """
         try:
             with self.driver.session(database=self.database) as session:
-                # 建立唯一性约束 (Unique Constraints)
-                session.run("CREATE CONSTRAINT herb_name_unique IF NOT EXISTS FOR (h:Herb) REQUIRE h.name IS UNIQUE")
-                session.run("CREATE CONSTRAINT literature_title_unique IF NOT EXISTS FOR (l:Literature) REQUIRE l.title IS UNIQUE")
-                session.run("CREATE CONSTRAINT prescription_name_unique IF NOT EXISTS FOR (p:Prescription) REQUIRE p.name IS UNIQUE")
-                session.run("CREATE CONSTRAINT symptom_name_unique IF NOT EXISTS FOR (s:Symptom) REQUIRE s.name IS UNIQUE")
-                session.run("CREATE CONSTRAINT pathogenesis_name_unique IF NOT EXISTS FOR (p:Pathogenesis) REQUIRE p.name IS UNIQUE")
-
-                # 建立全文索引 (Text Indexes)
-                # 为实体的 name、alias、title 属性建立全文索引，加速后续 Graph-RAG 多义词消歧与高频检索
-                session.run(
-                    "CREATE FULLTEXT INDEX entity_text_index IF NOT EXISTS "
-                    "FOR (n:Herb|Prescription|Symptom|Pathogenesis|Literature) "
-                    "ON EACH [n.name, n.alias, n.title]"
-                )
-            logger.info("Neo4j 约束与索引自动化部署完成: constraints & fulltext index (entity_text_index)")
+                try:
+                    statement_count = self._setup_constraints_from_ontology_registry(
+                        session
+                    )
+                    logger.info(
+                        "Neo4j ontology registry schema 部署完成: %d statements",
+                        statement_count,
+                    )
+                except Exception as registry_exc:  # noqa: BLE001
+                    logger.warning(
+                        "Neo4j ontology registry schema 部署失败，回退旧约束/索引: %s",
+                        registry_exc,
+                    )
+                    statement_count = self._setup_legacy_constraints_and_indexes(
+                        session
+                    )
+                    logger.info(
+                        "Neo4j 旧约束与索引 fallback 部署完成: %d statements",
+                        statement_count,
+                    )
         except Exception as exc:
             logger.warning("Neo4j 约束与索引部署失败: %s", exc)
+
+    def _setup_constraints_from_ontology_registry(self, session: Any) -> int:
+        from src.storage.ontology.registry import load_ontology_registry
+
+        registry = load_ontology_registry()
+        statements = [
+            *[
+                _build_unique_constraint_cypher(spec)
+                for spec in registry.unique_constraint_specs()
+            ],
+            *[
+                _build_fulltext_index_cypher(spec)
+                for spec in registry.fulltext_index_specs()
+            ],
+        ]
+        for statement in statements:
+            session.run(statement)
+        return len(statements)
+
+    @staticmethod
+    def _setup_legacy_constraints_and_indexes(session: Any) -> int:
+        for statement in _LEGACY_SCHEMA_DDL:
+            session.run(statement)
+        return len(_LEGACY_SCHEMA_DDL)
 
     # ── Schema bootstrap / version ────────────────────────────────────
 
@@ -170,6 +252,7 @@ class Neo4jDriver:
             GRAPH_SCHEMA_VERSION,
             build_schema_meta_node_properties,
         )
+
         try:
             query = (
                 f"MERGE (m:{_safe_cypher_label(_SCHEMA_META_LABEL)} {{id: $id}}) "
@@ -178,6 +261,7 @@ class Neo4jDriver:
                 "RETURN m.schema_version AS v"
             )
             from datetime import datetime
+
             props = build_schema_meta_node_properties()
             with self.driver.session(database=self.database) as session:
                 session.execute_write(
@@ -196,6 +280,7 @@ class Neo4jDriver:
     def get_schema_version(self) -> Optional[str]:
         """读取 graph 中 GraphSchemaMeta 节点记录的 schema_version。"""
         from .graph_schema import _SCHEMA_META_LABEL, _SCHEMA_META_NODE_ID
+
         try:
             query = f"MATCH (m:{_safe_cypher_label(_SCHEMA_META_LABEL)} {{id: $id}}) RETURN m.schema_version AS v"
             with self.driver.session(database=self.database) as session:
@@ -217,6 +302,7 @@ class Neo4jDriver:
         ``fail-fast``。
         """
         from .graph_schema import assert_schema_consistent
+
         stored = self.get_schema_version()
         return assert_schema_consistent(stored, strict=strict)
 
@@ -227,6 +313,7 @@ class Neo4jDriver:
         失败，方便生产环境 ``fail-fast``。
         """
         from .graph_schema import GraphSchemaDriftError, is_strict_mode_enabled
+
         if not is_strict_mode_enabled():
             return
         try:
@@ -234,10 +321,10 @@ class Neo4jDriver:
         except GraphSchemaDriftError as exc:
             logger.error("Graph schema strict mode 检测到漂移: %s", exc.drift_report)
             raise
-    
+
     def close(self):
         """关闭连接"""
-        if hasattr(self, 'driver') and self.driver:
+        if hasattr(self, "driver") and self.driver:
             try:
                 self.driver.close()
                 logger.info("Neo4j 连接已关闭")
@@ -245,7 +332,7 @@ class Neo4jDriver:
                 logger.error(f"关闭 Neo4j 连接时出错: {e}", exc_info=True)
             finally:
                 self.driver = None
-    
+
     def clear_database(self):
         """清空数据库（谨慎使用）"""
         try:
@@ -255,16 +342,16 @@ class Neo4jDriver:
         except Exception as e:
             logger.error(f"清空数据库失败: {e}")
             raise
-    
+
     # ==================== 节点操作 ====================
-    
+
     def create_node(self, node: Neo4jNode) -> bool:
         """
         创建或更新节点
-        
+
         Args:
             node: 节点对象
-        
+
         Returns:
             是否成功
         """
@@ -274,20 +361,16 @@ class Neo4jDriver:
             SET n += $properties
             RETURN n
             """
-            
+
             with self.driver.session(database=self.database) as session:
                 session.execute_write(
-                    lambda tx: tx.run(
-                        query,
-                        id=node.id,
-                        properties=node.properties
-                    )
+                    lambda tx: tx.run(query, id=node.id, properties=node.properties)
                 )
             return True
         except Exception as e:
             logger.error(f"创建节点失败: {e}")
             return False
-    
+
     def batch_create_nodes(self, nodes: List[Neo4jNode]) -> bool:
         """批量创建节点"""
         try:
@@ -317,56 +400,58 @@ class Neo4jDriver:
         except Exception as e:
             logger.error(f"批量创建节点失败: {e}")
             return False
-    
+
     def get_node(self, node_id: str, label: str) -> Optional[Dict]:
         """
         获取节点
-        
+
         Args:
             node_id: 节点ID
             label: 节点标签
-        
+
         Returns:
             节点数据或None
         """
         try:
             query = f"MATCH (n:{_safe_cypher_label(label)} {{id: $id}}) RETURN n"
-            
+
             with self.driver.session(database=self.database) as session:
                 result = session.execute_read(
                     lambda tx: tx.run(query, id=node_id).single()
                 )
-            
+
             if result:
-                return dict(result['n'])
+                return dict(result["n"])
             return None
         except Exception as e:
             logger.error(f"获取节点失败: {e}")
             return None
-    
+
     def delete_node(self, node_id: str, label: str) -> bool:
         """删除节点及其关系"""
         try:
             query = f"MATCH (n:{_safe_cypher_label(label)} {{id: $id}}) DETACH DELETE n"
-            
+
             with self.driver.session(database=self.database) as session:
                 session.execute_write(lambda tx: tx.run(query, id=node_id))
             return True
         except Exception as e:
             logger.error(f"删除节点失败: {e}")
             return False
-    
+
     # ==================== 关系操作 ====================
-    
-    def create_relationship(self, edge: Neo4jEdge, source_label: str, target_label: str) -> bool:
+
+    def create_relationship(
+        self, edge: Neo4jEdge, source_label: str, target_label: str
+    ) -> bool:
         """
         创建关系
-        
+
         Args:
             edge: 边对象
             source_label: 源节点标签
             target_label: 目标节点标签
-        
+
         Returns:
             是否成功
         """
@@ -378,28 +463,30 @@ class Neo4jDriver:
             SET r += $properties
             RETURN r
             """
-            
+
             with self.driver.session(database=self.database) as session:
                 session.execute_write(
                     lambda tx: tx.run(
                         query,
                         source_id=edge.source_id,
                         target_id=edge.target_id,
-                        properties=edge.properties
+                        properties=edge.properties,
                     )
                 )
             return True
         except Exception as e:
             logger.error(f"创建关系失败: {e}")
             return False
-    
-    def batch_create_relationships(self, edges: List[Tuple[Neo4jEdge, str, str]]) -> bool:
+
+    def batch_create_relationships(
+        self, edges: List[Tuple[Neo4jEdge, str, str]]
+    ) -> bool:
         """
         批量创建关系
-        
+
         Args:
             edges: [(edge, source_label, target_label), ...] 列表
-        
+
         Returns:
             是否成功
         """
@@ -407,9 +494,13 @@ class Neo4jDriver:
             if not edges:
                 return True
 
-            grouped_rows: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
+            grouped_rows: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = (
+                defaultdict(list)
+            )
             for edge, source_label, target_label in edges:
-                grouped_rows[(source_label, target_label, edge.relationship_type)].append(
+                grouped_rows[
+                    (source_label, target_label, edge.relationship_type)
+                ].append(
                     {
                         "source_id": edge.source_id,
                         "target_id": edge.target_id,
@@ -418,7 +509,11 @@ class Neo4jDriver:
                 )
 
             with self.driver.session(database=self.database) as session:
-                for (source_label, target_label, rel_type), rows in grouped_rows.items():
+                for (
+                    source_label,
+                    target_label,
+                    rel_type,
+                ), rows in grouped_rows.items():
                     query = f"""
                     UNWIND $rows AS row
                     MATCH (source:{_safe_cypher_label(source_label)} {{id: row.source_id}})
@@ -433,17 +528,18 @@ class Neo4jDriver:
         except Exception as e:
             logger.error(f"批量创建关系失败: {e}")
             return False
-    
-    def get_relationships(self, source_id: str, source_label: str, 
-                         rel_type: Optional[str] = None) -> List[Dict]:
+
+    def get_relationships(
+        self, source_id: str, source_label: str, rel_type: Optional[str] = None
+    ) -> List[Dict]:
         """
         获取节点的出边关系
-        
+
         Args:
             source_id: 源节点ID
             source_label: 源节点标签
             rel_type: 关系类型过滤（可选）
-        
+
         Returns:
             关系列表
         """
@@ -458,54 +554,53 @@ class Neo4jDriver:
                 MATCH (source:{_safe_cypher_label(source_label)} {{id: $source_id}})-[r]->(target)
                 RETURN r, target
                 """
-            
+
             with self.driver.session(database=self.database) as session:
                 results = session.execute_read(
                     lambda tx: list(tx.run(query, source_id=source_id))
                 )
-            
+
             return [
-                {
-                    'relationship': dict(result['r']),
-                    'target': dict(result['target'])
-                }
+                {"relationship": dict(result["r"]), "target": dict(result["target"])}
                 for result in results
             ]
         except Exception as e:
             logger.error(f"获取关系失败: {e}")
             return []
-    
-    def delete_relationship(self, source_id: str, target_id: str, 
-                          rel_type: str, source_label: str, target_label: str) -> bool:
+
+    def delete_relationship(
+        self,
+        source_id: str,
+        target_id: str,
+        rel_type: str,
+        source_label: str,
+        target_label: str,
+    ) -> bool:
         """删除关系"""
         try:
             query = f"""
             MATCH (source:{_safe_cypher_label(source_label)} {{id: $source_id}})-[r:{_safe_cypher_label(rel_type)}]->(target:{_safe_cypher_label(target_label)} {{id: $target_id}})
             DELETE r
             """
-            
+
             with self.driver.session(database=self.database) as session:
                 session.execute_write(
-                    lambda tx: tx.run(
-                        query,
-                        source_id=source_id,
-                        target_id=target_id
-                    )
+                    lambda tx: tx.run(query, source_id=source_id, target_id=target_id)
                 )
             return True
         except Exception as e:
             logger.error(f"删除关系失败: {e}")
             return False
-    
+
     # ==================== 查询操作 ====================
-    
+
     def find_formula_composition(self, formula_name: str) -> Dict[str, List[str]]:
         """
         查找方剂的组成（君臣佐使）
-        
+
         Args:
             formula_name: 方剂名称
-        
+
         Returns:
             {
                 'sovereign': [药物列表],
@@ -526,35 +621,40 @@ class Neo4jDriver:
                 [pair IN role_pairs WHERE pair.role = 'ASSISTANT' AND pair.herb IS NOT NULL | pair.herb] AS assistant,
                 [pair IN role_pairs WHERE pair.role = 'ENVOY' AND pair.herb IS NOT NULL | pair.herb] AS envoy
             """
-            
+
             with self.driver.session(database=self.database) as session:
                 result = session.execute_read(
                     lambda tx: tx.run(
                         query,
                         formula_name=formula_name,
-                        composition_roles=["SOVEREIGN", "MINISTER", "ASSISTANT", "ENVOY"],
+                        composition_roles=[
+                            "SOVEREIGN",
+                            "MINISTER",
+                            "ASSISTANT",
+                            "ENVOY",
+                        ],
                     ).single()
                 )
-            
+
             if result:
                 return {
-                    'sovereign': [h for h in result['sovereign'] if h],
-                    'minister': [h for h in result['minister'] if h],
-                    'assistant': [h for h in result['assistant'] if h],
-                    'envoy': [h for h in result['envoy'] if h],
+                    "sovereign": [h for h in result["sovereign"] if h],
+                    "minister": [h for h in result["minister"] if h],
+                    "assistant": [h for h in result["assistant"] if h],
+                    "envoy": [h for h in result["envoy"] if h],
                 }
             return {}
         except Exception as e:
             logger.error(f"查询方剂组成失败: {e}")
             return {}
-    
+
     def find_formulas_treating_syndrome(self, syndrome_name: str) -> List[Dict]:
         """
         查找治疗某症候的所有方剂
-        
+
         Args:
             syndrome_name: 症候名称
-        
+
         Returns:
             方剂列表
         """
@@ -563,24 +663,27 @@ class Neo4jDriver:
             MATCH (f:Formula)-[:TREATS]->(s:Syndrome {name: $syndrome_name})
             RETURN f.name as name, f as properties
             """
-            
+
             with self.driver.session(database=self.database) as session:
                 results = session.execute_read(
                     lambda tx: list(tx.run(query, syndrome_name=syndrome_name))
                 )
-            
-            return [{'name': result['name'], 'properties': dict(result['properties'])} for result in results]
+
+            return [
+                {"name": result["name"], "properties": dict(result["properties"])}
+                for result in results
+            ]
         except Exception as e:
             logger.error(f"查询治疗方剂失败: {e}")
             return []
-    
+
     def find_herb_efficacies(self, herb_name: str) -> List[str]:
         """
         查找中药的所有功效
-        
+
         Args:
             herb_name: 中药名称
-        
+
         Returns:
             功效列表
         """
@@ -589,25 +692,25 @@ class Neo4jDriver:
             MATCH (h:Herb {name: $herb_name})-[:HAS_EFFICACY]->(e:Efficacy)
             RETURN e.name as efficacy
             """
-            
+
             with self.driver.session(database=self.database) as session:
                 results = session.execute_read(
                     lambda tx: list(tx.run(query, herb_name=herb_name))
                 )
-            
-            return [result['efficacy'] for result in results]
+
+            return [result["efficacy"] for result in results]
         except Exception as e:
             logger.error(f"查询功效失败: {e}")
             return []
-    
+
     def find_similar_formulas(self, formula_name: str, limit: int = 10) -> List[Dict]:
         """
         查找类似方剂
-        
+
         Args:
             formula_name: 方剂名称
             limit: 返回数量限制
-        
+
         Returns:
             类似方剂列表
         """
@@ -617,18 +720,25 @@ class Neo4jDriver:
             RETURN f2.name as name, f2 as properties
             LIMIT $limit
             """
-            
+
             with self.driver.session(database=self.database) as session:
                 results = session.execute_read(
-                    lambda tx: list(tx.run(query, formula_name=formula_name, limit=limit))
+                    lambda tx: list(
+                        tx.run(query, formula_name=formula_name, limit=limit)
+                    )
                 )
-            
-            return [{'name': result['name'], 'properties': dict(result['properties'])} for result in results]
+
+            return [
+                {"name": result["name"], "properties": dict(result["properties"])}
+                for result in results
+            ]
         except Exception as e:
             logger.error(f"查询类似方剂失败: {e}")
             return []
 
-    def collect_formula_similarity_evidence(self, formula_name: str, similar_formula_name: str) -> Dict[str, Any]:
+    def collect_formula_similarity_evidence(
+        self, formula_name: str, similar_formula_name: str
+    ) -> Dict[str, Any]:
         """汇总两个方剂在图数据库中的相似性证据。"""
         try:
             shared_herb_query = """
@@ -653,7 +763,9 @@ class Neo4jDriver:
                         {
                             "herb": record["herb_name"],
                             "formula_role": str(record["formula_role"]).lower(),
-                            "similar_formula_role": str(record["similar_formula_role"]).lower(),
+                            "similar_formula_role": str(
+                                record["similar_formula_role"]
+                            ).lower(),
                         }
                         for record in tx.run(
                             shared_herb_query,
@@ -685,7 +797,9 @@ class Neo4jDriver:
 
             shared_syndromes = []
             if syndrome_record:
-                shared_syndromes = [item for item in (syndrome_record.get("syndromes") or []) if item]
+                shared_syndromes = [
+                    item for item in (syndrome_record.get("syndromes") or []) if item
+                ]
 
             evidence_score = min(
                 1.0,
@@ -706,41 +820,47 @@ class Neo4jDriver:
         except Exception as e:
             logger.error(f"查询方剂图谱证据失败: {e}")
             return {}
-    
+
     def get_graph_statistics(self) -> Dict[str, Any]:
         """
         获取图数据库统计信息（含 schema version 与 drift）
-        
+
         Returns:
             统计数据
         """
         try:
             node_query = "MATCH (n) RETURN labels(n)[0] as label, count(*) as count"
             rel_query = "MATCH ()-[r]->() RETURN type(r) as type, count(*) as count"
-            
+
             with self.driver.session(database=self.database) as session:
                 nodes = session.execute_read(lambda tx: list(tx.run(node_query)))
                 rels = session.execute_read(lambda tx: list(tx.run(rel_query)))
 
             drift = self.ensure_schema_version()
 
-            nodes_by_type = {result['label']: result['count'] for result in nodes}
-            relationships_by_type = {result['type']: result['count'] for result in rels}
+            nodes_by_type = {result["label"]: result["count"] for result in nodes}
+            relationships_by_type = {result["type"]: result["count"] for result in rels}
 
             return {
-                'nodes_by_type': nodes_by_type,
-                'relationships_by_type': relationships_by_type,
-                'total_nodes': sum(result['count'] for result in nodes),
-                'total_relationships': sum(result['count'] for result in rels),
-                'schema_version': drift.get("expected_version"),
-                'schema_drift_detected': drift.get("drift_detected", False),
-                'schema_drift_detail': drift.get("detail", ""),
-                'hypothesis_node_count': int(nodes_by_type.get('Hypothesis', 0)),
-                'evidence_node_count': int(nodes_by_type.get('Evidence', 0)),
-                'evidence_claim_node_count': int(nodes_by_type.get('EvidenceClaim', 0)),
-                'has_hypothesis_edge_count': int(relationships_by_type.get('HAS_HYPOTHESIS', 0)),
-                'evidence_for_edge_count': int(relationships_by_type.get('EVIDENCE_FOR', 0)),
-                'derived_from_phase_edge_count': int(relationships_by_type.get('DERIVED_FROM_PHASE', 0)),
+                "nodes_by_type": nodes_by_type,
+                "relationships_by_type": relationships_by_type,
+                "total_nodes": sum(result["count"] for result in nodes),
+                "total_relationships": sum(result["count"] for result in rels),
+                "schema_version": drift.get("expected_version"),
+                "schema_drift_detected": drift.get("drift_detected", False),
+                "schema_drift_detail": drift.get("detail", ""),
+                "hypothesis_node_count": int(nodes_by_type.get("Hypothesis", 0)),
+                "evidence_node_count": int(nodes_by_type.get("Evidence", 0)),
+                "evidence_claim_node_count": int(nodes_by_type.get("EvidenceClaim", 0)),
+                "has_hypothesis_edge_count": int(
+                    relationships_by_type.get("HAS_HYPOTHESIS", 0)
+                ),
+                "evidence_for_edge_count": int(
+                    relationships_by_type.get("EVIDENCE_FOR", 0)
+                ),
+                "derived_from_phase_edge_count": int(
+                    relationships_by_type.get("DERIVED_FROM_PHASE", 0)
+                ),
             }
         except Exception as e:
             logger.error(f"获取统计信息失败: {e}")
@@ -748,6 +868,7 @@ class Neo4jDriver:
 
 
 # ==================== 工具函数 ====================
+
 
 def _to_json_text(value: Any) -> str:
     """将复杂对象转换为 Neo4j 可接受的 JSON 文本。"""
@@ -758,55 +879,58 @@ def _to_json_text(value: Any) -> str:
     except Exception:
         return "{}"
 
+
 def entity_to_neo4j_node(entity: Entity, node_id: str | None = None) -> Neo4jNode:
     """
     将PostgreSQL实体转换为Neo4j节点
-    
+
     Args:
         entity: SQLAlchemy Entity 对象
         node_id: 自定义节点ID
-    
+
     Returns:
         Neo4j节点
     """
     from .graph_schema import NodeLabel, resolve_node_label
 
     label_map = {
-        'formula': NodeLabel.FORMULA.value,
-        'herb': NodeLabel.HERB.value,
-        'syndrome': NodeLabel.SYNDROME.value,
-        'efficacy': NodeLabel.EFFICACY.value,
-        'property': NodeLabel.PROPERTY.value,
-        'taste': NodeLabel.TASTE.value,
-        'meridian': NodeLabel.MERIDIAN.value,
+        "formula": NodeLabel.FORMULA.value,
+        "herb": NodeLabel.HERB.value,
+        "syndrome": NodeLabel.SYNDROME.value,
+        "efficacy": NodeLabel.EFFICACY.value,
+        "property": NodeLabel.PROPERTY.value,
+        "taste": NodeLabel.TASTE.value,
+        "meridian": NodeLabel.MERIDIAN.value,
     }
-    
+
     node_id = node_id or str(entity.id)
     label = label_map.get(entity.type.value, NodeLabel.ENTITY.value)
     label = resolve_node_label(label)
-    
+
     return Neo4jNode(
         id=node_id,
         label=label,
         properties={
-            'name': entity.name,
-            'type': entity.type.value,
-            'confidence': entity.confidence,
-            'alternative_names': entity.alternative_names or [],
-            'description': entity.description or '',
-            'entity_metadata_json': _to_json_text(entity.entity_metadata),
-        }
+            "name": entity.name,
+            "type": entity.type.value,
+            "confidence": entity.confidence,
+            "alternative_names": entity.alternative_names or [],
+            "description": entity.description or "",
+            "entity_metadata_json": _to_json_text(entity.entity_metadata),
+        },
     )
 
 
-def relationship_to_neo4j_edge(rel: EntityRelationship, rel_type_name: str) -> Neo4jEdge:
+def relationship_to_neo4j_edge(
+    rel: EntityRelationship, rel_type_name: str
+) -> Neo4jEdge:
     """
     将PostgreSQL关系转换为Neo4j边
-    
+
     Args:
         rel: SQLAlchemy EntityRelationship 对象
         rel_type_name: 关系类型英文名
-    
+
     Returns:
         Neo4j边
     """
@@ -815,11 +939,11 @@ def relationship_to_neo4j_edge(rel: EntityRelationship, rel_type_name: str) -> N
         target_id=str(rel.target_entity_id),
         relationship_type=rel_type_name,
         properties={
-            'confidence': rel.confidence,
-            'created_by_module': rel.created_by_module or 'unknown',
-            'evidence': rel.evidence or '',
-            'relationship_metadata_json': _to_json_text(rel.relationship_metadata),
-        }
+            "confidence": rel.confidence,
+            "created_by_module": rel.created_by_module or "unknown",
+            "evidence": rel.evidence or "",
+            "relationship_metadata_json": _to_json_text(rel.relationship_metadata),
+        },
     )
 
 
@@ -944,7 +1068,9 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
                 for n in record["nodes"]:
                     g.add_node(n["id"], **(n["props"] or {}))
                 for e in record["edges"]:
-                    g.add_edge(e["src"], e["dst"], rel_type=e["type"], **(e["props"] or {}))
+                    g.add_edge(
+                        e["src"], e["dst"], rel_type=e["type"], **(e["props"] or {})
+                    )
             return g
         except Exception as exc:
             logger.warning("Neo4j get_subgraph 失败: %s", exc)
@@ -1048,7 +1174,9 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
 
     def _ensure_node(self, name: str) -> None:
         """MERGE 节点，确保存在。"""
-        self._driver.create_node(Neo4jNode(id=name, label=NodeLabel.ENTITY.value, properties={"name": name}))
+        self._driver.create_node(
+            Neo4jNode(id=name, label=NodeLabel.ENTITY.value, properties={"name": name})
+        )
 
     def _resolve_label(self, node_id: str) -> str:
         """尝试获取已有节点的标签，默认 Entity。"""
@@ -1076,29 +1204,63 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
 
         compositions = TCMRelationshipDefinitions.FORMULA_COMPOSITIONS
         for formula_name, roles in compositions.items():
-            nodes.append(Neo4jNode(id=formula_name, label=_NL.FORMULA.value,
-                                    properties={"name": formula_name, "entity_type": "formula"}))
+            nodes.append(
+                Neo4jNode(
+                    id=formula_name,
+                    label=_NL.FORMULA.value,
+                    properties={"name": formula_name, "entity_type": "formula"},
+                )
+            )
             for role, herbs in roles.items():
                 for herb in herbs:
-                    nodes.append(Neo4jNode(id=herb, label=_NL.HERB.value,
-                                            properties={"name": herb, "entity_type": "herb"}))
-                    edge_tuples.append((
-                        Neo4jEdge(source_id=formula_name, target_id=herb,
-                                  relationship_type=role.upper(), properties={}),
-                        _NL.FORMULA.value, _NL.HERB.value,
-                    ))
+                    nodes.append(
+                        Neo4jNode(
+                            id=herb,
+                            label=_NL.HERB.value,
+                            properties={"name": herb, "entity_type": "herb"},
+                        )
+                    )
+                    edge_tuples.append(
+                        (
+                            Neo4jEdge(
+                                source_id=formula_name,
+                                target_id=herb,
+                                relationship_type=role.upper(),
+                                properties={},
+                            ),
+                            _NL.FORMULA.value,
+                            _NL.HERB.value,
+                        )
+                    )
 
         for herb, effs in TCMRelationshipDefinitions.HERB_EFFICACY_MAP.items():
-            nodes.append(Neo4jNode(id=herb, label=_NL.HERB.value,
-                                    properties={"name": herb, "entity_type": "herb"}))
+            nodes.append(
+                Neo4jNode(
+                    id=herb,
+                    label=_NL.HERB.value,
+                    properties={"name": herb, "entity_type": "herb"},
+                )
+            )
             for eff in effs:
-                nodes.append(Neo4jNode(id=eff, label=_NL.EFFICACY.value,
-                                        properties={"name": eff, "entity_type": "efficacy"}))
-                edge_tuples.append((
-                    Neo4jEdge(source_id=herb, target_id=eff,
-                              relationship_type=_RT.HAS_EFFICACY.value, properties={}),
-                    _NL.HERB.value, _NL.EFFICACY.value,
-                ))
+                nodes.append(
+                    Neo4jNode(
+                        id=eff,
+                        label=_NL.EFFICACY.value,
+                        properties={"name": eff, "entity_type": "efficacy"},
+                    )
+                )
+                edge_tuples.append(
+                    (
+                        Neo4jEdge(
+                            source_id=herb,
+                            target_id=eff,
+                            relationship_type=_RT.HAS_EFFICACY.value,
+                            properties={},
+                        ),
+                        _NL.HERB.value,
+                        _NL.EFFICACY.value,
+                    )
+                )
 
         if nodes:
             self._driver.batch_create_nodes(nodes)
@@ -1118,21 +1280,31 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
                 records = session.execute_read(lambda tx: list(tx.run(query)))
             for r in records:
                 ntype = r["label"].lower() if r["label"] else "generic"
-                gaps.append(KnowledgeGap(
-                    gap_type="orphan_entity",
-                    entity=r["id"],
-                    entity_type=ntype,
-                    description=f"实体 '{r['id']}' 没有任何关系连接",
-                    severity="medium",
-                ))
+                gaps.append(
+                    KnowledgeGap(
+                        gap_type="orphan_entity",
+                        entity=r["id"],
+                        entity_type=ntype,
+                        description=f"实体 '{r['id']}' 没有任何关系连接",
+                        severity="medium",
+                    )
+                )
         except Exception as exc:
             logger.warning("orphan gap 查询失败: %s", exc)
 
     def _find_missing_downstream_gaps_cypher(self, gaps: List[KnowledgeGap]) -> None:
         level_pairs = [
             (NodeLabel.FORMULA.value, NodeLabel.SYNDROME.value, _RelType.TREATS.value),
-            (NodeLabel.SYNDROME.value, NodeLabel.TARGET.value, _RelType.ASSOCIATED_TARGET.value),
-            (NodeLabel.TARGET.value, NodeLabel.PATHWAY.value, _RelType.PARTICIPATES_IN.value),
+            (
+                NodeLabel.SYNDROME.value,
+                NodeLabel.TARGET.value,
+                _RelType.ASSOCIATED_TARGET.value,
+            ),
+            (
+                NodeLabel.TARGET.value,
+                NodeLabel.PATHWAY.value,
+                _RelType.PARTICIPATES_IN.value,
+            ),
         ]
         for src_label, dst_label, expected_rel in level_pairs:
             query = f"""
@@ -1141,23 +1313,29 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
             RETURN n.id AS id
             """
             try:
-                with self._driver.driver.session(database=self._driver.database) as session:
+                with self._driver.driver.session(
+                    database=self._driver.database
+                ) as session:
                     records = session.execute_read(lambda tx: list(tx.run(query)))
                 for r in records:
-                    gaps.append(KnowledgeGap(
-                        gap_type="missing_downstream",
-                        entity=r["id"],
-                        entity_type=src_label.lower(),
-                        description=(
-                            f"{src_label.lower()} '{r['id']}' 缺少到 {dst_label.lower()}"
-                            f" 层级的 '{expected_rel.lower()}' 关系"
-                        ),
-                        severity="high",
-                    ))
+                    gaps.append(
+                        KnowledgeGap(
+                            gap_type="missing_downstream",
+                            entity=r["id"],
+                            entity_type=src_label.lower(),
+                            description=(
+                                f"{src_label.lower()} '{r['id']}' 缺少到 {dst_label.lower()}"
+                                f" 层级的 '{expected_rel.lower()}' 关系"
+                            ),
+                            severity="high",
+                        )
+                    )
             except Exception as exc:
                 logger.warning("downstream gap 查询失败 (%s): %s", src_label, exc)
 
-    def _find_incomplete_composition_gaps_cypher(self, gaps: List[KnowledgeGap]) -> None:
+    def _find_incomplete_composition_gaps_cypher(
+        self, gaps: List[KnowledgeGap]
+    ) -> None:
         query = f"""
         MATCH (f:{_safe_cypher_label(NodeLabel.FORMULA.value)})
         OPTIONAL MATCH (f)-[r]->(h:{_safe_cypher_label(NodeLabel.HERB.value)})
@@ -1173,13 +1351,15 @@ class Neo4jKnowledgeGraph(IKnowledgeGraph):
                 present = {str(role).lower() for role in (r["present_roles"] or [])}
                 missing = _COMPOSITION_ROLES - present
                 if missing:
-                    gaps.append(KnowledgeGap(
-                        gap_type="incomplete_composition",
-                        entity=r["id"],
-                        entity_type="formula",
-                        description=f"方剂 '{r['id']}' 缺少角色: {', '.join(sorted(missing))}",
-                        severity="low" if len(missing) == 1 else "medium",
-                    ))
+                    gaps.append(
+                        KnowledgeGap(
+                            gap_type="incomplete_composition",
+                            entity=r["id"],
+                            entity_type="formula",
+                            description=f"方剂 '{r['id']}' 缺少角色: {', '.join(sorted(missing))}",
+                            severity="low" if len(missing) == 1 else "medium",
+                        )
+                    )
         except Exception as exc:
             logger.warning("composition gap 查询失败: %s", exc)
 
@@ -1216,14 +1396,24 @@ def create_knowledge_graph(
     if neo4j_cfg.get("enabled"):
         uri = neo4j_cfg.get("uri", "neo4j://localhost:7687")
         user = neo4j_cfg.get("user", "neo4j")
-        password = resolve_config_password(neo4j_cfg, default_env_name="TCM_NEO4J_PASSWORD")
+        password = resolve_config_password(
+            neo4j_cfg, default_env_name="TCM_NEO4J_PASSWORD"
+        )
         database = neo4j_cfg.get("database", "neo4j")
         try:
             driver = Neo4jDriver(
-                uri=uri, auth=(user, password), database=database,
-                max_connection_pool_size=int(neo4j_cfg.get("max_connection_pool_size", 50)),
-                connection_acquisition_timeout=float(neo4j_cfg.get("connection_acquisition_timeout", 60)),
-                max_connection_lifetime=int(neo4j_cfg.get("max_connection_lifetime", 3600)),
+                uri=uri,
+                auth=(user, password),
+                database=database,
+                max_connection_pool_size=int(
+                    neo4j_cfg.get("max_connection_pool_size", 50)
+                ),
+                connection_acquisition_timeout=float(
+                    neo4j_cfg.get("connection_acquisition_timeout", 60)
+                ),
+                max_connection_lifetime=int(
+                    neo4j_cfg.get("max_connection_lifetime", 3600)
+                ),
             )
             driver.connect()
             logger.info("知识图谱后端: Neo4j (%s)", uri)

@@ -1,0 +1,55 @@
+{
+  "case_id": "version_variant_guizhi_shao",
+  "category": "version_variant",
+  "category_label": "版本异文",
+  "input": {
+    "query": "桂枝汤条文中芍药/芍药三两的版本异文",
+    "source_ref": "variant_gzt_shaoyao_witnesses"
+  },
+  "expected": {
+    "entities": [
+      {"type": "work", "name": "伤寒论"},
+      {"type": "variant_reading", "name": "芍药"},
+      {"type": "variant_reading", "name": "芍药三两"}
+    ],
+    "relationships": [
+      {"type": "has_variant", "source": "伤寒论", "target": "芍药"},
+      {"type": "has_variant", "source": "伤寒论", "target": "芍药三两"}
+    ],
+    "philology_verdict": {
+      "status": "needs_review",
+      "variant": "芍药三两",
+      "confidence": 0.72
+    },
+    "citation_support": [
+      {
+        "claim_id": "claim_variant_gzt_shaoyao",
+        "supported": true,
+        "citation_keys": ["variant_gzt_shaoyao_witnesses"]
+      }
+    ]
+  },
+  "actual": {
+    "entities": [
+      {"type": "work", "name": "伤寒论"},
+      {"type": "variant_reading", "name": "芍药"},
+      {"type": "variant_reading", "name": "芍药三两"}
+    ],
+    "relationships": [
+      {"type": "has_variant", "source": "伤寒论", "target": "芍药"},
+      {"type": "has_variant", "source": "伤寒论", "target": "芍药三两"}
+    ],
+    "philology_verdict": {
+      "status": "needs_review",
+      "variant": "芍药三两",
+      "confidence": 0.72
+    },
+    "citation_support": [
+      {
+        "claim_id": "claim_variant_gzt_shaoyao",
+        "supported": true,
+        "citation_keys": ["variant_gzt_shaoyao_witnesses"]
+      }
+    ]
+  }
+}

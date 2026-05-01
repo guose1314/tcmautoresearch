@@ -1,0 +1,393 @@
+contract_version: ontology-registry-v1
+ontology_id: tcm_literature_graph
+schema_version: "1.0.0"
+description: 中医文献研究知识图谱本体注册表，统一 Neo4j 标签、关系、属性与 traceability 字段。
+
+traceability:
+  id:
+    type: string
+    required: true
+    unique: true
+    indexed: true
+    description: 图资产全局稳定标识。
+  cycle_id:
+    type: string
+    indexed: true
+    description: 研究循环 ID。
+  phase:
+    type: string
+    indexed: true
+    description: 产生该资产的阶段名。
+  phase_execution_id:
+    type: string
+    indexed: true
+    description: 阶段执行记录 ID。
+  source_phase:
+    type: string
+    indexed: true
+    description: 上游来源阶段。
+  source_ref:
+    type: string
+    indexed: true
+    description: 原始文献、外部资源、数据库或文件引用。
+  document_urn:
+    type: string
+    indexed: true
+    description: 文献归一化 URN。
+  document_title:
+    type: string
+    fulltext: true
+    description: 文献题名。
+  witness_key:
+    type: string
+    indexed: true
+    description: 版本 witness 标识。
+  version_lineage_key:
+    type: string
+    indexed: true
+    description: 版本谱系标识。
+  claim_id:
+    type: string
+    indexed: true
+    description: EvidenceClaim 标识。
+  citation_key:
+    type: string
+    indexed: true
+    description: Citation 标识或引用键。
+  node_ids:
+    type: list
+    item_type: string
+    description: GraphRAG 检索涉及的节点 ID 列表。
+  relationship_ids:
+    type: list
+    item_type: string
+    description: GraphRAG 检索涉及的关系 ID 列表。
+  created_at:
+    type: datetime
+    indexed: true
+    description: 创建时间。
+  updated_at:
+    type: datetime
+    indexed: true
+    description: 更新时间。
+
+nodes:
+  Literature:
+    description: 中医古籍、医案、论文、目录条目或可引用文献单元。
+    required_properties: [id, title]
+    unique_key: id
+    indexes: [source_ref, document_urn, dynasty]
+    fulltext_fields: [title, abstract]
+    traceability_fields: [id, source_ref, document_urn, document_title, created_at, updated_at]
+    properties:
+      id: {type: string, required: true, unique: true, indexed: true, description: 文献节点 ID。}
+      title: {type: string, required: true, fulltext: true, description: 文献题名。}
+      authors: {type: list, item_type: string, description: 作者列表。}
+      dynasty: {type: string, indexed: true, description: 朝代或时代。}
+      chapter: {type: string, description: 卷、篇、章。}
+      abstract: {type: string, fulltext: true, description: 摘要或内容概述。}
+      source_type: {type: string, indexed: true, description: 来源类型。}
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      document_urn: {type: string, indexed: true, description: 文献 URN。}
+      document_title: {type: string, description: 原始文献题名。}
+      created_at: {type: datetime, description: 创建时间。}
+      updated_at: {type: datetime, description: 更新时间。}
+
+  VersionWitness:
+    description: 某一文献或片段的版本见证本。
+    required_properties: [id, witness_key, version_lineage_key]
+    unique_key: id
+    indexes: [witness_key, version_lineage_key, document_urn]
+    fulltext_fields: [work_title, document_title]
+    traceability_fields: [id, witness_key, version_lineage_key, document_urn, source_ref, created_at, updated_at]
+    properties:
+      id: {type: string, required: true, unique: true, indexed: true, description: witness 节点 ID。}
+      witness_key: {type: string, required: true, indexed: true, description: witness 稳定键。}
+      version_lineage_key: {type: string, required: true, indexed: true, description: 所属版本谱系键。}
+      work_title: {type: string, fulltext: true, description: 书名或作品名。}
+      fragment_title: {type: string, description: 片段、卷篇或条目名。}
+      dynasty: {type: string, indexed: true, description: 版本朝代。}
+      edition: {type: string, description: 版本/刻本说明。}
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      document_urn: {type: string, indexed: true, description: 文献 URN。}
+      document_title: {type: string, fulltext: true, description: 文献题名。}
+      created_at: {type: datetime, description: 创建时间。}
+      updated_at: {type: datetime, description: 更新时间。}
+
+  VersionLineage:
+    description: 文献版本、片段或传抄谱系。
+    required_properties: [id, version_lineage_key, work_title]
+    unique_key: id
+    indexes: [version_lineage_key, work_title]
+    fulltext_fields: [work_title, fragment_title]
+    traceability_fields: [id, version_lineage_key, source_ref, created_at, updated_at]
+    properties:
+      id: {type: string, required: true, unique: true, indexed: true, description: 谱系节点 ID。}
+      version_lineage_key: {type: string, required: true, indexed: true, description: 谱系稳定键。}
+      work_title: {type: string, required: true, fulltext: true, description: 作品名。}
+      fragment_title: {type: string, fulltext: true, description: 片段或卷篇名。}
+      dynasty: {type: string, indexed: true, description: 主要时代。}
+      author: {type: string, description: 作者。}
+      lineage_summary: {type: string, description: 谱系摘要。}
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      created_at: {type: datetime, description: 创建时间。}
+      updated_at: {type: datetime, description: 更新时间。}
+
+  Formula:
+    description: 方剂、处方或方名实体。
+    required_properties: [id, name]
+    unique_key: id
+    indexes: [name]
+    fulltext_fields: [name, alternative_names, description]
+    traceability_fields: [id, source_ref, cycle_id, phase, created_at, updated_at]
+    properties:
+      id: {type: string, required: true, unique: true, indexed: true, description: 方剂节点 ID。}
+      name: {type: string, required: true, indexed: true, fulltext: true, description: 方名。}
+      alternative_names: {type: list, item_type: string, fulltext: true, description: 异名。}
+      description: {type: string, fulltext: true, description: 方义或说明。}
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      confidence: {type: float, description: 抽取置信度。}
+      cycle_id: {type: string, indexed: true, description: 研究循环 ID。}
+      phase: {type: string, indexed: true, description: 来源阶段。}
+      created_at: {type: datetime, description: 创建时间。}
+      updated_at: {type: datetime, description: 更新时间。}
+
+  Herb:
+    description: 中药、药物或本草实体。
+    required_properties: [id, name]
+    unique_key: id
+    indexes: [name]
+    fulltext_fields: [name, alternative_names, description]
+    traceability_fields: [id, source_ref, cycle_id, phase, created_at, updated_at]
+    properties:
+      id: {type: string, required: true, unique: true, indexed: true, description: 药物节点 ID。}
+      name: {type: string, required: true, indexed: true, fulltext: true, description: 药名。}
+      alternative_names: {type: list, item_type: string, fulltext: true, description: 别名。}
+      nature: {type: string, description: 四气。}
+      flavor: {type: string, description: 五味。}
+      meridian: {type: list, item_type: string, description: 归经。}
+      description: {type: string, fulltext: true, description: 药性说明。}
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      confidence: {type: float, description: 抽取置信度。}
+      cycle_id: {type: string, indexed: true, description: 研究循环 ID。}
+      phase: {type: string, indexed: true, description: 来源阶段。}
+      created_at: {type: datetime, description: 创建时间。}
+      updated_at: {type: datetime, description: 更新时间。}
+
+  Symptom:
+    description: 症状、体征或临床表现。
+    required_properties: [id, name]
+    unique_key: id
+    indexes: [name]
+    fulltext_fields: [name, description]
+    traceability_fields: [id, source_ref, cycle_id, phase, created_at, updated_at]
+    properties:
+      id: {type: string, required: true, unique: true, indexed: true, description: 症状节点 ID。}
+      name: {type: string, required: true, indexed: true, fulltext: true, description: 症状名。}
+      description: {type: string, fulltext: true, description: 症状描述。}
+      symptom_category: {type: string, indexed: true, description: 症状类别。}
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      confidence: {type: float, description: 抽取置信度。}
+      cycle_id: {type: string, indexed: true, description: 研究循环 ID。}
+      phase: {type: string, indexed: true, description: 来源阶段。}
+      created_at: {type: datetime, description: 创建时间。}
+      updated_at: {type: datetime, description: 更新时间。}
+
+  Syndrome:
+    description: 证候、病证或辨证实体。
+    required_properties: [id, name]
+    unique_key: id
+    indexes: [name]
+    fulltext_fields: [name, description]
+    traceability_fields: [id, source_ref, cycle_id, phase, created_at, updated_at]
+    properties:
+      id: {type: string, required: true, unique: true, indexed: true, description: 证候节点 ID。}
+      name: {type: string, required: true, indexed: true, fulltext: true, description: 证候名。}
+      description: {type: string, fulltext: true, description: 证候描述。}
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      confidence: {type: float, description: 抽取置信度。}
+      cycle_id: {type: string, indexed: true, description: 研究循环 ID。}
+      phase: {type: string, indexed: true, description: 来源阶段。}
+      created_at: {type: datetime, description: 创建时间。}
+      updated_at: {type: datetime, description: 更新时间。}
+
+  Pathogenesis:
+    description: 病机、病理机制或机理解释。
+    required_properties: [id, name]
+    unique_key: id
+    indexes: [name]
+    fulltext_fields: [name, mechanism]
+    traceability_fields: [id, source_ref, cycle_id, phase, created_at, updated_at]
+    properties:
+      id: {type: string, required: true, unique: true, indexed: true, description: 病机节点 ID。}
+      name: {type: string, required: true, indexed: true, fulltext: true, description: 病机名。}
+      mechanism: {type: string, fulltext: true, description: 病理机制说明。}
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      confidence: {type: float, description: 抽取置信度。}
+      cycle_id: {type: string, indexed: true, description: 研究循环 ID。}
+      phase: {type: string, indexed: true, description: 来源阶段。}
+      created_at: {type: datetime, description: 创建时间。}
+      updated_at: {type: datetime, description: 更新时间。}
+
+  EvidenceClaim:
+    description: 可审计证据声明，连接研究观点、证据和来源链。
+    required_properties: [id, claim_id, claim_text]
+    unique_key: id
+    indexes: [claim_id, source_entity, target_entity, witness_key]
+    fulltext_fields: [claim_text, decision_basis]
+    traceability_fields: [id, claim_id, witness_key, version_lineage_key, source_ref, cycle_id, phase, created_at, updated_at]
+    properties:
+      id: {type: string, required: true, unique: true, indexed: true, description: 声明节点 ID。}
+      claim_id: {type: string, required: true, indexed: true, description: 声明稳定 ID。}
+      claim_text: {type: string, required: true, fulltext: true, description: 声明文本。}
+      source_entity: {type: string, indexed: true, description: 来源实体。}
+      target_entity: {type: string, indexed: true, description: 目标实体。}
+      relation_type: {type: string, indexed: true, description: 关系类型。}
+      evidence_ids: {type: list, item_type: string, description: 关联证据 ID。}
+      support_count: {type: integer, description: 支持证据数。}
+      confidence: {type: float, description: 置信度。}
+      evidence_grade: {type: string, description: 证据等级。}
+      decision_basis: {type: string, fulltext: true, description: 判定依据。}
+      review_status: {type: string, indexed: true, description: 复核状态。}
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      witness_key: {type: string, indexed: true, description: witness 标识。}
+      version_lineage_key: {type: string, indexed: true, description: 谱系标识。}
+      cycle_id: {type: string, indexed: true, description: 研究循环 ID。}
+      phase: {type: string, indexed: true, description: 来源阶段。}
+      created_at: {type: datetime, description: 创建时间。}
+      updated_at: {type: datetime, description: 更新时间。}
+
+  Citation:
+    description: 引文、参考文献或引用键。
+    required_properties: [id, citation_key, title]
+    unique_key: id
+    indexes: [citation_key, source_ref, doi]
+    fulltext_fields: [title, abstract]
+    traceability_fields: [id, citation_key, source_ref, document_urn, created_at, updated_at]
+    properties:
+      id: {type: string, required: true, unique: true, indexed: true, description: 引文节点 ID。}
+      citation_key: {type: string, required: true, indexed: true, description: 引用键。}
+      title: {type: string, required: true, fulltext: true, description: 文献题名。}
+      authors: {type: list, item_type: string, description: 作者列表。}
+      year: {type: integer, description: 年份。}
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      source_type: {type: string, indexed: true, description: 来源类型。}
+      doi: {type: string, indexed: true, description: DOI。}
+      url: {type: string, description: URL。}
+      abstract: {type: string, fulltext: true, description: 摘要。}
+      document_urn: {type: string, indexed: true, description: 文献 URN。}
+      created_at: {type: datetime, description: 创建时间。}
+      updated_at: {type: datetime, description: 更新时间。}
+
+  ResearchTopic:
+    description: 研究主题、无监督社区主题或下一轮研究候选。
+    required_properties: [id, topic_key, title]
+    unique_key: id
+    indexes: [topic_key, source_phase]
+    fulltext_fields: [title, description]
+    traceability_fields: [id, source_phase, cycle_id, phase, created_at, updated_at]
+    properties:
+      id: {type: string, required: true, unique: true, indexed: true, description: 主题节点 ID。}
+      topic_key: {type: string, required: true, indexed: true, description: 主题稳定键。}
+      title: {type: string, required: true, fulltext: true, description: 主题标题。}
+      description: {type: string, fulltext: true, description: 主题说明。}
+      novelty_score: {type: float, description: 新颖性分数。}
+      confidence: {type: float, description: 置信度。}
+      source_phase: {type: string, indexed: true, description: 来源阶段。}
+      cycle_id: {type: string, indexed: true, description: 研究循环 ID。}
+      phase: {type: string, indexed: true, description: 当前阶段。}
+      created_at: {type: datetime, description: 创建时间。}
+      updated_at: {type: datetime, description: 更新时间。}
+
+relationships:
+  APPEARS_IN:
+    description: 方剂或引文条目出自某文献。
+    source_labels: [Formula, Citation]
+    target_labels: [Literature]
+    traceability_fields: [source_ref, document_urn, citation_key, cycle_id, phase]
+    properties:
+      source_ref: {type: string, indexed: true, description: 出处引用。}
+      document_urn: {type: string, indexed: true, description: 文献 URN。}
+      citation_key: {type: string, indexed: true, description: 引用键。}
+      confidence: {type: float, description: 置信度。}
+      cycle_id: {type: string, indexed: true, description: 研究循环 ID。}
+      phase: {type: string, indexed: true, description: 来源阶段。}
+
+  CONTAINS:
+    description: 方剂包含药物或文献包含版本 witness。
+    source_labels: [Formula, Literature]
+    target_labels: [Herb, VersionWitness]
+    traceability_fields: [source_ref, witness_key, cycle_id, phase]
+    properties:
+      dosage: {type: string, description: 剂量、炮制或比例。}
+      role: {type: string, description: 君臣佐使或文献结构角色。}
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      witness_key: {type: string, indexed: true, description: witness 标识。}
+      confidence: {type: float, description: 置信度。}
+      cycle_id: {type: string, indexed: true, description: 研究循环 ID。}
+      phase: {type: string, indexed: true, description: 来源阶段。}
+
+  TREATS:
+    description: 方剂或药物主治证候/症状。
+    source_labels: [Formula, Herb]
+    target_labels: [Symptom, Syndrome]
+    traceability_fields: [source_ref, claim_id, cycle_id, phase]
+    properties:
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      claim_id: {type: string, indexed: true, description: 支撑声明 ID。}
+      confidence: {type: float, description: 置信度。}
+      evidence_grade: {type: string, description: 证据等级。}
+      cycle_id: {type: string, indexed: true, description: 研究循环 ID。}
+      phase: {type: string, indexed: true, description: 来源阶段。}
+
+  BELONGS_TO_LINEAGE:
+    description: 版本 witness 属于某版本谱系。
+    source_labels: [VersionWitness]
+    target_labels: [VersionLineage]
+    traceability_fields: [witness_key, version_lineage_key, source_ref]
+    properties:
+      witness_key: {type: string, indexed: true, description: witness 标识。}
+      version_lineage_key: {type: string, indexed: true, description: 谱系标识。}
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      confidence: {type: float, description: 置信度。}
+
+  EVIDENCE_FOR:
+    description: 证据声明支撑实体、主题、引文或版本 witness。
+    source_labels: [EvidenceClaim]
+    target_labels: [Formula, Herb, Symptom, Syndrome, Pathogenesis, Citation, VersionWitness, ResearchTopic]
+    traceability_fields: [claim_id, citation_key, witness_key, source_ref, cycle_id, phase]
+    properties:
+      claim_id: {type: string, indexed: true, description: 声明 ID。}
+      citation_key: {type: string, indexed: true, description: 引用键。}
+      witness_key: {type: string, indexed: true, description: witness 标识。}
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      support_level: {type: string, indexed: true, description: strong/moderate/weak/unsupported。}
+      confidence: {type: float, description: 置信度。}
+      cycle_id: {type: string, indexed: true, description: 研究循环 ID。}
+      phase: {type: string, indexed: true, description: 来源阶段。}
+
+  CITES:
+    description: 声明、文献或引文节点引用另一引文/文献/witness。
+    source_labels: [EvidenceClaim, Literature, Citation]
+    target_labels: [Citation, Literature, VersionWitness]
+    traceability_fields: [citation_key, source_ref, document_urn, witness_key, cycle_id, phase]
+    properties:
+      citation_key: {type: string, indexed: true, description: 引用键。}
+      source_ref: {type: string, indexed: true, description: 来源引用。}
+      document_urn: {type: string, indexed: true, description: 文献 URN。}
+      witness_key: {type: string, indexed: true, description: witness 标识。}
+      confidence: {type: float, description: 置信度。}
+      cycle_id: {type: string, indexed: true, description: 研究循环 ID。}
+      phase: {type: string, indexed: true, description: 来源阶段。}
+
+  BELONGS_TO_TOPIC:
+    description: 文献、证据声明、实体或谱系属于某研究主题。
+    source_labels: [Literature, EvidenceClaim, Formula, Herb, Symptom, Syndrome, Pathogenesis, VersionLineage]
+    target_labels: [ResearchTopic]
+    traceability_fields: [source_phase, cycle_id, phase]
+    properties:
+      source_phase: {type: string, indexed: true, description: 来源阶段。}
+      confidence: {type: float, description: 置信度。}
+      topic_weight: {type: float, description: 主题权重。}
+      cycle_id: {type: string, indexed: true, description: 研究循环 ID。}
+      phase: {type: string, indexed: true, description: 来源阶段。}

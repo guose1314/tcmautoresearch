@@ -915,6 +915,37 @@ class ResearchLearningFeedback(Base):
     )
 
 
+class LearningInsight(Base):
+    """Reviewable and expirable learning insight produced by PG/Neo4j mining."""
+
+    __tablename__ = "learning_insights"
+
+    insight_id = Column(String(128), primary_key=True)
+    source = Column(String(64), nullable=False)
+    target_phase = Column(String(64), nullable=False)
+    insight_type = Column(String(64), nullable=False)
+    description = Column(Text, nullable=False)
+    confidence = Column(Float, default=0.0, nullable=False)
+    evidence_refs_json = Column(JSON, default=list, nullable=False)
+    status = Column(String(32), nullable=False, default="active")
+    expires_at = Column(DateTime, nullable=True)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_learning_insights_source", "source"),
+        Index("idx_learning_insights_phase_status", "target_phase", "status"),
+        Index("idx_learning_insights_type", "insight_type"),
+        Index("idx_learning_insights_expires", "expires_at"),
+        Index("idx_learning_insights_created", "created_at"),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_learning_insights_confidence",
+        ),
+    )
+
+
 class ReviewAssignment(Base):
     """Review assignment 事实面 — 谁在处理哪个 review item、何时认领、是否逾期。
 
@@ -1039,7 +1070,9 @@ class OutboxEventORM(Base):
     event_type = Column(String(96), nullable=False)
     payload = Column(JSON, default=dict, nullable=False)
     status = Column(String(16), nullable=False, default=OutboxStatusEnum.PENDING.value)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
     processed_at = Column(DateTime, nullable=True)
     retry_count = Column(Integer, default=0, nullable=False)
     last_error = Column(Text, nullable=True)
@@ -1063,8 +1096,12 @@ class OutboxDLQORM(Base):
     payload = Column(JSON, default=dict, nullable=False)
     retry_count = Column(Integer, default=0, nullable=False)
     last_error = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    moved_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    moved_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
 
 
 def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:

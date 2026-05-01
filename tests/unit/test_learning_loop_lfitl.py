@@ -25,6 +25,25 @@ class _FakeFeedbackRepo:
         return list(self._records[-limit:])
 
 
+class _FakeLearningInsightRepo:
+    def __init__(self, records: List[Dict[str, Any]]) -> None:
+        self._records = list(records)
+
+    def list_active(self, limit: int = 100) -> List[Dict[str, Any]]:
+        return list(self._records[:limit])
+
+
+class _FakeLearningFeedbackListRepo:
+    def __init__(self, records: List[Dict[str, Any]]) -> None:
+        self._records = list(records)
+
+    def list_learning_feedback(
+        self, limit: int = 50, **_filters: Any
+    ) -> Dict[str, Any]:
+        items = list(self._records[:limit])
+        return {"items": items, "total": len(items), "limit": limit, "offset": 0}
+
+
 def _make_pipeline() -> Any:
     """Bare pipeline stub: orchestrator only needs config + a few duck-typed methods."""
 
@@ -91,6 +110,91 @@ class TestLearningLoopLFITLIntegration(unittest.TestCase):
         prep = llo.prepare_cycle(_make_pipeline())
         self.assertIsNone(prep["lfitl_plan"])
         self.assertEqual(prep["prompt_bias_blocks"], {})
+
+    def test_learning_insight_repo_adds_prompt_bias_blocks(self) -> None:
+        repo = _FakeLearningInsightRepo(
+            [
+                {
+                    "status": "active",
+                    "insight_type": "method_policy",
+                    "target_phase": "analyze",
+                    "confidence": 0.88,
+                    "description": "优先检查证据链的版本来源一致性",
+                },
+                {
+                    "status": "active",
+                    "insight_type": "prompt_bias",
+                    "target_phase": "analyze",
+                    "confidence": 0.2,
+                    "description": "低置信度策略不进入 prompt",
+                },
+                {
+                    "status": "reviewed",
+                    "insight_type": "prompt_bias",
+                    "target_phase": "publish",
+                    "confidence": 0.95,
+                    "description": "非 active 策略不进入 prompt",
+                },
+            ]
+        )
+        llo = LearningLoopOrchestrator(
+            learning_insight_repo=repo,
+            learning_insight_min_confidence=0.7,
+        )
+
+        prep = llo.prepare_cycle(_make_pipeline())
+
+        self.assertIsNotNone(prep["learning_insight_plan"])
+        self.assertEqual(list(prep["prompt_bias_blocks"]), ["analyze"])
+        bias_text = prep["prompt_bias_blocks"]["analyze"]["bias_text"]
+        self.assertIn("优先检查证据链的版本来源一致性", bias_text)
+        self.assertNotIn("低置信度策略", bias_text)
+
+    def test_philology_review_list_feedback_generates_prompt_bias(self) -> None:
+        repo = _FakeLearningFeedbackListRepo(
+            [
+                {
+                    "feedback_scope": "philology_review",
+                    "source_phase": "observe",
+                    "target_phase": "observe",
+                    "feedback_status": "weakness",
+                    "grade_level": "D",
+                    "metadata": {
+                        "asset_kind": "exegesis_entry",
+                        "asset_id": "exegesis::黄芪",
+                        "decision": "rejected",
+                        "reason": "未核对宋本 witness",
+                        "target_phase": "observe",
+                        "severity": "high",
+                        "issue_fields": ["此类术语需优先检查版本 witness"],
+                        "violations": [
+                            {
+                                "rule_id": "philology_review:rejected:exegesis_entry",
+                                "severity": "high",
+                            }
+                        ],
+                    },
+                    "details": {
+                        "asset_kind": "exegesis_entry",
+                        "asset_id": "exegesis::黄芪",
+                        "decision": "rejected",
+                        "reason": "未核对宋本 witness",
+                        "target_phase": "observe",
+                    },
+                }
+            ]
+        )
+        llo = LearningLoopOrchestrator(
+            feedback_repo=repo,
+            recent_feedback_limit=10,
+        )
+
+        prep = llo.prepare_cycle(_make_pipeline())
+
+        self.assertIn("observe", prep["prompt_bias_blocks"])
+        bias_text = prep["prompt_bias_blocks"]["observe"]["bias_text"]
+        self.assertIn("此类术语需优先检查版本 witness", bias_text)
+        self.assertIn("philology_review:rejected:exegesis_entry", bias_text)
 
 
 if __name__ == "__main__":

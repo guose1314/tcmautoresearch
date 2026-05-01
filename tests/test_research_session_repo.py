@@ -68,9 +68,11 @@ class _RecordingNeo4jDriver:
     def session(self, database=None):
         return _RecordingNeo4jSession(self)
 
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def db_manager():
@@ -129,7 +131,9 @@ def _make_learning_feedback_payload() -> dict:
                 "strategy_after_fingerprint": "after-001",
                 "recorded_phase_names": ["observe", "analyze"],
                 "weak_phase_names": ["analyze"],
-                "improvement_priorities": ["优先: 提升analyze阶段数据完整性 (评分 0.35)"],
+                "improvement_priorities": [
+                    "优先: 提升analyze阶段数据完整性 (评分 0.35)"
+                ],
                 "replay_feedback": replay_feedback,
                 "details": {
                     "learning_summary": replay_feedback["learning_summary"],
@@ -139,7 +143,9 @@ def _make_learning_feedback_payload() -> dict:
                         "before_fingerprint": "before-001",
                         "after_fingerprint": "after-001",
                     },
-                    "tuned_parameters": replay_feedback["learning_summary"]["tuned_parameters"],
+                    "tuned_parameters": replay_feedback["learning_summary"][
+                        "tuned_parameters"
+                    ],
                 },
             },
             {
@@ -184,6 +190,7 @@ def _make_learning_feedback_payload() -> dict:
 # 枚举转换
 # ---------------------------------------------------------------------------
 
+
 class TestEnumConversion:
     def test_to_session_status_from_string(self):
         assert _to_session_status("active") == SessionStatusEnum.ACTIVE
@@ -223,6 +230,7 @@ class TestEnumConversion:
 # ORM 模型基础
 # ---------------------------------------------------------------------------
 
+
 class TestORMModels:
     def test_research_session_table_created(self, db_manager):
         assert "research_sessions" in Base.metadata.tables
@@ -255,6 +263,7 @@ class TestORMModels:
 # 会话 CRUD
 # ---------------------------------------------------------------------------
 
+
 class TestSessionCRUD:
     def test_create_session(self, repo):
         result = repo.create_session(_make_payload())
@@ -282,11 +291,14 @@ class TestSessionCRUD:
     def test_update_session(self, repo):
         payload = _make_payload()
         repo.create_session(payload)
-        result = repo.update_session(payload["cycle_id"], {
-            "cycle_name": "更新后的名称",
-            "budget": 5000.0,
-            "tags": ["中医", "方剂"],
-        })
+        result = repo.update_session(
+            payload["cycle_id"],
+            {
+                "cycle_name": "更新后的名称",
+                "budget": 5000.0,
+                "tags": ["中医", "方剂"],
+            },
+        )
         assert result["cycle_name"] == "更新后的名称"
         assert result["budget"] == 5000.0
         assert result["tags"] == ["中医", "方剂"]
@@ -329,6 +341,7 @@ class TestSessionCRUD:
 # 状态转换
 # ---------------------------------------------------------------------------
 
+
 class TestStatusTransitions:
     def test_start_session(self, repo):
         payload = _make_payload()
@@ -361,15 +374,19 @@ class TestStatusTransitions:
 # 阶段执行
 # ---------------------------------------------------------------------------
 
+
 class TestPhaseExecution:
     def test_add_phase_execution(self, repo):
         session_payload = _make_payload()
         repo.create_session(session_payload)
-        pe = repo.add_phase_execution(session_payload["cycle_id"], {
-            "phase": "observe",
-            "status": "running",
-            "input": {"topic": "麻黄汤"},
-        })
+        pe = repo.add_phase_execution(
+            session_payload["cycle_id"],
+            {
+                "phase": "observe",
+                "status": "running",
+                "input": {"topic": "麻黄汤"},
+            },
+        )
         assert pe is not None
         assert pe["phase"] == "observe"
         assert pe["status"] == "running"
@@ -381,14 +398,20 @@ class TestPhaseExecution:
     def test_update_phase_execution(self, repo):
         session_payload = _make_payload()
         repo.create_session(session_payload)
-        pe = repo.add_phase_execution(session_payload["cycle_id"], {
-            "phase": "hypothesis",
-        })
-        updated = repo.update_phase_execution(uuid.UUID(pe["id"]), {
-            "status": "completed",
-            "duration": 12.5,
-            "output": {"hypothesis": "麻黄汤可治表寒证"},
-        })
+        pe = repo.add_phase_execution(
+            session_payload["cycle_id"],
+            {
+                "phase": "hypothesis",
+            },
+        )
+        updated = repo.update_phase_execution(
+            uuid.UUID(pe["id"]),
+            {
+                "status": "completed",
+                "duration": 12.5,
+                "output": {"hypothesis": "麻黄汤可治表寒证"},
+            },
+        )
         assert updated["status"] == "completed"
         assert updated["duration"] == 12.5
         assert updated["output"]["hypothesis"] == "麻黄汤可治表寒证"
@@ -403,7 +426,11 @@ class TestPhaseExecution:
             repo.add_phase_execution(session_payload["cycle_id"], {"phase": phase})
         phases = repo.list_phase_executions(session_payload["cycle_id"])
         assert len(phases) == 3
-        assert sorted(p["phase"] for p in phases) == ["experiment", "hypothesis", "observe"]
+        assert sorted(p["phase"] for p in phases) == [
+            "experiment",
+            "hypothesis",
+            "observe",
+        ]
 
     def test_list_phase_executions_nonexistent_session(self, repo):
         assert repo.list_phase_executions("nonexistent") == []
@@ -413,16 +440,20 @@ class TestPhaseExecution:
 # 工件
 # ---------------------------------------------------------------------------
 
+
 class TestArtifact:
     def test_add_artifact(self, repo):
         session_payload = _make_payload()
         repo.create_session(session_payload)
-        art = repo.add_artifact(session_payload["cycle_id"], {
-            "name": "麻黄汤分析报告",
-            "artifact_type": "report",
-            "content": {"summary": "报告正文"},
-            "size_bytes": 1024,
-        })
+        art = repo.add_artifact(
+            session_payload["cycle_id"],
+            {
+                "name": "麻黄汤分析报告",
+                "artifact_type": "report",
+                "content": {"summary": "报告正文"},
+                "size_bytes": 1024,
+            },
+        )
         assert art is not None
         assert art["name"] == "麻黄汤分析报告"
         assert art["artifact_type"] == "report"
@@ -435,26 +466,37 @@ class TestArtifact:
         session_payload = _make_payload()
         repo.create_session(session_payload)
         pe = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "analyze"})
-        art = repo.add_artifact(session_payload["cycle_id"], {
-            "name": "方剂对比数据集",
-            "artifact_type": "dataset",
-            "phase_execution_id": pe["id"],
-        })
+        art = repo.add_artifact(
+            session_payload["cycle_id"],
+            {
+                "name": "方剂对比数据集",
+                "artifact_type": "dataset",
+                "phase_execution_id": pe["id"],
+            },
+        )
         assert art["phase_execution_id"] == pe["id"]
 
     def test_list_artifacts(self, repo):
         session_payload = _make_payload()
         repo.create_session(session_payload)
-        repo.add_artifact(session_payload["cycle_id"], {"name": "a1", "artifact_type": "paper"})
-        repo.add_artifact(session_payload["cycle_id"], {"name": "a2", "artifact_type": "dataset"})
+        repo.add_artifact(
+            session_payload["cycle_id"], {"name": "a1", "artifact_type": "paper"}
+        )
+        repo.add_artifact(
+            session_payload["cycle_id"], {"name": "a2", "artifact_type": "dataset"}
+        )
         arts = repo.list_artifacts(session_payload["cycle_id"])
         assert len(arts) == 2
 
     def test_list_artifacts_filter_type(self, repo):
         session_payload = _make_payload()
         repo.create_session(session_payload)
-        repo.add_artifact(session_payload["cycle_id"], {"name": "a1", "artifact_type": "paper"})
-        repo.add_artifact(session_payload["cycle_id"], {"name": "a2", "artifact_type": "dataset"})
+        repo.add_artifact(
+            session_payload["cycle_id"], {"name": "a1", "artifact_type": "paper"}
+        )
+        repo.add_artifact(
+            session_payload["cycle_id"], {"name": "a2", "artifact_type": "dataset"}
+        )
         arts = repo.list_artifacts(session_payload["cycle_id"], artifact_type="paper")
         assert len(arts) == 1
         assert arts[0]["artifact_type"] == "paper"
@@ -474,11 +516,14 @@ class TestArtifact:
 # 学习反馈库
 # ---------------------------------------------------------------------------
 
+
 class TestLearningFeedbackLibrary:
     def test_replace_learning_feedback_library_persists_records(self, repo):
         session_payload = _make_payload(cycle_id="feedback-library")
         repo.create_session(session_payload)
-        phase = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "reflect", "status": "completed"})
+        phase = repo.add_phase_execution(
+            session_payload["cycle_id"], {"phase": "reflect", "status": "completed"}
+        )
 
         saved = repo.replace_learning_feedback_library(
             session_payload["cycle_id"],
@@ -489,15 +534,26 @@ class TestLearningFeedbackLibrary:
         assert saved is not None
         assert saved["summary"]["record_count"] == 3
         assert saved["summary"]["weak_phase_names"] == ["analyze"]
-        assert saved["replay_feedback"]["learning_summary"]["tuned_parameters"]["max_concurrent_tasks"] == 6
+        assert (
+            saved["replay_feedback"]["learning_summary"]["tuned_parameters"][
+                "max_concurrent_tasks"
+            ]
+            == 6
+        )
 
-    def test_list_learning_feedback_supports_cross_cycle_queries(self, repo, db_manager):
+    def test_list_learning_feedback_supports_cross_cycle_queries(
+        self, repo, db_manager
+    ):
         for cycle_id, phase_score in (("feedback-a", 0.35), ("feedback-b", 0.42)):
             repo.create_session(_make_payload(cycle_id=cycle_id))
-            phase = repo.add_phase_execution(cycle_id, {"phase": "reflect", "status": "completed"})
+            phase = repo.add_phase_execution(
+                cycle_id, {"phase": "reflect", "status": "completed"}
+            )
             payload = _make_learning_feedback_payload()
             payload["records"][2]["overall_score"] = phase_score
-            repo.replace_learning_feedback_library(cycle_id, payload, phase_execution_id=phase["id"])
+            repo.replace_learning_feedback_library(
+                cycle_id, payload, phase_execution_id=phase["id"]
+            )
 
         page = repo.list_learning_feedback(
             feedback_scope="phase_assessment",
@@ -512,7 +568,9 @@ class TestLearningFeedbackLibrary:
     def test_get_full_snapshot_includes_learning_feedback_library(self, repo):
         session_payload = _make_payload(cycle_id="feedback-snapshot")
         repo.create_session(session_payload)
-        phase = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "reflect", "status": "completed"})
+        phase = repo.add_phase_execution(
+            session_payload["cycle_id"], {"phase": "reflect", "status": "completed"}
+        )
         repo.replace_learning_feedback_library(
             session_payload["cycle_id"],
             _make_learning_feedback_payload(),
@@ -533,11 +591,16 @@ class TestLearningFeedbackLibrary:
 # Observe 文档图谱
 # ---------------------------------------------------------------------------
 
+
 class TestObserveDocumentGraph:
-    def test_replace_observe_document_graphs_persists_entities_and_relationships(self, repo):
+    def test_replace_observe_document_graphs_persists_entities_and_relationships(
+        self, repo
+    ):
         session_payload = _make_payload(cycle_id="observe-cycle")
         repo.create_session(session_payload)
-        phase = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "observe", "status": "completed"})
+        phase = repo.add_phase_execution(
+            session_payload["cycle_id"], {"phase": "observe", "status": "completed"}
+        )
 
         snapshots = repo.replace_observe_document_graphs(
             session_payload["cycle_id"],
@@ -564,8 +627,20 @@ class TestObserveDocumentGraph:
                         }
                     },
                     "entities": [
-                        {"name": "桂枝汤", "type": "formula", "confidence": 0.95, "position": 0, "length": 3},
-                        {"name": "桂枝", "type": "herb", "confidence": 0.93, "position": 4, "length": 2},
+                        {
+                            "name": "桂枝汤",
+                            "type": "formula",
+                            "confidence": 0.95,
+                            "position": 0,
+                            "length": 3,
+                        },
+                        {
+                            "name": "桂枝",
+                            "type": "herb",
+                            "confidence": 0.93,
+                            "position": 4,
+                            "length": 2,
+                        },
                     ],
                     "semantic_relationships": [
                         {
@@ -577,7 +652,9 @@ class TestObserveDocumentGraph:
                             "confidence": 0.95,
                         }
                     ],
-                    "output_generation": {"quality_metrics": {"confidence_score": 0.91}},
+                    "output_generation": {
+                        "quality_metrics": {"confidence_score": 0.91}
+                    },
                 }
             ],
         )
@@ -587,17 +664,28 @@ class TestObserveDocumentGraph:
         assert snapshot["phase_execution_id"] == phase["id"]
         assert snapshot["entity_count"] == 2
         assert snapshot["relationship_count"] == 1
-        assert snapshot["entities"][0]["entity_metadata"]["cycle_id"] == session_payload["cycle_id"]
+        assert (
+            snapshot["entities"][0]["entity_metadata"]["cycle_id"]
+            == session_payload["cycle_id"]
+        )
         assert snapshot["semantic_relationships"][0]["relationship_type"] == "CONTAINS"
         assert snapshot["semantic_relationships"][0]["source_entity_type"] == "formula"
         assert snapshot["source_type"] == "ctext"
-        assert snapshot["version_metadata"]["catalog_id"] == "ctp:shang-han-lun/bian-mai-fa"
-        assert snapshot["version_metadata"]["version_lineage_key"] == "伤寒论|辨脉法|东汉|张仲景|宋本"
+        assert (
+            snapshot["version_metadata"]["catalog_id"]
+            == "ctp:shang-han-lun/bian-mai-fa"
+        )
+        assert (
+            snapshot["version_metadata"]["version_lineage_key"]
+            == "伤寒论|辨脉法|东汉|张仲景|宋本"
+        )
 
     def test_get_full_snapshot_includes_observe_documents(self, repo):
         session_payload = _make_payload(cycle_id="observe-snapshot")
         repo.create_session(session_payload)
-        phase = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "observe", "status": "completed"})
+        phase = repo.add_phase_execution(
+            session_payload["cycle_id"], {"phase": "observe", "status": "completed"}
+        )
         repo.replace_observe_document_graphs(
             session_payload["cycle_id"],
             phase["id"],
@@ -622,7 +710,13 @@ class TestObserveDocumentGraph:
                         }
                     },
                     "entities": [
-                        {"name": "桂枝汤", "type": "formula", "confidence": 0.95, "position": 0, "length": 3},
+                        {
+                            "name": "桂枝汤",
+                            "type": "formula",
+                            "confidence": 0.95,
+                            "position": 0,
+                            "length": 3,
+                        },
                     ],
                     "semantic_relationships": [],
                 }
@@ -642,7 +736,9 @@ class TestObserveDocumentGraph:
     def test_list_observe_version_lineages_groups_multiple_witnesses(self, repo):
         session_payload = _make_payload(cycle_id="observe-lineage")
         repo.create_session(session_payload)
-        phase = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "observe", "status": "completed"})
+        phase = repo.add_phase_execution(
+            session_payload["cycle_id"], {"phase": "observe", "status": "completed"}
+        )
 
         repo.replace_observe_document_graphs(
             session_payload["cycle_id"],
@@ -695,12 +791,19 @@ class TestObserveDocumentGraph:
 
         assert len(lineages) == 1
         assert lineages[0]["witness_count"] == 2
-        assert {w["catalog_id"] for w in lineages[0]["witnesses"]} == {"ctp:shang-han-lun/bian-mai-fa", "archive_org"}
+        assert {w["catalog_id"] for w in lineages[0]["witnesses"]} == {
+            "ctp:shang-han-lun/bian-mai-fa",
+            "archive_org",
+        }
 
-    def test_list_observe_document_graphs_derives_version_metadata_for_legacy_rows(self, repo, db_manager):
+    def test_list_observe_document_graphs_derives_version_metadata_for_legacy_rows(
+        self, repo, db_manager
+    ):
         session_payload = _make_payload(cycle_id="observe-legacy-lineage")
         repo.create_session(session_payload)
-        phase = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "observe", "status": "completed"})
+        phase = repo.add_phase_execution(
+            session_payload["cycle_id"], {"phase": "observe", "status": "completed"}
+        )
 
         snapshots = repo.replace_observe_document_graphs(
             session_payload["cycle_id"],
@@ -749,19 +852,27 @@ class TestObserveDocumentGraph:
             session.close()
             db_manager.remove_session()
 
-        legacy_snapshot = repo.list_observe_document_graphs(session_payload["cycle_id"])[0]
+        legacy_snapshot = repo.list_observe_document_graphs(
+            session_payload["cycle_id"]
+        )[0]
 
         assert legacy_snapshot["source_type"] == "local"
         assert legacy_snapshot["work_title"] == "本草纲目"
         assert legacy_snapshot["dynasty"] == "明"
         assert legacy_snapshot["author"] == "李时珍"
-        assert legacy_snapshot["version_metadata"]["catalog_id"].endswith("013-本草纲目-明-李时珍.txt")
+        assert legacy_snapshot["version_metadata"]["catalog_id"].endswith(
+            "013-本草纲目-明-李时珍.txt"
+        )
         assert legacy_snapshot["version_metadata"]["version_lineage_key"]
 
-    def test_backfill_observe_document_version_metadata_persists_legacy_rows(self, repo, db_manager):
+    def test_backfill_observe_document_version_metadata_persists_legacy_rows(
+        self, repo, db_manager
+    ):
         session_payload = _make_payload(cycle_id="observe-legacy-writeback")
         repo.create_session(session_payload)
-        phase = repo.add_phase_execution(session_payload["cycle_id"], {"phase": "observe", "status": "completed"})
+        phase = repo.add_phase_execution(
+            session_payload["cycle_id"], {"phase": "observe", "status": "completed"}
+        )
 
         snapshots = repo.replace_observe_document_graphs(
             session_payload["cycle_id"],
@@ -810,7 +921,9 @@ class TestObserveDocumentGraph:
             session.close()
             db_manager.remove_session()
 
-        summary = repo.backfill_observe_document_version_metadata(session_payload["cycle_id"])
+        summary = repo.backfill_observe_document_version_metadata(
+            session_payload["cycle_id"]
+        )
 
         session = db_manager.get_session()
         try:
@@ -823,7 +936,9 @@ class TestObserveDocumentGraph:
 
         assert summary["scanned_document_count"] == 1
         assert summary["updated_document_count"] == 1
-        assert document.document_urn and document.document_urn.endswith("013-本草纲目-明-李时珍.txt")
+        assert document.document_urn and document.document_urn.endswith(
+            "013-本草纲目-明-李时珍.txt"
+        )
         assert document.document_title == "本草纲目-明-李时珍"
         assert document.source_type == "local"
         assert document.work_title == "本草纲目"
@@ -831,11 +946,18 @@ class TestObserveDocumentGraph:
         assert document.dynasty == "明"
         assert document.author == "李时珍"
         assert document.version_lineage_key
-        assert document.version_metadata_json["catalog_id"].endswith("013-本草纲目-明-李时珍.txt")
+        assert document.version_metadata_json["catalog_id"].endswith(
+            "013-本草纲目-明-李时珍.txt"
+        )
         assert notes["source_type"] == "local"
-        assert notes["version_metadata"]["version_lineage_key"] == document.version_lineage_key
+        assert (
+            notes["version_metadata"]["version_lineage_key"]
+            == document.version_lineage_key
+        )
 
-    def test_backfill_observe_philology_artifacts_persists_from_phase_output(self, repo):
+    def test_backfill_observe_philology_artifacts_persists_from_phase_output(
+        self, repo
+    ):
         session_payload = _make_payload(cycle_id="observe-philology-backfill")
         repo.create_session(session_payload)
         observe_output = {
@@ -949,23 +1071,57 @@ class TestObserveDocumentGraph:
             "observe_philology_annotation_report",
             "observe_philology_catalog_summary",
         }
-        assert artifacts["observe_philology_terminology_table"]["artifact_type"] == "dataset"
-        assert artifacts["observe_philology_terminology_table"]["content"]["rows"][0]["canonical"] == "黄芪"
-        assert artifacts["observe_philology_collation_entries"]["content"]["entries"][0]["witness_text"] == "黃耆"
-        assert artifacts["observe_philology_annotation_report"]["content"]["summary"]["collation_entry_count"] == 1
-        assert artifacts["observe_philology_catalog_summary"]["content"]["summary"]["version_lineage_count"] == 1
+        assert (
+            artifacts["observe_philology_terminology_table"]["artifact_type"]
+            == "dataset"
+        )
+        assert (
+            artifacts["observe_philology_terminology_table"]["content"]["rows"][0][
+                "canonical"
+            ]
+            == "黄芪"
+        )
+        assert (
+            artifacts["observe_philology_collation_entries"]["content"]["entries"][0][
+                "witness_text"
+            ]
+            == "黃耆"
+        )
+        assert (
+            artifacts["observe_philology_annotation_report"]["content"]["summary"][
+                "collation_entry_count"
+            ]
+            == 1
+        )
+        assert (
+            artifacts["observe_philology_catalog_summary"]["content"]["summary"][
+                "version_lineage_count"
+            ]
+            == 1
+        )
         assert snapshot is not None
         assert snapshot["observe_philology"]["terminology_standard_table_count"] == 1
         assert snapshot["observe_philology"]["collation_entry_count"] == 1
-        assert snapshot["observe_philology"]["catalog_summary"]["summary"]["catalog_document_count"] == 1
+        assert (
+            snapshot["observe_philology"]["catalog_summary"]["summary"][
+                "catalog_document_count"
+            ]
+            == 1
+        )
         assert snapshot["observe_philology"]["source"] == "artifacts"
 
-    def test_upsert_observe_catalog_review_persists_artifact_and_updates_snapshot(self, repo):
+    def test_upsert_observe_catalog_review_persists_artifact_and_updates_snapshot(
+        self, repo
+    ):
         session_payload = _make_payload(cycle_id="observe-philology-review-writeback")
         repo.create_session(session_payload)
         phase = repo.add_phase_execution(
             session_payload["cycle_id"],
-            {"phase": "observe", "status": "completed", "output": {"phase": "observe", "status": "completed"}},
+            {
+                "phase": "observe",
+                "status": "completed",
+                "output": {"phase": "observe", "status": "completed"},
+            },
         )
         repo.add_artifact(
             session_payload["cycle_id"],
@@ -1035,14 +1191,22 @@ class TestObserveDocumentGraph:
             },
         )
         snapshot = repo.get_full_snapshot(session_payload["cycle_id"])
-        artifacts = {artifact["name"]: artifact for artifact in repo.list_artifacts(session_payload["cycle_id"])}
+        artifacts = {
+            artifact["name"]: artifact
+            for artifact in repo.list_artifacts(session_payload["cycle_id"])
+        }
 
         assert saved_artifact is not None
         assert saved_artifact["name"] == "observe_philology_catalog_review"
-        assert artifacts["observe_philology_catalog_review"]["content"]["decision_count"] == 1
+        assert (
+            artifacts["observe_philology_catalog_review"]["content"]["decision_count"]
+            == 1
+        )
         assert snapshot is not None
         document = snapshot["observe_philology"]["catalog_summary"]["documents"][0]
-        lineage = snapshot["observe_philology"]["catalog_summary"]["version_lineages"][0]
+        lineage = snapshot["observe_philology"]["catalog_summary"]["version_lineages"][
+            0
+        ]
         assert document["review_status"] == "accepted"
         assert document["needs_manual_review"] is False
         assert document["reviewer"] == "repo-test"
@@ -1050,12 +1214,20 @@ class TestObserveDocumentGraph:
         assert lineage["review_status"] == "accepted"
         assert lineage["reviewer"] == "repo-test"
 
-    def test_upsert_observe_workbench_review_persists_artifact_and_updates_snapshot(self, repo):
-        session_payload = _make_payload(cycle_id="observe-philology-workbench-review-writeback")
+    def test_upsert_observe_workbench_review_persists_artifact_and_updates_snapshot(
+        self, repo
+    ):
+        session_payload = _make_payload(
+            cycle_id="observe-philology-workbench-review-writeback"
+        )
         repo.create_session(session_payload)
         phase = repo.add_phase_execution(
             session_payload["cycle_id"],
-            {"phase": "observe", "status": "completed", "output": {"phase": "observe", "status": "completed"}},
+            {
+                "phase": "observe",
+                "status": "completed",
+                "output": {"phase": "observe", "status": "completed"},
+            },
         )
         repo.add_artifact(
             session_payload["cycle_id"],
@@ -1111,11 +1283,17 @@ class TestObserveDocumentGraph:
             },
         )
         snapshot = repo.get_full_snapshot(session_payload["cycle_id"])
-        artifacts = {artifact["name"]: artifact for artifact in repo.list_artifacts(session_payload["cycle_id"])}
+        artifacts = {
+            artifact["name"]: artifact
+            for artifact in repo.list_artifacts(session_payload["cycle_id"])
+        }
 
         assert saved_artifact is not None
         assert saved_artifact["name"] == "observe_philology_review_workbench"
-        assert artifacts["observe_philology_review_workbench"]["content"]["decision_count"] == 1
+        assert (
+            artifacts["observe_philology_review_workbench"]["content"]["decision_count"]
+            == 1
+        )
         assert snapshot is not None
         decisions = snapshot["observe_philology"]["review_workbench_decisions"]
         assert len(decisions) == 1
@@ -1123,7 +1301,43 @@ class TestObserveDocumentGraph:
         assert decisions[0]["review_status"] == "accepted"
         assert decisions[0]["reviewer"] == "repo-reviewer"
 
-    def test_backfill_observe_philology_artifacts_skips_sessions_without_philology(self, repo):
+    def test_upsert_observe_workbench_review_appends_philology_feedback(self, repo):
+        session_payload = _make_payload(cycle_id="observe-philology-feedback-writeback")
+        repo.create_session(session_payload)
+        repo.add_phase_execution(
+            session_payload["cycle_id"],
+            {"phase": "observe", "status": "completed", "output": {"phase": "observe"}},
+        )
+
+        saved_artifact = repo.upsert_observe_workbench_review(
+            session_payload["cycle_id"],
+            {
+                "asset_type": "exegesis_entry",
+                "asset_key": "exegesis::黄芪",
+                "review_status": "rejected",
+                "reviewer": "repo-reviewer",
+                "reason": "未核对宋本 witness",
+                "term": "黄芪",
+            },
+        )
+        feedback = repo.list_learning_feedback(
+            session_payload["cycle_id"],
+            feedback_scope="philology_review",
+        )
+
+        assert saved_artifact is not None
+        assert feedback["total"] == 1
+        item = feedback["items"][0]
+        assert item["feedback_scope"] == "philology_review"
+        assert item["target_phase"] == "observe"
+        assert item["metadata"]["asset_kind"] == "exegesis_entry"
+        assert item["metadata"]["asset_id"] == "exegesis::黄芪"
+        assert item["metadata"]["decision"] == "rejected"
+        assert "此类术语需优先检查版本 witness" in item["metadata"]["issue_fields"]
+
+    def test_backfill_observe_philology_artifacts_skips_sessions_without_philology(
+        self, repo
+    ):
         session_payload = _make_payload(cycle_id="observe-philology-backfill-skip")
         repo.create_session(session_payload)
         phase = repo.add_phase_execution(
@@ -1170,7 +1384,9 @@ class TestObserveDocumentGraph:
         assert summary["created_artifact_count"] == 0
         assert artifacts == []
 
-    def test_backfill_phase_graph_assets_persists_from_historical_phase_outputs(self, repo):
+    def test_backfill_phase_graph_assets_persists_from_historical_phase_outputs(
+        self, repo
+    ):
         session_payload = _make_payload(cycle_id="phase-graph-assets-backfill")
         repo.create_session(session_payload)
 
@@ -1319,10 +1535,18 @@ class TestObserveDocumentGraph:
         assert summary["updated_observe_phase_count"] == 1
         assert summary["updated_hypothesis_phase_count"] == 1
         assert summary["updated_analyze_phase_count"] == 1
-        assert "philology_subgraph" in phase_outputs["observe"]["results"]["graph_assets"]
-        assert phase_outputs["observe"]["metadata"]["graph_asset_subgraphs"] == ["philology_subgraph"]
-        assert phase_outputs["hypothesis"]["metadata"]["graph_asset_subgraphs"] == ["hypothesis_subgraph"]
-        assert phase_outputs["analyze"]["metadata"]["graph_asset_subgraphs"] == ["evidence_subgraph"]
+        assert (
+            "philology_subgraph" in phase_outputs["observe"]["results"]["graph_assets"]
+        )
+        assert phase_outputs["observe"]["metadata"]["graph_asset_subgraphs"] == [
+            "philology_subgraph"
+        ]
+        assert phase_outputs["hypothesis"]["metadata"]["graph_asset_subgraphs"] == [
+            "hypothesis_subgraph"
+        ]
+        assert phase_outputs["analyze"]["metadata"]["graph_asset_subgraphs"] == [
+            "evidence_subgraph"
+        ]
         assert phase_outputs["analyze"]["metadata"]["graph_asset_node_count"] > 0
 
     def test_backfill_phase_graph_assets_dry_run_does_not_persist(self, repo):
@@ -1352,8 +1576,12 @@ class TestObserveDocumentGraph:
             },
         )
 
-        summary = repo.backfill_phase_graph_assets(session_payload["cycle_id"], dry_run=True)
-        phase_output = repo.list_phase_executions(session_payload["cycle_id"])[0]["output"]
+        summary = repo.backfill_phase_graph_assets(
+            session_payload["cycle_id"], dry_run=True
+        )
+        phase_output = repo.list_phase_executions(session_payload["cycle_id"])[0][
+            "output"
+        ]
 
         assert summary["status"] == "dry_run"
         assert summary["dry_run"] is True
@@ -1362,7 +1590,9 @@ class TestObserveDocumentGraph:
         assert phase_output["results"].get("graph_assets") in (None, {})
         assert phase_output["metadata"].get("graph_asset_subgraphs") in (None, [])
 
-    def test_external_transaction_rolls_back_observe_graph_on_neo4j_failure(self, db_manager, repo):
+    def test_external_transaction_rolls_back_observe_graph_on_neo4j_failure(
+        self, db_manager, repo
+    ):
         session_payload = _make_payload(cycle_id="observe-txn-rollback")
         neo4j_driver = _RecordingNeo4jDriver(fail_on_queries={"CREATE second"})
         session = db_manager.get_session()
@@ -1384,7 +1614,13 @@ class TestObserveDocumentGraph:
                             "title": "事务回滚观察文档",
                             "entity_count": 1,
                             "entities": [
-                                {"name": "麻黄汤", "type": "formula", "confidence": 0.95, "position": 0, "length": 3},
+                                {
+                                    "name": "麻黄汤",
+                                    "type": "formula",
+                                    "confidence": 0.95,
+                                    "position": 0,
+                                    "length": 3,
+                                },
                             ],
                             "semantic_relationships": [],
                         }
@@ -1392,7 +1628,9 @@ class TestObserveDocumentGraph:
                     session=txn.pg_session,
                 )
                 txn.neo4j_write("CREATE first", compensate_cypher="DELETE first", id=1)
-                txn.neo4j_write("CREATE second", compensate_cypher="DELETE second", id=2)
+                txn.neo4j_write(
+                    "CREATE second", compensate_cypher="DELETE second", id=2
+                )
 
         session.close()
         db_manager.remove_session()
@@ -1418,7 +1656,10 @@ class TestObserveDocumentGraph:
                                 source_id="session-1",
                                 target_id="phase-1",
                                 relationship_type="HAS_PHASE",
-                                properties={"cycle_id": "session-1", "phase": "observe"},
+                                properties={
+                                    "cycle_id": "session-1",
+                                    "phase": "observe",
+                                },
                             ),
                             "ResearchSession",
                             "ResearchPhaseExecution",
@@ -1444,7 +1685,10 @@ class TestObserveDocumentGraph:
         first_query, first_params = neo4j_driver.executed_queries[0]
         second_query, second_params = neo4j_driver.executed_queries[1]
 
-        assert "MATCH (a:ResearchSession {id: $src_id}) MATCH (b:ResearchPhaseExecution {id: $tgt_id})" in first_query
+        assert (
+            "MATCH (a:ResearchSession {id: $src_id}) MATCH (b:ResearchPhaseExecution {id: $tgt_id})"
+            in first_query
+        )
         assert ", (b:ResearchPhaseExecution {id: $tgt_id})" not in first_query
         assert "MERGE (a)-[r:HAS_PHASE]->(b)" in first_query
         assert first_params == {
@@ -1453,7 +1697,10 @@ class TestObserveDocumentGraph:
             "props": {"cycle_id": "session-1", "phase": "observe"},
         }
 
-        assert "MATCH (a:ResearchPhaseExecution {id: $src_id}) MATCH (b:ResearchArtifact {id: $tgt_id})" in second_query
+        assert (
+            "MATCH (a:ResearchPhaseExecution {id: $src_id}) MATCH (b:ResearchArtifact {id: $tgt_id})"
+            in second_query
+        )
         assert ", (b:ResearchArtifact {id: $tgt_id})" not in second_query
         assert "MERGE (a)-[r:GENERATED]->(b)" in second_query
         assert second_params == {
@@ -1474,11 +1721,14 @@ class TestObserveDocumentGraph:
             properties={"phase": "observe"},
         )
 
-        assert driver.create_relationship(
-            single_edge,
-            "ResearchSession",
-            "ResearchPhaseExecution",
-        ) is True
+        assert (
+            driver.create_relationship(
+                single_edge,
+                "ResearchSession",
+                "ResearchPhaseExecution",
+            )
+            is True
+        )
 
         single_query, single_params = backend.executed_queries[0]
         assert "MATCH (source:ResearchSession {id: $source_id})" in single_query
@@ -1500,18 +1750,23 @@ class TestObserveDocumentGraph:
             properties={"cycle_id": "session-1"},
         )
 
-        assert driver.batch_create_relationships(
-            [
-                (
-                    batch_edge,
-                    "ResearchPhaseExecution",
-                    "ResearchArtifact",
-                )
-            ]
-        ) is True
+        assert (
+            driver.batch_create_relationships(
+                [
+                    (
+                        batch_edge,
+                        "ResearchPhaseExecution",
+                        "ResearchArtifact",
+                    )
+                ]
+            )
+            is True
+        )
 
         batch_query, batch_params = backend.executed_queries[0]
-        assert "MATCH (source:ResearchPhaseExecution {id: row.source_id})" in batch_query
+        assert (
+            "MATCH (source:ResearchPhaseExecution {id: row.source_id})" in batch_query
+        )
         assert "MATCH (target:ResearchArtifact {id: row.target_id})" in batch_query
         assert ", (target:ResearchArtifact {id: row.target_id})" not in batch_query
         assert "MERGE (source)-[r:GENERATED]->(target)" in batch_query
@@ -1529,6 +1784,7 @@ class TestObserveDocumentGraph:
 # ---------------------------------------------------------------------------
 # 全快照
 # ---------------------------------------------------------------------------
+
 
 class TestFullSnapshot:
     def test_get_full_snapshot(self, repo):
@@ -1549,6 +1805,7 @@ class TestFullSnapshot:
 # ---------------------------------------------------------------------------
 # ResearchCycle 互转
 # ---------------------------------------------------------------------------
+
 
 class TestCycleConversion:
     def test_save_from_cycle_create(self, repo):
@@ -1599,6 +1856,7 @@ class TestCycleConversion:
 # 级联删除
 # ---------------------------------------------------------------------------
 
+
 class TestCascadeDelete:
     def test_delete_session_cascades_phases_and_artifacts(self, repo):
         session_payload = _make_payload()
@@ -1614,6 +1872,7 @@ class TestCascadeDelete:
 # ---------------------------------------------------------------------------
 # JSON 字段完整性
 # ---------------------------------------------------------------------------
+
 
 class TestJsonFields:
     def test_researchers_roundtrip(self, repo):
@@ -1653,8 +1912,12 @@ class TestReviewAssignments:
     def test_claim_persists_row_with_claimed_status(self, repo):
         cycle_id = self._seed_session(repo)
         result = repo.claim_review_assignment(
-            cycle_id, "catalog", "k-1", "李研究员",
-            priority_bucket="high", notes="紧急",
+            cycle_id,
+            "catalog",
+            "k-1",
+            "李研究员",
+            priority_bucket="high",
+            notes="紧急",
         )
         assert result is not None
         assert result["assignee"] == "李研究员"
@@ -1670,14 +1933,19 @@ class TestReviewAssignments:
 
     def test_claim_returns_none_when_session_missing(self, repo):
         result = repo.claim_review_assignment(
-            "cycle-does-not-exist", "catalog", "k-1", "李研究员",
+            "cycle-does-not-exist",
+            "catalog",
+            "k-1",
+            "李研究员",
         )
         assert result is None
 
     def test_release_clears_assignee_and_marks_unassigned(self, repo):
         cycle_id = self._seed_session(repo)
         repo.claim_review_assignment(cycle_id, "catalog", "k-1", "李研究员")
-        released = repo.release_review_assignment(cycle_id, "catalog", "k-1", notes="退回")
+        released = repo.release_review_assignment(
+            cycle_id, "catalog", "k-1", notes="退回"
+        )
         assert released is not None
         assert released["assignee"] is None
         assert released["queue_status"] == "unassigned"
@@ -1692,7 +1960,11 @@ class TestReviewAssignments:
         cycle_id = self._seed_session(repo)
         first = repo.claim_review_assignment(cycle_id, "catalog", "k-1", "李研究员")
         reassigned = repo.reassign_review_assignment(
-            cycle_id, "catalog", "k-1", "张研究员", priority_bucket="low",
+            cycle_id,
+            "catalog",
+            "k-1",
+            "张研究员",
+            priority_bucket="low",
         )
         assert reassigned is not None
         assert reassigned["assignee"] == "张研究员"
@@ -1721,9 +1993,15 @@ class TestReviewAssignments:
 
     def test_list_review_queue_filters(self, repo):
         cycle_id = self._seed_session(repo)
-        repo.claim_review_assignment(cycle_id, "catalog", "k-1", "李研究员", priority_bucket="high")
-        repo.claim_review_assignment(cycle_id, "catalog", "k-2", "张研究员", priority_bucket="low")
-        repo.claim_review_assignment(cycle_id, "workbench", "k-3", "李研究员", priority_bucket="medium")
+        repo.claim_review_assignment(
+            cycle_id, "catalog", "k-1", "李研究员", priority_bucket="high"
+        )
+        repo.claim_review_assignment(
+            cycle_id, "catalog", "k-2", "张研究员", priority_bucket="low"
+        )
+        repo.claim_review_assignment(
+            cycle_id, "workbench", "k-3", "李研究员", priority_bucket="medium"
+        )
 
         all_items = repo.list_review_queue(cycle_id=cycle_id)
         assert len(all_items) == 3
@@ -1734,7 +2012,9 @@ class TestReviewAssignments:
         only_high = repo.list_review_queue(cycle_id=cycle_id, priority_bucket="high")
         assert [row["asset_key"] for row in only_high] == ["k-1"]
 
-        only_workbench = repo.list_review_queue(cycle_id=cycle_id, asset_type="workbench")
+        only_workbench = repo.list_review_queue(
+            cycle_id=cycle_id, asset_type="workbench"
+        )
         assert [row["asset_key"] for row in only_workbench] == ["k-3"]
 
         repo.release_review_assignment(cycle_id, "catalog", "k-2")
@@ -1745,7 +2025,11 @@ class TestReviewAssignments:
         cycle_id = self._seed_session(repo)
         past_due = datetime(2020, 1, 1, 12, 0, 0)
         repo.claim_review_assignment(
-            cycle_id, "catalog", "k-1", "李研究员", due_at=past_due,
+            cycle_id,
+            "catalog",
+            "k-1",
+            "李研究员",
+            due_at=past_due,
         )
         repo.claim_review_assignment(cycle_id, "catalog", "k-2", "李研究员")
 
@@ -1755,9 +2039,15 @@ class TestReviewAssignments:
 
     def test_aggregate_reviewer_workload_groups_and_orders(self, repo):
         cycle_id = self._seed_session(repo)
-        repo.claim_review_assignment(cycle_id, "catalog", "k-1", "李研究员", priority_bucket="high")
-        repo.claim_review_assignment(cycle_id, "catalog", "k-2", "李研究员", priority_bucket="medium")
-        repo.claim_review_assignment(cycle_id, "catalog", "k-3", "张研究员", priority_bucket="low")
+        repo.claim_review_assignment(
+            cycle_id, "catalog", "k-1", "李研究员", priority_bucket="high"
+        )
+        repo.claim_review_assignment(
+            cycle_id, "catalog", "k-2", "李研究员", priority_bucket="medium"
+        )
+        repo.claim_review_assignment(
+            cycle_id, "catalog", "k-3", "张研究员", priority_bucket="low"
+        )
         repo.claim_review_assignment(cycle_id, "catalog", "k-4", "张研究员")
         repo.release_review_assignment(cycle_id, "catalog", "k-4")
 
@@ -1782,7 +2072,11 @@ class TestReviewAssignments:
         cycle_id = self._seed_session(repo)
         past_due = datetime(2020, 1, 1, 12, 0, 0)
         repo.claim_review_assignment(
-            cycle_id, "catalog", "k-1", "李研究员", due_at=past_due,
+            cycle_id,
+            "catalog",
+            "k-1",
+            "李研究员",
+            due_at=past_due,
         )
         buckets = repo.aggregate_reviewer_workload(cycle_id=cycle_id)
         assert buckets[0]["overdue"] == 1
@@ -1799,7 +2093,10 @@ class TestReviewDisputes:
     def test_open_persists_with_auto_case_id(self, repo):
         cycle_id = self._seed_session(repo)
         result = repo.open_review_dispute(
-            cycle_id, "catalog", "k-1", "李研究员",
+            cycle_id,
+            "catalog",
+            "k-1",
+            "李研究员",
             "需要重新审核版本谱系",
         )
         assert result is not None
@@ -1808,14 +2105,19 @@ class TestReviewDisputes:
         assert result["asset_key"] == "k-1"
         assert result["opened_by"] == "李研究员"
         assert result["arbitrator"] in (None, "")
-        assert isinstance(result["case_id"], str) and result["case_id"].startswith("DISP-")
+        assert isinstance(result["case_id"], str) and result["case_id"].startswith(
+            "DISP-"
+        )
         assert isinstance(result["events"], list) and len(result["events"]) == 1
         assert result["events"][0].get("event") == "opened"
 
     def test_open_with_arbitrator_marks_assigned(self, repo):
         cycle_id = self._seed_session(repo)
         result = repo.open_review_dispute(
-            cycle_id, "catalog", "k-1", "李研究员",
+            cycle_id,
+            "catalog",
+            "k-1",
+            "李研究员",
             "需要专家裁决",
             arbitrator="张专家",
         )
@@ -1832,31 +2134,51 @@ class TestReviewDisputes:
 
     def test_open_returns_none_when_session_missing(self, repo):
         result = repo.open_review_dispute(
-            "cycle-does-not-exist", "catalog", "k-1", "李研究员", "测试",
+            "cycle-does-not-exist",
+            "catalog",
+            "k-1",
+            "李研究员",
+            "测试",
         )
         assert result is None
 
     def test_open_with_explicit_case_id_unique(self, repo):
         cycle_id = self._seed_session(repo)
         first = repo.open_review_dispute(
-            cycle_id, "catalog", "k-1", "李研究员", "case-1",
+            cycle_id,
+            "catalog",
+            "k-1",
+            "李研究员",
+            "case-1",
             case_id="DISP-MANUAL-001",
         )
         assert first["case_id"] == "DISP-MANUAL-001"
         with pytest.raises(Exception):
             repo.open_review_dispute(
-                cycle_id, "catalog", "k-2", "李研究员", "case-1-dup",
+                cycle_id,
+                "catalog",
+                "k-2",
+                "李研究员",
+                "case-1-dup",
                 case_id="DISP-MANUAL-001",
             )
 
     def test_assign_updates_arbitrator_and_appends_event(self, repo):
         cycle_id = self._seed_session(repo)
         opened = repo.open_review_dispute(
-            cycle_id, "catalog", "k-1", "李研究员", "测试",
+            cycle_id,
+            "catalog",
+            "k-1",
+            "李研究员",
+            "测试",
         )
         case_id = opened["case_id"]
         assigned = repo.assign_review_dispute(
-            cycle_id, case_id, "张专家", actor="管理员", notes="安排裁决",
+            cycle_id,
+            case_id,
+            "张专家",
+            actor="管理员",
+            notes="安排裁决",
         )
         assert assigned is not None
         assert assigned["dispute_status"] == "assigned"
@@ -1866,7 +2188,11 @@ class TestReviewDisputes:
     def test_assign_terminal_status_raises(self, repo):
         cycle_id = self._seed_session(repo)
         opened = repo.open_review_dispute(
-            cycle_id, "catalog", "k-1", "李研究员", "测试",
+            cycle_id,
+            "catalog",
+            "k-1",
+            "李研究员",
+            "测试",
         )
         case_id = opened["case_id"]
         repo.withdraw_review_dispute(cycle_id, case_id, actor="李研究员")
@@ -1880,12 +2206,20 @@ class TestReviewDisputes:
     def test_resolve_marks_resolved_and_records_event(self, repo):
         cycle_id = self._seed_session(repo)
         opened = repo.open_review_dispute(
-            cycle_id, "catalog", "k-1", "李研究员", "测试", arbitrator="张专家",
+            cycle_id,
+            "catalog",
+            "k-1",
+            "李研究员",
+            "测试",
+            arbitrator="张专家",
         )
         case_id = opened["case_id"]
         resolved = repo.resolve_review_dispute(
-            cycle_id, case_id, "accepted",
-            resolved_by="张专家", resolution_notes="同意原审",
+            cycle_id,
+            case_id,
+            "accepted",
+            resolved_by="张专家",
+            resolution_notes="同意原审",
         )
         assert resolved is not None
         assert resolved["dispute_status"] == "resolved"
@@ -1896,28 +2230,47 @@ class TestReviewDisputes:
     def test_resolve_invalid_resolution_raises(self, repo):
         cycle_id = self._seed_session(repo)
         opened = repo.open_review_dispute(
-            cycle_id, "catalog", "k-1", "李研究员", "测试",
+            cycle_id,
+            "catalog",
+            "k-1",
+            "李研究员",
+            "测试",
         )
         with pytest.raises(ValueError):
-            repo.resolve_review_dispute(cycle_id, opened["case_id"], "invalid", resolved_by="张专家")
+            repo.resolve_review_dispute(
+                cycle_id, opened["case_id"], "invalid", resolved_by="张专家"
+            )
 
     def test_resolve_terminal_status_raises(self, repo):
         cycle_id = self._seed_session(repo)
         opened = repo.open_review_dispute(
-            cycle_id, "catalog", "k-1", "李研究员", "测试",
+            cycle_id,
+            "catalog",
+            "k-1",
+            "李研究员",
+            "测试",
         )
         case_id = opened["case_id"]
         repo.resolve_review_dispute(cycle_id, case_id, "accepted", resolved_by="张专家")
         with pytest.raises(ValueError):
-            repo.resolve_review_dispute(cycle_id, case_id, "rejected", resolved_by="张专家")
+            repo.resolve_review_dispute(
+                cycle_id, case_id, "rejected", resolved_by="张专家"
+            )
 
     def test_withdraw_marks_terminal(self, repo):
         cycle_id = self._seed_session(repo)
         opened = repo.open_review_dispute(
-            cycle_id, "catalog", "k-1", "李研究员", "测试",
+            cycle_id,
+            "catalog",
+            "k-1",
+            "李研究员",
+            "测试",
         )
         withdrawn = repo.withdraw_review_dispute(
-            cycle_id, opened["case_id"], actor="李研究员", notes="撤回",
+            cycle_id,
+            opened["case_id"],
+            actor="李研究员",
+            notes="撤回",
         )
         assert withdrawn is not None
         assert withdrawn["dispute_status"] == "withdrawn"
@@ -1926,7 +2279,11 @@ class TestReviewDisputes:
     def test_withdraw_terminal_raises(self, repo):
         cycle_id = self._seed_session(repo)
         opened = repo.open_review_dispute(
-            cycle_id, "catalog", "k-1", "李研究员", "测试",
+            cycle_id,
+            "catalog",
+            "k-1",
+            "李研究员",
+            "测试",
         )
         case_id = opened["case_id"]
         repo.resolve_review_dispute(cycle_id, case_id, "accepted", resolved_by="张专家")
@@ -1936,9 +2293,13 @@ class TestReviewDisputes:
     def test_list_review_disputes_filters(self, repo):
         cycle_id = self._seed_session(repo)
         a = repo.open_review_dispute(cycle_id, "catalog", "k-1", "李研究员", "S1")
-        b = repo.open_review_dispute(cycle_id, "catalog", "k-2", "张研究员", "S2", arbitrator="王专家")
+        b = repo.open_review_dispute(
+            cycle_id, "catalog", "k-2", "张研究员", "S2", arbitrator="王专家"
+        )
         c = repo.open_review_dispute(cycle_id, "workbench", "k-3", "李研究员", "S3")
-        repo.resolve_review_dispute(cycle_id, c["case_id"], "rejected", resolved_by="裁判")
+        repo.resolve_review_dispute(
+            cycle_id, c["case_id"], "rejected", resolved_by="裁判"
+        )
 
         all_items = repo.list_review_disputes(cycle_id=cycle_id)
         assert len(all_items) == 3
@@ -1946,10 +2307,14 @@ class TestReviewDisputes:
         only_open = repo.list_review_disputes(cycle_id=cycle_id, dispute_status="open")
         assert {row["case_id"] for row in only_open} == {a["case_id"]}
 
-        only_arbitrator = repo.list_review_disputes(cycle_id=cycle_id, arbitrator="王专家")
+        only_arbitrator = repo.list_review_disputes(
+            cycle_id=cycle_id, arbitrator="王专家"
+        )
         assert {row["case_id"] for row in only_arbitrator} == {b["case_id"]}
 
-        only_workbench = repo.list_review_disputes(cycle_id=cycle_id, asset_type="workbench")
+        only_workbench = repo.list_review_disputes(
+            cycle_id=cycle_id, asset_type="workbench"
+        )
         assert {row["case_id"] for row in only_workbench} == {c["case_id"]}
 
         only_li = repo.list_review_disputes(cycle_id=cycle_id, opened_by="李研究员")
@@ -1985,16 +2350,30 @@ class TestReviewQualitySummaryRepo:
         cycle_id = self._seed_session(repo)
         past_due = datetime(2020, 1, 1, 12, 0, 0)
         repo.claim_review_assignment(
-            cycle_id, "catalog", "k-1", "李研究员", due_at=past_due,
+            cycle_id,
+            "catalog",
+            "k-1",
+            "李研究员",
+            due_at=past_due,
         )
         repo.claim_review_assignment(cycle_id, "catalog", "k-2", "张研究员")
-        opened_a = repo.open_review_dispute(cycle_id, "catalog", "k-1", "李研究员", "S1")
-        opened_b = repo.open_review_dispute(cycle_id, "catalog", "k-2", "张研究员", "S2")
-        repo.resolve_review_dispute(
-            cycle_id, opened_a["case_id"], "accepted", resolved_by="裁判",
+        opened_a = repo.open_review_dispute(
+            cycle_id, "catalog", "k-1", "李研究员", "S1"
+        )
+        opened_b = repo.open_review_dispute(
+            cycle_id, "catalog", "k-2", "张研究员", "S2"
         )
         repo.resolve_review_dispute(
-            cycle_id, opened_b["case_id"], "rejected", resolved_by="裁判",
+            cycle_id,
+            opened_a["case_id"],
+            "accepted",
+            resolved_by="裁判",
+        )
+        repo.resolve_review_dispute(
+            cycle_id,
+            opened_b["case_id"],
+            "rejected",
+            resolved_by="裁判",
         )
 
         summary = repo.aggregate_review_quality_summary(cycle_id=cycle_id)
@@ -2011,7 +2390,7 @@ class TestReviewQualitySummaryRepo:
         repo.claim_review_assignment(cycle_id, "catalog", "k-2", "张研究员")
 
         summary = repo.aggregate_review_quality_summary(
-            cycle_id=cycle_id, reviewer="李研究员",
+            cycle_id=cycle_id,
+            reviewer="李研究员",
         )
         assert summary["assignment_count"] == 1
-

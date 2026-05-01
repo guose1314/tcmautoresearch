@@ -30,13 +30,33 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import Any, Awaitable, Callable, Dict, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Union
 
 from .pg_outbox_store import PgOutboxStore
 
 logger = logging.getLogger(__name__)
 
 OutboxHandler = Callable[[Dict[str, Any]], Union[None, Awaitable[None]]]
+
+
+def build_event_type_router(
+    handlers: Mapping[str, OutboxHandler],
+    *,
+    default_handler: Optional[OutboxHandler] = None,
+) -> OutboxHandler:
+    """Route outbox snapshots to handlers by ``event_type``."""
+    registered = {str(key): handler for key, handler in dict(handlers or {}).items()}
+
+    def _router(event: Dict[str, Any]) -> Union[None, Awaitable[None]]:
+        event_type = str(event.get("event_type") or "").strip()
+        handler = registered.get(event_type) or default_handler
+        if handler is None:
+            raise ValueError(
+                f"no outbox handler registered for event_type={event_type!r}"
+            )
+        return handler(event)
+
+    return _router
 
 
 class OutboxWorker:
@@ -91,7 +111,9 @@ class OutboxWorker:
                     batch_stats["moved_to_dlq"] += 1
                 logger.warning(
                     "outbox handler failed for %s: %s (retry=%d, dlq=%s)",
-                    event_id, exc, outcome.get("retry_count", 0),
+                    event_id,
+                    exc,
+                    outcome.get("retry_count", 0),
                     bool(outcome.get("moved_to_dlq")),
                 )
                 continue
@@ -109,7 +131,8 @@ class OutboxWorker:
         self._stop_event.clear()
         logger.info(
             "OutboxWorker started (poll_interval=%.2fs, batch_size=%d)",
-            self._poll_interval, self._batch_size,
+            self._poll_interval,
+            self._batch_size,
         )
         try:
             while not self._stop_event.is_set():

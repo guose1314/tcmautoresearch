@@ -79,10 +79,10 @@ function Start-OutboxWorkerJob {
 
     # Clean up any stale supervisor job from a prior run.
     Get-Job -Name $script:OutboxJobName -ErrorAction SilentlyContinue |
-        ForEach-Object {
-            try { Stop-Job -Job $_ -ErrorAction SilentlyContinue } catch {}
-            try { Remove-Job -Job $_ -Force -ErrorAction SilentlyContinue } catch {}
-        }
+    ForEach-Object {
+        try { Stop-Job -Job $_ -ErrorAction SilentlyContinue } catch {}
+        try { Remove-Job -Job $_ -Force -ErrorAction SilentlyContinue } catch {}
+    }
 
     $script:OutboxJob = Start-Job -Name $script:OutboxJobName -ScriptBlock {
         param($PythonExe, $RepoDir, $LogFile, $RestartDelay, $WatchdogLog)
@@ -101,9 +101,9 @@ function Start-OutboxWorkerJob {
                 _Log "starting outbox worker (restart_count=$restartCount)"
                 $proc = Start-Process -FilePath $PythonExe `
                     -ArgumentList @(
-                        "tools\run_outbox_worker.py",
-                        "--log-file", $LogFile
-                    ) `
+                    "tools\run_outbox_worker.py",
+                    "--log-file", $LogFile
+                ) `
                     -WorkingDirectory $RepoDir `
                     -NoNewWindow -PassThru `
                     -RedirectStandardOutput (Join-Path $RepoDir "logs\outbox_worker.stdout.log") `
@@ -136,11 +136,11 @@ function Stop-OutboxWorkerJob {
     # Kill any leftover python.exe running run_outbox_worker.py.
     try {
         Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -and $_.CommandLine -match 'run_outbox_worker\.py' } |
-            ForEach-Object {
-                Write-Log "  killing leftover outbox worker pid=$($_.ProcessId)"
-                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-            }
+        Where-Object { $_.CommandLine -and $_.CommandLine -match 'run_outbox_worker\.py' } |
+        ForEach-Object {
+            Write-Log "  killing leftover outbox worker pid=$($_.ProcessId)"
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
     }
     catch {}
     $script:OutboxJob = $null
@@ -164,46 +164,46 @@ try {
 
         Write-Log "starting API server (restart_count=$restartCount)"
 
-    # Required runtime credentials must be provided via environment variables.
-    # Defaults are intentionally left empty: we refuse to start with placeholder
-    # secrets so an unconfigured workstation cannot accidentally talk to the
-    # production database. Set the variables in a .env file or in your shell
-    # profile and re-run the watchdog.
-    $requiredEnv = @(
-        "TCM__DATABASE__HOST",
-        "TCM__DATABASE__NAME",
-        "TCM__DATABASE__USER",
-        "TCM_DB_PASSWORD",
-        "TCM_NEO4J_URI",
-        "TCM_NEO4J_PASSWORD"
-    )
-    $missing = @()
-    foreach ($name in $requiredEnv) {
-        $value = [Environment]::GetEnvironmentVariable($name, "Process")
-        if ([string]::IsNullOrWhiteSpace($value)) {
-            $missing += $name
+        # Required runtime credentials must be provided via environment variables.
+        # Defaults are intentionally left empty: we refuse to start with placeholder
+        # secrets so an unconfigured workstation cannot accidentally talk to the
+        # production database. Set the variables in a .env file or in your shell
+        # profile and re-run the watchdog.
+        $requiredEnv = @(
+            "TCM__DATABASE__HOST",
+            "TCM__DATABASE__NAME",
+            "TCM__DATABASE__USER",
+            "TCM_DB_PASSWORD",
+            "TCM_NEO4J_URI",
+            "TCM_NEO4J_PASSWORD"
+        )
+        $missing = @()
+        foreach ($name in $requiredEnv) {
+            $value = [Environment]::GetEnvironmentVariable($name, "Process")
+            if ([string]::IsNullOrWhiteSpace($value)) {
+                $missing += $name
+            }
         }
-    }
-    if ($missing.Count -gt 0) {
-        Write-Log ("missing required environment variables: " + ($missing -join ", "))
-        Write-Log "watchdog refuses to start the API with empty credentials. Set them and re-run."
-        throw "Missing required environment variables: $($missing -join ', ')"
-    }
+        if ($missing.Count -gt 0) {
+            Write-Log ("missing required environment variables: " + ($missing -join ", "))
+            Write-Log "watchdog refuses to start the API with empty credentials. Set them and re-run."
+            throw "Missing required environment variables: $($missing -join ', ')"
+        }
 
-    # Start the API in the foreground so the watchdog can observe exit.
-    try {
-        & $Python -m src.web.main --config config.yml --environment production --port $Port
-        $exitCode = $LASTEXITCODE
-        Write-Log "server process exited, exit_code=$exitCode"
-    }
-    catch {
-        Write-Log "startup exception: $_"
-    }
+        # Start the API in the foreground so the watchdog can observe exit.
+        try {
+            & $Python -m src.web.main --config config.yml --environment production --port $Port
+            $exitCode = $LASTEXITCODE
+            Write-Log "server process exited, exit_code=$exitCode"
+        }
+        catch {
+            Write-Log "startup exception: $_"
+        }
 
-    $restartCount++
-    Write-Log "cooldown ${RestartDelaySec}s before restart"
-    Start-Sleep -Seconds $RestartDelaySec
-}
+        $restartCount++
+        Write-Log "cooldown ${RestartDelaySec}s before restart"
+        Start-Sleep -Seconds $RestartDelaySec
+    }
 }
 finally {
     Stop-OutboxWorkerJob

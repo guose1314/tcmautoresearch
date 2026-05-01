@@ -2,13 +2,18 @@
 """分析路由 — 方剂分析、文本处理链、知识图谱数据。"""
 
 import logging
+import warnings
 from collections import Counter
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
+from src.analysis.ingestion_service import AnalysisIngestionService
 from src.analysis.unsupervised_research_enhancer import (
     apply_unsupervised_annotations,
     build_unsupervised_research_view,
@@ -59,121 +64,54 @@ _preprocessor = None
 _extractor = None
 _graph_builder = None
 _kg_instance = None
-_neo4j_driver_singleton = None
-_neo4j_init_failed = False
 
 _KG_DB_PATH = Path("data") / "knowledge_graph.db"
 
 
 def _get_neo4j_driver():
-    """获取 Neo4j driver 单例（首次失败后不再重试）。"""
-    global _neo4j_driver_singleton, _neo4j_init_failed  # noqa: PLW0603
-    if _neo4j_driver_singleton is not None:
-        return _neo4j_driver_singleton
-    if _neo4j_init_failed:
-        return None
-    try:
-        import os
-
-        from neo4j import GraphDatabase
-
-        uri = os.environ.get("TCM_NEO4J_URI", "neo4j://localhost:7687")
-        user = os.environ.get("TCM_NEO4J_USER", "neo4j")
-        password = os.environ.get("TCM_NEO4J_PASSWORD", "")
-        if not password:
-            logger.warning("TCM_NEO4J_PASSWORD 未设置，跳过 Neo4j 投影")
-            _neo4j_init_failed = True
-            return None
-        d = GraphDatabase.driver(uri, auth=(user, password))
-        with d.session(database="neo4j") as s:
-            s.run("RETURN 1").consume()
-        _neo4j_driver_singleton = d
-        logger.info("Neo4j driver 已就绪 (uri=%s)", uri)
-        return d
-    except Exception as exc:
-        logger.warning("Neo4j 初始化失败，将仅写 PG: %s", exc)
-        _neo4j_init_failed = True
-        return None
+    """Deprecated: Web analysis no longer creates a local Neo4j driver."""
+    warnings.warn(
+        "src.web.routes.analysis._get_neo4j_driver() is deprecated; use "
+        "AnalysisIngestionService.project_graph_assets() with StorageBackendFactory "
+        "or graph outbox instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return None
 
 
 def _project_to_neo4j(
     projection_entities: List[Dict[str, Any]],
     projection_relations: List[Dict[str, Any]],
+    *,
+    session: Any = None,
+    db_manager: Any = None,
+    storage_factory: Any = None,
+    service: Optional[AnalysisIngestionService] = None,
+    cycle_id: Optional[str] = None,
+    phase: str = "analysis",
+    source_file: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
 ) -> Dict[str, int]:
-    """把已 commit 的 ORM 投影为 Neo4j 节点/关系。
-
-    每个 projection_entities 元素：{id, name, type}
-    每个 projection_relations 元素：{src_id, dst_id, rel_type, src_label, dst_label}
-    """
-    driver = _get_neo4j_driver()
-    if driver is None:
-        return {"neo4j_nodes": 0, "neo4j_edges": 0}
-
-    nodes_written = 0
-    edges_written = 0
-    try:
-        with driver.session(database="neo4j") as s:
-            # 节点：按 type 分组，使用 UNWIND 批量 MERGE
-            from collections import defaultdict
-
-            def _cypher_label(raw_label: str) -> str:
-                cleaned = "".join(
-                    ch if ch.isalnum() or ch == "_" else "_"
-                    for ch in str(raw_label or "Entity")
-                )
-                parts = [part for part in cleaned.split("_") if part]
-                label = "".join(part.capitalize() for part in parts) or "Entity"
-                if not label.replace("_", "").isalnum():
-                    return "Entity"
-                return label
-
-            by_label: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-            for n in projection_entities:
-                label = _cypher_label(str(n.get("type") or "Entity"))
-                by_label[label].append(
-                    {
-                        "id": str(n["id"]),
-                        "name": n["name"],
-                        "props": dict(n.get("props") or {}),
-                    }
-                )
-            for label, batch in by_label.items():
-                cypher = (
-                    f"UNWIND $rows AS row "
-                    f"MERGE (n:{label} {{id: row.id}}) "
-                    f"SET n.name = row.name "
-                    f"SET n += row.props"
-                )
-                s.run(cypher, rows=batch).consume()
-                nodes_written += len(batch)
-
-            # 关系：按 rel_type 分组
-            by_rel: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-            for r in projection_relations:
-                rt = (r.get("rel_type") or "RELATED").upper()
-                if not rt.replace("_", "").isalnum():
-                    rt = "RELATED"
-                by_rel[rt].append(
-                    {
-                        "src": str(r["src_id"]),
-                        "dst": str(r["dst_id"]),
-                        "props": dict(r.get("props") or {}),
-                    }
-                )
-            for rt, batch in by_rel.items():
-                cypher = (
-                    f"UNWIND $rows AS row "
-                    f"MATCH (a {{id: row.src}}), (b {{id: row.dst}}) "
-                    f"MERGE (a)-[rel:{rt}]->(b) "
-                    f"SET rel += row.props"
-                )
-                s.run(cypher, rows=batch).consume()
-                edges_written += len(batch)
-    except Exception as exc:
-        logger.warning("Neo4j 投影失败: %s", exc)
-        return {"neo4j_nodes": 0, "neo4j_edges": 0, "error": str(exc)}
-
-    return {"neo4j_nodes": nodes_written, "neo4j_edges": edges_written}
+    """Deprecated compatibility wrapper for legacy graph projection callers."""
+    warnings.warn(
+        "src.web.routes.analysis._project_to_neo4j() is deprecated; use "
+        "AnalysisIngestionService.project_graph_assets() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    projection_service = service or AnalysisIngestionService()
+    return projection_service.project_graph_assets(
+        projection_entities,
+        projection_relations,
+        session=session,
+        db_manager=db_manager,
+        storage_factory=storage_factory,
+        cycle_id=cycle_id,
+        phase=phase,
+        source_file=source_file,
+        idempotency_key=idempotency_key,
+    )
 
 
 def _get_kg():
@@ -228,8 +166,42 @@ def _get_graph_builder():
     return _graph_builder
 
 
+def _get_analysis_ingestion_service(request: Request) -> AnalysisIngestionService:
+    state = getattr(getattr(request, "app", None), "state", None)
+    service_factory = getattr(state, "analysis_ingestion_service_factory", None)
+    if service_factory is not None:
+        return service_factory(request)
+    service = getattr(state, "analysis_ingestion_service", None)
+    if service is not None:
+        return service
+
+    def _persist_orm(**kwargs: Any) -> Dict[str, int]:
+        return _persist_to_orm(request, **kwargs)
+
+    return AnalysisIngestionService(
+        preprocessor_provider=_get_preprocessor,
+        extractor_provider=_get_extractor,
+        graph_builder_provider=_get_graph_builder,
+        kg_provider=_get_kg,
+        unsupervised_builder=_build_unsupervised_research_assets,
+        kg_persistor=_persist_to_kg,
+        orm_persistor=_persist_orm,
+        research_summary_builder=_build_research_response_summary,
+    )
+
+
 def _json_ready(value: Any) -> Any:
     """递归转换为可稳定写入 JSON 列的数据结构。"""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, Path):
+        return str(value)
     if isinstance(value, Mapping):
         return {str(key): _json_ready(item) for key, item in value.items()}
     if isinstance(value, list):
@@ -372,75 +344,12 @@ def analyze_text(
 ):
     """文本处理链 — 预处理 → 实体抽取 → 语义建模 → 知识沉淀。"""
     try:
-        # 1) 预处理
-        preprocessor = _get_preprocessor()
-        preprocess_ctx: Dict[str, Any] = {"raw_text": body.raw_text}
-        if body.source_file:
-            preprocess_ctx["source_file"] = body.source_file
-        if body.metadata:
-            preprocess_ctx["metadata"] = body.metadata
-        preprocess_result = preprocessor.execute(preprocess_ctx)
-
-        # 2) 实体抽取
-        extractor = _get_extractor()
-        extraction_result = extractor.execute(preprocess_result)
-
-        # 3) 语义建模
-        graph_builder = _get_graph_builder()
-        semantic_result = graph_builder.execute(extraction_result)
-
-        # 4) 知识沉淀 — 将实体和关系持久化到本地 KG 数据库
-        entities = extraction_result.get("entities", [])
-        graph_data = semantic_result.get("semantic_graph", {})
-        entities, graph_data, research_view = _build_unsupervised_research_assets(
+        service = _get_analysis_ingestion_service(request)
+        return service.analyze_and_persist(
             body.raw_text,
             body.source_file,
-            entities,
-            graph_data,
+            body.metadata,
         )
-        persisted = _persist_to_kg(entities, graph_data)
-
-        # 5) 写入主应用数据库 (ORM)
-        orm_result = _persist_to_orm(
-            request,
-            entities,
-            graph_data,
-            source_file=body.source_file,
-            created_by="text_analysis",
-            raw_text=body.raw_text,
-            semantic_result=semantic_result,
-            research_view=research_view,
-        )
-
-        kg = _get_kg()
-        return {
-            "message": "文本分析完成",
-            "preprocessing": {
-                "processed_text": preprocess_result.get("processed_text", ""),
-                "processing_steps": preprocess_result.get("processing_steps", []),
-            },
-            "entities": {
-                "items": entities,
-                "statistics": extraction_result.get("statistics", {}),
-            },
-            "semantic_graph": {
-                "graph": graph_data,
-                "statistics": semantic_result.get("graph_statistics", {}),
-            },
-            "knowledge_accumulation": {
-                "new_entities": persisted["new_entities"],
-                "new_relations": persisted["new_relations"],
-                "total_entities": kg.entity_count,
-                "total_relations": kg.relation_count,
-                "orm_entities": orm_result["orm_entities"],
-                "orm_relations": orm_result["orm_relations"],
-                "orm_statistics": orm_result["orm_statistics"],
-                "orm_analyses": orm_result["orm_analyses"],
-                "neo4j_nodes": orm_result["neo4j_nodes"],
-                "neo4j_edges": orm_result["neo4j_edges"],
-            },
-            "research_enhancement": _build_research_response_summary(research_view),
-        }
     except Exception as exc:
         logger.exception("文本分析链失败")
         raise HTTPException(
@@ -563,39 +472,15 @@ def _sync_community_topics_to_catalog(
     document_id: str,
     community_topics: List[Dict[str, Any]],
 ) -> int:
-    """T3.2: community_topics → CatalogContext.upsert_topic_membership。
-
-    要求 ``_get_neo4j_driver()`` 可用；driver 不可用时直接返回 0。
-    """
+    """Deprecated: topic membership is now queued through graph projection outbox."""
     if not document_id or not community_topics:
         return 0
-    driver = _get_neo4j_driver()
-    if driver is None:
-        return 0
-    payload: List[Dict[str, Any]] = []
-    for topic in community_topics:
-        if not isinstance(topic, Mapping):
-            continue
-        label = str(
-            topic.get("label") or topic.get("name") or topic.get("topic_id") or ""
-        )
-        key = _slugify_topic_key(label or str(topic.get("community_id") or ""))
-        if not key:
-            continue
-        payload.append(
-            {
-                "key": key,
-                "label": label or key,
-                "description": str(topic.get("description") or "")[:500],
-                "weight": float(topic.get("cohesion") or topic.get("size") or 1.0),
-            }
-        )
-    if not payload:
-        return 0
-    from src.contexts.catalog import CatalogContext
-
-    catalog = CatalogContext(driver, database="neo4j")
-    return catalog.upsert_topic_membership(document_id, payload)
+    logger.debug(
+        "Catalog topic sync deferred to graph outbox (document_id=%s, topics=%d)",
+        document_id,
+        len(community_topics),
+    )
+    return 0
 
 
 def _persist_to_orm(
@@ -608,7 +493,7 @@ def _persist_to_orm(
     semantic_result: Optional[Dict[str, Any]] = None,
     research_view: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, int]:
-    """将抽取结果写入主应用数据库，并在 commit 后同步投影到 Neo4j。"""
+    """将抽取结果写入主应用数据库，并通过 graph outbox 排队投影。"""
     db_mgr = getattr(getattr(request, "app", None), "state", None)
     db_mgr = getattr(db_mgr, "db_manager", None) if db_mgr else None
     if db_mgr is None:
@@ -640,6 +525,13 @@ def _persist_to_orm(
     orm_analysis_count = 0
     projection_entities: List[Dict[str, Any]] = []
     projection_relations: List[Dict[str, Any]] = []
+    neo4j_proj: Dict[str, Any] = {
+        "neo4j_nodes": 0,
+        "neo4j_edges": 0,
+        "graph_projection_status": "skipped",
+        "graph_projection_mode": "outbox",
+        "needs_backfill": False,
+    }
     semantic_result = semantic_result or {}
     research_view = research_view or {}
 
@@ -1041,30 +933,22 @@ def _persist_to_orm(
                 )
                 projection_relations.append(projection_relation)
 
-            # T6.1: 同事务向 outbox_events 写入投影任务，便于后台 worker 异步消费 Neo4j。
+            # T6.1+: 同事务向 graph outbox 写入投影任务，便于后台 worker 异步消费 Neo4j。
             try:
-                from src.storage.outbox.pg_outbox_store import enqueue_in_session
-
-                enqueue_in_session(
-                    session,
-                    aggregate_type="document",
-                    aggregate_id=str(getattr(doc, "id", "")),
-                    event_type="neo4j.projection.upsert",
-                    payload={
-                        "entities": projection_entities,
-                        "relations": projection_relations,
-                        "source_file": sf,
-                    },
+                neo4j_proj = AnalysisIngestionService().project_graph_assets(
+                    projection_entities,
+                    projection_relations,
+                    session=session,
+                    cycle_id=str(doc.id),
+                    phase="analysis",
+                    source_file=sf,
+                    idempotency_key=f"web-analysis:{doc.id}:{content_hash}",
                 )
             except Exception:
-                # 老库未跑 outbox 迁移时静默跳过，不影响 PG 主写入。
-                logger.debug("outbox enqueue skipped", exc_info=True)
+                logger.debug("graph outbox enqueue skipped", exc_info=True)
             # session_scope 自动 commit
     except Exception:
         logger.exception("ORM 持久化失败（不影响 KG 侧已写入的数据）")
-
-    # commit 完成后投影到 Neo4j
-    neo4j_proj = _project_to_neo4j(projection_entities, projection_relations)
 
     # T3.2: 把 community_topics 同步到 Catalog (Topic / BELONGS_TO_TOPIC)。
     # 旧 ResearchTopic / HAS_LATENT_TOPIC / HAS_TOPIC_MEMBER 边由 _build_neo4j_projection

@@ -1,9 +1,12 @@
 # src/analysis/semantic_graph.py  (migrated from src/semantic_modeling/semantic_graph_builder.py)
 """
-语义图构建模块 - 集成君臣佐使关系识别 + 高级研究方法
-支持方剂结构、性味归经、类方比较、现代药理学分析
-基于T/C IATCM 098-2023标准
+语义图主建图服务。
+
+主链应通过 ``SemanticGraphService`` facade 使用本模块；
+``src.semantic_modeling`` 保留为兼容入口和研究方法库。
+底层 ``SemanticGraphBuilder`` 继续承载既有建图实现，以保持历史 API 兼容。
 """
+
 from importlib import import_module
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -30,12 +33,14 @@ from src.semantic_modeling.methods import (
 from src.storage.graph_data_batch import GraphDataBatch
 from src.storage.neo4j_driver import Neo4jEdge, Neo4jNode
 
+SEMANTIC_GRAPH_MAIN_PATH = "src.analysis.semantic_graph.SemanticGraphService"
+
 
 class SemanticGraphBuilder(BaseModule):
     """
     语义图构建器 - 支持君臣佐使等TCM语义关系
     """
-    
+
     def __init__(self, config: Dict[str, Any] = None):
         super().__init__("semantic_graph_builder", config)
         cfg = config or {}
@@ -45,21 +50,31 @@ class SemanticGraphBuilder(BaseModule):
         self.relationships_used = {}  # 记录已使用的关系类型
         self.relation_extractor = RelationExtractor()
         self.ontology = OntologyManager()
-        self._formula_similarity_top_k = int(cfg.get("formula_similarity_top_k", 3) or 3)
-        self._formula_similarity_min_score = float(cfg.get("formula_similarity_min_score", 0.35) or 0.35)
-        self._enable_formula_embeddings = bool(cfg.get("enable_formula_embeddings", True))
+        self._formula_similarity_top_k = int(
+            cfg.get("formula_similarity_top_k", 3) or 3
+        )
+        self._formula_similarity_min_score = float(
+            cfg.get("formula_similarity_min_score", 0.35) or 0.35
+        )
+        self._enable_formula_embeddings = bool(
+            cfg.get("enable_formula_embeddings", True)
+        )
         self._embedding_model_name = str(
             cfg.get("embedding_model_name")
             or "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
         )
-        persist_dir = cfg.get("formula_index_persist_directory") or "cache/embedding_indexes"
+        persist_dir = (
+            cfg.get("formula_index_persist_directory") or "cache/embedding_indexes"
+        )
         self._formula_index_persist_directory = str(Path(persist_dir).resolve())
-        self._formula_index_corpus_version = str(cfg.get("formula_index_corpus_version") or "tcm_formula_catalog.v1")
+        self._formula_index_corpus_version = str(
+            cfg.get("formula_index_corpus_version") or "tcm_formula_catalog.v1"
+        )
         self._embedding_encoder = cfg.get("embedding_encoder")
         self._neo4j_driver = cfg.get("neo4j_driver")
         self._formula_embedding_service: Optional[EmbeddingService] = None
         self._formula_catalog_by_name: Dict[str, Dict[str, Any]] = {}
-        
+
     def _do_initialize(self) -> bool:
         """初始化语义图构建器"""
         try:
@@ -68,30 +83,30 @@ class SemanticGraphBuilder(BaseModule):
         except Exception as e:
             self.logger.error(f"语义图构建器初始化失败: {e}")
             return False
-    
+
     def _do_execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """执行语义图构建 - 集成高级研究方法"""
         try:
             entities = self._validate_entities(context)
-            
+
             # 构建语义图
             graph = self._build_semantic_graph(entities)
-            
+
             # 统计关系分布
             relationship_stats = self._calculate_relationship_statistics()
-            
+
             formulas, herbs = self._partition_entities(entities)
             herb_names = self._extract_entity_names(herbs)
-            
+
             # 【新增】生成高级研究视角
             research_perspectives = self._generate_research_perspectives(formulas)
-            
+
             # 【新增】生成药物属性分析
             herb_analysis = self._analyze_herb_properties(herbs)
-            
+
             # 【新增】类方比较分析
             formula_comparison = self._analyze_formula_similarities(formulas)
-            
+
             # 【新增】现代药理学集成
             pharmacology_data = self._collect_pharmacology_data(herbs)
 
@@ -103,11 +118,13 @@ class SemanticGraphBuilder(BaseModule):
             )
 
             # 【新增】统一评分面板（8维 0-1 标准化 + 总分 + 95%CI）
-            scoring_panel = self._build_research_scoring_panel(research_perspectives, formula_comparison)
+            scoring_panel = self._build_research_scoring_panel(
+                research_perspectives, formula_comparison
+            )
 
             # 【新增】总结分析（统计/挖掘/建模）
             summary_analysis = SummaryAnalysisEngine.analyze(context)
-            
+
             graph_batch = GraphDataBatch()
             for node_id, data in graph.nodes(data=True):
                 n_type = data.get("type", "Unknown").capitalize()
@@ -116,47 +133,54 @@ class SemanticGraphBuilder(BaseModule):
                 rel_type = attrs.get("type", "RELATED_TO").upper()
                 s_type = graph.nodes[source].get("type", "Unknown").capitalize()
                 t_type = graph.nodes[target].get("type", "Unknown").capitalize()
-                graph_batch.add_edge(Neo4jEdge(source, target, rel_type, attrs), s_type, t_type)
-            
+                graph_batch.add_edge(
+                    Neo4jEdge(source, target, rel_type, attrs), s_type, t_type
+                )
+
             # 构造输出
             output_data = {
                 "graph_batch": graph_batch,
                 "semantic_graph": {
                     "nodes": [
-                        {
-                            "id": node,
-                            "data": data
-                        } for node, data in graph.nodes(data=True)
+                        {"id": node, "data": data}
+                        for node, data in graph.nodes(data=True)
                     ],
                     "edges": [
-                        {
-                            "source": edge[0],
-                            "target": edge[1],
-                            "attributes": edge[2]
-                        } for edge in graph.edges(data=True)
-                    ]
+                        {"source": edge[0], "target": edge[1], "attributes": edge[2]}
+                        for edge in graph.edges(data=True)
+                    ],
                 },
                 "graph_statistics": {
                     "nodes_count": graph.number_of_nodes(),
                     "edges_count": graph.number_of_edges(),
                     "density": nx.density(graph) if graph.number_of_nodes() > 0 else 0,
-                    "connected_components": nx.number_connected_components(graph.to_undirected()) if graph.number_of_nodes() > 0 else 0,
+                    "connected_components": nx.number_connected_components(
+                        graph.to_undirected()
+                    )
+                    if graph.number_of_nodes() > 0
+                    else 0,
                     "relationships_by_type": relationship_stats,
                 },
                 "research_perspectives": research_perspectives,
                 "herb_properties": herb_analysis,
                 "formula_comparisons": formula_comparison,
                 "pharmacology_integration": pharmacology_data,
-                "network_pharmacology_systems_biology": advanced_analyses["network_pharmacology_systems_biology"],
-                "supramolecular_physicochemistry": advanced_analyses["supramolecular_physicochemistry"],
+                "network_pharmacology_systems_biology": advanced_analyses[
+                    "network_pharmacology_systems_biology"
+                ],
+                "supramolecular_physicochemistry": advanced_analyses[
+                    "supramolecular_physicochemistry"
+                ],
                 "knowledge_archaeology": advanced_analyses["knowledge_archaeology"],
-                "complexity_nonlinear_dynamics": advanced_analyses["complexity_nonlinear_dynamics"],
+                "complexity_nonlinear_dynamics": advanced_analyses[
+                    "complexity_nonlinear_dynamics"
+                ],
                 "research_scoring_panel": scoring_panel,
                 "summary_analysis": summary_analysis,
             }
-            
+
             return output_data
-            
+
         except Exception as e:
             self.logger.error(f"语义图构建执行失败: {e}")
             raise
@@ -170,7 +194,9 @@ class SemanticGraphBuilder(BaseModule):
             raise ValueError("entities 必须为列表")
         return [item for item in entities if isinstance(item, dict)]
 
-    def _partition_entities(self, entities: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    def _partition_entities(
+        self, entities: List[Dict[str, Any]]
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """拆分方剂与药物实体。"""
         formulas = [entity for entity in entities if entity.get("type") == "formula"]
         herbs = [entity for entity in entities if entity.get("type") == "herb"]
@@ -187,11 +213,29 @@ class SemanticGraphBuilder(BaseModule):
         research_perspectives: Dict[str, Dict[str, Any]],
     ) -> Dict[str, Dict[str, Any]]:
         """聚合高级方剂分析结果，优先复用 integrated 输出。"""
-        analysis_specs: List[Tuple[str, str, Callable[[List[Dict[str, Any]], List[str]], Dict[str, Any]]]] = [
-            ("network_pharmacology_systems_biology", "network_pharmacology", self._analyze_network_systems),
-            ("supramolecular_physicochemistry", "supramolecular_physicochemical", self._analyze_supramolecular_physicochemistry),
-            ("knowledge_archaeology", "knowledge_archaeology", self._analyze_knowledge_archaeology),
-            ("complexity_nonlinear_dynamics", "complexity_dynamics", self._analyze_complexity_dynamics),
+        analysis_specs: List[
+            Tuple[str, str, Callable[[List[Dict[str, Any]], List[str]], Dict[str, Any]]]
+        ] = [
+            (
+                "network_pharmacology_systems_biology",
+                "network_pharmacology",
+                self._analyze_network_systems,
+            ),
+            (
+                "supramolecular_physicochemistry",
+                "supramolecular_physicochemical",
+                self._analyze_supramolecular_physicochemistry,
+            ),
+            (
+                "knowledge_archaeology",
+                "knowledge_archaeology",
+                self._analyze_knowledge_archaeology,
+            ),
+            (
+                "complexity_nonlinear_dynamics",
+                "complexity_dynamics",
+                self._analyze_complexity_dynamics,
+            ),
         ]
 
         results: Dict[str, Dict[str, Any]] = {}
@@ -203,7 +247,7 @@ class SemanticGraphBuilder(BaseModule):
                 fallback=lambda items, analyzer=fallback: analyzer(items, herb_names),
             )
         return results
-    
+
     def _build_semantic_graph(self, entities: List[Dict]) -> nx.MultiDiGraph:
         """
         构建语义图 - 支持君臣佐使等TCM关系
@@ -212,16 +256,16 @@ class SemanticGraphBuilder(BaseModule):
         self.graph.clear()
         self.entity_map.clear()
         self.relationships_used.clear()
-        
+
         # 添加节点
         for entity in entities:
             self._add_node(entity)
-        
+
         # 添加边（关系）
         self._add_relationships(entities)
-        
+
         return self.graph
-    
+
     def _add_node(self, entity: Dict):
         """
         添加节点到图中
@@ -232,23 +276,23 @@ class SemanticGraphBuilder(BaseModule):
         if not entity_name:
             return
         node_id = self.ontology.make_node_id(entity_type, entity_name)
-        
+
         node_data = {
             "type": entity_type,
             "name": entity_name,
             "confidence": entity.get("confidence", 0.5),
             "position": entity.get("position", 0),
-            "length": entity.get("length", len(entity_name))
+            "length": entity.get("length", len(entity_name)),
         }
-        
+
         self.graph.add_node(node_id, **node_data)
         self.entity_types[node_id] = entity_type
-        
+
         # 建立实体名称到节点ID的映射（支持多类型实体同名）
         if entity_name not in self.entity_map:
             self.entity_map[entity_name] = []
         self.entity_map[entity_name].append(node_id)
-    
+
     def _add_relationships(self, entities: List[Dict]):
         """
         添加语义关系边（委托给独立 RelationExtractor）
@@ -261,19 +305,19 @@ class SemanticGraphBuilder(BaseModule):
                 **edge["attributes"],
             )
         self.relationships_used = dict(self.relation_extractor.relationship_counts)
-    
+
     def _record_relationship(self, rel_type_value: str):
         """记录已使用的关系类型及其计数"""
         if rel_type_value not in self.relationships_used:
             self.relationships_used[rel_type_value] = 0
         self.relationships_used[rel_type_value] += 1
-    
+
     def _calculate_relationship_statistics(self) -> Dict[str, Any]:
         """
         计算关系类型统计信息
         """
         return self.relation_extractor.relationship_statistics()
-    
+
     def _generate_research_perspectives(self, formulas: List[Dict]) -> Dict:
         """生成方剂结构分析 - Formula Structure Analysis"""
         perspectives = {}
@@ -281,21 +325,28 @@ class SemanticGraphBuilder(BaseModule):
             formula_name = formula.get("name")
             structure = FormulaStructureAnalyzer.analyze_formula_structure(formula_name)
             if structure:
-                integrated = IntegratedResearchAnalyzer.generate_research_perspective(formula_name)
-                integrated["similar_formula_matches"] = self._build_similar_formula_matches(formula_name, integrated)
+                integrated = IntegratedResearchAnalyzer.generate_research_perspective(
+                    formula_name
+                )
+                integrated["similar_formula_matches"] = (
+                    self._build_similar_formula_matches(formula_name, integrated)
+                )
                 perspectives[formula_name] = {
                     "structure": structure,
                     "integrated": integrated,
                 }
         return perspectives
 
-    def _build_similar_formula_matches(self, formula_name: str, integrated: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _build_similar_formula_matches(
+        self, formula_name: str, integrated: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
         service = self._get_formula_embedding_service()
         results: List[Dict[str, Any]] = []
         seen_names = set()
 
         if service is not None and (
-            not self._formula_catalog_by_name or formula_name in self._formula_catalog_by_name
+            not self._formula_catalog_by_name
+            or formula_name in self._formula_catalog_by_name
         ):
             query_text = self._build_formula_query_text(formula_name)
             try:
@@ -321,7 +372,9 @@ class SemanticGraphBuilder(BaseModule):
                         "rank": len(results) + 1,
                         "similarity_score": match.score,
                         "retrieval_sources": ["embedding"],
-                        "graph_evidence": self._resolve_formula_graph_evidence(formula_name, match_name),
+                        "graph_evidence": self._resolve_formula_graph_evidence(
+                            formula_name, match_name
+                        ),
                     }
                 )
 
@@ -336,7 +389,9 @@ class SemanticGraphBuilder(BaseModule):
                     "rank": len(results) + 1,
                     "similarity_score": None,
                     "retrieval_sources": ["relationship_reasoning"],
-                    "graph_evidence": self._resolve_formula_graph_evidence(formula_name, match_name),
+                    "graph_evidence": self._resolve_formula_graph_evidence(
+                        formula_name, match_name
+                    ),
                 }
             )
 
@@ -360,7 +415,9 @@ class SemanticGraphBuilder(BaseModule):
             catalog = self._build_formula_embedding_catalog()
             if not catalog:
                 return None
-            self._formula_catalog_by_name = {str(item["name"]): item for item in catalog if item.get("name")}
+            self._formula_catalog_by_name = {
+                str(item["name"]): item for item in catalog if item.get("name")
+            }
             service.build_formula_index(catalog)
             self._formula_embedding_service = service
             return service
@@ -372,7 +429,10 @@ class SemanticGraphBuilder(BaseModule):
         catalog_names = set(FormulaStructureAnalyzer.FORMULA_STRUCTURES.keys())
         for family_formulas in FormulaComparator.FORMULA_FAMILIES.values():
             catalog_names.update(name for name in family_formulas if name)
-        for formula_left, formula_right in FormulaComparator.FORMULA_RELATIONSHIPS.keys():
+        for (
+            formula_left,
+            formula_right,
+        ) in FormulaComparator.FORMULA_RELATIONSHIPS.keys():
             catalog_names.add(formula_left)
             catalog_names.add(formula_right)
 
@@ -385,7 +445,9 @@ class SemanticGraphBuilder(BaseModule):
                 herbs.extend(str(herb) for herb in herb_names if herb)
 
             descriptions = [str(structure.get("characteristics") or "").strip()]
-            for _, relation_data in FormulaComparator.find_similar_formulas(formula_name):
+            for _, relation_data in FormulaComparator.find_similar_formulas(
+                formula_name
+            ):
                 difference = str(relation_data.get("difference") or "").strip()
                 if difference:
                     descriptions.append(difference)
@@ -413,7 +475,9 @@ class SemanticGraphBuilder(BaseModule):
             for part in [
                 str(catalog_item.get("name") or formula_name),
                 self._format_formula_field("药物:", catalog_item.get("herbs") or []),
-                self._format_formula_field("证候:", catalog_item.get("indications") or []),
+                self._format_formula_field(
+                    "证候:", catalog_item.get("indications") or []
+                ),
                 str(catalog_item.get("description") or "").strip(),
             ]
             if part
@@ -424,17 +488,29 @@ class SemanticGraphBuilder(BaseModule):
             return ""
         return prefix + " ".join(str(value) for value in values if value)
 
-    def _resolve_formula_graph_evidence(self, formula_name: str, similar_formula_name: str) -> Dict[str, Any]:
-        local_evidence = self._build_local_formula_graph_evidence(formula_name, similar_formula_name)
-        neo4j_evidence = self._collect_neo4j_formula_graph_evidence(formula_name, similar_formula_name)
+    def _resolve_formula_graph_evidence(
+        self, formula_name: str, similar_formula_name: str
+    ) -> Dict[str, Any]:
+        local_evidence = self._build_local_formula_graph_evidence(
+            formula_name, similar_formula_name
+        )
+        neo4j_evidence = self._collect_neo4j_formula_graph_evidence(
+            formula_name, similar_formula_name
+        )
         if not neo4j_evidence:
             return local_evidence
 
-        local_shared = {item.get("herb") for item in local_evidence.get("shared_herbs", []) if item.get("herb")}
+        local_shared = {
+            item.get("herb")
+            for item in local_evidence.get("shared_herbs", [])
+            if item.get("herb")
+        }
         merged_shared = list(neo4j_evidence.get("shared_herbs", []))
         for item in local_evidence.get("shared_herbs", []):
             herb_name = item.get("herb")
-            if herb_name and herb_name not in {entry.get("herb") for entry in merged_shared}:
+            if herb_name and herb_name not in {
+                entry.get("herb") for entry in merged_shared
+            }:
                 merged_shared.append(item)
 
         return {
@@ -445,18 +521,29 @@ class SemanticGraphBuilder(BaseModule):
             "role_overlaps": local_evidence.get("role_overlaps", []),
             "comparison_summary": local_evidence.get("comparison_summary", {}),
             "evidence_score": round(
-                max(float(neo4j_evidence.get("evidence_score", 0.0) or 0.0), float(local_evidence.get("evidence_score", 0.0) or 0.0)),
+                max(
+                    float(neo4j_evidence.get("evidence_score", 0.0) or 0.0),
+                    float(local_evidence.get("evidence_score", 0.0) or 0.0),
+                ),
                 3,
             ),
-            "shared_herb_count": len({item.get("herb") for item in merged_shared if item.get("herb")}),
+            "shared_herb_count": len(
+                {item.get("herb") for item in merged_shared if item.get("herb")}
+            ),
             "local_shared_herb_count": len(local_shared),
         }
 
-    def _collect_neo4j_formula_graph_evidence(self, formula_name: str, similar_formula_name: str) -> Dict[str, Any]:
-        if self._neo4j_driver is None or not hasattr(self._neo4j_driver, "collect_formula_similarity_evidence"):
+    def _collect_neo4j_formula_graph_evidence(
+        self, formula_name: str, similar_formula_name: str
+    ) -> Dict[str, Any]:
+        if self._neo4j_driver is None or not hasattr(
+            self._neo4j_driver, "collect_formula_similarity_evidence"
+        ):
             return {}
         try:
-            payload = self._neo4j_driver.collect_formula_similarity_evidence(formula_name, similar_formula_name)
+            payload = self._neo4j_driver.collect_formula_similarity_evidence(
+                formula_name, similar_formula_name
+            )
         except Exception as exc:
             self.logger.warning("Neo4j 图谱证据查询失败: %s", exc)
             return {}
@@ -499,7 +586,9 @@ class SemanticGraphBuilder(BaseModule):
             if not herbs_a_set:
                 continue
             for role_b, herbs_b in composition_b.items():
-                common = sorted(herbs_a_set & self._normalize_formula_herb_names(herbs_b))
+                common = sorted(
+                    herbs_a_set & self._normalize_formula_herb_names(herbs_b)
+                )
                 if not common:
                     continue
                 overlap_shared_herbs, role_overlap = self._build_role_overlap_payload(
@@ -517,8 +606,12 @@ class SemanticGraphBuilder(BaseModule):
         shared_herbs: List[Dict[str, str]],
         comparison_summary: Dict[str, Any],
     ) -> None:
-        comparison_herbs = [str(item) for item in comparison_summary.get("common_herbs", []) if item]
-        existing_shared = {item.get("herb") for item in shared_herbs if item.get("herb")}
+        comparison_herbs = [
+            str(item) for item in comparison_summary.get("common_herbs", []) if item
+        ]
+        existing_shared = {
+            item.get("herb") for item in shared_herbs if item.get("herb")
+        }
         for herb_name in comparison_herbs:
             if herb_name in existing_shared:
                 continue
@@ -546,15 +639,21 @@ class SemanticGraphBuilder(BaseModule):
             ),
         )
 
-    def _build_local_formula_graph_evidence(self, formula_name: str, similar_formula_name: str) -> Dict[str, Any]:
+    def _build_local_formula_graph_evidence(
+        self, formula_name: str, similar_formula_name: str
+    ) -> Dict[str, Any]:
         composition_a = FormulaStructureAnalyzer.get_formula_composition(formula_name)
-        composition_b = FormulaStructureAnalyzer.get_formula_composition(similar_formula_name)
+        composition_b = FormulaStructureAnalyzer.get_formula_composition(
+            similar_formula_name
+        )
         shared_herbs, role_overlaps = self._collect_local_formula_role_overlaps(
             composition_a,
             composition_b,
         )
 
-        comparison_summary = FormulaComparator.compare_formulas(formula_name, similar_formula_name)
+        comparison_summary = FormulaComparator.compare_formulas(
+            formula_name, similar_formula_name
+        )
         self._append_missing_comparison_herbs(shared_herbs, comparison_summary)
         evidence_score = self._calculate_local_formula_evidence_score(
             shared_herbs,
@@ -569,9 +668,11 @@ class SemanticGraphBuilder(BaseModule):
             "role_overlaps": role_overlaps,
             "comparison_summary": comparison_summary,
             "evidence_score": evidence_score,
-            "shared_herb_count": len({item.get("herb") for item in shared_herbs if item.get("herb")}),
+            "shared_herb_count": len(
+                {item.get("herb") for item in shared_herbs if item.get("herb")}
+            ),
         }
-    
+
     def _analyze_herb_properties(self, herbs: List[Dict]) -> Dict:
         """分析药物性味与归经 - Herb Properties & Meridian Entry"""
         properties = {}
@@ -581,21 +682,21 @@ class SemanticGraphBuilder(BaseModule):
             if prop:
                 properties[herb_name] = prop
         return properties
-    
+
     def _analyze_formula_similarities(self, formulas: List[Dict]) -> List[Dict]:
         """类方比较分析 - Similar Formula Comparison"""
         comparisons = []
         formula_names = [f.get("name") for f in formulas if f.get("name")]
-        
+
         # 对比所有方剂对
         for i, f1 in enumerate(formula_names):
-            for f2 in formula_names[i+1:]:
+            for f2 in formula_names[i + 1 :]:
                 comparison = FormulaComparator.compare_formulas(f1, f2)
                 if comparison:
                     comparisons.append(comparison)
-        
+
         return comparisons
-    
+
     def _collect_pharmacology_data(self, herbs: List[Dict]) -> Dict:
         """现代药理学与临床研究数据 - Modern Pharmacology & Clinical Research"""
         pharmacology = {}
@@ -607,7 +708,7 @@ class SemanticGraphBuilder(BaseModule):
                     "components": pharm_data.get("active_components", {}),
                     "actions": pharm_data.get("pharmacological_actions", []),
                     "clinical": pharm_data.get("clinical_research", {}),
-                    "safety": ModernPharmacologyDatabase.get_safety_info(herb_name)
+                    "safety": ModernPharmacologyDatabase.get_safety_info(herb_name),
                 }
         return pharmacology
 
@@ -626,7 +727,9 @@ class SemanticGraphBuilder(BaseModule):
             formula_name = formula.get("name")
             if not formula_name:
                 continue
-            integrated = (research_perspectives.get(formula_name) or {}).get("integrated", {})
+            integrated = (research_perspectives.get(formula_name) or {}).get(
+                "integrated", {}
+            )
             value = integrated.get(integrated_key)
             if value:
                 output[formula_name] = value
@@ -638,7 +741,9 @@ class SemanticGraphBuilder(BaseModule):
 
         return output
 
-    def _analyze_network_systems(self, formulas: List[Dict], herb_names: List[str]) -> Dict:
+    def _analyze_network_systems(
+        self, formulas: List[Dict], herb_names: List[str]
+    ) -> Dict:
         """网络药理学与系统性生物学分析"""
         return self._analyze_formulas_with(
             formulas,
@@ -646,7 +751,9 @@ class SemanticGraphBuilder(BaseModule):
             NetworkPharmacologySystemBiologyAnalyzer.analyze_formula_network,
         )
 
-    def _analyze_supramolecular_physicochemistry(self, formulas: List[Dict], herb_names: List[str]) -> Dict:
+    def _analyze_supramolecular_physicochemistry(
+        self, formulas: List[Dict], herb_names: List[str]
+    ) -> Dict:
         """超分子化学和物理化学分析"""
         return self._analyze_formulas_with(
             formulas,
@@ -654,7 +761,9 @@ class SemanticGraphBuilder(BaseModule):
             SupramolecularPhysicochemicalAnalyzer.analyze_formula_physicochemical,
         )
 
-    def _analyze_knowledge_archaeology(self, formulas: List[Dict], herb_names: List[str]) -> Dict:
+    def _analyze_knowledge_archaeology(
+        self, formulas: List[Dict], herb_names: List[str]
+    ) -> Dict:
         """古典文献数字化与知识考古分析"""
         return self._analyze_formulas_with(
             formulas,
@@ -662,7 +771,9 @@ class SemanticGraphBuilder(BaseModule):
             ClassicalLiteratureArchaeologyAnalyzer.analyze_formula_knowledge_archaeology,
         )
 
-    def _analyze_complexity_dynamics(self, formulas: List[Dict], herb_names: List[str]) -> Dict:
+    def _analyze_complexity_dynamics(
+        self, formulas: List[Dict], herb_names: List[str]
+    ) -> Dict:
         """复杂性科学与非线性动力学分析"""
         return self._analyze_formulas_with(
             formulas,
@@ -700,7 +811,7 @@ class SemanticGraphBuilder(BaseModule):
                 formula_comparisons,
             )
         return result
-    
+
     def _do_cleanup(self) -> bool:
         """清理资源"""
         try:
@@ -715,3 +826,14 @@ class SemanticGraphBuilder(BaseModule):
         except Exception as e:
             self.logger.error(f"语义图构建器资源清理失败: {e}")
             return False
+
+
+class SemanticGraphService(SemanticGraphBuilder):
+    """Canonical facade for semantic graph construction.
+
+    ``SemanticGraphBuilder`` remains the implementation class and compatibility
+    API. Runtime composition should depend on this facade so graph schema and
+    projection behavior have a single primary entrypoint.
+    """
+
+    contract_version = "semantic-graph-service-v1"

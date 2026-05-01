@@ -24,7 +24,18 @@ observe_philology / dashboard / artifact）都应引用此处的常量与函数�
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Mapping, Protocol, Sequence, runtime_checkable
+from dataclasses import dataclass
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Protocol,
+    Sequence,
+    Tuple,
+    runtime_checkable,
+)
 
 from src.collector.normalizer import TCM_LOAN_CHAR_MAP
 
@@ -118,6 +129,153 @@ class ExegesisDictionary(Protocol):
         ...  # pragma: no cover
 
 
+@dataclass(frozen=True)
+class ExegesisContextWindow:
+    """训诂义项判别所需的最小上下文窗口。"""
+
+    term: str = ""
+    left_context: str = ""
+    right_context: str = ""
+    dynasty: str = ""
+    school: str = ""
+    witness_key: str = ""
+    graph_neighbors: Tuple[str, ...] = ()
+
+    @classmethod
+    def from_mapping(cls, value: Any) -> "ExegesisContextWindow":
+        if isinstance(value, cls):
+            return value
+        payload = dict(value) if isinstance(value, Mapping) else {}
+        return cls(
+            term=_context_text(payload.get("term") or payload.get("canonical")),
+            left_context=_context_text(
+                payload.get("left_context") or payload.get("before_context")
+            ),
+            right_context=_context_text(
+                payload.get("right_context") or payload.get("after_context")
+            ),
+            dynasty=_context_text(payload.get("dynasty")),
+            school=_context_text(payload.get("school")),
+            witness_key=_context_text(payload.get("witness_key")),
+            graph_neighbors=tuple(_context_texts(payload.get("graph_neighbors"))),
+        )
+
+    @classmethod
+    def from_row(
+        cls, row: Mapping[str, Any], *, term: str = "", dynasty: str = ""
+    ) -> "ExegesisContextWindow":
+        payload = dict(row)
+        nested = (
+            payload.get("context_window")
+            or payload.get("exegesis_context_window")
+            or payload.get("exegesis_context")
+            or {}
+        )
+        base = dict(nested) if isinstance(nested, Mapping) else {}
+        for key in (
+            "left_context",
+            "right_context",
+            "school",
+            "witness_key",
+            "graph_neighbors",
+        ):
+            if key not in base and key in payload:
+                base[key] = payload[key]
+        base.setdefault("term", term or payload.get("term") or payload.get("canonical"))
+        base.setdefault("dynasty", dynasty or payload.get("dynasty"))
+        return cls.from_mapping(base)
+
+    def is_empty(self) -> bool:
+        return not any(
+            [
+                self.term,
+                self.left_context,
+                self.right_context,
+                self.dynasty,
+                self.school,
+                self.witness_key,
+                *self.graph_neighbors,
+            ]
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        for key in (
+            "term",
+            "left_context",
+            "right_context",
+            "dynasty",
+            "school",
+            "witness_key",
+        ):
+            value = getattr(self, key)
+            if value:
+                payload[key] = value
+        if self.graph_neighbors:
+            payload["graph_neighbors"] = list(self.graph_neighbors)
+        return payload
+
+    def to_scoring_terms(self) -> Tuple[str, ...]:
+        return tuple(
+            _context_texts(
+                [
+                    self.left_context,
+                    self.right_context,
+                    self.dynasty,
+                    self.school,
+                    self.witness_key,
+                    *self.graph_neighbors,
+                ]
+            )
+        )
+
+    def raw_text_window(self) -> str:
+        return " ".join(
+            _context_texts([self.left_context, self.term, self.right_context])
+        )
+
+
+def _context_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _context_texts(values: Any) -> List[str]:
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, Iterable):
+        return []
+    result: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = _context_text(value)
+        if text and text not in seen:
+            seen.add(text)
+            result.append(text)
+    return result
+
+
+def build_contextual_disambiguation_basis(context_window: Any) -> List[str]:
+    """把上下文窗口转为可审计的义项判别依据。"""
+    window = ExegesisContextWindow.from_mapping(context_window)
+    if window.is_empty():
+        return []
+
+    basis: List[str] = []
+    for field_name, label in (
+        ("left_context", "left_context"),
+        ("right_context", "right_context"),
+        ("dynasty", "dynasty"),
+        ("school", "school"),
+        ("witness_key", "witness_key"),
+    ):
+        value = getattr(window, field_name)
+        if value:
+            basis.append(f"{label}:{value}")
+    if window.graph_neighbors:
+        basis.append(f"graph_neighbors:{'、'.join(window.graph_neighbors[:5])}")
+    return basis
+
+
 # ---------------------------------------------------------------------------
 # 义项判别 (polysemy disambiguation)
 # ---------------------------------------------------------------------------
@@ -136,7 +294,10 @@ def resolve_polysemy_category(
     return LABEL_TO_CATEGORY.get(label, "")
 
 
-HIGH_POLYSEMY_TERMS: frozenset[str] = frozenset({"风", "水", "伤寒", "白虎"} | set(TCM_LOAN_CHAR_MAP.keys()))
+HIGH_POLYSEMY_TERMS: frozenset[str] = frozenset(
+    {"风", "水", "伤寒", "白虎"} | set(TCM_LOAN_CHAR_MAP.keys())
+)
+
 
 def disambiguate_polysemy(
     canonical: str,
@@ -144,7 +305,8 @@ def disambiguate_polysemy(
     *,
     dictionaries: Sequence[ExegesisDictionary] = (),
     context_terms: Sequence[str] = (),
-    document_context: Dict[str, Any] = None,
+    document_context: Mapping[str, Any] | None = None,
+    context_window: ExegesisContextWindow | Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """对多义术语执行义项判别，返回释义载荷。
 
@@ -152,6 +314,18 @@ def disambiguate_polysemy(
     针对高频多义词（如“风”、“水”、“伤寒”、“白虎”），将会拦截请求，
     结合上下文窗口 (document_context) 及预查候选列表，让大语言模型进行推演。
     """
+    doc_ctx = dict(document_context or {})
+    window = ExegesisContextWindow.from_mapping(
+        context_window
+        or doc_ctx.get("context_window")
+        or doc_ctx.get("exegesis_context_window")
+        or doc_ctx
+    )
+    scoring_context_terms = tuple(
+        _context_texts([*context_terms, *window.to_scoring_terms()])
+    )
+    contextual_basis = build_contextual_disambiguation_basis(window)
+
     candidates: List[tuple[float, int, Dict[str, Any]]] = []
     for idx, dictionary in enumerate(dictionaries):
         payload = dictionary.lookup(canonical, category=category)
@@ -168,7 +342,7 @@ def disambiguate_polysemy(
         # context 命中
         definition_text = str(payload.get("definition") or "")
         context_hits = 0
-        for term in context_terms:
+        for term in scoring_context_terms:
             term_str = str(term or "").strip()
             if term_str and term_str in definition_text:
                 context_hits += 1
@@ -177,16 +351,25 @@ def disambiguate_polysemy(
         candidates.append((score, -idx, payload))
 
     # ==== [增强] 高频歧义词 LLM Context 推演 ====
-    if canonical in HIGH_POLYSEMY_TERMS and document_context:
+    if canonical in HIGH_POLYSEMY_TERMS and (doc_ctx or not window.is_empty()):
         # 如果命中了高频多义词，并且有附带的上下文，交由 LLM 判断
-        doc_ctx = document_context or {}
-        raw_window = doc_ctx.get("raw_text_window", "")
-        dynasty = doc_ctx.get("dynasty", "未知")
+        raw_window = doc_ctx.get("raw_text_window", "") or window.raw_text_window()
+        dynasty = window.dynasty or doc_ctx.get("dynasty", "未知")
         author = doc_ctx.get("author", "未知")
+        school = window.school or doc_ctx.get("school", "未知")
+        witness_key = window.witness_key or doc_ctx.get("witness_key", "未知")
+        graph_neighbors = "、".join(window.graph_neighbors) or "无"
 
         # 整理已有的字典候选提供给 LLM 参考
-        candidate_defs = [c[2].get("definition") for c in sorted(candidates, key=lambda t: (t[0], t[1]), reverse=True)]
-        candidates_str = "\n".join(f"- {d}" for d in candidate_defs) if candidate_defs else "无预设字典候选"
+        candidate_defs = [
+            c[2].get("definition")
+            for c in sorted(candidates, key=lambda t: (t[0], t[1]), reverse=True)
+        ]
+        candidates_str = (
+            "\n".join(f"- {d}" for d in candidate_defs)
+            if candidate_defs
+            else "无预设字典候选"
+        )
 
         loan_hint = ""
         if canonical in TCM_LOAN_CHAR_MAP:
@@ -198,7 +381,10 @@ def disambiguate_polysemy(
 [类型分类] {category}
 [原文窗口] {raw_window}
 [文献朝代] {dynasty}
-[文献作者] {author}{loan_hint}
+[文献作者] {author}
+[学派线索] {school}
+[版本 witness] {witness_key}
+[图邻居] {graph_neighbors}{loan_hint}
 
 [候选释义列表]
 {candidates_str}
@@ -217,18 +403,19 @@ def disambiguate_polysemy(
         import json
 
         from src.infra.llm_service import CachedLLMService
+
         try:
             llm_res = CachedLLMService().generate(prompt).strip()
             # 尝试提取 json
             start = llm_res.find("{")
             end = llm_res.rfind("}")
             if start != -1 and end != -1:
-                llm_res = llm_res[start:end+1]
+                llm_res = llm_res[start : end + 1]
             data = json.loads(llm_res)
             meaning = data.get("selected_meaning", "")
             conf = data.get("confidence_score", 1.0)
             chain = data.get("reasoning_chain", "")
-            
+
             if meaning:
                 # 判断置信度，若过低也可以根据系统策略回退，这里只要有结果就记录
                 return {
@@ -237,24 +424,37 @@ def disambiguate_polysemy(
                     "source_refs": ["llm_inference"],
                     "dynasty_usage": dynasty,
                     "disambiguation_basis": [
+                        *contextual_basis[:3],
                         f"LLM Conf: {conf}",
-                        f"LLM Reasoning: {chain}"
-                    ]
+                        f"LLM Reasoning: {chain}",
+                    ],
                 }
         except Exception as e:
             logger.error(f"LLM Disambiguation Error: {e}")
-            pass # 回退到普通 O(1) 字典查找机制
+            pass  # 回退到普通 O(1) 字典查找机制
 
     if not candidates:
         return {}
     candidates.sort(key=lambda t: (t[0], t[1]), reverse=True)
     best = candidates[0][2]
     # 记录判别依据
-    if context_terms and "disambiguation_basis" not in best:
-        basis_terms = [t for t in context_terms if str(t or "").strip() in str(best.get("definition") or "")]
-        if basis_terms:
-            best = dict(best)
-            best.setdefault("disambiguation_basis", [f"上下文关联:{t}" for t in basis_terms[:3]])
+    basis_terms = [
+        t
+        for t in scoring_context_terms
+        if str(t or "").strip() in str(best.get("definition") or "")
+    ]
+    basis = _context_texts(
+        [
+            *_context_texts(best.get("disambiguation_basis") or []),
+            *[f"上下文关联:{t}" for t in basis_terms[:3]],
+            *contextual_basis,
+        ]
+    )
+    if basis:
+        best = dict(best)
+        best["disambiguation_basis"] = basis
+        if not best.get("context_window") and not window.is_empty():
+            best["context_window"] = window.to_dict()
     return best
 
 
@@ -301,7 +501,9 @@ def assess_exegesis_completeness(rows: Sequence[Mapping[str, Any]]) -> Dict[str,
         "with_definition": with_definition,
         "definition_coverage": round(with_definition / total, 4) if total else 0.0,
         "source_distribution": {k: source_counts[k] for k in sorted(source_counts)},
-        "category_distribution": {k: category_counts[k] for k in sorted(category_counts)},
+        "category_distribution": {
+            k: category_counts[k] for k in sorted(category_counts)
+        },
         "disambiguation_count": disambiguation_count,
         "needs_disambiguation": needs_disambiguation,
     }

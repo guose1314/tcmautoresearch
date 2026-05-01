@@ -53,15 +53,31 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         self._register_event_handlers()
 
     def _register_event_handlers(self) -> None:
-        self.pipeline.event_bus.subscribe("phase.execute.requested", self._on_phase_execute_requested)
-        self.pipeline.event_bus.subscribe("cycle.create.requested", self._on_cycle_create_requested)
-        self.pipeline.event_bus.subscribe("cycle.start.requested", self._on_cycle_start_requested)
-        self.pipeline.event_bus.subscribe("cycle.phase.execute.requested", self._on_cycle_phase_execute_requested)
-        self.pipeline.event_bus.subscribe("cycle.complete.requested", self._on_cycle_complete_requested)
-        self.pipeline.event_bus.subscribe("cycle.suspend.requested", self._on_cycle_suspend_requested)
-        self.pipeline.event_bus.subscribe("cycle.resume.requested", self._on_cycle_resume_requested)
+        self.pipeline.event_bus.subscribe(
+            "phase.execute.requested", self._on_phase_execute_requested
+        )
+        self.pipeline.event_bus.subscribe(
+            "cycle.create.requested", self._on_cycle_create_requested
+        )
+        self.pipeline.event_bus.subscribe(
+            "cycle.start.requested", self._on_cycle_start_requested
+        )
+        self.pipeline.event_bus.subscribe(
+            "cycle.phase.execute.requested", self._on_cycle_phase_execute_requested
+        )
+        self.pipeline.event_bus.subscribe(
+            "cycle.complete.requested", self._on_cycle_complete_requested
+        )
+        self.pipeline.event_bus.subscribe(
+            "cycle.suspend.requested", self._on_cycle_suspend_requested
+        )
+        self.pipeline.event_bus.subscribe(
+            "cycle.resume.requested", self._on_cycle_resume_requested
+        )
 
-    def _on_phase_execute_requested(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _on_phase_execute_requested(
+        self, payload: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         phase = payload.get("phase")
         cycle = payload.get("cycle")
         context = payload.get("context") or {}
@@ -85,7 +101,10 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         scope = payload.get("scope")
         researchers = payload.get("researchers")
         cycle_options = payload.get("cycle_options") or {}
-        if not all(isinstance(value, str) and value for value in [cycle_name, description, objective, scope]):
+        if not all(
+            isinstance(value, str) and value
+            for value in [cycle_name, description, objective, scope]
+        ):
             return None
         return self.pipeline.orchestrator._create_research_cycle_local(
             cycle_name=cycle_name,
@@ -104,7 +123,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             return None
         return self.pipeline.orchestrator._start_research_cycle_local(cycle_id)
 
-    def _on_cycle_phase_execute_requested(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _on_cycle_phase_execute_requested(
+        self, payload: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         if not hasattr(self.pipeline, "orchestrator"):
             return None
         cycle_id = payload.get("cycle_id")
@@ -141,11 +162,11 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             return None
         return self.pipeline.orchestrator._resume_research_cycle_local(cycle_id)
 
-    def _start_phase(# type: ignore[override]
+    def _start_phase(  # type: ignore[override]
         self,
         metadata: Dict[str, Any],
         phase_name: str,
-        context: Optional[Dict[str, Any]]=None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         phase_entry = {
             "phase": phase_name,
@@ -175,27 +196,45 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         )
         return phase_entry
 
-    def _complete_phase(# type: ignore[override]
+    def _complete_phase(  # type: ignore[override]
         self,
         metadata: Dict[str, Any],
         phase_name: str,
         phase_entry: Dict[str, Any],
         start_time: float,
-        phase_status: str="completed",
-        error: Optional[str]=None,
+        phase_status: str = "completed",
+        error: Optional[str] = None,
     ) -> None:
         duration = time.perf_counter() - start_time
-        normalized_status = str(phase_status or "completed").strip().lower() or "completed"
-        completed_like = normalized_status not in {"failed", "skipped", "blocked", "pending", "running"}
-        event_lifecycle_status = "completed" if normalized_status == "skipped" or completed_like else "failed"
-        audit_action = "phase_completed" if normalized_status == "skipped" or completed_like else "phase_lifecycle_failed"
+        normalized_status = (
+            str(phase_status or "completed").strip().lower() or "completed"
+        )
+        completed_like = normalized_status not in {
+            "failed",
+            "skipped",
+            "blocked",
+            "pending",
+            "running",
+        }
+        event_lifecycle_status = (
+            "completed"
+            if normalized_status == "skipped" or completed_like
+            else "failed"
+        )
+        audit_action = (
+            "phase_completed"
+            if normalized_status == "skipped" or completed_like
+            else "phase_lifecycle_failed"
+        )
         phase_entry["status"] = normalized_status
         phase_entry["ended_at"] = datetime.now().isoformat()
         phase_entry["duration_seconds"] = round(duration, 6)
         if error:
             phase_entry["error"] = error
         metadata.setdefault("phase_timings", {})[phase_name] = round(duration, 6)
-        if completed_like and phase_name not in metadata.setdefault("completed_phases", []):
+        if completed_like and phase_name not in metadata.setdefault(
+            "completed_phases", []
+        ):
             metadata["completed_phases"].append(phase_name)
         if completed_like:
             metadata["last_completed_phase"] = phase_name
@@ -225,7 +264,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             },
         )
 
-    def _fail_phase(# type: ignore[override]
+    def _fail_phase(  # type: ignore[override]
         self,
         metadata: Dict[str, Any],
         failed_operations: List[Dict[str, Any]],
@@ -270,13 +309,13 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             phase_entry.get("context", {}),
         )
 
-    def _record_failed_operation(# type: ignore[override]
+    def _record_failed_operation(  # type: ignore[override]
         self,
         failed_operations: List[Dict[str, Any]],
         operation: str,
         error: str,
         duration: float,
-        details: Optional[Dict[str, Any]]=None,
+        details: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not self.pipeline._governance_config.get("persist_failed_operations", True):
             return
@@ -293,7 +332,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
     def _build_runtime_metadata(self) -> Dict[str, Any]:
         return self._build_runtime_metadata_from_dict(self.pipeline._metadata)
 
-    def _validate_research_phase_request(self, cycle_id: str) -> Optional[Dict[str, Any]]:
+    def _validate_research_phase_request(
+        self, cycle_id: str
+    ) -> Optional[Dict[str, Any]]:
         if cycle_id not in self.pipeline.research_cycles:
             self.pipeline.logger.warning(f"研究循环 {cycle_id} 不存在")
             return {"error": "循环不存在"}
@@ -304,7 +345,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             return {"error": "循环未激活"}
         return None
 
-    def _advance_research_cycle_phase(self, research_cycle: ResearchCycle, phase: ResearchPhase) -> None:
+    def _advance_research_cycle_phase(
+        self, research_cycle: ResearchCycle, phase: ResearchPhase
+    ) -> None:
         phase_transitions = {
             ResearchPhase.OBSERVE: ResearchPhase.HYPOTHESIS,
             ResearchPhase.HYPOTHESIS: ResearchPhase.EXPERIMENT,
@@ -313,7 +356,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             ResearchPhase.ANALYZE: ResearchPhase.PUBLISH,
             ResearchPhase.PUBLISH: ResearchPhase.REFLECT,
         }
-        research_cycle.current_phase = phase_transitions.get(phase, research_cycle.current_phase)
+        research_cycle.current_phase = phase_transitions.get(
+            phase, research_cycle.current_phase
+        )
 
     def _build_phase_execution(
         self,
@@ -325,7 +370,8 @@ class PhaseOrchestrator(PhaseTrackerMixin):
     ) -> Dict[str, Any]:
         return {
             "phase": phase.value,
-            "status": str(phase_result.get("status") or "completed").strip().lower() or "completed",
+            "status": str(phase_result.get("status") or "completed").strip().lower()
+            or "completed",
             "started_at": started_at,
             "completed_at": datetime.now().isoformat(),
             "duration": time.perf_counter() - start_time,
@@ -340,7 +386,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         phase_execution: Dict[str, Any],
         phase_result: Dict[str, Any],
     ) -> None:
-        phase_entry["status"] = phase_execution.get("status") or phase_entry.get("status")
+        phase_entry["status"] = phase_execution.get("status") or phase_entry.get(
+            "status"
+        )
         phase_entry["completed_at"] = phase_execution["completed_at"]
         phase_entry["duration"] = phase_execution["duration"]
         if phase_execution.get("error"):
@@ -359,11 +407,15 @@ class PhaseOrchestrator(PhaseTrackerMixin):
 
         research_cycle.outcomes.append({"phase": phase.value, "result": phase_result})
         if phase == ResearchPhase.PUBLISH:
-            research_cycle.deliverables = get_phase_value(phase_result, "deliverables", []) or []
+            research_cycle.deliverables = (
+                get_phase_value(phase_result, "deliverables", []) or []
+            )
         if phase == ResearchPhase.ANALYZE:
             research_cycle.quality_metrics = phase_result.get("results", {})
 
-    def _record_phase_success(self, cycle_id: str, phase: ResearchPhase, start_time: float) -> None:
+    def _record_phase_success(
+        self, cycle_id: str, phase: ResearchPhase, start_time: float
+    ) -> None:
         publish_audit_event(
             self.pipeline.event_bus,
             "phase_executed",
@@ -387,8 +439,12 @@ class PhaseOrchestrator(PhaseTrackerMixin):
 
         research_cycle = self.pipeline.research_cycles[cycle_id]
         self._record_failed_phase_history(research_cycle, phase, start_time, str(exc))
-        self.pipeline.session_manager.mark_cycle_failed(research_cycle, phase.value, str(exc))
-        research_cycle.metadata["analysis_summary"] = self.pipeline.session_manager.build_cycle_analysis_summary(research_cycle)
+        self.pipeline.session_manager.mark_cycle_failed(
+            research_cycle, phase.value, str(exc)
+        )
+        research_cycle.metadata["analysis_summary"] = (
+            self.pipeline.session_manager.build_cycle_analysis_summary(research_cycle)
+        )
         publish_audit_event(
             self.pipeline.event_bus,
             "phase_failed",
@@ -541,7 +597,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             analyzer.cleanup()
             engine.unload()
 
-    def _extract_literature_summaries(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _extract_literature_summaries(
+        self, records: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         summaries: List[Dict[str, Any]] = []
         for item in records:
             title = (item.get("title") or "").strip()
@@ -569,10 +627,38 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         context: Dict[str, Any],
     ) -> Dict[str, Any]:
         default_dimensions: Dict[str, List[str]] = {
-            "condition_terms": ["covid", "diabetes", "cancer", "depression", "inflammation", "pain"],
-            "intervention_terms": ["traditional chinese medicine", "tcm", "herb", "formula", "decoction", "acupuncture"],
-            "outcome_terms": ["efficacy", "effectiveness", "safety", "survival", "risk", "response"],
-            "method_terms": ["randomized", "meta-analysis", "cohort", "case-control", "network", "machine learning"],
+            "condition_terms": [
+                "covid",
+                "diabetes",
+                "cancer",
+                "depression",
+                "inflammation",
+                "pain",
+            ],
+            "intervention_terms": [
+                "traditional chinese medicine",
+                "tcm",
+                "herb",
+                "formula",
+                "decoction",
+                "acupuncture",
+            ],
+            "outcome_terms": [
+                "efficacy",
+                "effectiveness",
+                "safety",
+                "survival",
+                "risk",
+                "response",
+            ],
+            "method_terms": [
+                "randomized",
+                "meta-analysis",
+                "cohort",
+                "case-control",
+                "network",
+                "machine learning",
+            ],
         }
 
         dimension_keywords = context.get("evidence_dimensions") or default_dimensions
@@ -613,10 +699,14 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         total_cycles = len(self.pipeline.research_cycles)
         active_cycles = len(self.pipeline.active_cycles)
         completed_cycles = sum(
-            1 for c in self.pipeline.research_cycles.values() if c.status == ResearchCycleStatus.COMPLETED
+            1
+            for c in self.pipeline.research_cycles.values()
+            if c.status == ResearchCycleStatus.COMPLETED
         )
         failed_cycles = sum(
-            1 for c in self.pipeline.research_cycles.values() if c.status == ResearchCycleStatus.FAILED
+            1
+            for c in self.pipeline.research_cycles.values()
+            if c.status == ResearchCycleStatus.FAILED
         )
 
         completion_rate = (completed_cycles / total_cycles) if total_cycles > 0 else 0.0
@@ -631,17 +721,25 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 "quality_metrics": self._serialize_value(self.pipeline.quality_metrics),
                 "resource_usage": self._serialize_value(self.pipeline.resource_usage),
                 "recent_activities": self._serialize_value(
-                    self.pipeline.execution_history[-10:] if self.pipeline.execution_history else []
+                    self.pipeline.execution_history[-10:]
+                    if self.pipeline.execution_history
+                    else []
                 ),
                 "analysis_summary": self.pipeline._build_pipeline_analysis_summary(),
                 "report_metadata": self.pipeline._build_report_metadata(),
-                "failed_operations": self._serialize_value(self.pipeline._failed_operations),
+                "failed_operations": self._serialize_value(
+                    self.pipeline._failed_operations
+                ),
                 "metadata": self._build_runtime_metadata(),
             }
         }
 
     def export_pipeline_data(self, output_path: str) -> bool:
-        phase_entry = self._start_phase(self.pipeline._metadata, "export_pipeline_data", {"output_path": output_path})
+        phase_entry = self._start_phase(
+            self.pipeline._metadata,
+            "export_pipeline_data",
+            {"output_path": output_path},
+        )
         start_time = time.perf_counter()
         try:
             pipeline_data = {
@@ -655,18 +753,30 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     "generated_at": datetime.now().isoformat(),
                     "pipeline_summary": self.get_pipeline_summary(),
                 },
-                "research_cycles": [self.pipeline._serialize_cycle(cycle) for cycle in self.pipeline.research_cycles.values()],
-                "failed_cycles": [self.pipeline._serialize_cycle(cycle) for cycle in self.pipeline.failed_cycles],
-                "execution_history": self._serialize_value(self.pipeline.execution_history),
+                "research_cycles": [
+                    self.pipeline._serialize_cycle(cycle)
+                    for cycle in self.pipeline.research_cycles.values()
+                ],
+                "failed_cycles": [
+                    self.pipeline._serialize_cycle(cycle)
+                    for cycle in self.pipeline.failed_cycles
+                ],
+                "execution_history": self._serialize_value(
+                    self.pipeline.execution_history
+                ),
                 "quality_metrics": self._serialize_value(self.pipeline.quality_metrics),
                 "resource_usage": self._serialize_value(self.pipeline.resource_usage),
-                "failed_operations": self._serialize_value(self.pipeline._failed_operations),
+                "failed_operations": self._serialize_value(
+                    self.pipeline._failed_operations
+                ),
                 "metadata": self._build_runtime_metadata(),
             }
 
             with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(pipeline_data, f, ensure_ascii=False, indent=2)
-            self._complete_phase(self.pipeline._metadata, "export_pipeline_data", phase_entry, start_time)
+            self._complete_phase(
+                self.pipeline._metadata, "export_pipeline_data", phase_entry, start_time
+            )
 
             self.pipeline.logger.info(f"流程数据已导出到: {output_path}")
             return True
@@ -686,7 +796,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
     def _should_use_structured_result_persistence(self) -> bool:
         database_config = self.pipeline.config.get("database")
         neo4j_config = self.pipeline.config.get("neo4j") or {}
-        return bool(isinstance(database_config, dict) and database_config) or bool(neo4j_config.get("enabled"))
+        return bool(isinstance(database_config, dict) and database_config) or bool(
+            neo4j_config.get("enabled")
+        )
 
     def _normalize_repository_phase_status(self, phase_result: Dict[str, Any]) -> str:
         status = str(phase_result.get("status") or "").strip().lower()
@@ -714,7 +826,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             return default
         return "".join(part[:1].upper() + part[1:] for part in parts)
 
-    def _normalize_graph_relationship_type(self, value: Any, default: str = "RELATED_TO") -> str:
+    def _normalize_graph_relationship_type(
+        self, value: Any, default: str = "RELATED_TO"
+    ) -> str:
         return self._normalize_graph_identifier(value, default).upper()
 
     def _normalize_graph_properties(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -729,16 +843,24 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             if isinstance(value, (int, float, str)):
                 normalized[safe_key] = value
                 continue
-            if isinstance(value, list) and all(isinstance(item, (bool, int, float, str)) for item in value):
+            if isinstance(value, list) and all(
+                isinstance(item, (bool, int, float, str)) for item in value
+            ):
                 normalized[safe_key] = value
                 continue
-            normalized[safe_key] = json.dumps(self._serialize_value(value), ensure_ascii=False)
+            normalized[safe_key] = json.dumps(
+                self._serialize_value(value), ensure_ascii=False
+            )
         return normalized
 
-    def _infer_artifact_type(self, phase_name: str, artifact_name: str, file_path: str) -> str:
+    def _infer_artifact_type(
+        self, phase_name: str, artifact_name: str, file_path: str
+    ) -> str:
         name = artifact_name.lower()
         path = file_path.lower()
-        if any(token in name for token in ("bibtex", "gbt7714", "citation", "reference")):
+        if any(
+            token in name for token in ("bibtex", "gbt7714", "citation", "reference")
+        ):
             return "reference"
         if any(token in name for token in ("imrd", "report")):
             return "report"
@@ -773,7 +895,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         except OSError:
             return 0
 
-    def _collect_phase_artifacts(self, phase_name: str, phase_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _collect_phase_artifacts(
+        self, phase_name: str, phase_result: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
         raw_artifacts = phase_result.get("artifacts") or []
         artifacts: List[Dict[str, Any]] = []
         if isinstance(raw_artifacts, list):
@@ -785,7 +909,12 @@ class PhaseOrchestrator(PhaseTrackerMixin):
 
         deduplicated: Dict[tuple[str, str], Dict[str, Any]] = {}
         for artifact in artifacts:
-            name = str(artifact.get("name") or artifact.get("type") or artifact.get("artifact_type") or f"{phase_name}_artifact").strip()
+            name = str(
+                artifact.get("name")
+                or artifact.get("type")
+                or artifact.get("artifact_type")
+                or f"{phase_name}_artifact"
+            ).strip()
             raw_path = artifact.get("path") or artifact.get("file_path")
             if not raw_path and isinstance(artifact.get("value"), str):
                 raw_path = artifact.get("value")
@@ -797,24 +926,48 @@ class PhaseOrchestrator(PhaseTrackerMixin):
 
     def _estimate_artifact_size(self, payload: Any) -> int:
         try:
-            return len(json.dumps(self._serialize_value(payload), ensure_ascii=False).encode("utf-8"))
+            return len(
+                json.dumps(self._serialize_value(payload), ensure_ascii=False).encode(
+                    "utf-8"
+                )
+            )
         except Exception:
             return 0
 
-    def _collect_observe_semantic_relationships(self, cycle: ResearchCycle) -> List[Dict[str, Any]]:
+    def _collect_observe_semantic_relationships(
+        self, cycle: ResearchCycle
+    ) -> List[Dict[str, Any]]:
         observe_execution = cycle.phase_executions.get(ResearchPhase.OBSERVE, {})
-        observe_result = observe_execution.get("result") if isinstance(observe_execution, dict) else {}
+        observe_result = (
+            observe_execution.get("result")
+            if isinstance(observe_execution, dict)
+            else {}
+        )
         if not isinstance(observe_result, dict):
             return []
 
-        ingestion_pipeline = get_phase_value(observe_result, "ingestion_pipeline", {}) or {}
-        aggregate = ingestion_pipeline.get("aggregate") if isinstance(ingestion_pipeline, dict) else {}
-        aggregate_relationships = aggregate.get("semantic_relationships") if isinstance(aggregate, dict) else None
+        ingestion_pipeline = (
+            get_phase_value(observe_result, "ingestion_pipeline", {}) or {}
+        )
+        aggregate = (
+            ingestion_pipeline.get("aggregate")
+            if isinstance(ingestion_pipeline, dict)
+            else {}
+        )
+        aggregate_relationships = (
+            aggregate.get("semantic_relationships")
+            if isinstance(aggregate, dict)
+            else None
+        )
         if isinstance(aggregate_relationships, list) and aggregate_relationships:
             return [item for item in aggregate_relationships if isinstance(item, dict)]
 
         relationships: List[Dict[str, Any]] = []
-        documents = ingestion_pipeline.get("documents") if isinstance(ingestion_pipeline, dict) else []
+        documents = (
+            ingestion_pipeline.get("documents")
+            if isinstance(ingestion_pipeline, dict)
+            else []
+        )
         if not isinstance(documents, list):
             return relationships
         for document in documents:
@@ -822,7 +975,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 continue
             document_relationships = document.get("semantic_relationships") or []
             if isinstance(document_relationships, list):
-                relationships.extend(item for item in document_relationships if isinstance(item, dict))
+                relationships.extend(
+                    item for item in document_relationships if isinstance(item, dict)
+                )
         return relationships
 
     def _persist_cycle_phase_executions(
@@ -836,7 +991,11 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             if not isinstance(execution, dict):
                 continue
             phase_name = getattr(phase, "value", str(phase))
-            phase_result = execution.get("result") if isinstance(execution.get("result"), dict) else {}
+            phase_result = (
+                execution.get("result")
+                if isinstance(execution.get("result"), dict)
+                else {}
+            )
             record = repository.add_phase_execution(
                 cycle.cycle_id,
                 {
@@ -867,26 +1026,43 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             if not isinstance(execution, dict):
                 continue
             phase_name = getattr(phase, "value", str(phase))
-            phase_result = execution.get("result") if isinstance(execution.get("result"), dict) else {}
+            phase_result = (
+                execution.get("result")
+                if isinstance(execution.get("result"), dict)
+                else {}
+            )
             phase_record = phase_records.get(phase_name) or {}
             phase_execution_id = phase_record.get("id")
 
             for artifact in self._collect_phase_artifacts(phase_name, phase_result):
-                artifact_name = str(artifact.get("name") or artifact.get("type") or artifact.get("artifact_type") or f"{phase_name}_artifact").strip()
+                artifact_name = str(
+                    artifact.get("name")
+                    or artifact.get("type")
+                    or artifact.get("artifact_type")
+                    or f"{phase_name}_artifact"
+                ).strip()
                 raw_file_path = artifact.get("path") or artifact.get("file_path")
                 if not raw_file_path and isinstance(artifact.get("value"), str):
                     raw_file_path = artifact.get("value")
                 file_path = str(raw_file_path or "").strip()
-                content_payload = artifact.get("content") if "content" in artifact else artifact
-                explicit_artifact_type = str(artifact.get("artifact_type") or "").strip().lower()
-                explicit_mime_type = str(artifact.get("mime_type") or "").strip() or None
+                content_payload = (
+                    artifact.get("content") if "content" in artifact else artifact
+                )
+                explicit_artifact_type = (
+                    str(artifact.get("artifact_type") or "").strip().lower()
+                )
+                explicit_mime_type = (
+                    str(artifact.get("mime_type") or "").strip() or None
+                )
                 explicit_size_bytes = artifact.get("size_bytes")
                 artifact_metadata = {
                     "phase": phase_name,
                     "phase_status": phase_result.get("status"),
                 }
                 if isinstance(artifact.get("metadata"), dict):
-                    artifact_metadata.update(self._serialize_value(artifact.get("metadata") or {}))
+                    artifact_metadata.update(
+                        self._serialize_value(artifact.get("metadata") or {})
+                    )
 
                 size_bytes = 0
                 if explicit_size_bytes not in (None, ""):
@@ -903,12 +1079,19 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     cycle.cycle_id,
                     {
                         "phase_execution_id": phase_execution_id,
-                        "artifact_type": explicit_artifact_type or self._infer_artifact_type(phase_name, artifact_name, file_path),
+                        "artifact_type": explicit_artifact_type
+                        or self._infer_artifact_type(
+                            phase_name, artifact_name, file_path
+                        ),
                         "name": artifact_name,
-                        "description": str(artifact.get("description") or artifact.get("label") or "").strip(),
+                        "description": str(
+                            artifact.get("description") or artifact.get("label") or ""
+                        ).strip(),
                         "content": self._serialize_value(content_payload),
                         "file_path": file_path or None,
-                        "mime_type": explicit_mime_type or self._infer_mime_type(file_path) or "application/json",
+                        "mime_type": explicit_mime_type
+                        or self._infer_mime_type(file_path)
+                        or "application/json",
                         "size_bytes": size_bytes,
                         "metadata": artifact_metadata,
                     },
@@ -928,11 +1111,17 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         reflect_execution = cycle.phase_executions.get(ResearchPhase.REFLECT)
         if not isinstance(reflect_execution, dict):
             return {}
-        phase_result = reflect_execution.get("result") if isinstance(reflect_execution.get("result"), dict) else {}
+        phase_result = (
+            reflect_execution.get("result")
+            if isinstance(reflect_execution.get("result"), dict)
+            else {}
+        )
         if not isinstance(phase_result, dict):
             return {}
 
-        feedback_library = get_phase_value(phase_result, "learning_feedback_library", {}) or {}
+        feedback_library = (
+            get_phase_value(phase_result, "learning_feedback_library", {}) or {}
+        )
         if not isinstance(feedback_library, dict):
             return {}
 
@@ -940,7 +1129,8 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         saved = repository.replace_learning_feedback_library(
             cycle.cycle_id,
             self._serialize_value(feedback_library),
-            phase_execution_id=str(reflect_phase_record.get("id") or "").strip() or None,
+            phase_execution_id=str(reflect_phase_record.get("id") or "").strip()
+            or None,
             session=session,
         )
         return saved if isinstance(saved, dict) else {}
@@ -955,13 +1145,23 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         observe_execution = cycle.phase_executions.get(ResearchPhase.OBSERVE)
         if not isinstance(observe_execution, dict):
             return []
-        phase_result = observe_execution.get("result") if isinstance(observe_execution.get("result"), dict) else {}
+        phase_result = (
+            observe_execution.get("result")
+            if isinstance(observe_execution.get("result"), dict)
+            else {}
+        )
         if not isinstance(phase_result, dict):
             return []
-        ingestion_pipeline = get_phase_value(phase_result, "ingestion_pipeline", {}) or {}
+        ingestion_pipeline = (
+            get_phase_value(phase_result, "ingestion_pipeline", {}) or {}
+        )
         if not isinstance(ingestion_pipeline, dict):
             return []
-        documents = [item for item in (ingestion_pipeline.get("documents") or []) if isinstance(item, dict)]
+        documents = [
+            item
+            for item in (ingestion_pipeline.get("documents") or [])
+            if isinstance(item, dict)
+        ]
         if not documents:
             return []
         persisted = repository.replace_observe_document_graphs(
@@ -983,7 +1183,12 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         transaction: Any = None,
     ) -> Dict[str, Any]:
         if neo4j_driver is None:
-            return {"status": "skipped", "enabled": False, "node_count": 0, "edge_count": 0}
+            return {
+                "status": "skipped",
+                "enabled": False,
+                "node_count": 0,
+                "edge_count": 0,
+            }
 
         try:
             from src.research.graph_assets import get_phase_graph_assets
@@ -1108,7 +1313,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                         }
                     ),
                 )
-                phase_execution_id = str(artifact.get("phase_execution_id") or "").strip()
+                phase_execution_id = str(
+                    artifact.get("phase_execution_id") or ""
+                ).strip()
                 if phase_execution_id:
                     _add_edge(
                         phase_execution_id,
@@ -1128,8 +1335,14 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                         {"cycle_id": cycle.cycle_id},
                     )
 
-            observe_phase_id = str((phase_records.get("observe") or {}).get("id") or "").strip()
-            observe_document_records = [item for item in observe_documents if isinstance(item, dict)] if isinstance(observe_documents, list) else []
+            observe_phase_id = str(
+                (phase_records.get("observe") or {}).get("id") or ""
+            ).strip()
+            observe_document_records = (
+                [item for item in observe_documents if isinstance(item, dict)]
+                if isinstance(observe_documents, list)
+                else []
+            )
             if observe_document_records:
                 for node in build_observe_entity_graph_nodes(observe_document_records):
                     _add_node(node.label, node.id, node.properties)
@@ -1148,7 +1361,11 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                         target_label,
                         edge.properties,
                     )
-                for edge, source_label, target_label in build_observe_version_graph_edges(
+                for (
+                    edge,
+                    source_label,
+                    target_label,
+                ) in build_observe_version_graph_edges(
                     cycle.cycle_id,
                     observe_phase_id,
                     observe_document_records,
@@ -1167,12 +1384,32 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                     target_name = str(relation.get("target") or "").strip()
                     if not source_name or not target_name:
                         continue
-                    source_type = self._normalize_graph_label(relation.get("source_type") or NodeLabel.ENTITY.value, NodeLabel.ENTITY.value)
-                    target_type = self._normalize_graph_label(relation.get("target_type") or NodeLabel.ENTITY.value, NodeLabel.ENTITY.value)
+                    source_type = self._normalize_graph_label(
+                        relation.get("source_type") or NodeLabel.ENTITY.value,
+                        NodeLabel.ENTITY.value,
+                    )
+                    target_type = self._normalize_graph_label(
+                        relation.get("target_type") or NodeLabel.ENTITY.value,
+                        NodeLabel.ENTITY.value,
+                    )
                     source_id = f"entity::{source_name}"
                     target_id = f"entity::{target_name}"
-                    _add_node(source_type, source_id, {"name": source_name, "entity_type": relation.get("source_type") or source_type})
-                    _add_node(target_type, target_id, {"name": target_name, "entity_type": relation.get("target_type") or target_type})
+                    _add_node(
+                        source_type,
+                        source_id,
+                        {
+                            "name": source_name,
+                            "entity_type": relation.get("source_type") or source_type,
+                        },
+                    )
+                    _add_node(
+                        target_type,
+                        target_id,
+                        {
+                            "name": target_name,
+                            "entity_type": relation.get("target_type") or target_type,
+                        },
+                    )
                     _add_edge(
                         source_id,
                         target_id,
@@ -1180,7 +1417,11 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                         source_type,
                         target_type,
                         {
-                            **(relation.get("metadata") if isinstance(relation.get("metadata"), dict) else {}),
+                            **(
+                                relation.get("metadata")
+                                if isinstance(relation.get("metadata"), dict)
+                                else {}
+                            ),
                             "cycle_id": cycle.cycle_id,
                             "phase": "observe",
                         },
@@ -1204,13 +1445,18 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                         )
 
             for phase_enum, execution in cycle.phase_executions.items():
-                phase_name = str(getattr(phase_enum, "value", phase_enum) or "").strip().lower()
+                phase_name = (
+                    str(getattr(phase_enum, "value", phase_enum) or "").strip().lower()
+                )
                 if not phase_name or not isinstance(execution, dict):
                     continue
                 graph_assets = get_phase_graph_assets(execution.get("result") or {})
                 if not graph_assets:
                     continue
-                phase_id = str((phase_records.get(phase_name) or {}).get("id") or f"{cycle.cycle_id}:{phase_name}")
+                phase_id = str(
+                    (phase_records.get(phase_name) or {}).get("id")
+                    or f"{cycle.cycle_id}:{phase_name}"
+                )
                 for subgraph_name, subgraph in graph_assets.items():
                     if subgraph_name == "summary" or not isinstance(subgraph, dict):
                         continue
@@ -1220,7 +1466,10 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                         if not isinstance(node, dict):
                             continue
                         node_id = str(node.get("id") or "").strip()
-                        label = self._normalize_graph_label(node.get("label") or NodeLabel.ENTITY.value, NodeLabel.ENTITY.value)
+                        label = self._normalize_graph_label(
+                            node.get("label") or NodeLabel.ENTITY.value,
+                            NodeLabel.ENTITY.value,
+                        )
                         properties = dict(node.get("properties") or {})
                         if not node_id:
                             continue
@@ -1237,18 +1486,32 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                                 asset_counts["textual_evidence_chain_node_count"] += 1
                             if has_complete_graph_traceability(label, properties):
                                 asset_counts["philology_traceable_node_count"] += 1
-                                traceability_kind = get_graph_traceability_kind(label, properties)
+                                traceability_kind = get_graph_traceability_kind(
+                                    label, properties
+                                )
                                 if traceability_kind == TRACEABILITY_KIND_SYMPTOM:
                                     asset_counts["symptom_traceable_node_count"] += 1
-                                elif traceability_kind == TRACEABILITY_KIND_PATHOGENESIS:
-                                    asset_counts["pathogenesis_traceable_node_count"] += 1
+                                elif (
+                                    traceability_kind == TRACEABILITY_KIND_PATHOGENESIS
+                                ):
+                                    asset_counts[
+                                        "pathogenesis_traceable_node_count"
+                                    ] += 1
                                 elif traceability_kind == TRACEABILITY_KIND_EFFICACY:
                                     asset_counts["efficacy_traceable_node_count"] += 1
-                                elif traceability_kind == TRACEABILITY_KIND_FORMULA_COMPONENT:
-                                    asset_counts["formula_component_traceable_node_count"] += 1
+                                elif (
+                                    traceability_kind
+                                    == TRACEABILITY_KIND_FORMULA_COMPONENT
+                                ):
+                                    asset_counts[
+                                        "formula_component_traceable_node_count"
+                                    ] += 1
                         if label == NodeLabel.HYPOTHESIS.value:
                             phase_rel = RelType.HAS_HYPOTHESIS.value
-                        elif label in {NodeLabel.EVIDENCE.value, NodeLabel.EVIDENCE_CLAIM.value}:
+                        elif label in {
+                            NodeLabel.EVIDENCE.value,
+                            NodeLabel.EVIDENCE_CLAIM.value,
+                        }:
                             phase_rel = RelType.DERIVED_FROM_PHASE.value
                         elif asset_family == "philology":
                             phase_rel = RelType.CAPTURED.value
@@ -1275,8 +1538,14 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                         relationship_type = self._normalize_graph_relationship_type(
                             edge.get("relationship_type") or RelType.RELATED_TO.value
                         )
-                        source_label = self._normalize_graph_label(edge.get("source_label") or NodeLabel.ENTITY.value, NodeLabel.ENTITY.value)
-                        target_label = self._normalize_graph_label(edge.get("target_label") or NodeLabel.ENTITY.value, NodeLabel.ENTITY.value)
+                        source_label = self._normalize_graph_label(
+                            edge.get("source_label") or NodeLabel.ENTITY.value,
+                            NodeLabel.ENTITY.value,
+                        )
+                        target_label = self._normalize_graph_label(
+                            edge.get("target_label") or NodeLabel.ENTITY.value,
+                            NodeLabel.ENTITY.value,
+                        )
                         if not source_id or not target_id:
                             continue
                         _add_edge(
@@ -1294,33 +1563,60 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                         elif asset_family == "philology":
                             asset_counts["philology_edge_count"] += 1
                             properties = dict(edge.get("properties") or {})
-                            if has_complete_graph_edge_traceability(source_label, target_label, relationship_type, properties):
+                            if has_complete_graph_edge_traceability(
+                                source_label,
+                                target_label,
+                                relationship_type,
+                                properties,
+                            ):
                                 asset_counts["philology_traceable_edge_count"] += 1
-                                edge_traceability_kind = get_graph_edge_traceability_kind(
-                                    source_label,
-                                    target_label,
-                                    relationship_type,
-                                    properties,
+                                edge_traceability_kind = (
+                                    get_graph_edge_traceability_kind(
+                                        source_label,
+                                        target_label,
+                                        relationship_type,
+                                        properties,
+                                    )
                                 )
-                                if edge_traceability_kind == TRACEABILITY_KIND_HERB_PROVENANCE_EDGE:
+                                if (
+                                    edge_traceability_kind
+                                    == TRACEABILITY_KIND_HERB_PROVENANCE_EDGE
+                                ):
                                     asset_counts["herb_provenance_edge_count"] += 1
-                                elif edge_traceability_kind == TRACEABILITY_KIND_FORMULA_PROVENANCE_EDGE:
+                                elif (
+                                    edge_traceability_kind
+                                    == TRACEABILITY_KIND_FORMULA_PROVENANCE_EDGE
+                                ):
                                     asset_counts["formula_provenance_edge_count"] += 1
 
             nodes = list(node_map.values())
             edges = list(edge_map.values())
             _scope = "current_cycle"
             if transaction is not None:
-                if nodes:
-                    transaction.neo4j_batch_nodes(nodes)
-                if edges:
-                    transaction.neo4j_batch_edges(edges)
+                from src.storage.outbox import enqueue_graph_projection
+
+                graph_payload = self._build_graph_projection_payload(
+                    nodes,
+                    edges,
+                    graph_projection_scope=_scope,
+                    asset_counts=asset_counts,
+                )
+                row = enqueue_graph_projection(
+                    cycle.cycle_id,
+                    "cycle",
+                    graph_payload,
+                    f"graph_projection:{cycle.cycle_id}:cycle",
+                    session=transaction.pg_session,
+                )
                 return {
-                    "status": "active",
+                    "status": "queued",
                     "enabled": True,
                     "node_count": len(nodes),
                     "edge_count": len(edges),
                     "graph_projection_scope": _scope,
+                    "graph_projection_mode": "outbox",
+                    "outbox_event_id": str(getattr(row, "id", "")),
+                    "outbox_event_type": "neo4j.graph_projection.upsert",
                     **asset_counts,
                 }
             node_status = neo4j_driver.batch_create_nodes(nodes)
@@ -1345,7 +1641,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         except Exception as exc:
             if transaction is not None:
                 raise RuntimeError(f"Neo4j 研究资产投影失败: {exc}") from exc
-            self.pipeline.logger.warning("Neo4j 研究资产投影失败，已降级为仅 PG 持久化: %s", exc)
+            self.pipeline.logger.warning(
+                "Neo4j 研究资产投影失败，已降级为仅 PG 持久化: %s", exc
+            )
             return {
                 "status": "error",
                 "enabled": True,
@@ -1358,6 +1656,42 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 "evidence_edge_count": 0,
             }
 
+    @staticmethod
+    def _build_graph_projection_payload(
+        nodes: List[Any],
+        edges: List[Any],
+        *,
+        graph_projection_scope: str,
+        asset_counts: Dict[str, int],
+    ) -> Dict[str, Any]:
+        return {
+            "nodes": [
+                {
+                    "id": node.id,
+                    "label": node.label,
+                    "properties": dict(node.properties or {}),
+                }
+                for node in nodes
+            ],
+            "edges": [
+                {
+                    "source_id": edge.source_id,
+                    "target_id": edge.target_id,
+                    "relationship_type": edge.relationship_type,
+                    "source_label": source_label,
+                    "target_label": target_label,
+                    "properties": dict(edge.properties or {}),
+                }
+                for edge, source_label, target_label in edges
+            ],
+            "summary": {
+                "node_count": len(nodes),
+                "edge_count": len(edges),
+                "graph_projection_scope": graph_projection_scope,
+                **dict(asset_counts or {}),
+            },
+        }
+
     # ── Storage factory 生命周期 ──────────────────────────────────────────
 
     def _get_storage_factory(self) -> Any:
@@ -1365,6 +1699,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         if self._storage_factory is not None and self._storage_factory.initialized:
             return self._storage_factory
         from src.storage import StorageBackendFactory
+
         factory = StorageBackendFactory(self.pipeline.config)
         factory.initialize()
         self._storage_factory = factory
@@ -1403,7 +1738,9 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         artifact_records: List[Dict[str, Any]] = []
         learning_feedback_library: Dict[str, Any] = {}
         graph_report: Dict[str, Any] = {
-            "status": persistence_report.get("neo4j_status") if persistence_report.get("neo4j_status") != "active" else "skipped",
+            "status": persistence_report.get("neo4j_status")
+            if persistence_report.get("neo4j_status") != "active"
+            else "skipped",
             "enabled": bool(factory.neo4j_driver),
             "node_count": 0,
             "edge_count": 0,
@@ -1414,15 +1751,21 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             if repository.get_session(cycle.cycle_id, session=pg_session):
                 repository.delete_session(cycle.cycle_id, session=pg_session)
             session_record = repository.save_from_cycle(cycle, session=pg_session)
-            phase_records = self._persist_cycle_phase_executions(repository, cycle, session=pg_session)
+            phase_records = self._persist_cycle_phase_executions(
+                repository, cycle, session=pg_session
+            )
             learning_feedback_library = self._persist_cycle_learning_feedback(
                 repository,
                 cycle,
                 phase_records,
                 session=pg_session,
             )
-            observe_documents = self._persist_cycle_observe_documents(repository, cycle, phase_records, session=pg_session)
-            artifact_records = self._persist_cycle_artifacts(repository, cycle, phase_records, session=pg_session)
+            observe_documents = self._persist_cycle_observe_documents(
+                repository, cycle, phase_records, session=pg_session
+            )
+            artifact_records = self._persist_cycle_artifacts(
+                repository, cycle, phase_records, session=pg_session
+            )
             graph_report = self._project_cycle_to_neo4j(
                 factory.neo4j_driver,
                 cycle,
@@ -1442,70 +1785,153 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 "consistency_state": consistency_state.to_dict(),
                 "db_type": persistence_report.get("db_type"),
                 "pg_status": persistence_report.get("pg_status"),
-                "neo4j_status": graph_report.get("status") if graph_report.get("enabled") else persistence_report.get("neo4j_status"),
+                "neo4j_status": persistence_report.get("neo4j_status")
+                if graph_report.get("status") == "queued"
+                else graph_report.get("status")
+                if graph_report.get("enabled")
+                else persistence_report.get("neo4j_status"),
                 "phase_execution_count": len(phase_records),
                 "artifact_count": len(artifact_records),
-                "learning_feedback_record_count": len(learning_feedback_library.get("records") or []),
+                "learning_feedback_record_count": len(
+                    learning_feedback_library.get("records") or []
+                ),
                 "observe_document_count": len(observe_documents),
                 "observe_version_witness_count": sum(
                     1
                     for item in observe_documents
                     if isinstance(item, dict)
                     and (
-                        str((item.get("version_metadata") or {}).get("witness_key") or "").strip()
+                        str(
+                            (item.get("version_metadata") or {}).get("witness_key")
+                            or ""
+                        ).strip()
                         or str(item.get("witness_key") or "").strip()
                     )
                 ),
                 "observe_version_lineage_count": len(
                     {
                         str(
-                            ((item.get("version_metadata") or {}).get("version_lineage_key") or "").strip()
-                            or ((item.get("version_metadata") or {}).get("work_fragment_key") or "").strip()
+                            (
+                                (item.get("version_metadata") or {}).get(
+                                    "version_lineage_key"
+                                )
+                                or ""
+                            ).strip()
+                            or (
+                                (item.get("version_metadata") or {}).get(
+                                    "work_fragment_key"
+                                )
+                                or ""
+                            ).strip()
                             or str(item.get("version_lineage_key") or "").strip()
                         )
                         for item in observe_documents
                         if isinstance(item, dict)
                         and (
-                            str(((item.get("version_metadata") or {}).get("version_lineage_key") or "").strip())
-                            or str(((item.get("version_metadata") or {}).get("work_fragment_key") or "").strip())
+                            str(
+                                (
+                                    (item.get("version_metadata") or {}).get(
+                                        "version_lineage_key"
+                                    )
+                                    or ""
+                                ).strip()
+                            )
+                            or str(
+                                (
+                                    (item.get("version_metadata") or {}).get(
+                                        "work_fragment_key"
+                                    )
+                                    or ""
+                                ).strip()
+                            )
                             or str(item.get("version_lineage_key") or "").strip()
                         )
                     }
                 ),
-                "observe_entity_count": sum(int(item.get("entity_count") or 0) for item in observe_documents if isinstance(item, dict)),
-                "observe_relationship_count": sum(int(item.get("relationship_count") or 0) for item in observe_documents if isinstance(item, dict)),
+                "observe_entity_count": sum(
+                    int(item.get("entity_count") or 0)
+                    for item in observe_documents
+                    if isinstance(item, dict)
+                ),
+                "observe_relationship_count": sum(
+                    int(item.get("relationship_count") or 0)
+                    for item in observe_documents
+                    if isinstance(item, dict)
+                ),
                 "graph_node_count": graph_report.get("node_count", 0),
                 "graph_edge_count": graph_report.get("edge_count", 0),
-                "hypothesis_graph_node_count": graph_report.get("hypothesis_node_count", 0),
-                "hypothesis_graph_edge_count": graph_report.get("hypothesis_edge_count", 0),
+                "graph_projection_status": graph_report.get("status"),
+                "graph_projection_mode": graph_report.get(
+                    "graph_projection_mode", "direct"
+                ),
+                "graph_projection_outbox_event_id": graph_report.get("outbox_event_id"),
+                "graph_projection_outbox_event_type": graph_report.get(
+                    "outbox_event_type"
+                ),
+                "hypothesis_graph_node_count": graph_report.get(
+                    "hypothesis_node_count", 0
+                ),
+                "hypothesis_graph_edge_count": graph_report.get(
+                    "hypothesis_edge_count", 0
+                ),
                 "evidence_graph_node_count": graph_report.get("evidence_node_count", 0),
                 "evidence_graph_edge_count": graph_report.get("evidence_edge_count", 0),
-                "philology_graph_node_count": graph_report.get("philology_node_count", 0),
-                "philology_graph_edge_count": graph_report.get("philology_edge_count", 0),
-                "philology_traceable_graph_node_count": graph_report.get("philology_traceable_node_count", 0),
-                "philology_traceable_graph_edge_count": graph_report.get("philology_traceable_edge_count", 0),
-                "herb_provenance_graph_edge_count": graph_report.get("herb_provenance_edge_count", 0),
-                "formula_provenance_graph_edge_count": graph_report.get("formula_provenance_edge_count", 0),
-                "efficacy_traceable_graph_node_count": graph_report.get("efficacy_traceable_node_count", 0),
-                "formula_component_traceable_graph_node_count": graph_report.get("formula_component_traceable_node_count", 0),
-                "symptom_traceable_graph_node_count": graph_report.get("symptom_traceable_node_count", 0),
-                "pathogenesis_traceable_graph_node_count": graph_report.get("pathogenesis_traceable_node_count", 0),
-                "exegesis_term_graph_node_count": graph_report.get("exegesis_term_node_count", 0),
-                "textual_evidence_chain_graph_node_count": graph_report.get("textual_evidence_chain_node_count", 0),
+                "philology_graph_node_count": graph_report.get(
+                    "philology_node_count", 0
+                ),
+                "philology_graph_edge_count": graph_report.get(
+                    "philology_edge_count", 0
+                ),
+                "philology_traceable_graph_node_count": graph_report.get(
+                    "philology_traceable_node_count", 0
+                ),
+                "philology_traceable_graph_edge_count": graph_report.get(
+                    "philology_traceable_edge_count", 0
+                ),
+                "herb_provenance_graph_edge_count": graph_report.get(
+                    "herb_provenance_edge_count", 0
+                ),
+                "formula_provenance_graph_edge_count": graph_report.get(
+                    "formula_provenance_edge_count", 0
+                ),
+                "efficacy_traceable_graph_node_count": graph_report.get(
+                    "efficacy_traceable_node_count", 0
+                ),
+                "formula_component_traceable_graph_node_count": graph_report.get(
+                    "formula_component_traceable_node_count", 0
+                ),
+                "symptom_traceable_graph_node_count": graph_report.get(
+                    "symptom_traceable_node_count", 0
+                ),
+                "pathogenesis_traceable_graph_node_count": graph_report.get(
+                    "pathogenesis_traceable_node_count", 0
+                ),
+                "exegesis_term_graph_node_count": graph_report.get(
+                    "exegesis_term_node_count", 0
+                ),
+                "textual_evidence_chain_graph_node_count": graph_report.get(
+                    "textual_evidence_chain_node_count", 0
+                ),
                 "eventual_consistency": self._classify_eventual_consistency(
-                    consistency_state, graph_report,
+                    consistency_state,
+                    graph_report,
                 ),
             }
-            repository.update_session(cycle.cycle_id, {"metadata": cycle.metadata}, session=pg_session)
+            repository.update_session(
+                cycle.cycle_id, {"metadata": cycle.metadata}, session=pg_session
+            )
 
         # commit 后可从 txn.last_result 获取完整事务观测
         if txn.last_result is not None:
             txn_observation = txn.last_result.to_observation_dict()
-            cycle.metadata["storage_persistence"]["transaction_observation"] = txn_observation
+            cycle.metadata["storage_persistence"]["transaction_observation"] = (
+                txn_observation
+            )
             if txn.last_result.needs_backfill:
                 self.logger.warning(
                     "事务需要 backfill 补偿: cycle=%s, error=%s",
-                    cycle.cycle_id, txn.last_result.error,
+                    cycle.cycle_id,
+                    txn.last_result.error,
                 )
 
         self.pipeline.logger.info("研究结果已持久化到结构化存储: %s", cycle.cycle_id)
@@ -1532,7 +1958,21 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             and graph_report.get("node_count", 0) > 0
         )
         if consistency_state.mode == MODE_DUAL_WRITE and graph_ok:
-            return {"graph_backfill_pending": False, "reason": None}
+            return {
+                "graph_backfill_pending": False,
+                "graph_projection_pending": False,
+                "reason": None,
+            }
+
+        if graph_report.get("status") == "queued" and graph_report.get(
+            "outbox_event_id"
+        ):
+            return {
+                "graph_backfill_pending": False,
+                "graph_projection_pending": True,
+                "reason": "图投影已写入 outbox，等待 worker 投影到 Neo4j",
+                "outbox_event_id": graph_report.get("outbox_event_id"),
+            }
 
         if not graph_report.get("enabled"):
             reason = "Neo4j 未启用，图投影需后续 backfill"
@@ -1542,7 +1982,11 @@ class PhaseOrchestrator(PhaseTrackerMixin):
             reason = f"存储模式 {consistency_state.mode}，图数据需后续 backfill"
         else:
             reason = "图投影节点为零，需后续 backfill"
-        return {"graph_backfill_pending": True, "reason": reason}
+        return {
+            "graph_backfill_pending": True,
+            "graph_projection_pending": False,
+            "reason": reason,
+        }
 
     def _persist_result_via_factory(self, cycle: ResearchCycle) -> bool:
         """通过 StorageBackendFactory + ResearchRecord ORM 持久化研究结果。
@@ -1558,7 +2002,11 @@ class PhaseOrchestrator(PhaseTrackerMixin):
         try:
             factory = self._get_storage_factory()
             with factory.session_scope() as session:
-                record = session.query(ResearchRecord).filter_by(cycle_id=cycle.cycle_id).one_or_none()
+                record = (
+                    session.query(ResearchRecord)
+                    .filter_by(cycle_id=cycle.cycle_id)
+                    .one_or_none()
+                )
                 if record is None:
                     record = ResearchRecord(
                         cycle_id=cycle.cycle_id,
@@ -1575,7 +2023,8 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 record.duration = float(cycle.duration or 0.0)
                 record.research_objective = cycle.research_objective
                 record.outcomes_json = json.dumps(
-                    self._serialize_value(cycle.outcomes), ensure_ascii=False,
+                    self._serialize_value(cycle.outcomes),
+                    ensure_ascii=False,
                 )
 
                 # 标记 fallback 降级元数据
@@ -1590,11 +2039,14 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 }
 
                 record.metadata_json = json.dumps(
-                    self._serialize_value(cycle.metadata), ensure_ascii=False,
+                    self._serialize_value(cycle.metadata),
+                    ensure_ascii=False,
                 )
                 record.persisted_at = datetime.now().isoformat()
 
-            self.pipeline.logger.info("研究结果已持久化 (factory_fallback): %s", cycle.cycle_id)
+            self.pipeline.logger.info(
+                "研究结果已持久化 (factory_fallback): %s", cycle.cycle_id
+            )
             return True
         except Exception as exc:  # pragma: no cover
             self.pipeline.logger.warning("研究结果持久化失败，已跳过: %s", exc)
@@ -1606,5 +2058,7 @@ class PhaseOrchestrator(PhaseTrackerMixin):
                 if self._persist_result_structured(cycle):
                     return True
             except Exception as exc:  # pragma: no cover
-                self.pipeline.logger.warning("结构化研究结果持久化失败，回退 factory fallback: %s", exc)
+                self.pipeline.logger.warning(
+                    "结构化研究结果持久化失败，回退 factory fallback: %s", exc
+                )
         return self._persist_result_via_factory(cycle)

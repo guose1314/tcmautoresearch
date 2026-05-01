@@ -134,7 +134,13 @@ def _llm_structured_quality(
 ) -> Optional[float]:
     """调用 LLM 做方法学/证据强度/可重复性三维评分，返回均值或 None。"""
     summary_parts = [f"模块: {module_name}", f"状态: {result.get('status', 'unknown')}"]
-    for key in ("entities", "relationships", "reasoning_results", "conclusions", "processed_text"):
+    for key in (
+        "entities",
+        "relationships",
+        "reasoning_results",
+        "conclusions",
+        "processed_text",
+    ):
         val = result.get(key)
         if isinstance(val, list):
             summary_parts.append(f"{key}: {len(val)} 项")
@@ -158,6 +164,7 @@ def _llm_structured_quality(
     try:
         raw = llm_engine.generate(prompt, system)
         import json as _json
+
         parsed = _json.loads(raw)
         dims = [
             float(parsed.get("methodological_rigor", 0)),
@@ -173,6 +180,7 @@ def _llm_structured_quality(
 
 # ── 模块构建与生命周期 ────────────────────────────────────────────────────
 
+
 def build_real_modules() -> List[tuple[str, Any]]:
     """构建真实处理链路模块。
 
@@ -181,6 +189,7 @@ def build_real_modules() -> List[tuple[str, Any]]:
         默认主链不再调用此函数。
     """
     import warnings
+
     warnings.warn(
         "build_real_modules() 是旧 5 模块链路径，"
         "默认主链已迁移至 ResearchPipeline + ModuleFactory。",
@@ -190,13 +199,13 @@ def build_real_modules() -> List[tuple[str, Any]]:
     from src.analysis.entity_extractor import AdvancedEntityExtractor
     from src.analysis.preprocessor import DocumentPreprocessor
     from src.analysis.reasoning_engine import ReasoningEngine
-    from src.analysis.semantic_graph import SemanticGraphBuilder
+    from src.analysis.semantic_graph import SemanticGraphService
     from src.generation.output_formatter import OutputGenerator
 
     return [
         ("DocumentPreprocessor", DocumentPreprocessor()),
         ("EntityExtractor", AdvancedEntityExtractor()),
-        ("SemanticModeler", SemanticGraphBuilder()),
+        ("SemanticModeler", SemanticGraphService()),
         ("ReasoningEngine", ReasoningEngine()),
         ("OutputGenerator", OutputGenerator()),
     ]
@@ -223,6 +232,7 @@ def cleanup_real_modules(modules: List[tuple[str, Any]]) -> None:
 
 class ModuleLifecycle(NamedTuple):
     """模块生命周期回调集合（build / initialize / cleanup）。"""
+
     build: Callable[[], List[tuple[str, Any]]]
     initialize: Callable[[List[tuple[str, Any]]], None]
     cleanup: Callable[[List[tuple[str, Any]]], None]
@@ -237,6 +247,7 @@ DEFAULT_MODULE_LIFECYCLE = ModuleLifecycle(
 
 # ── 流水线执行 ────────────────────────────────────────────────────────────
 
+
 def execute_real_module_pipeline(
     input_data: Dict[str, Any],
     modules: Optional[List[tuple[str, Any]]] = None,
@@ -247,7 +258,9 @@ def execute_real_module_pipeline(
     context = dict(input_data)
     module_results: List[Dict[str, Any]] = []
     module_chain = modules or build_real_modules()
-    optional_module_names = {str(module_name) for module_name in (optional_modules or [])}
+    optional_module_names = {
+        str(module_name) for module_name in (optional_modules or [])
+    }
 
     if manage_module_lifecycle:
         initialize_real_modules(module_chain)
@@ -264,7 +277,9 @@ def execute_real_module_pipeline(
                 if module_name not in optional_module_names:
                     raise
 
-                logger.warning("可选真实模块 %s 执行失败，继续后续链路: %s", module_name, exc)
+                logger.warning(
+                    "可选真实模块 %s 执行失败，继续后续链路: %s", module_name, exc
+                )
                 module_results.append(
                     {
                         "module": module_name,
@@ -294,7 +309,9 @@ def execute_real_module_pipeline(
                 }
             )
 
-            logger.info("真实模块 %s 执行完成，耗时: %.2f秒", module_name, execution_time)
+            logger.info(
+                "真实模块 %s 执行完成，耗时: %.2f秒", module_name, execution_time
+            )
 
     finally:
         if manage_module_lifecycle:

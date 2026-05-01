@@ -45,11 +45,12 @@ _BASIC_TERMINOLOGY_MAP = {
     "制半夏": "半夏",
     "法半夏": "半夏",
     "清半夏": "半夏",
-    "熟地": "大黄", # actually 熟地黄 = 地黄, this is just an example
+    "熟地": "地黄",
     "熟地黄": "地黄",
     "山药(炒)": "山药",
     "炒山药": "山药",
 }
+
 
 def _resolve_entity_name(name: str) -> str:
     """实体消歧逻辑：将大模型输出的异名统一为标准规范名。"""
@@ -58,9 +59,11 @@ def _resolve_entity_name(name: str) -> str:
     normalized = name.strip()
     return _BASIC_TERMINOLOGY_MAP.get(normalized, normalized)
 
+
 @dataclass
 class _Neo4jPendingOp:
     """待提交的 Neo4j 写操作。"""
+
     cypher: str
     params: Dict[str, Any]
     compensate_cypher: Optional[str] = None
@@ -77,6 +80,7 @@ class TransactionObserver(Protocol):
 @dataclass
 class TransactionResult:
     """事务执行结果。"""
+
     success: bool
     pg_committed: bool = False
     neo4j_committed: bool = False
@@ -218,12 +222,14 @@ class TransactionCoordinator:
         **params :
             Cypher 参数。
         """
-        self._neo4j_pending.append(_Neo4jPendingOp(
-            cypher=cypher,
-            params=dict(params),
-            compensate_cypher=compensate_cypher,
-            compensate_params=dict(params) if compensate_cypher else None,
-        ))
+        self._neo4j_pending.append(
+            _Neo4jPendingOp(
+                cypher=cypher,
+                params=dict(params),
+                compensate_cypher=compensate_cypher,
+                compensate_params=dict(params) if compensate_cypher else None,
+            )
+        )
 
     def neo4j_batch_nodes(
         self,
@@ -233,7 +239,7 @@ class TransactionCoordinator:
         """批量注册 Neo4j 节点创建。"""
         for node in nodes:
             props = dict(node.properties or {})
-            
+
             original_name = str(props.get("name", ""))
             if original_name:
                 resolved_name = _resolve_entity_name(original_name)
@@ -242,7 +248,7 @@ class TransactionCoordinator:
                     parts = node.id.split("-!")
                     parts[-1] = resolved_name
                     node.id = "-!".join(parts)
-            
+
             props["id"] = node.id
             safe_label = _safe_cypher_label(node.label)
             cypher = (
@@ -250,13 +256,19 @@ class TransactionCoordinator:
                 f"ON CREATE SET n += $props "
                 f"ON MATCH SET n += $props"
             )
-            comp = f"MATCH (n:{safe_label} {{id: $id}}) DETACH DELETE n" if compensate else None
-            self._neo4j_pending.append(_Neo4jPendingOp(
-                cypher=cypher,
-                params={"id": node.id, "props": props},
-                compensate_cypher=comp,
-                compensate_params={"id": node.id} if comp else None,
-            ))
+            comp = (
+                f"MATCH (n:{safe_label} {{id: $id}}) DETACH DELETE n"
+                if compensate
+                else None
+            )
+            self._neo4j_pending.append(
+                _Neo4jPendingOp(
+                    cypher=cypher,
+                    params={"id": node.id, "props": props},
+                    compensate_cypher=comp,
+                    compensate_params={"id": node.id} if comp else None,
+                )
+            )
 
     def neo4j_batch_edges(
         self,
@@ -285,22 +297,30 @@ class TransactionCoordinator:
                 f"ON MATCH SET r += $props, r.weight = coalesce(r.weight, 0) + 1"
             )
             comp = (
-                f"MATCH (a:{safe_src} {{id: $src_id}})-[r:{safe_rel}]->"
-                f"(b:{safe_tgt} {{id: $tgt_id}}) DELETE r"
-            ) if compensate else None
-            self._neo4j_pending.append(_Neo4jPendingOp(
-                cypher=cypher,
-                params={
-                    "src_id": edge.source_id,
-                    "tgt_id": edge.target_id,
-                    "props": dict(edge.properties or {}),
-                },
-                compensate_cypher=comp,
-                compensate_params={
-                    "src_id": edge.source_id,
-                    "tgt_id": edge.target_id,
-                } if comp else None,
-            ))
+                (
+                    f"MATCH (a:{safe_src} {{id: $src_id}})-[r:{safe_rel}]->"
+                    f"(b:{safe_tgt} {{id: $tgt_id}}) DELETE r"
+                )
+                if compensate
+                else None
+            )
+            self._neo4j_pending.append(
+                _Neo4jPendingOp(
+                    cypher=cypher,
+                    params={
+                        "src_id": edge.source_id,
+                        "tgt_id": edge.target_id,
+                        "props": dict(edge.properties or {}),
+                    },
+                    compensate_cypher=comp,
+                    compensate_params={
+                        "src_id": edge.source_id,
+                        "tgt_id": edge.target_id,
+                    }
+                    if comp
+                    else None,
+                )
+            )
 
     # ── Commit / Rollback ────────────────────────────────────────────────
 
@@ -311,7 +331,9 @@ class TransactionCoordinator:
         任一端失败都可完整回滚。
         """
         if self._committed or self._rolledback:
-            return TransactionResult(success=self._committed, pg_committed=self._committed)
+            return TransactionResult(
+                success=self._committed, pg_committed=self._committed
+            )
 
         t_start = time.monotonic()
         has_neo4j = self._neo4j is not None and self._neo4j_pending
@@ -394,9 +416,12 @@ class TransactionCoordinator:
         result.success = True
         result.total_ms = (time.monotonic() - t_start) * 1000
         self._committed = True
-        logger.debug("事务成功提交: PG=%s, Neo4j ops=%d, total=%.1fms",
-                      result.pg_committed, len(self._neo4j_executed),
-                      result.total_ms)
+        logger.debug(
+            "事务成功提交: PG=%s, Neo4j ops=%d, total=%.1fms",
+            result.pg_committed,
+            len(self._neo4j_executed),
+            result.total_ms,
+        )
         self._notify_observer(result)
         return result
 
@@ -439,7 +464,7 @@ class TransactionCoordinator:
     def _execute_neo4j_ops(self) -> Optional[str]:
         """逐一执行 Neo4j 操作，返回 None 表示全成功，否则返回错误信息。"""
         driver = self._neo4j
-        if not hasattr(driver, 'driver') or driver.driver is None:
+        if not hasattr(driver, "driver") or driver.driver is None:
             return "Neo4j driver 未连接"
 
         for op in self._neo4j_pending:
@@ -461,7 +486,7 @@ class TransactionCoordinator:
     def _compensate_neo4j_detailed(self) -> tuple:
         """对已执行的 Neo4j 操作执行补偿，返回 (成功补偿数, 详情列表)。"""
         driver = self._neo4j
-        if driver is None or not hasattr(driver, 'driver') or driver.driver is None:
+        if driver is None or not hasattr(driver, "driver") or driver.driver is None:
             return 0, []
 
         compensated = 0
@@ -472,12 +497,16 @@ class TransactionCoordinator:
             try:
                 with driver.driver.session(database=driver.database) as session:
                     session.execute_write(
-                        lambda tx, c=op.compensate_cypher, p=op.compensate_params or {}: tx.run(c, **p)
+                        lambda tx, c=op.compensate_cypher, p=op.compensate_params or {}: (
+                            tx.run(c, **p)
+                        )
                     )
                 compensated += 1
                 details.append(f"compensated: {op.compensate_cypher[:80]}")
             except Exception as exc:
-                logger.warning("Neo4j 补偿失败（需人工介入）: %s — %s", op.compensate_cypher, exc)
+                logger.warning(
+                    "Neo4j 补偿失败（需人工介入）: %s — %s", op.compensate_cypher, exc
+                )
                 details.append(f"failed: {op.compensate_cypher[:80]} — {exc}")
         self._neo4j_executed.clear()
         return compensated, details

@@ -12,13 +12,22 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from datetime import datetime, timezone
+from decimal import Decimal
+from pathlib import Path
 from typing import Any, Dict, List
+from uuid import uuid4
 
 from src.infrastructure.persistence import (
     DatabaseManager,
     OutboxDLQORM,
     OutboxEventORM,
     OutboxStatusEnum,
+)
+from src.storage.outbox.graph_projection import (
+    GRAPH_PROJECTION_EVENT_TYPE,
+    build_graph_projection_handler,
+    enqueue_graph_projection,
 )
 from src.storage.outbox.outbox_worker import OutboxWorker
 from src.storage.outbox.pg_outbox_store import (
@@ -32,6 +41,49 @@ def _build_db() -> DatabaseManager:
     db = DatabaseManager("sqlite:///:memory:")
     db.init_db()
     return db
+
+
+class _RecordingNeo4jTx:
+    def __init__(self, owner):
+        self._owner = owner
+
+    def run(self, query, **params):
+        self._owner.calls.append((query, params))
+        if self._owner.fail:
+            raise RuntimeError("neo4j unavailable")
+        return {"query": query, "params": params}
+
+
+class _RecordingNeo4jSession:
+    def __init__(self, owner):
+        self._owner = owner
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute_write(self, callback):
+        return callback(_RecordingNeo4jTx(self._owner))
+
+
+class _RecordingNeo4jBackend:
+    def __init__(self, owner):
+        self._owner = owner
+
+    def session(self, database=None):
+        self._owner.session_databases.append(database)
+        return _RecordingNeo4jSession(self._owner)
+
+
+class _RecordingNeo4jDriver:
+    def __init__(self, *, fail=False):
+        self.database = "neo4j"
+        self.fail = fail
+        self.calls = []
+        self.session_databases = []
+        self.driver = _RecordingNeo4jBackend(self)
 
 
 class TestTransactionalOutbox(unittest.TestCase):
@@ -94,9 +146,7 @@ class TestTransactionalOutbox(unittest.TestCase):
 
         # 行确实落到 processed 状态
         with db.session_scope() as session:
-            statuses = [
-                r.status for r in session.query(OutboxEventORM).all()
-            ]
+            statuses = [r.status for r in session.query(OutboxEventORM).all()]
         self.assertTrue(all(s == OutboxStatusEnum.PROCESSED.value for s in statuses))
 
     def test_handler_failure_moves_to_dlq_after_max_retry(self) -> None:
@@ -164,6 +214,118 @@ class TestTransactionalOutbox(unittest.TestCase):
         self.assertEqual(s2["processed"], 1)
         self.assertEqual(store.count_pending(), 0)
         self.assertEqual(store.count_dlq(), 0)
+
+    def test_graph_projection_outbox_commits_and_worker_marks_processed(self) -> None:
+        db = _build_db()
+        node_id = uuid4()
+        created_at = datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)
+
+        with db.session_scope() as session:
+            row = enqueue_graph_projection(
+                "cycle-graph-1",
+                "observe",
+                {
+                    "nodes": [
+                        {
+                            "id": node_id,
+                            "label": "Literature",
+                            "properties": {
+                                "created_at": created_at,
+                                "score": Decimal("0.82"),
+                                "source_path": Path("data/example.txt"),
+                            },
+                        }
+                    ],
+                    "edges": [],
+                },
+                "cycle-graph-1:observe:projection",
+                session=session,
+            )
+            self.assertEqual(row.status, OutboxStatusEnum.PENDING.value)
+
+        store = PgOutboxStore(db)
+        self.assertEqual(store.count_pending(), 1)
+
+        fake_neo4j = _RecordingNeo4jDriver()
+        worker = OutboxWorker(
+            store,
+            handler=build_graph_projection_handler(fake_neo4j),
+            batch_size=10,
+        )
+
+        stats = asyncio.run(worker.run_once())
+
+        self.assertEqual(stats["claimed"], 1)
+        self.assertEqual(stats["processed"], 1)
+        self.assertEqual(store.count_pending(), 0)
+        self.assertEqual(len(fake_neo4j.calls), 1)
+        query, params = fake_neo4j.calls[0]
+        self.assertIn("MERGE (n:Literature {id: row.id})", query)
+        self.assertNotIn("CREATE ", query)
+        projected_node = params["rows"][0]
+        self.assertEqual(projected_node["id"], str(node_id))
+        self.assertEqual(
+            projected_node["properties"]["created_at"], created_at.isoformat()
+        )
+        self.assertEqual(projected_node["properties"]["score"], 0.82)
+        self.assertEqual(
+            projected_node["properties"]["source_path"], str(Path("data/example.txt"))
+        )
+        self.assertTrue(projected_node["projection_event_id"])
+        self.assertTrue(projected_node["projected_at"])
+
+        with db.session_scope() as session:
+            rows = session.query(OutboxEventORM).all()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].status, OutboxStatusEnum.PROCESSED.value)
+            self.assertEqual(rows[0].event_type, GRAPH_PROJECTION_EVENT_TYPE)
+
+    def test_graph_projection_handler_failure_moves_to_dlq_after_max_retry(
+        self,
+    ) -> None:
+        db = _build_db()
+        store = PgOutboxStore(db)
+        with db.session_scope() as session:
+            enqueue_graph_projection(
+                "cycle-graph-fail",
+                "observe",
+                {
+                    "nodes": [
+                        {
+                            "id": "literature-fail",
+                            "label": "Literature",
+                            "properties": {"title": "伤寒论"},
+                        }
+                    ],
+                    "edges": [],
+                },
+                "cycle-graph-fail:observe:projection",
+                session=session,
+            )
+
+        worker = OutboxWorker(
+            store,
+            handler=build_graph_projection_handler(_RecordingNeo4jDriver(fail=True)),
+            batch_size=1,
+        )
+        moved = False
+        for _ in range(MAX_RETRY_COUNT):
+            stats = asyncio.run(worker.run_once())
+            if stats["moved_to_dlq"]:
+                moved = True
+                break
+            self.assertEqual(stats["failed"], 1)
+
+        self.assertTrue(moved)
+        self.assertEqual(store.count_pending(), 0)
+        self.assertEqual(store.count_dlq(), 1)
+        with db.session_scope() as session:
+            self.assertEqual(session.query(OutboxEventORM).count(), 0)
+            dlq_rows = session.query(OutboxDLQORM).all()
+            self.assertEqual(len(dlq_rows), 1)
+            self.assertEqual(dlq_rows[0].event_type, GRAPH_PROJECTION_EVENT_TYPE)
+            self.assertEqual(dlq_rows[0].retry_count, MAX_RETRY_COUNT)
+            self.assertIn("neo4j unavailable", dlq_rows[0].last_error)
 
 
 if __name__ == "__main__":

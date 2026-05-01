@@ -12,6 +12,7 @@ Document = _persistence.Document
 Entity = _persistence.Entity
 EntityRelationship = _persistence.EntityRelationship
 EntityTypeEnum = _persistence.EntityTypeEnum
+LearningInsight = _persistence.LearningInsight
 LogStatusEnum = _persistence.LogStatusEnum
 ProcessStatusEnum = _persistence.ProcessStatusEnum
 ProcessingLog = _persistence.ProcessingLog
@@ -44,6 +45,7 @@ __all__ = [
     "Entity",
     "EntityRelationship",
     "EntityTypeEnum",
+    "LearningInsight",
     "LogStatusEnum",
     "PhaseExecution",
     "PhaseStatusEnum",

@@ -179,6 +179,10 @@ reasoning_template_selector:
   max_witnesses: 3
   collation_context_window: 12
 
+graph_rag:
+  # Analyze 默认注入图谱证据；单次调用可用 context.enable_graph_rag=false 显式关闭
+  default_enabled: true
+
 # §11.3 动态算力分配
 compute_tier_router:
   enabled: true

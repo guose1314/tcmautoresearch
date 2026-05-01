@@ -124,8 +124,18 @@ class TestAssessExegesisCompleteness(unittest.TestCase):
         from src.research.exegesis_contract import assess_exegesis_completeness
 
         rows = [
-            {"definition": "补气固表", "definition_source": "structured_tcm_knowledge", "category": "herb", "disambiguation_basis": ["src1"]},
-            {"definition": "血虚之证", "definition_source": "config_terminology_standard", "category": "syndrome", "disambiguation_basis": ["src2"]},
+            {
+                "definition": "补气固表",
+                "definition_source": "structured_tcm_knowledge",
+                "category": "herb",
+                "disambiguation_basis": ["src1"],
+            },
+            {
+                "definition": "血虚之证",
+                "definition_source": "config_terminology_standard",
+                "category": "syndrome",
+                "disambiguation_basis": ["src2"],
+            },
         ]
         result = assess_exegesis_completeness(rows)
         self.assertEqual(result["total"], 2)
@@ -138,7 +148,11 @@ class TestAssessExegesisCompleteness(unittest.TestCase):
         from src.research.exegesis_contract import assess_exegesis_completeness
 
         rows = [
-            {"definition": "补气", "definition_source": "structured_tcm_knowledge", "category": "herb"},
+            {
+                "definition": "补气",
+                "definition_source": "structured_tcm_knowledge",
+                "category": "herb",
+            },
             {"definition": "", "category": "syndrome"},
         ]
         result = assess_exegesis_completeness(rows)
@@ -152,8 +166,18 @@ class TestBuildExegesisSummary(unittest.TestCase):
         from src.research.exegesis_contract import build_exegesis_summary
 
         rows = [
-            {"definition": "test", "definition_source": "note", "category": "herb", "dynasty_usage": ["唐", "宋"]},
-            {"definition": "test2", "definition_source": "note", "category": "herb", "dynasty_usage": ["唐"]},
+            {
+                "definition": "test",
+                "definition_source": "note",
+                "category": "herb",
+                "dynasty_usage": ["唐", "宋"],
+            },
+            {
+                "definition": "test2",
+                "definition_source": "note",
+                "category": "herb",
+                "dynasty_usage": ["唐"],
+            },
         ]
         result = build_exegesis_summary(rows)
         self.assertEqual(result["dynasty_term_counts"]["唐"], 2)
@@ -171,7 +195,9 @@ class TestBuildExegesisNote(unittest.TestCase):
     def test_structured_source_note(self):
         from src.research.exegesis_contract import build_exegesis_note
 
-        note = build_exegesis_note("黄芪", "structured_tcm_knowledge", "herb", ["HERB_EFFICACY_MAP"])
+        note = build_exegesis_note(
+            "黄芪", "structured_tcm_knowledge", "herb", ["HERB_EFFICACY_MAP"]
+        )
         self.assertIn("黄芪", note)
         self.assertIn("结构化知识库", note)
         self.assertIn("药名", note)
@@ -233,14 +259,21 @@ class TestDisambiguatePolysemyScoring(unittest.TestCase):
 
         class LowRankDict:
             def lookup(self, canonical, *, category=""):
-                return {"definition": "低优先级", "definition_source": "canonical_fallback"}
+                return {
+                    "definition": "低优先级",
+                    "definition_source": "canonical_fallback",
+                }
 
         class HighRankDict:
             def lookup(self, canonical, *, category=""):
-                return {"definition": "高优先级", "definition_source": "config_terminology_standard"}
+                return {
+                    "definition": "高优先级",
+                    "definition_source": "config_terminology_standard",
+                }
 
         result = disambiguate_polysemy(
-            "黄芪", "herb",
+            "黄芪",
+            "herb",
             dictionaries=[LowRankDict(), HighRankDict()],
         )
         self.assertEqual(result["definition"], "高优先级")
@@ -250,15 +283,22 @@ class TestDisambiguatePolysemyScoring(unittest.TestCase):
 
         class DictA:
             def lookup(self, canonical, *, category=""):
-                return {"definition": "补气固表", "definition_source": "canonical_fallback"}
+                return {
+                    "definition": "补气固表",
+                    "definition_source": "canonical_fallback",
+                }
 
         class DictB:
             def lookup(self, canonical, *, category=""):
-                return {"definition": "清热解毒利湿", "definition_source": "canonical_fallback"}
+                return {
+                    "definition": "清热解毒利湿",
+                    "definition_source": "canonical_fallback",
+                }
 
         # 上下文含"清热"时 DictB 胜出
         result = disambiguate_polysemy(
-            "黄芪", "herb",
+            "黄芪",
+            "herb",
             dictionaries=[DictA(), DictB()],
             context_terms=["清热", "解毒"],
         )
@@ -272,7 +312,8 @@ class TestDisambiguatePolysemyScoring(unittest.TestCase):
                 return {"definition": "含有补气的释义", "definition_source": "note"}
 
         result = disambiguate_polysemy(
-            "x", "herb",
+            "x",
+            "herb",
             dictionaries=[FakeDict()],
             context_terms=["补气"],
         )
@@ -283,17 +324,118 @@ class TestDisambiguatePolysemyScoring(unittest.TestCase):
 
         class DictNoCategory:
             def lookup(self, canonical, *, category=""):
-                return {"definition": "无类别", "definition_source": "canonical_fallback"}
+                return {
+                    "definition": "无类别",
+                    "definition_source": "canonical_fallback",
+                }
 
         class DictWithCategory:
             def lookup(self, canonical, *, category=""):
-                return {"definition": "有类别", "definition_source": "canonical_fallback", "category": "herb"}
+                return {
+                    "definition": "有类别",
+                    "definition_source": "canonical_fallback",
+                    "category": "herb",
+                }
 
         result = disambiguate_polysemy(
-            "x", "herb",
+            "x",
+            "herb",
             dictionaries=[DictNoCategory(), DictWithCategory()],
         )
         self.assertEqual(result["definition"], "有类别")
+
+
+class TestExegesisContextWindow(unittest.TestCase):
+    def test_context_window_basis_references_context_fields(self):
+        from src.research.exegesis_contract import (
+            ExegesisContextWindow,
+            build_contextual_disambiguation_basis,
+        )
+
+        window = ExegesisContextWindow(
+            term="伤寒",
+            left_context="脉浮头项强痛",
+            right_context="恶寒发热",
+            dynasty="汉",
+            school="伤寒学派",
+            witness_key="宋本",
+            graph_neighbors=("太阳病", "桂枝汤"),
+        )
+        basis = build_contextual_disambiguation_basis(window)
+        self.assertTrue(any(item.startswith("left_context:") for item in basis))
+        self.assertTrue(any(item.startswith("dynasty:汉") for item in basis))
+        self.assertTrue(any(item.startswith("graph_neighbors:") for item in basis))
+
+    def test_same_term_different_dynasty_context_generates_different_basis(self):
+        from src.research.exegesis_contract import (
+            ExegesisContextWindow,
+            disambiguate_polysemy,
+        )
+
+        class FakeDict:
+            def lookup(self, canonical, *, category=""):
+                return {
+                    "definition": "外感病名，需随上下文判别",
+                    "definition_source": "terminology_note",
+                }
+
+        han = disambiguate_polysemy(
+            "厥",
+            "theory",
+            dictionaries=[FakeDict()],
+            context_window=ExegesisContextWindow(
+                term="厥",
+                left_context="脉浮头痛",
+                dynasty="汉",
+                witness_key="宋本",
+            ),
+        )
+        ming = disambiguate_polysemy(
+            "厥",
+            "theory",
+            dictionaries=[FakeDict()],
+            context_window=ExegesisContextWindow(
+                term="厥",
+                right_context="温热暑湿",
+                dynasty="明",
+                school="温病学派",
+                witness_key="明抄本",
+            ),
+        )
+        self.assertNotEqual(han["disambiguation_basis"], ming["disambiguation_basis"])
+        self.assertIn("dynasty:汉", han["disambiguation_basis"])
+        self.assertIn("dynasty:明", ming["disambiguation_basis"])
+        self.assertTrue(
+            any(
+                item.startswith("right_context:")
+                for item in ming["disambiguation_basis"]
+            )
+        )
+
+    def test_empty_context_window_degrades_without_error(self):
+        from src.research.exegesis_contract import (
+            ExegesisContextWindow,
+            build_contextual_disambiguation_basis,
+            disambiguate_polysemy,
+        )
+
+        class FakeDict:
+            def lookup(self, canonical, *, category=""):
+                return {
+                    "definition": "兜底释义",
+                    "definition_source": "terminology_note",
+                }
+
+        self.assertEqual(
+            build_contextual_disambiguation_basis(ExegesisContextWindow()), []
+        )
+        result = disambiguate_polysemy(
+            "术语A",
+            "theory",
+            dictionaries=[FakeDict()],
+            context_window=ExegesisContextWindow(),
+        )
+        self.assertEqual(result["definition"], "兜底释义")
 
 
 if __name__ == "__main__":

@@ -28,6 +28,18 @@ from src.research.observe_philology import (
     extract_observe_philology_assets_from_phase_result,
 )
 from src.research.phase_result import build_phase_result
+from src.research.textual_criticism import (
+    VERDICT_CONTRACT_VERSION,
+    assess_catalog_batch,
+    build_textual_criticism_summary,
+    normalize_authenticity_verdicts,
+)
+from src.research.topic_discovery import (
+    TOPIC_PROPOSAL_CONTRACT_VERSION,
+    build_topic_discovery_summary,
+    normalize_topic_proposals,
+    propose_topics,
+)
 
 
 class ObservePhaseMixin:
@@ -66,6 +78,24 @@ class ObservePhaseMixin:
         )
         self._append_collation_observe_updates(collation_result, observations, findings)
 
+        topic_discovery = self._build_observe_topic_discovery(
+            cycle,
+            context,
+            corpus_result,
+            ingestion_result,
+        )
+        self._append_topic_discovery_observe_updates(
+            topic_discovery, observations, findings
+        )
+        textual_criticism = self._build_observe_textual_criticism(
+            context,
+            corpus_result,
+            ingestion_result,
+        )
+        self._append_textual_criticism_observe_updates(
+            textual_criticism, observations, findings
+        )
+
         metadata = self._build_observe_metadata(
             context,
             observations,
@@ -81,6 +111,8 @@ class ObservePhaseMixin:
                 "succeeded_total": collation_result.get("succeeded_total", 0),
                 "failed_total": collation_result.get("failed_total", 0),
             }
+        self._apply_observe_topic_discovery_metadata(metadata, topic_discovery)
+        self._apply_observe_textual_criticism_metadata(metadata, textual_criticism)
         artifacts = self._build_observe_philology_artifacts(ingestion_result)
         graph_assets = self._build_observe_graph_assets(
             cycle.cycle_id, ingestion_result
@@ -127,6 +159,8 @@ class ObservePhaseMixin:
                 "ingestion_pipeline": ingestion_result,
                 "literature_pipeline": literature_result,
                 "collation_pipeline": collation_result,
+                "topic_discovery": topic_discovery,
+                "textual_criticism": textual_criticism,
                 "evidence_protocol": evidence_protocol,
                 "graph_assets": graph_assets,
             },
@@ -139,6 +173,8 @@ class ObservePhaseMixin:
                 "ingestion_pipeline": ingestion_result,
                 "literature_pipeline": literature_result,
                 "collation_pipeline": collation_result,
+                "topic_discovery": topic_discovery,
+                "textual_criticism": textual_criticism,
             },
         )
 
@@ -372,6 +408,279 @@ class ObservePhaseMixin:
             findings.append(
                 "已完成 Qwen 临床关联 Gap Analysis，可直接用于选题与方案设计"
             )
+
+    # ------------------------------------------------------------------ #
+    # J-1 / Card B: TopicDiscovery 接入 Observe 主链
+    # ------------------------------------------------------------------ #
+
+    def _build_observe_topic_discovery(
+        self,
+        cycle: "ResearchCycle",
+        context: Dict[str, Any],
+        corpus_result: Dict[str, Any] | None,
+        ingestion_result: Dict[str, Any] | None,
+    ) -> Dict[str, Any]:
+        seed = self._resolve_observe_topic_discovery_seed(cycle, context)
+        payload: Dict[str, Any] = {
+            "proposals": [],
+            "summary": build_topic_discovery_summary(seed, []),
+            "contract_version": TOPIC_PROPOSAL_CONTRACT_VERSION,
+        }
+        if not seed:
+            payload["degraded_reason"] = "missing_topic_seed"
+            return payload
+
+        try:
+            proposals = propose_topics(
+                seed,
+                catalog_entries=self._extract_observe_topic_catalog_entries(
+                    ingestion_result,
+                    corpus_result,
+                ),
+                kg=(
+                    context.get("topic_discovery_kg")
+                    or context.get("kg")
+                    or getattr(self.pipeline, "knowledge_graph", None)
+                ),
+                llm_caller=context.get("topic_discovery_llm_caller"),
+            )
+        except Exception as exc:  # noqa: BLE001 - topic discovery must not block observe
+            logger = getattr(self.pipeline, "logger", None)
+            if logger is not None:
+                logger.warning("observe topic_discovery failed: %s", exc)
+            payload["degraded_reason"] = "topic_discovery_failed"
+            payload["error"] = str(exc)
+            return payload
+
+        normalized = normalize_topic_proposals(proposals)
+        payload["proposals"] = normalized
+        payload["summary"] = build_topic_discovery_summary(seed, normalized)
+        return payload
+
+    def _resolve_observe_topic_discovery_seed(
+        self,
+        cycle: "ResearchCycle",
+        context: Dict[str, Any],
+    ) -> str:
+        for key in (
+            "research_question",
+            "topic_seed",
+            "research_topic",
+            "question",
+            "objective",
+        ):
+            value = str(context.get(key) or "").strip()
+            if value:
+                return value
+
+        for attr_name in (
+            "research_objective",
+            "objective",
+            "description",
+            "cycle_name",
+        ):
+            value = str(getattr(cycle, attr_name, "") or "").strip()
+            if value:
+                return value
+        return ""
+
+    def _extract_observe_topic_catalog_entries(
+        self,
+        ingestion_result: Dict[str, Any] | None,
+        corpus_result: Dict[str, Any] | None,
+    ) -> List[Mapping[str, Any]]:
+        return self._extract_observe_catalog_entries(ingestion_result, corpus_result)
+
+    def _extract_observe_catalog_entries(
+        self,
+        ingestion_result: Dict[str, Any] | None,
+        corpus_result: Dict[str, Any] | None,
+    ) -> List[Mapping[str, Any]]:
+        entries: List[Mapping[str, Any]] = []
+        seen: set[str] = set()
+
+        def add_entry(entry: Any) -> None:
+            if not isinstance(entry, Mapping):
+                return
+            identity = str(
+                entry.get("catalog_id")
+                or entry.get("document_id")
+                or entry.get("id")
+                or entry.get("document_urn")
+                or entry.get("urn")
+                or entry.get("work_title")
+                or entry.get("document_title")
+                or entry.get("title")
+                or ""
+            ).strip()
+            if not identity or identity in seen:
+                return
+            seen.add(identity)
+            entries.append(entry)
+
+        for source in (ingestion_result, corpus_result):
+            if not isinstance(source, Mapping):
+                continue
+            aggregate = (
+                source.get("aggregate")
+                if isinstance(source.get("aggregate"), Mapping)
+                else {}
+            )
+            philology_assets = (
+                aggregate.get("philology_assets")
+                if isinstance(aggregate.get("philology_assets"), Mapping)
+                else {}
+            )
+            catalog_summary = (
+                philology_assets.get("catalog_summary")
+                if isinstance(philology_assets.get("catalog_summary"), Mapping)
+                else aggregate.get("catalog_summary")
+                if isinstance(aggregate.get("catalog_summary"), Mapping)
+                else {}
+            )
+            if isinstance(catalog_summary, Mapping):
+                for document in catalog_summary.get("documents") or []:
+                    add_entry(document)
+                for lineage in catalog_summary.get("version_lineages") or []:
+                    add_entry(lineage)
+
+            for document in source.get("documents") or []:
+                if not isinstance(document, Mapping):
+                    continue
+                metadata = (
+                    document.get("metadata")
+                    if isinstance(document.get("metadata"), Mapping)
+                    else {}
+                )
+                version_metadata = (
+                    metadata.get("version_metadata")
+                    if isinstance(metadata.get("version_metadata"), Mapping)
+                    else document.get("version_metadata")
+                    if isinstance(document.get("version_metadata"), Mapping)
+                    else {}
+                )
+                add_entry({**dict(document), **dict(version_metadata)})
+        return entries
+
+    def _append_topic_discovery_observe_updates(
+        self,
+        topic_discovery: Dict[str, Any],
+        observations: list[str],
+        findings: list[str],
+    ) -> None:
+        proposal_count = len(topic_discovery.get("proposals") or [])
+        if proposal_count:
+            observations.append(f"已生成 {proposal_count} 个文献研究候选课题")
+            findings.append("观察阶段已补齐选题发现资产，可供假说阶段筛选研究角度")
+        elif topic_discovery.get("degraded_reason"):
+            findings.append(
+                f"选题发现未生成候选: {topic_discovery.get('degraded_reason')}"
+            )
+
+    def _apply_observe_topic_discovery_metadata(
+        self,
+        metadata: Dict[str, Any],
+        topic_discovery: Dict[str, Any],
+    ) -> None:
+        proposal_count = len(topic_discovery.get("proposals") or [])
+        metadata["topic_proposal_count"] = proposal_count
+        metadata["topic_discovery_generated"] = proposal_count > 0
+        metadata["topic_discovery_contract_version"] = str(
+            topic_discovery.get("contract_version") or TOPIC_PROPOSAL_CONTRACT_VERSION
+        )
+        if topic_discovery.get("degraded_reason"):
+            metadata["topic_discovery_degraded_reason"] = topic_discovery[
+                "degraded_reason"
+            ]
+        if topic_discovery.get("error"):
+            metadata["topic_discovery_error"] = topic_discovery["error"]
+
+    # ------------------------------------------------------------------ #
+    # J-2 / Card C: TextualCriticism 接入 Observe 主链
+    # ------------------------------------------------------------------ #
+
+    def _build_observe_textual_criticism(
+        self,
+        context: Dict[str, Any],
+        corpus_result: Dict[str, Any] | None,
+        ingestion_result: Dict[str, Any] | None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "verdicts": [],
+            "summary": build_textual_criticism_summary([]),
+            "contract_version": VERDICT_CONTRACT_VERSION,
+        }
+        catalog_entries = self._extract_observe_catalog_entries(
+            ingestion_result,
+            corpus_result,
+        )
+        if not catalog_entries:
+            payload["degraded_reason"] = "missing_catalog_entries"
+            return payload
+
+        try:
+            verdicts = assess_catalog_batch(
+                catalog_entries,
+                llm_caller=context.get("textual_criticism_llm_caller"),
+            )
+        except Exception as exc:  # noqa: BLE001 - textual criticism must not block observe
+            logger = getattr(self.pipeline, "logger", None)
+            if logger is not None:
+                logger.warning("observe textual_criticism failed: %s", exc)
+            payload["degraded_reason"] = "textual_criticism_failed"
+            payload["error"] = str(exc)
+            return payload
+
+        normalized = normalize_authenticity_verdicts(verdicts)
+        payload["verdicts"] = normalized
+        payload["summary"] = build_textual_criticism_summary(normalized)
+        if not normalized:
+            payload["degraded_reason"] = "no_valid_catalog_entries"
+        return payload
+
+    def _append_textual_criticism_observe_updates(
+        self,
+        textual_criticism: Dict[str, Any],
+        observations: list[str],
+        findings: list[str],
+    ) -> None:
+        summary = textual_criticism.get("summary") or {}
+        verdict_count = int(summary.get("verdict_count") or 0)
+        if verdict_count:
+            observations.append(f"已完成 {verdict_count} 条目录资产考据裁定")
+            needs_review_count = int(summary.get("needs_review_count") or 0)
+            if needs_review_count:
+                findings.append(
+                    f"考据裁定标记 {needs_review_count} 条需人工复核的真伪/年代问题"
+                )
+            else:
+                findings.append("考据裁定未发现需优先复核的真伪争议")
+        elif textual_criticism.get("degraded_reason"):
+            findings.append(
+                f"考据裁定未生成: {textual_criticism.get('degraded_reason')}"
+            )
+
+    def _apply_observe_textual_criticism_metadata(
+        self,
+        metadata: Dict[str, Any],
+        textual_criticism: Dict[str, Any],
+    ) -> None:
+        summary = textual_criticism.get("summary") or {}
+        verdict_count = int(summary.get("verdict_count") or 0)
+        metadata["textual_criticism_verdict_count"] = verdict_count
+        metadata["textual_criticism_generated"] = verdict_count > 0
+        metadata["textual_criticism_needs_review_count"] = int(
+            summary.get("needs_review_count") or 0
+        )
+        metadata["textual_criticism_contract_version"] = str(
+            textual_criticism.get("contract_version") or VERDICT_CONTRACT_VERSION
+        )
+        if textual_criticism.get("degraded_reason"):
+            metadata["textual_criticism_degraded_reason"] = textual_criticism[
+                "degraded_reason"
+            ]
+        if textual_criticism.get("error"):
+            metadata["textual_criticism_error"] = textual_criticism["error"]
 
     def _build_observe_metadata(
         self,

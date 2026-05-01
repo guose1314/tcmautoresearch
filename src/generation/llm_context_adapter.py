@@ -10,12 +10,17 @@ DEFAULT_LLM_ANALYSIS_MODULE_ALIASES: Dict[str, tuple[str, ...]] = {
     "formula_comparisons": ("formula_comparisons",),
     "herb_properties_analysis": ("herb_properties_analysis", "herb_properties"),
     "pharmacology_integration": ("pharmacology_integration",),
-    "network_pharmacology": ("network_pharmacology", "network_pharmacology_systems_biology"),
+    "network_pharmacology": (
+        "network_pharmacology",
+        "network_pharmacology_systems_biology",
+    ),
     "supramolecular_physicochemistry": ("supramolecular_physicochemistry",),
     "knowledge_archaeology": ("knowledge_archaeology",),
     "complexity_dynamics": ("complexity_dynamics", "complexity_nonlinear_dynamics"),
     "research_scoring_panel": ("research_scoring_panel",),
     "summary_analysis": ("summary_analysis",),
+    "publish_graph_context": ("publish_graph_context",),
+    "graph_rag_citations": ("graph_rag_citations",),
 }
 
 
@@ -24,10 +29,10 @@ class LLMContextAdapter:
 
     def __init__(
         self,
-        module_aliases: Mapping[str, Sequence[str]] | None=None,
+        module_aliases: Mapping[str, Sequence[str]] | None = None,
         *,
-        contract_version: str="llm-analysis-context-v1",
-        expose_top_level_analysis_modules: bool=True,
+        contract_version: str = "llm-analysis-context-v1",
+        expose_top_level_analysis_modules: bool = True,
     ) -> None:
         resolved_aliases = module_aliases or DEFAULT_LLM_ANALYSIS_MODULE_ALIASES
         self.module_aliases: Dict[str, tuple[str, ...]] = {
@@ -50,7 +55,23 @@ class LLMContextAdapter:
             analysis_results_payload = {}
         analysis_results_payload["llm_analysis_context"] = llm_analysis_context
         for module_name, module_value in analysis_modules.items():
-            analysis_results_payload.setdefault(module_name, copy.deepcopy(module_value))
+            analysis_results_payload.setdefault(
+                module_name, copy.deepcopy(module_value)
+            )
+        publish_graph_context = self._resolve_publish_graph_context(adapted)
+        if publish_graph_context:
+            adapted["publish_graph_context"] = copy.deepcopy(publish_graph_context)
+            analysis_results_payload.setdefault(
+                "publish_graph_context", copy.deepcopy(publish_graph_context)
+            )
+            graph_rag_citations = publish_graph_context.get("graph_rag_citations")
+            if isinstance(graph_rag_citations, list):
+                adapted.setdefault(
+                    "graph_rag_citations", copy.deepcopy(graph_rag_citations)
+                )
+                analysis_results_payload.setdefault(
+                    "graph_rag_citations", copy.deepcopy(graph_rag_citations)
+                )
         adapted["analysis_results"] = analysis_results_payload
 
         if self.expose_top_level_analysis_modules:
@@ -58,7 +79,9 @@ class LLMContextAdapter:
 
         return adapted
 
-    def build_llm_analysis_context(self, context: Mapping[str, Any] | None) -> Dict[str, Any]:
+    def build_llm_analysis_context(
+        self, context: Mapping[str, Any] | None
+    ) -> Dict[str, Any]:
         context_payload = context if isinstance(context, Mapping) else {}
         modules = self._resolve_analysis_modules(context_payload)
         module_presence = {
@@ -81,7 +104,9 @@ class LLMContextAdapter:
 
     def _resolve_analysis_modules(self, context: Mapping[str, Any]) -> Dict[str, Any]:
         llm_context = self._resolve_llm_analysis_context(context)
-        llm_modules = llm_context.get("analysis_modules") if isinstance(llm_context, dict) else {}
+        llm_modules = (
+            llm_context.get("analysis_modules") if isinstance(llm_context, dict) else {}
+        )
 
         top_level_analysis_modules = context.get("analysis_modules")
         phase_results = get_phase_results(context)
@@ -89,18 +114,26 @@ class LLMContextAdapter:
         output_data = self._resolve_output_data(context)
         output_analysis_results = get_phase_value(output_data, "analysis_results")
         research_artifact = self._resolve_research_artifact(context)
-        publish_phase_results = get_phase_results(self._resolve_phase_payload(context, "publish"))
-        analyze_phase_results = get_phase_results(self._resolve_phase_payload(context, "analyze"))
+        publish_phase_results = get_phase_results(
+            self._resolve_phase_payload(context, "publish")
+        )
+        analyze_phase_results = get_phase_results(
+            self._resolve_phase_payload(context, "analyze")
+        )
         research_perspectives = self._resolve_research_perspectives(context)
 
         containers = [
             llm_modules if isinstance(llm_modules, dict) else {},
-            top_level_analysis_modules if isinstance(top_level_analysis_modules, dict) else {},
+            top_level_analysis_modules
+            if isinstance(top_level_analysis_modules, dict)
+            else {},
             phase_results if isinstance(phase_results, dict) else {},
             context,
             analysis_results if isinstance(analysis_results, dict) else {},
             output_data if isinstance(output_data, dict) else {},
-            output_analysis_results if isinstance(output_analysis_results, dict) else {},
+            output_analysis_results
+            if isinstance(output_analysis_results, dict)
+            else {},
             research_artifact if isinstance(research_artifact, dict) else {},
             publish_phase_results if isinstance(publish_phase_results, dict) else {},
             analyze_phase_results if isinstance(analyze_phase_results, dict) else {},
@@ -109,12 +142,18 @@ class LLMContextAdapter:
         resolved: Dict[str, Any] = {}
         for module_name, aliases in self.module_aliases.items():
             module_value = self._resolve_field(containers, aliases)
-            if module_name == "research_perspectives" and module_value is None and isinstance(research_perspectives, dict):
+            if (
+                module_name == "research_perspectives"
+                and module_value is None
+                and isinstance(research_perspectives, dict)
+            ):
                 module_value = copy.deepcopy(research_perspectives)
             resolved[module_name] = module_value if module_value is not None else {}
         return resolved
 
-    def _resolve_field(self, containers: Sequence[Mapping[str, Any]], field_names: Sequence[str]) -> Any:
+    def _resolve_field(
+        self, containers: Sequence[Mapping[str, Any]], field_names: Sequence[str]
+    ) -> Any:
         for container in containers:
             for field_name in field_names:
                 if field_name not in container:
@@ -125,7 +164,9 @@ class LLMContextAdapter:
                 return copy.deepcopy(value)
         return None
 
-    def _resolve_phase_payload(self, context: Mapping[str, Any], phase_name: str) -> Dict[str, Any]:
+    def _resolve_phase_payload(
+        self, context: Mapping[str, Any], phase_name: str
+    ) -> Dict[str, Any]:
         phase_results = context.get("phase_results")
         if not isinstance(phase_results, dict):
             return {}
@@ -169,7 +210,30 @@ class LLMContextAdapter:
         nested = get_phase_value(publish_phase, "research_artifact")
         return nested if isinstance(nested, dict) else {}
 
-    def _resolve_research_perspectives(self, context: Mapping[str, Any]) -> Dict[str, Any]:
+    def _resolve_publish_graph_context(
+        self, context: Mapping[str, Any]
+    ) -> Dict[str, Any]:
+        publish_graph_context = get_phase_value(context, "publish_graph_context")
+        if isinstance(publish_graph_context, dict) and publish_graph_context:
+            return publish_graph_context
+
+        analysis_results = self._resolve_analysis_results(context)
+        nested = get_phase_value(analysis_results, "publish_graph_context")
+        if isinstance(nested, dict) and nested:
+            return nested
+
+        research_artifact = self._resolve_research_artifact(context)
+        nested = get_phase_value(research_artifact, "publish_graph_context")
+        if isinstance(nested, dict) and nested:
+            return nested
+
+        publish_phase = self._resolve_phase_payload(context, "publish")
+        nested = get_phase_value(publish_phase, "publish_graph_context")
+        return nested if isinstance(nested, dict) else {}
+
+    def _resolve_research_perspectives(
+        self, context: Mapping[str, Any]
+    ) -> Dict[str, Any]:
         research_perspectives = get_phase_value(context, "research_perspectives")
         if isinstance(research_perspectives, dict) and research_perspectives:
             return research_perspectives
@@ -188,7 +252,9 @@ class LLMContextAdapter:
         nested = get_phase_value(analyze_phase, "research_perspectives")
         return nested if isinstance(nested, dict) else {}
 
-    def _resolve_llm_analysis_context(self, context: Mapping[str, Any]) -> Dict[str, Any]:
+    def _resolve_llm_analysis_context(
+        self, context: Mapping[str, Any]
+    ) -> Dict[str, Any]:
         llm_context = get_phase_value(context, "llm_analysis_context")
         if isinstance(llm_context, dict) and llm_context:
             return llm_context
@@ -218,7 +284,7 @@ class LLMContextAdaptedPaperWriter:
     def __init__(
         self,
         paper_writer: Any,
-        context_adapter: LLMContextAdapter | None=None,
+        context_adapter: LLMContextAdapter | None = None,
     ) -> None:
         self._paper_writer = paper_writer
         self._context_adapter = context_adapter or LLMContextAdapter()
@@ -246,9 +312,9 @@ class LLMContextAdaptedPaperWriter:
 def wrap_paper_writer_with_llm_context(
     paper_writer: Any,
     *,
-    module_aliases: Mapping[str, Sequence[str]] | None=None,
-    contract_version: str="llm-analysis-context-v1",
-    expose_top_level_analysis_modules: bool=True,
+    module_aliases: Mapping[str, Sequence[str]] | None = None,
+    contract_version: str = "llm-analysis-context-v1",
+    expose_top_level_analysis_modules: bool = True,
 ) -> Any:
     """Wrap a paper writer so execute() always receives adapted LLM context."""
 

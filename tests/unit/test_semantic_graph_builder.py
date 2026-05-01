@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from src.analysis.semantic_graph import SemanticGraphBuilder
+from src.analysis.semantic_graph import SemanticGraphBuilder, SemanticGraphService
 from src.knowledge.embedding_service import SearchResult
 
 
@@ -10,7 +10,9 @@ class _StubEmbeddingService:
     def __init__(self, results):
         self._results = results
 
-    def search_similar_formulas(self, query, top_k=5, min_score=0.0, exclude_formula_id=None):
+    def search_similar_formulas(
+        self, query, top_k=5, min_score=0.0, exclude_formula_id=None
+    ):
         del query, top_k, min_score, exclude_formula_id
         return list(self._results)
 
@@ -27,7 +29,9 @@ class _StubNeo4jDriver:
                 }
             ],
             "shared_syndromes": ["脾气虚证"],
-            "direct_relationships": [{"relationship_type": "SIMILAR_TO", "properties": {"confidence": 0.92}}],
+            "direct_relationships": [
+                {"relationship_type": "SIMILAR_TO", "properties": {"confidence": 0.92}}
+            ],
             "evidence_score": 0.92,
         }
 
@@ -76,12 +80,31 @@ class TestSemanticGraphBuilderRefactor(unittest.TestCase):
             }
         }
 
-        with patch.object(self.builder, "_analyze_network_systems", return_value={"B": {"fb": "n"}}) as p1, patch.object(
-            self.builder, "_analyze_supramolecular_physicochemistry", return_value={"B": {"fb": "s"}}
-        ) as p2, patch.object(self.builder, "_analyze_knowledge_archaeology", return_value={"B": {"fb": "k"}}) as p3, patch.object(
-            self.builder, "_analyze_complexity_dynamics", return_value={"B": {"fb": "c"}}
-        ) as p4:
-            out = self.builder._collect_advanced_formula_analyses(formulas, herbs, research_perspectives)
+        with (
+            patch.object(
+                self.builder,
+                "_analyze_network_systems",
+                return_value={"B": {"fb": "n"}},
+            ) as p1,
+            patch.object(
+                self.builder,
+                "_analyze_supramolecular_physicochemistry",
+                return_value={"B": {"fb": "s"}},
+            ) as p2,
+            patch.object(
+                self.builder,
+                "_analyze_knowledge_archaeology",
+                return_value={"B": {"fb": "k"}},
+            ) as p3,
+            patch.object(
+                self.builder,
+                "_analyze_complexity_dynamics",
+                return_value={"B": {"fb": "c"}},
+            ) as p4,
+        ):
+            out = self.builder._collect_advanced_formula_analyses(
+                formulas, herbs, research_perspectives
+            )
 
         self.assertEqual(out["network_pharmacology_systems_biology"]["A"], {"v": 1})
         self.assertEqual(out["supramolecular_physicochemistry"]["A"], {"v": 2})
@@ -97,22 +120,38 @@ class TestSemanticGraphBuilderRefactor(unittest.TestCase):
         p4.assert_called_once()
 
     def test_execute_accepts_none_entities_as_empty(self):
-        with patch.object(self.builder, "_generate_research_perspectives", return_value={}), patch.object(
-            self.builder, "_analyze_herb_properties", return_value={}
-        ), patch.object(self.builder, "_analyze_formula_similarities", return_value=[]), patch.object(
-            self.builder, "_collect_pharmacology_data", return_value={}
-        ), patch.object(self.builder, "_collect_advanced_formula_analyses", return_value={
-            "network_pharmacology_systems_biology": {},
-            "supramolecular_physicochemistry": {},
-            "knowledge_archaeology": {},
-            "complexity_nonlinear_dynamics": {},
-        }), patch("src.semantic_modeling.semantic_graph_builder.SummaryAnalysisEngine.analyze", return_value={}):
+        with (
+            patch.object(
+                self.builder, "_generate_research_perspectives", return_value={}
+            ),
+            patch.object(self.builder, "_analyze_herb_properties", return_value={}),
+            patch.object(
+                self.builder, "_analyze_formula_similarities", return_value=[]
+            ),
+            patch.object(self.builder, "_collect_pharmacology_data", return_value={}),
+            patch.object(
+                self.builder,
+                "_collect_advanced_formula_analyses",
+                return_value={
+                    "network_pharmacology_systems_biology": {},
+                    "supramolecular_physicochemistry": {},
+                    "knowledge_archaeology": {},
+                    "complexity_nonlinear_dynamics": {},
+                },
+            ),
+            patch(
+                "src.semantic_modeling.semantic_graph_builder.SummaryAnalysisEngine.analyze",
+                return_value={},
+            ),
+        ):
             out = self.builder.execute({"entities": None})
 
         self.assertIn("semantic_graph", out)
         self.assertEqual(out["graph_statistics"]["nodes_count"], 0)
 
-    def test_generate_research_perspectives_adds_similar_formula_matches_with_graph_evidence(self):
+    def test_generate_research_perspectives_adds_similar_formula_matches_with_graph_evidence(
+        self,
+    ):
         builder = SemanticGraphBuilder({"neo4j_driver": _StubNeo4jDriver()})
         self.assertTrue(builder.initialize())
         try:
@@ -128,17 +167,26 @@ class TestSemanticGraphBuilderRefactor(unittest.TestCase):
                     )
                 ]
             )
-            with patch.object(builder, "_get_formula_embedding_service", return_value=stub_service):
-                perspectives = builder._generate_research_perspectives([
-                    {"type": "formula", "name": "四君子汤"}
-                ])
+            with patch.object(
+                builder, "_get_formula_embedding_service", return_value=stub_service
+            ):
+                perspectives = builder._generate_research_perspectives(
+                    [{"type": "formula", "name": "四君子汤"}]
+                )
 
             integrated = perspectives["四君子汤"]["integrated"]
             self.assertIn("similar_formula_matches", integrated)
-            self.assertEqual(integrated["similar_formula_matches"][0]["formula_name"], "六君子汤")
-            self.assertIn("embedding", integrated["similar_formula_matches"][0]["retrieval_sources"])
             self.assertEqual(
-                integrated["similar_formula_matches"][0]["graph_evidence"]["shared_syndromes"],
+                integrated["similar_formula_matches"][0]["formula_name"], "六君子汤"
+            )
+            self.assertIn(
+                "embedding",
+                integrated["similar_formula_matches"][0]["retrieval_sources"],
+            )
+            self.assertEqual(
+                integrated["similar_formula_matches"][0]["graph_evidence"][
+                    "shared_syndromes"
+                ],
                 ["脾气虚证"],
             )
             self.assertEqual(
@@ -148,28 +196,48 @@ class TestSemanticGraphBuilderRefactor(unittest.TestCase):
         finally:
             builder.cleanup()
 
-    def test_generate_research_perspectives_falls_back_to_relationship_reasoning_without_embedding_service(self):
-        with patch.object(self.builder, "_get_formula_embedding_service", return_value=None):
-            perspectives = self.builder._generate_research_perspectives([
-                {"type": "formula", "name": "四君子汤"}
-            ])
+    def test_generate_research_perspectives_falls_back_to_relationship_reasoning_without_embedding_service(
+        self,
+    ):
+        with patch.object(
+            self.builder, "_get_formula_embedding_service", return_value=None
+        ):
+            perspectives = self.builder._generate_research_perspectives(
+                [{"type": "formula", "name": "四君子汤"}]
+            )
 
         integrated = perspectives["四君子汤"]["integrated"]
         self.assertIn("六君子汤", integrated["similar_formulas"])
-        self.assertEqual(integrated["similar_formula_matches"][0]["retrieval_sources"], ["relationship_reasoning"])
-        self.assertEqual(integrated["similar_formula_matches"][0]["graph_evidence"]["source"], "relationship_reasoning")
-        self.assertGreater(integrated["similar_formula_matches"][0]["graph_evidence"]["shared_herb_count"], 0)
-
-    def test_build_local_formula_graph_evidence_merges_role_overlaps_and_comparison_herbs(self):
-        with patch(
-            "src.analysis.semantic_graph.FormulaStructureAnalyzer.get_formula_composition",
-            side_effect=[
-                {"sovereign": ["黄芪", "人参"], "minister": ["白术"]},
-                {"sovereign": ["黄芪"], "assistant": ["白术", "甘草"]},
+        self.assertEqual(
+            integrated["similar_formula_matches"][0]["retrieval_sources"],
+            ["relationship_reasoning"],
+        )
+        self.assertEqual(
+            integrated["similar_formula_matches"][0]["graph_evidence"]["source"],
+            "relationship_reasoning",
+        )
+        self.assertGreater(
+            integrated["similar_formula_matches"][0]["graph_evidence"][
+                "shared_herb_count"
             ],
-        ), patch(
-            "src.analysis.semantic_graph.FormulaComparator.compare_formulas",
-            return_value={"common_herbs": ["黄芪", "白术", "茯苓"]},
+            0,
+        )
+
+    def test_build_local_formula_graph_evidence_merges_role_overlaps_and_comparison_herbs(
+        self,
+    ):
+        with (
+            patch(
+                "src.analysis.semantic_graph.FormulaStructureAnalyzer.get_formula_composition",
+                side_effect=[
+                    {"sovereign": ["黄芪", "人参"], "minister": ["白术"]},
+                    {"sovereign": ["黄芪"], "assistant": ["白术", "甘草"]},
+                ],
+            ),
+            patch(
+                "src.analysis.semantic_graph.FormulaComparator.compare_formulas",
+                return_value={"common_herbs": ["黄芪", "白术", "茯苓"]},
+            ),
         ):
             evidence = self.builder._build_local_formula_graph_evidence("方A", "方B")
 
@@ -220,7 +288,9 @@ class TestSemanticGraphBuilderRefactor(unittest.TestCase):
             },
         ]
         query_text = "四君子汤；药物:人参 白术 茯苓 甘草；证候:脾虚 气虚；补气健脾"
-        six_gentlemen_text = "六君子汤；药物:人参 白术 茯苓 甘草 陈皮 半夏；证候:脾虚 痰湿；补气化痰"
+        six_gentlemen_text = (
+            "六君子汤；药物:人参 白术 茯苓 甘草 陈皮 半夏；证候:脾虚 痰湿；补气化痰"
+        )
         encoder = _CountingEncoder(
             {
                 query_text: [1.0, 0.0, 0.0],
@@ -238,8 +308,14 @@ class TestSemanticGraphBuilderRefactor(unittest.TestCase):
             )
             self.assertTrue(first_builder.initialize())
             try:
-                with patch.object(first_builder, "_build_formula_embedding_catalog", return_value=catalog):
-                    first_builder._generate_research_perspectives([{"type": "formula", "name": "四君子汤"}])
+                with patch.object(
+                    first_builder,
+                    "_build_formula_embedding_catalog",
+                    return_value=catalog,
+                ):
+                    first_builder._generate_research_perspectives(
+                        [{"type": "formula", "name": "四君子汤"}]
+                    )
             finally:
                 first_builder.cleanup()
 
@@ -254,8 +330,14 @@ class TestSemanticGraphBuilderRefactor(unittest.TestCase):
             )
             self.assertTrue(second_builder.initialize())
             try:
-                with patch.object(second_builder, "_build_formula_embedding_catalog", return_value=catalog):
-                    second_builder._generate_research_perspectives([{"type": "formula", "name": "四君子汤"}])
+                with patch.object(
+                    second_builder,
+                    "_build_formula_embedding_catalog",
+                    return_value=catalog,
+                ):
+                    second_builder._generate_research_perspectives(
+                        [{"type": "formula", "name": "四君子汤"}]
+                    )
             finally:
                 second_builder.cleanup()
 
@@ -264,6 +346,45 @@ class TestSemanticGraphBuilderRefactor(unittest.TestCase):
             1,
             "重启后应直接复用持久化索引与已缓存查询向量，不应再次编码",
         )
+
+
+class TestSemanticGraphServiceFacade(unittest.TestCase):
+    def test_service_is_canonical_facade_with_builder_output_contract(self):
+        service = SemanticGraphService()
+        self.assertTrue(service.initialize())
+        try:
+            with (
+                patch.object(
+                    service, "_generate_research_perspectives", return_value={}
+                ),
+                patch.object(service, "_analyze_herb_properties", return_value={}),
+                patch.object(service, "_analyze_formula_similarities", return_value=[]),
+                patch.object(service, "_collect_pharmacology_data", return_value={}),
+                patch.object(
+                    service,
+                    "_collect_advanced_formula_analyses",
+                    return_value={
+                        "network_pharmacology_systems_biology": {},
+                        "supramolecular_physicochemistry": {},
+                        "knowledge_archaeology": {},
+                        "complexity_nonlinear_dynamics": {},
+                    },
+                ),
+                patch(
+                    "src.analysis.semantic_graph.SummaryAnalysisEngine.analyze",
+                    return_value={},
+                ),
+            ):
+                output = service.execute(
+                    {"entities": [{"type": "herb", "name": "柴胡"}]}
+                )
+
+            self.assertEqual(service.contract_version, "semantic-graph-service-v1")
+            self.assertIn("semantic_graph", output)
+            self.assertIn("graph_statistics", output)
+            self.assertGreaterEqual(output["graph_statistics"]["nodes_count"], 1)
+        finally:
+            service.cleanup()
 
 
 if __name__ == "__main__":

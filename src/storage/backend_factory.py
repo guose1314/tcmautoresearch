@@ -87,6 +87,7 @@ class StorageBackendFactory:
 
         self._db_manager: Optional[DatabaseManager] = None
         self._neo4j_driver: Any = None
+        self._outbox_store: Any = None
         self._db_type: str = str(self._db_config.get("type", "sqlite")).strip().lower()
         self._initialized = False
 
@@ -110,6 +111,16 @@ class StorageBackendFactory:
     @property
     def neo4j_driver(self) -> Any:
         return self._neo4j_driver
+
+    @property
+    def outbox_store(self) -> Any:
+        if not self._initialized or self._db_manager is None:
+            raise RuntimeError("StorageBackendFactory 尚未初始化")
+        if self._outbox_store is None:
+            from src.storage.outbox import PgOutboxStore
+
+            self._outbox_store = PgOutboxStore(self._db_manager)
+        return self._outbox_store
 
     @property
     def initialized(self) -> bool:
@@ -161,8 +172,14 @@ class StorageBackendFactory:
                 DatabaseManager.create_default_relationships(session)
 
             report["pg_status"] = "active"
-            report["schema_completeness"] = self._db_manager.get_schema_completeness_report()
-            logger.info("关系型数据库初始化完成: %s (%s)", self._db_type, conn_str.split("@")[-1] if "@" in conn_str else "local")
+            report["schema_completeness"] = (
+                self._db_manager.get_schema_completeness_report()
+            )
+            logger.info(
+                "关系型数据库初始化完成: %s (%s)",
+                self._db_type,
+                conn_str.split("@")[-1] if "@" in conn_str else "local",
+            )
         except Exception as exc:
             report["pg_status"] = f"error: {exc}"
             logger.error("数据库初始化失败: %s", exc)
@@ -175,14 +192,24 @@ class StorageBackendFactory:
 
                 uri = self._neo4j_config.get("uri", "neo4j://localhost:7687")
                 user = self._neo4j_config.get("user", "neo4j")
-                password = resolve_config_password(self._neo4j_config, default_env_name="TCM_NEO4J_PASSWORD")
+                password = resolve_config_password(
+                    self._neo4j_config, default_env_name="TCM_NEO4J_PASSWORD"
+                )
                 database = self._neo4j_config.get("database", "neo4j")
 
                 self._neo4j_driver = Neo4jDriver(
-                    uri, (user, password), database=database,
-                    max_connection_pool_size=int(self._neo4j_config.get("max_connection_pool_size", 50)),
-                    connection_acquisition_timeout=float(self._neo4j_config.get("connection_acquisition_timeout", 60)),
-                    max_connection_lifetime=int(self._neo4j_config.get("max_connection_lifetime", 3600)),
+                    uri,
+                    (user, password),
+                    database=database,
+                    max_connection_pool_size=int(
+                        self._neo4j_config.get("max_connection_pool_size", 50)
+                    ),
+                    connection_acquisition_timeout=float(
+                        self._neo4j_config.get("connection_acquisition_timeout", 60)
+                    ),
+                    max_connection_lifetime=int(
+                        self._neo4j_config.get("max_connection_lifetime", 3600)
+                    ),
                 )
                 self._neo4j_driver.connect()
                 report["neo4j_status"] = "active"
@@ -193,9 +220,7 @@ class StorageBackendFactory:
                 self._neo4j_driver = None
 
         self._initialized = True
-        self._degradation_governor.set_initial_mode(
-            self.get_consistency_state().mode
-        )
+        self._degradation_governor.set_initial_mode(self.get_consistency_state().mode)
         return report
 
     def close(self) -> None:
@@ -206,6 +231,7 @@ class StorageBackendFactory:
             except Exception as exc:
                 logger.warning("关闭数据库连接失败: %s", exc)
             self._db_manager = None
+        self._outbox_store = None
 
         if self._neo4j_driver:
             try:
@@ -262,6 +288,56 @@ class StorageBackendFactory:
         with self._db_manager.session_scope() as session:
             yield session
 
+    def enqueue_graph_projection(
+        self,
+        cycle_id: str,
+        phase: str,
+        graph_payload: Dict[str, Any],
+        idempotency_key: str,
+        *,
+        session: Any = None,
+    ) -> Any:
+        """Enqueue a graph projection event through the configured PG outbox."""
+        from src.storage.outbox import enqueue_graph_projection
+
+        return enqueue_graph_projection(
+            cycle_id,
+            phase,
+            graph_payload,
+            idempotency_key,
+            session=session,
+            store=None if session is not None else self.outbox_store,
+        )
+
+    def create_graph_projection_worker(
+        self,
+        *,
+        poll_interval: float = 1.0,
+        batch_size: int = 50,
+    ) -> Any:
+        """Create an OutboxWorker that replays graph projection events to Neo4j."""
+        if self._neo4j_driver is None:
+            raise RuntimeError(
+                "Neo4j driver unavailable; cannot create graph projection worker"
+            )
+        from src.storage.outbox import (
+            GRAPH_PROJECTION_EVENT_TYPE,
+            OutboxWorker,
+            build_event_type_router,
+            build_graph_projection_handler,
+        )
+
+        graph_handler = build_graph_projection_handler(self._neo4j_driver)
+
+        return OutboxWorker(
+            self.outbox_store,
+            handler=build_event_type_router(
+                {GRAPH_PROJECTION_EVENT_TYPE: graph_handler}
+            ),
+            poll_interval=poll_interval,
+            batch_size=batch_size,
+        )
+
     # ── 查询 ──────────────────────────────────────────────────────────────
 
     def health_check(self) -> Dict[str, Any]:
@@ -272,13 +348,21 @@ class StorageBackendFactory:
         }
         if self._db_manager:
             result["db_healthy"] = self._db_manager.health_check()
-            result["schema_completeness"] = self._db_manager.get_schema_completeness_report()
+            result["schema_completeness"] = (
+                self._db_manager.get_schema_completeness_report()
+            )
         else:
             result["db_healthy"] = False
 
-        if self._neo4j_driver and hasattr(self._neo4j_driver, "driver") and self._neo4j_driver.driver:
+        if (
+            self._neo4j_driver
+            and hasattr(self._neo4j_driver, "driver")
+            and self._neo4j_driver.driver
+        ):
             try:
-                with self._neo4j_driver.driver.session(database=self._neo4j_driver.database) as s:
+                with self._neo4j_driver.driver.session(
+                    database=self._neo4j_driver.database
+                ) as s:
                     s.run("RETURN 1").consume()
                 result["neo4j_healthy"] = True
             except Exception:
@@ -290,7 +374,11 @@ class StorageBackendFactory:
 
     def _detect_schema_drift(self) -> bool:
         """返回当前后端是否检测到 schema drift。"""
-        if not self._initialized or self._db_type != "postgresql" or self._db_manager is None:
+        if (
+            not self._initialized
+            or self._db_type != "postgresql"
+            or self._db_manager is None
+        ):
             return False
 
         inspect_schema_drift = getattr(self._db_manager, "inspect_schema_drift", None)
@@ -300,13 +388,17 @@ class StorageBackendFactory:
         try:
             report = inspect_schema_drift() or {}
         except Exception as exc:
-            logger.debug("schema drift 检测失败，consistency_state 按未检测处理: %s", exc)
+            logger.debug(
+                "schema drift 检测失败，consistency_state 按未检测处理: %s", exc
+            )
             return False
 
         status = str(report.get("status") or "").strip().lower()
         legacy_enum_count = int(report.get("legacy_enum_count", 0) or 0)
         incompatible_drift_count = int(report.get("incompatible_drift_count", 0) or 0)
-        compatibility_variant_count = int(report.get("compatibility_variant_count", 0) or 0)
+        compatibility_variant_count = int(
+            report.get("compatibility_variant_count", 0) or 0
+        )
         return bool(
             legacy_enum_count
             or incompatible_drift_count
@@ -368,11 +460,14 @@ class StorageBackendFactory:
                     RelationshipType,
                     ResearchRecord,
                 )
+
                 with self._db_manager.session_scope() as session:
                     stats["documents"] = session.query(Document).count()
                     stats["entities"] = session.query(Entity).count()
                     stats["relationships"] = session.query(EntityRelationship).count()
-                    stats["relationship_types"] = session.query(RelationshipType).count()
+                    stats["relationship_types"] = session.query(
+                        RelationshipType
+                    ).count()
                     stats["research_records"] = session.query(ResearchRecord).count()
             except Exception as exc:
                 stats["error"] = str(exc)

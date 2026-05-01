@@ -25,11 +25,16 @@ from typing import Any, Dict, List
 
 from src.infrastructure.persistence import DatabaseManager
 from src.infrastructure.research_session_repo import ResearchSessionRepository
+from src.learning.expert_review_consensus import (
+    EXPERT_SIGNAL_CONSENSUS,
+    EXPERT_SIGNAL_DISPUTE,
+    EXPERT_SIGNAL_SINGLE,
+    build_expert_review_consensus_index,
+)
 from src.learning.expert_review_feedback_repo import ExpertReviewFeedbackRepo
 from src.research.learning_loop_orchestrator import LearningLoopOrchestrator
 from tools.export_for_expert_review import export
 from tools.import_expert_review import import_records
-
 
 _FIXTURE_TOPICS = [
     ("cycle-001", "118-增订医方歌诀"),
@@ -191,9 +196,7 @@ class ExpertReviewRoundtripTest(unittest.TestCase):
         db.init_db()
         try:
             repo = ResearchSessionRepository(db)
-            page = repo.list_learning_feedback(
-                feedback_scope="expert_review", limit=50
-            )
+            page = repo.list_learning_feedback(feedback_scope="expert_review", limit=50)
             self.assertEqual(page["total"], 5)
             grades = sorted(item["grade_level"] for item in page["items"])
             self.assertEqual(grades, sorted(_EXPERT_GRADES))
@@ -228,6 +231,181 @@ class ExpertReviewRoundtripTest(unittest.TestCase):
             self.assertIn("expert_review", block["bias_text"].lower())
         finally:
             db.engine.dispose()
+
+    def test_expert_review_governance_consensus_dispute_and_bias(self) -> None:
+        export_summary = export(
+            connection_string=self.connection_string,
+            cycle_ids=[c for c, _ in _FIXTURE_TOPICS],
+            output=self.review_jsonl,
+        )
+        self.assertEqual(export_summary["records_written"], 5)
+        exported = [
+            json.loads(raw)
+            for raw in self.review_jsonl.read_text(encoding="utf-8").splitlines()
+        ]
+
+        consensus_group_id = (
+            f"consensus::{exported[0]['cycle_id']}::{exported[0]['hypothesis_id']}"
+        )
+        dispute_group_id = (
+            f"dispute::{exported[1]['cycle_id']}::{exported[1]['hypothesis_id']}"
+        )
+        single_group_id = (
+            f"single::{exported[2]['cycle_id']}::{exported[2]['hypothesis_id']}"
+        )
+        governed_records = [
+            _governed_record(
+                exported[0],
+                reviewer_id="consensus-a",
+                grade="D",
+                confidence=0.92,
+                consensus_group_id=consensus_group_id,
+                blind_group="A",
+            ),
+            _governed_record(
+                exported[0],
+                reviewer_id="consensus-b",
+                grade="D",
+                confidence=0.88,
+                consensus_group_id=consensus_group_id,
+                blind_group="B",
+            ),
+            _governed_record(
+                exported[1],
+                reviewer_id="dispute-a",
+                grade="A",
+                confidence=0.86,
+                consensus_group_id=dispute_group_id,
+                blind_group="A",
+            ),
+            _governed_record(
+                exported[1],
+                reviewer_id="dispute-b",
+                grade="D",
+                confidence=0.91,
+                consensus_group_id=dispute_group_id,
+                blind_group="B",
+                dispute_flag=True,
+            ),
+            _governed_record(
+                exported[2],
+                reviewer_id="single-a",
+                grade="C",
+                confidence=0.7,
+                consensus_group_id=single_group_id,
+                blind_group="A",
+            ),
+        ]
+        self.review_jsonl.write_text(
+            "\n".join(json.dumps(item, ensure_ascii=False) for item in governed_records)
+            + "\n",
+            encoding="utf-8",
+        )
+
+        import_summary = import_records(
+            connection_string=self.connection_string,
+            input_path=self.review_jsonl,
+            weight=5.0,
+        )
+        self.assertEqual(import_summary["records_inserted"], 5)
+        self.assertEqual(import_summary["records_duplicate"], 0)
+        self.assertEqual(import_summary["records_skipped"], [])
+
+        duplicate_summary = import_records(
+            connection_string=self.connection_string,
+            input_path=self.review_jsonl,
+            weight=5.0,
+        )
+        self.assertEqual(duplicate_summary["records_inserted"], 0)
+        self.assertEqual(duplicate_summary["records_duplicate"], 5)
+
+        db = DatabaseManager(self.connection_string)
+        db.init_db()
+        try:
+            repo = ResearchSessionRepository(db)
+            page = repo.list_learning_feedback(feedback_scope="expert_review", limit=20)
+            self.assertEqual(page["total"], 5)
+
+            metadata_by_reviewer = {
+                item["metadata"]["reviewer_id"]: item["metadata"]
+                for item in page["items"]
+            }
+            self.assertEqual(metadata_by_reviewer["consensus-a"]["review_round"], 1)
+            self.assertEqual(metadata_by_reviewer["consensus-a"]["blind_group"], "A")
+            self.assertEqual(metadata_by_reviewer["consensus-a"]["confidence"], 0.92)
+            self.assertTrue(metadata_by_reviewer["dispute-b"]["dispute_flag"])
+            self.assertTrue(
+                all(
+                    meta["expert_review_identity"]
+                    for meta in metadata_by_reviewer.values()
+                )
+            )
+
+            consensus_index = build_expert_review_consensus_index(page["items"])
+            consensus_summary = _find_consensus(consensus_index, consensus_group_id)
+            self.assertEqual(consensus_summary["review_count"], 2)
+            self.assertEqual(consensus_summary["agreement_rate"], 1.0)
+            self.assertEqual(consensus_summary["majority_grade"], "D")
+            self.assertFalse(consensus_summary["has_dispute"])
+            self.assertTrue(consensus_summary["high_weight_feedback"])
+
+            dispute_summary = _find_consensus(consensus_index, dispute_group_id)
+            self.assertEqual(dispute_summary["review_count"], 2)
+            self.assertTrue(dispute_summary["has_dispute"])
+            self.assertFalse(dispute_summary["high_weight_feedback"])
+
+            adapter = ExpertReviewFeedbackRepo(repo)
+            recent = adapter.recent(limit=10)
+            signals = {item["expert_signal"] for item in recent}
+            self.assertIn(EXPERT_SIGNAL_CONSENSUS, signals)
+            self.assertIn(EXPERT_SIGNAL_DISPUTE, signals)
+            self.assertIn(EXPERT_SIGNAL_SINGLE, signals)
+
+            llo = LearningLoopOrchestrator(feedback_repo=adapter)
+            prep = llo.prepare_cycle(SimpleNamespace(config={}))
+            bias_text = prep["prompt_bias_blocks"]["hypothesis"]["bias_text"].lower()
+            self.assertIn("expert_consensus", bias_text)
+            self.assertIn("expert_dispute", bias_text)
+            self.assertIn("single_expert_review", bias_text)
+        finally:
+            db.engine.dispose()
+
+
+def _governed_record(
+    base: Dict[str, Any],
+    *,
+    reviewer_id: str,
+    grade: str,
+    confidence: float,
+    consensus_group_id: str,
+    blind_group: str,
+    dispute_flag: bool = False,
+) -> Dict[str, Any]:
+    record = dict(base)
+    record.update(
+        {
+            "expert_grade": grade,
+            "expert_notes": f"{reviewer_id}: governed expert review",
+            "reviewer_id": reviewer_id,
+            "review_round": 1,
+            "blind_group": blind_group,
+            "confidence": confidence,
+            "dispute_flag": dispute_flag,
+            "consensus_group_id": consensus_group_id,
+            "claim_id": str(base.get("hypothesis_id") or ""),
+        }
+    )
+    return record
+
+
+def _find_consensus(
+    consensus_index: Dict[str, Dict[str, Any]],
+    consensus_group_id: str,
+) -> Dict[str, Any]:
+    for summary in consensus_index.values():
+        if summary.get("consensus_group_id") == consensus_group_id:
+            return summary
+    raise AssertionError(f"consensus group not found: {consensus_group_id}")
 
 
 if __name__ == "__main__":

@@ -703,6 +703,13 @@ class TestGraphAssetProjection(unittest.TestCase):
         orchestrator.pipeline = SimpleNamespace(logger=MagicMock())
         return orchestrator
 
+    class _OutboxSession:
+        def __init__(self):
+            self.rows = []
+
+        def add(self, row):
+            self.rows.append(row)
+
     def test_project_cycle_to_neo4j_reports_hypothesis_and_evidence_counts(self):
         orchestrator = self._make_orchestrator()
         cycle = _FakeCycle(
@@ -756,14 +763,13 @@ class TestGraphAssetProjection(unittest.TestCase):
 
         class _Txn:
             def __init__(self):
-                self.nodes = []
-                self.edges = []
+                self.pg_session = TestGraphAssetProjection._OutboxSession()
 
             def neo4j_batch_nodes(self, nodes):
-                self.nodes.extend(nodes)
+                raise AssertionError("transaction path must enqueue graph outbox")
 
             def neo4j_batch_edges(self, edges):
-                self.edges.extend(edges)
+                raise AssertionError("transaction path must enqueue graph outbox")
 
         txn = _Txn()
         report = orchestrator._project_cycle_to_neo4j(
@@ -794,8 +800,16 @@ class TestGraphAssetProjection(unittest.TestCase):
         self.assertGreater(report["pathogenesis_traceable_node_count"], 0)
         self.assertGreater(report["exegesis_term_node_count"], 0)
         self.assertGreater(report["textual_evidence_chain_node_count"], 0)
+        self.assertEqual(report["status"], "queued")
+        self.assertEqual(report["graph_projection_mode"], "outbox")
+        self.assertEqual(len(txn.pg_session.rows), 1)
+        payload = txn.pg_session.rows[0].payload
+        self.assertEqual(payload["contract_version"], "graph-projection-outbox-v1")
+        self.assertEqual(payload["cycle_id"], "cycle-001")
+        self.assertGreater(len(payload["graph_payload"]["nodes"]), 0)
+        self.assertGreater(len(payload["graph_payload"]["edges"]), 0)
 
-    def test_project_cycle_to_neo4j_raises_when_transaction_graph_write_fails(self):
+    def test_project_cycle_to_neo4j_raises_when_outbox_enqueue_fails(self):
         orchestrator = self._make_orchestrator()
         cycle = _FakeCycle(
             phase_executions={
@@ -822,12 +836,18 @@ class TestGraphAssetProjection(unittest.TestCase):
             }
         )
 
+        class _FailingOutboxSession:
+            def add(self, _row):
+                raise RuntimeError("outbox write failed")
+
         class _FailTxn:
+            pg_session = _FailingOutboxSession()
+
             def neo4j_batch_nodes(self, _nodes):
-                raise RuntimeError("neo4j write failed")
+                raise AssertionError("transaction path must enqueue graph outbox")
 
             def neo4j_batch_edges(self, _edges):
-                return None
+                raise AssertionError("transaction path must enqueue graph outbox")
 
         with self.assertRaises(RuntimeError):
             orchestrator._project_cycle_to_neo4j(
@@ -869,13 +889,13 @@ class TestGraphAssetProjection(unittest.TestCase):
 
         class _Txn:
             def __init__(self):
-                self.edges = []
+                self.pg_session = TestGraphAssetProjection._OutboxSession()
 
             def neo4j_batch_nodes(self, _nodes):
-                return None
+                raise AssertionError("transaction path must enqueue graph outbox")
 
             def neo4j_batch_edges(self, edges):
-                self.edges.extend(edges)
+                raise AssertionError("transaction path must enqueue graph outbox")
 
         txn = _Txn()
         orchestrator._project_cycle_to_neo4j(
@@ -887,7 +907,10 @@ class TestGraphAssetProjection(unittest.TestCase):
             observe_documents=[],
             transaction=txn,
         )
-        relationship_types = {edge[0].relationship_type for edge in txn.edges}
+        payload = txn.pg_session.rows[0].payload
+        relationship_types = {
+            edge["relationship_type"] for edge in payload["graph_payload"]["edges"]
+        }
         self.assertIn("HAS_HYPOTHESIS", relationship_types)
 
 

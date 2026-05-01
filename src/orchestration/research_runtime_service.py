@@ -9,11 +9,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
-from src.orchestration.research_orchestrator import (
+from src.orchestration.orchestration_contract import (
     OrchestrationResult,
     PhaseOutcome,
-    ResearchOrchestrator,
     _slug_topic,
+    extract_publish_result_highlights,
+    infer_scope,
+    resolve_phase_outcome_status,
+    summarize_phase_result,
     topic_to_phase_context,
 )
 from src.research.learning_loop_orchestrator import LearningLoopOrchestrator
@@ -72,7 +75,7 @@ _SHARED_RUNTIME_PROFILES: Dict[str, Dict[str, Any]] = {
         "default_cycle_name_mode": "slug",
         "default_observe_context": dict(CANONICAL_OBSERVE_DEFAULTS),
         "default_publish_context": dict(CANONICAL_PUBLISH_DEFAULTS),
-    }
+    },
 }
 
 
@@ -99,11 +102,19 @@ class ResearchRuntimeResult:
         phase_results: Dict[str, Any],
         cycle_snapshot: Dict[str, Any],
     ) -> Dict[str, Any]:
-        publish_result = phase_results.get("publish") if isinstance(phase_results.get("publish"), dict) else {}
+        publish_result = (
+            phase_results.get("publish")
+            if isinstance(phase_results.get("publish"), dict)
+            else {}
+        )
         if publish_result:
             return publish_result
         snapshot_phase_results = extract_research_phase_results(cycle_snapshot)
-        candidate = snapshot_phase_results.get("publish") if isinstance(snapshot_phase_results.get("publish"), dict) else {}
+        candidate = (
+            snapshot_phase_results.get("publish")
+            if isinstance(snapshot_phase_results.get("publish"), dict)
+            else {}
+        )
         return candidate if isinstance(candidate, dict) else {}
 
     @staticmethod
@@ -149,7 +160,11 @@ class ResearchRuntimeResult:
         if not isinstance(publish_result, dict):
             return {}
 
-        metadata = publish_result.get("metadata") if isinstance(publish_result.get("metadata"), dict) else {}
+        metadata = (
+            publish_result.get("metadata")
+            if isinstance(publish_result.get("metadata"), dict)
+            else {}
+        )
         report_error_count = int(metadata.get("report_error_count", 0) or 0)
         report_count = int(metadata.get("report_count", 0) or 0)
         if report_count <= 0 and publish_output_files:
@@ -182,15 +197,22 @@ class ResearchRuntimeResult:
         cycle_snapshot = deepcopy(self.cycle_snapshot or {})
         publish_result = self._resolve_publish_result(phase_results, cycle_snapshot)
         publish_output_files = self._extract_publish_output_files(publish_result)
-        publish_deliverables = self._extract_publish_deliverables(publish_result, cycle_snapshot)
-        publish_reports = self._build_report_summary(publish_result, publish_output_files, publish_deliverables)
-        snapshot_metadata = cycle_snapshot.get("metadata") if isinstance(cycle_snapshot.get("metadata"), dict) else {}
+        publish_deliverables = self._extract_publish_deliverables(
+            publish_result, cycle_snapshot
+        )
+        publish_reports = self._build_report_summary(
+            publish_result, publish_output_files, publish_deliverables
+        )
+        snapshot_metadata = (
+            cycle_snapshot.get("metadata")
+            if isinstance(cycle_snapshot.get("metadata"), dict)
+            else {}
+        )
         metadata = deepcopy(snapshot_metadata)
         metadata["research_question"] = normalized_question
-        metadata["cycle_name"] = (
-            self.orchestration_result.pipeline_metadata.get("cycle_name")
-            or metadata.get("cycle_name")
-        )
+        metadata["cycle_name"] = self.orchestration_result.pipeline_metadata.get(
+            "cycle_name"
+        ) or metadata.get("cycle_name")
 
         session_result = {
             "status": self.orchestration_result.status,
@@ -205,8 +227,12 @@ class ResearchRuntimeResult:
             "cycle_snapshot": cycle_snapshot,
         }
 
-        if isinstance(metadata.get("analysis_summary"), dict) and metadata.get("analysis_summary"):
-            session_result["analysis_summary"] = deepcopy(metadata.get("analysis_summary") or {})
+        if isinstance(metadata.get("analysis_summary"), dict) and metadata.get(
+            "analysis_summary"
+        ):
+            session_result["analysis_summary"] = deepcopy(
+                metadata.get("analysis_summary") or {}
+            )
 
         if publish_deliverables:
             session_result["deliverables"] = deepcopy(publish_deliverables)
@@ -245,21 +271,31 @@ class ResearchRuntimeService:
 
     def __init__(self, orchestrator_config: Optional[Dict[str, Any]] = None):
         raw_config: Dict[str, Any] = deepcopy(orchestrator_config or {})
-        profile_defaults = self._resolve_runtime_profile_config(raw_config.get("runtime_profile"))
+        profile_defaults = self._resolve_runtime_profile_config(
+            raw_config.get("runtime_profile")
+        )
         self.config: Dict[str, Any] = {**profile_defaults, **raw_config}
-        self.pipeline_config: Dict[str, Any] = deepcopy(self.config.get("pipeline_config") or {})
+        self.pipeline_config: Dict[str, Any] = deepcopy(
+            self.config.get("pipeline_config") or {}
+        )
         self.stop_on_failure: bool = bool(self.config.get("stop_on_failure", True))
-        self.researchers: List[str] = list(self.config.get("researchers") or ["orchestrator"])
+        self.researchers: List[str] = list(
+            self.config.get("researchers") or ["orchestrator"]
+        )
 
         configured_phases = self.config.get("phases") or list(_DEFAULT_PHASES)
-        normalized_phases = [str(item).strip().lower() for item in configured_phases if str(item).strip()]
+        normalized_phases = [
+            str(item).strip().lower() for item in configured_phases if str(item).strip()
+        ]
         self.phase_names = normalized_phases or list(_DEFAULT_PHASES)
 
         self._storage_factory: Optional[Any] = None
         self._initialize_storage_factory()
 
     @staticmethod
-    def _resolve_runtime_profile_config(runtime_profile: Optional[str]) -> Dict[str, Any]:
+    def _resolve_runtime_profile_config(
+        runtime_profile: Optional[str],
+    ) -> Dict[str, Any]:
         normalized_profile = str(runtime_profile or "").strip().lower()
         if not normalized_profile:
             return {}
@@ -287,9 +323,15 @@ class ResearchRuntimeService:
             factory = StorageBackendFactory(self.pipeline_config)
             factory.initialize()
             self._storage_factory = factory
-            logger.info("ResearchRuntimeService: StorageBackendFactory 已初始化 (db_type=%s)", factory.db_type)
+            logger.info(
+                "ResearchRuntimeService: StorageBackendFactory 已初始化 (db_type=%s)",
+                factory.db_type,
+            )
         except Exception as exc:
-            logger.warning("ResearchRuntimeService: StorageBackendFactory 初始化失败，运行期降级: %s", exc)
+            logger.warning(
+                "ResearchRuntimeService: StorageBackendFactory 初始化失败，运行期降级: %s",
+                exc,
+            )
             self._storage_factory = None
 
     @staticmethod
@@ -350,7 +392,7 @@ class ResearchRuntimeService:
         resolved_cycle_name = self._resolve_cycle_name(normalized_topic, cycle_name)
         resolved_description = description or normalized_topic
         default_scope = str(self.config.get("default_scope") or "").strip()
-        resolved_scope = scope or default_scope or ResearchOrchestrator._infer_scope(normalized_topic)
+        resolved_scope = scope or default_scope or infer_scope(normalized_topic)
         protocol_inputs = {
             "study_type": study_type,
             "primary_outcome": primary_outcome,
@@ -367,7 +409,9 @@ class ResearchRuntimeService:
         publish_highlights: Dict[str, Dict[str, Any]] = {}
         observe_philology: Dict[str, Any] = {}
 
-        pipeline = ResearchPipeline(self.pipeline_config, storage_factory=self._storage_factory)
+        pipeline = ResearchPipeline(
+            self.pipeline_config, storage_factory=self._storage_factory
+        )
         learning_loop = self._build_learning_loop_orchestrator()
         _learning_prep = learning_loop.prepare_cycle(pipeline)
         learning_strategy = _learning_prep["learning_strategy"]
@@ -408,7 +452,10 @@ class ResearchRuntimeService:
                 self._emit(
                     emit,
                     "job_completed",
-                    {"status": orchestration_result.status, "result": orchestration_result.to_dict()},
+                    {
+                        "status": orchestration_result.status,
+                        "result": orchestration_result.to_dict(),
+                    },
                 )
                 return ResearchRuntimeResult(
                     orchestration_result=orchestration_result,
@@ -440,7 +487,9 @@ class ResearchRuntimeService:
                         "progress": round(progress_before, 3),
                     },
                 )
-                raw_result, outcome = self._run_single_phase(pipeline, cycle_id, phase, phase_context)
+                raw_result, outcome = self._run_single_phase(
+                    pipeline, cycle_id, phase, phase_context
+                )
                 if raw_result is not None:
                     phase_results[phase.value] = raw_result
                 phase_outcomes.append(outcome)
@@ -499,7 +548,9 @@ class ResearchRuntimeService:
             )
             observe_philology = resolve_observe_philology_assets(
                 observe_phase_result=phase_results.get("observe"),
-                observe_documents=cycle_snapshot.get("observe_documents") if isinstance(cycle_snapshot.get("observe_documents"), list) else [],
+                observe_documents=cycle_snapshot.get("observe_documents")
+                if isinstance(cycle_snapshot.get("observe_documents"), list)
+                else [],
             )
             if not observe_philology.get("available"):
                 observe_philology = {}
@@ -510,7 +561,11 @@ class ResearchRuntimeService:
                 logger.warning("pipeline cleanup 失败: %s", exc)
 
         non_skipped = [item for item in phase_outcomes if item.status != "skipped"]
-        if non_skipped and overall_status != "partial" and all(item.status == "failed" for item in non_skipped):
+        if (
+            non_skipped
+            and overall_status != "partial"
+            and all(item.status == "failed" for item in non_skipped)
+        ):
             overall_status = "failed"
 
         orchestration_result = OrchestrationResult(
@@ -541,7 +596,10 @@ class ResearchRuntimeService:
         self._emit(
             emit,
             "job_completed",
-            {"status": orchestration_result.status, "result": orchestration_result.to_dict()},
+            {
+                "status": orchestration_result.status,
+                "result": orchestration_result.to_dict(),
+            },
         )
         return ResearchRuntimeResult(
             orchestration_result=orchestration_result,
@@ -555,7 +613,9 @@ class ResearchRuntimeService:
         for phase_name in self.phase_names:
             phase = phase_map.get(phase_name)
             if phase is None:
-                logger.warning("跳过未知阶段: %s (可选: %s)", phase_name, list(phase_map.keys()))
+                logger.warning(
+                    "跳过未知阶段: %s (可选: %s)", phase_name, list(phase_map.keys())
+                )
                 continue
             resolved.append(phase)
         if resolved:
@@ -563,14 +623,21 @@ class ResearchRuntimeService:
         observe = phase_map.get("observe")
         return [observe] if observe is not None else []
 
-    def _resolve_cycle_name(self, topic: str, explicit_cycle_name: Optional[str]) -> str:
+    def _resolve_cycle_name(
+        self, topic: str, explicit_cycle_name: Optional[str]
+    ) -> str:
         normalized_explicit_cycle_name = str(explicit_cycle_name or "").strip()
         if normalized_explicit_cycle_name:
             return normalized_explicit_cycle_name
 
-        default_cycle_name_mode = str(self.config.get("default_cycle_name_mode") or "slug").strip().lower()
+        default_cycle_name_mode = (
+            str(self.config.get("default_cycle_name_mode") or "slug").strip().lower()
+        )
         if default_cycle_name_mode == "timestamp":
-            cycle_name_prefix = str(self.config.get("default_cycle_name_prefix") or "research").strip() or "research"
+            cycle_name_prefix = (
+                str(self.config.get("default_cycle_name_prefix") or "research").strip()
+                or "research"
+            )
             return f"{cycle_name_prefix}_{int(time.time())}"
 
         return _slug_topic(topic)
@@ -600,17 +667,31 @@ class ResearchRuntimeService:
         base.setdefault("research_question", topic)
 
         config_key = f"default_{phase.value}_context"
-        config_override = self.config.get(config_key) if isinstance(self.config.get(config_key), dict) else {}
-        call_override = phase_contexts.get(phase.value) if isinstance(phase_contexts.get(phase.value), dict) else {}
+        config_override = (
+            self.config.get(config_key)
+            if isinstance(self.config.get(config_key), dict)
+            else {}
+        )
+        call_override = (
+            phase_contexts.get(phase.value)
+            if isinstance(phase_contexts.get(phase.value), dict)
+            else {}
+        )
         merged = {**base, **dict(config_override), **dict(call_override)}
-        if isinstance(learning_strategy, dict) and learning_strategy and "learning_strategy" not in merged:
+        if (
+            isinstance(learning_strategy, dict)
+            and learning_strategy
+            and "learning_strategy" not in merged
+        ):
             merged["learning_strategy"] = deepcopy(learning_strategy)
         if (
             isinstance(previous_iteration_feedback, dict)
             and previous_iteration_feedback
             and "previous_iteration_feedback" not in merged
         ):
-            merged["previous_iteration_feedback"] = deepcopy(previous_iteration_feedback)
+            merged["previous_iteration_feedback"] = deepcopy(
+                previous_iteration_feedback
+            )
         return merged
 
     @staticmethod
@@ -626,7 +707,9 @@ class ResearchRuntimeService:
                     return dict(strategy)
 
         pipeline_config = getattr(pipeline, "config", None)
-        if isinstance(pipeline_config, dict) and isinstance(pipeline_config.get("learning_strategy"), dict):
+        if isinstance(pipeline_config, dict) and isinstance(
+            pipeline_config.get("learning_strategy"), dict
+        ):
             return dict(pipeline_config.get("learning_strategy") or {})
         return {}
 
@@ -643,12 +726,16 @@ class ResearchRuntimeService:
                     return dict(previous_feedback)
 
         pipeline_config = getattr(pipeline, "config", None)
-        if isinstance(pipeline_config, dict) and isinstance(pipeline_config.get("previous_iteration_feedback"), dict):
+        if isinstance(pipeline_config, dict) and isinstance(
+            pipeline_config.get("previous_iteration_feedback"), dict
+        ):
             return dict(pipeline_config.get("previous_iteration_feedback") or {})
         return {}
 
     @staticmethod
-    def _normalize_phase_contexts(raw_phase_contexts: Optional[Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, Any]]:
+    def _normalize_phase_contexts(
+        raw_phase_contexts: Optional[Dict[str, Dict[str, Any]]],
+    ) -> Dict[str, Dict[str, Any]]:
         if not isinstance(raw_phase_contexts, dict):
             return {}
         normalized: Dict[str, Dict[str, Any]] = {}
@@ -721,18 +808,22 @@ class ResearchRuntimeService:
                 summary=normalized_result,
             )
 
-        summary = ResearchOrchestrator._summarize_phase_result(phase, normalized_result)
-        outcome_status = ResearchOrchestrator._resolve_phase_outcome_status(normalized_result)
+        summary = summarize_phase_result(phase, normalized_result)
+        outcome_status = resolve_phase_outcome_status(normalized_result)
         return normalized_result, PhaseOutcome(
             phase=phase.value,
             status=outcome_status,
             duration_sec=duration,
             summary=summary,
-            error=str(normalized_result.get("error") or "") if outcome_status == "failed" else "",
+            error=str(normalized_result.get("error") or "")
+            if outcome_status == "failed"
+            else "",
         )
 
     @staticmethod
-    def _build_skipped_outcomes(phases: List[Any], failed_index: int, failed_phase: Any) -> List[PhaseOutcome]:
+    def _build_skipped_outcomes(
+        phases: List[Any], failed_index: int, failed_phase: Any
+    ) -> List[PhaseOutcome]:
         skipped: List[PhaseOutcome] = []
         for phase in phases[failed_index:]:
             skipped.append(
@@ -765,14 +856,16 @@ class ResearchRuntimeService:
     ) -> Dict[str, Dict[str, Any]]:
         if hasattr(pipeline, "research_cycles"):
             try:
-                highlights = ResearchOrchestrator._extract_publish_result_highlights(pipeline, cycle_id)
+                highlights = extract_publish_result_highlights(pipeline, cycle_id)
             except Exception as exc:
                 logger.warning("publish highlights 提取失败，回退到 snapshot: %s", exc)
             else:
                 if highlights:
                     return highlights
 
-        publish_result = extract_research_phase_results(cycle_snapshot).get("publish") or {}
+        publish_result = (
+            extract_research_phase_results(cycle_snapshot).get("publish") or {}
+        )
         if not isinstance(publish_result, dict):
             return {}
 

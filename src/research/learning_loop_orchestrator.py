@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from src.learning.policy_adjuster import PolicyAdjuster
 from src.research.learning_strategy import (
@@ -70,7 +70,10 @@ class LearningLoopOrchestrator:
         lfitl_translator: Optional[Any] = None,
         prompt_bias_compiler: Optional[Any] = None,
         graph_weight_updater: Optional[Any] = None,
+        learning_insight_repo: Optional[Any] = None,
         recent_feedback_limit: int = 20,
+        learning_insight_limit: int = 100,
+        learning_insight_min_confidence: float = 0.0,
         apply_graph_weights: bool = False,
     ) -> None:
         self._snapshot_before: Dict[str, Any] = {}
@@ -87,9 +90,15 @@ class LearningLoopOrchestrator:
         self._lfitl_translator = lfitl_translator
         self._prompt_bias_compiler = prompt_bias_compiler
         self._graph_weight_updater = graph_weight_updater
+        self._learning_insight_repo = learning_insight_repo
         self._recent_feedback_limit = int(recent_feedback_limit)
+        self._learning_insight_limit = int(learning_insight_limit)
+        self._learning_insight_min_confidence = float(
+            learning_insight_min_confidence or 0.0
+        )
         self._apply_graph_weights = bool(apply_graph_weights)
         self._last_lfitl_plan: Optional[Dict[str, Any]] = None
+        self._last_learning_insight_plan: Optional[Dict[str, Any]] = None
         self._last_prompt_bias_blocks: Dict[str, Dict[str, Any]] = {}
 
     @property
@@ -173,7 +182,15 @@ class LearningLoopOrchestrator:
 
         # ---- T5.2: 从 feedback_repo 拉取近期反馈，生成 LFITL plan ----
         lfitl_plan_dict, prompt_bias_blocks = self._build_lfitl_plan(pipeline)
+        learning_insight_plan_dict, learning_insight_blocks = (
+            self._build_learning_insight_prompt_bias(pipeline)
+        )
+        prompt_bias_blocks = self._merge_prompt_bias_blocks(
+            prompt_bias_blocks,
+            learning_insight_blocks,
+        )
         self._last_lfitl_plan = lfitl_plan_dict
+        self._last_learning_insight_plan = learning_insight_plan_dict
         self._last_prompt_bias_blocks = prompt_bias_blocks
 
         return {
@@ -181,6 +198,7 @@ class LearningLoopOrchestrator:
             "learning_strategy": learning_strategy,
             "previous_iteration_feedback": previous_iteration_feedback,
             "lfitl_plan": lfitl_plan_dict,
+            "learning_insight_plan": learning_insight_plan_dict,
             "prompt_bias_blocks": dict(prompt_bias_blocks),
         }
 
@@ -391,14 +409,17 @@ class LearningLoopOrchestrator:
         if repo is None or translator is None:
             return None, {}
         try:
-            recent = repo.recent(limit=self._recent_feedback_limit)
+            recent = self._load_recent_feedback(repo)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("LFITL feedback_repo.recent 失败: %s", exc)
+            logger.warning("LFITL feedback_repo 读取失败: %s", exc)
             return None, {}
         if not recent:
             return {"summary": {"feedback_count": 0}}, {}
+        prepared_recent = self._prepare_lfitl_feedback_records(recent)
+        if not prepared_recent:
+            return {"summary": {"feedback_count": 0}}, {}
         try:
-            plan = translator.translate(list(recent))
+            plan = translator.translate(prepared_recent)
         except Exception as exc:  # noqa: BLE001
             logger.warning("LFITL translate 失败: %s", exc)
             return None, {}
@@ -421,6 +442,220 @@ class LearningLoopOrchestrator:
 
         return plan.to_dict(), bias_blocks
 
+    def _load_recent_feedback(self, repo: Any) -> List[Any]:
+        recent = getattr(repo, "recent", None)
+        if callable(recent):
+            return list(recent(limit=self._recent_feedback_limit) or [])
+
+        list_learning_feedback = getattr(repo, "list_learning_feedback", None)
+        if not callable(list_learning_feedback):
+            return []
+        page = list_learning_feedback(limit=self._recent_feedback_limit)
+        if isinstance(page, Mapping):
+            return list(page.get("items") or [])
+        if isinstance(page, list):
+            return page
+        return []
+
+    @classmethod
+    def _prepare_lfitl_feedback_records(
+        cls, records: List[Any]
+    ) -> List[Dict[str, Any]]:
+        prepared: List[Dict[str, Any]] = []
+        for record in records or []:
+            if not isinstance(record, Mapping):
+                continue
+            prepared_record = cls._coerce_lfitl_feedback_record(record)
+            if prepared_record:
+                prepared.append(prepared_record)
+        return prepared
+
+    @staticmethod
+    def _coerce_lfitl_feedback_record(record: Mapping[str, Any]) -> Dict[str, Any]:
+        item = dict(record)
+        metadata = (
+            item.get("metadata") if isinstance(item.get("metadata"), Mapping) else {}
+        )
+        details = (
+            item.get("details") if isinstance(item.get("details"), Mapping) else {}
+        )
+        feedback_scope = (
+            str(item.get("feedback_scope") or metadata.get("feedback_scope") or "")
+            .strip()
+            .lower()
+        )
+        target_phase = (
+            str(
+                item.get("target_phase")
+                or metadata.get("target_phase")
+                or details.get("target_phase")
+                or ""
+            )
+            .strip()
+            .lower()
+        )
+        if feedback_scope == "philology_review" and target_phase:
+            item["source_phase"] = target_phase
+        elif not str(item.get("source_phase") or "").strip() and target_phase:
+            item["source_phase"] = target_phase
+
+        issue_fields = (
+            LearningLoopOrchestrator._extract_string_list(item.get("issue_fields"))
+            or LearningLoopOrchestrator._extract_string_list(
+                metadata.get("issue_fields")
+            )
+            or LearningLoopOrchestrator._extract_string_list(
+                details.get("issue_fields")
+            )
+            or LearningLoopOrchestrator._extract_string_list(
+                item.get("improvement_priorities")
+            )
+        )
+        if issue_fields:
+            item["issue_fields"] = issue_fields
+
+        violations = (
+            LearningLoopOrchestrator._extract_mapping_list(item.get("violations"))
+            or LearningLoopOrchestrator._extract_mapping_list(
+                metadata.get("violations")
+            )
+            or LearningLoopOrchestrator._extract_mapping_list(details.get("violations"))
+        )
+        if violations:
+            item["violations"] = violations
+
+        graph_targets = (
+            LearningLoopOrchestrator._extract_string_list(item.get("graph_targets"))
+            or LearningLoopOrchestrator._extract_string_list(
+                metadata.get("graph_targets")
+            )
+            or LearningLoopOrchestrator._extract_string_list(
+                details.get("graph_targets")
+            )
+        )
+        if graph_targets:
+            item["graph_targets"] = graph_targets
+
+        severity = (
+            str(item.get("severity") or metadata.get("severity") or "").strip().lower()
+        )
+        if not severity:
+            severity = LearningLoopOrchestrator._severity_from_learning_feedback(item)
+        if severity:
+            item["severity"] = severity
+        return item
+
+    @staticmethod
+    def _extract_string_list(value: Any) -> List[str]:
+        if value in (None, "", [], {}):
+            return []
+        if isinstance(value, str):
+            return [value.strip()] if value.strip() else []
+        if not isinstance(value, (list, tuple, set)):
+            text = str(value or "").strip()
+            return [text] if text else []
+        items: List[str] = []
+        for raw in value:
+            text = str(raw or "").strip()
+            if text and text not in items:
+                items.append(text)
+        return items
+
+    @staticmethod
+    def _extract_mapping_list(value: Any) -> List[Dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        return [dict(item) for item in value if isinstance(item, Mapping)]
+
+    @staticmethod
+    def _severity_from_learning_feedback(record: Mapping[str, Any]) -> str:
+        grade = str(record.get("grade_level") or "").strip().upper()
+        if grade in {"D", "VERY_LOW", "LOW"}:
+            return "high"
+        if grade in {"C", "MEDIUM"}:
+            return "medium"
+        status = str(record.get("feedback_status") or "").strip().lower()
+        if status == "weakness":
+            return "medium"
+        return "low"
+
+    def _build_learning_insight_prompt_bias(
+        self,
+        pipeline: Any,
+    ) -> tuple[Optional[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+        """Compile active LearningInsight rows into next-cycle prompt bias."""
+        repo = self._learning_insight_repo or self._extract_learning_insight_repo(
+            pipeline
+        )
+        compiler = self._prompt_bias_compiler
+        if repo is None or compiler is None:
+            return None, {}
+        build_plan = getattr(compiler, "build_plan_from_learning_insights", None)
+        if not callable(build_plan):
+            return None, {}
+
+        limit = self._resolve_learning_insight_limit(pipeline)
+        min_confidence = self._resolve_learning_insight_min_confidence(pipeline)
+        try:
+            insights = list(repo.list_active(limit=limit))
+        except TypeError:
+            try:
+                insights = list(repo.list_active())
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("LearningInsight list_active 失败: %s", exc)
+                return None, {}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LearningInsight list_active 失败: %s", exc)
+            return None, {}
+
+        try:
+            plan = build_plan(insights, min_confidence=min_confidence)
+            blocks = compiler.compile(plan)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LearningInsight prompt bias 编译失败: %s", exc)
+            return None, {}
+        return plan.to_dict(), blocks
+
+    @staticmethod
+    def _merge_prompt_bias_blocks(
+        primary: Optional[Mapping[str, Mapping[str, Any]]],
+        secondary: Optional[Mapping[str, Mapping[str, Any]]],
+    ) -> Dict[str, Dict[str, Any]]:
+        merged: Dict[str, Dict[str, Any]] = {
+            str(phase): dict(block) for phase, block in (primary or {}).items()
+        }
+        severity_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+        for phase, block in (secondary or {}).items():
+            phase_key = str(phase)
+            incoming = dict(block)
+            if phase_key not in merged:
+                merged[phase_key] = incoming
+                continue
+            current = merged[phase_key]
+            current_text = str(current.get("bias_text") or "").strip()
+            incoming_text = str(incoming.get("bias_text") or "").strip()
+            if incoming_text and incoming_text not in current_text:
+                current["bias_text"] = "\n".join(
+                    item for item in (current_text, incoming_text) if item
+                )
+            avoid_fields: List[str] = []
+            for item in list(current.get("avoid_fields") or []) + list(
+                incoming.get("avoid_fields") or []
+            ):
+                text = str(item).strip()
+                if text and text not in avoid_fields:
+                    avoid_fields.append(text)
+            current["avoid_fields"] = avoid_fields
+            severities = [
+                str(current.get("severity") or "medium"),
+                str(incoming.get("severity") or "medium"),
+            ]
+            current["severity"] = max(
+                severities,
+                key=lambda item: severity_order.get(item, 0),
+            )
+        return merged
+
     @staticmethod
     def _extract_feedback_repo(pipeline: Any) -> Optional[Any]:
         """退化路径：试着从 pipeline.config 找 feedback_repo。"""
@@ -434,6 +669,52 @@ class LearningLoopOrchestrator:
                 if config.get(key) is not None:
                     return config[key]
         return None
+
+    @staticmethod
+    def _extract_learning_insight_repo(pipeline: Any) -> Optional[Any]:
+        for attr in ("learning_insight_repo", "learning_insights_repo"):
+            repo = getattr(pipeline, attr, None)
+            if repo is not None:
+                return repo
+        config = getattr(pipeline, "config", None)
+        if isinstance(config, dict):
+            for key in ("learning_insight_repo", "learning_insights_repo"):
+                if config.get(key) is not None:
+                    return config[key]
+        return None
+
+    def _resolve_learning_insight_limit(self, pipeline: Any) -> int:
+        value = self._learning_insight_limit
+        config = getattr(pipeline, "config", None)
+        if isinstance(config, dict):
+            value = _nested_config_value(
+                config,
+                ("learning_insights", "limit"),
+                ("lfitl", "learning_insight_limit"),
+                ("learning_insight_limit",),
+                default=value,
+            )
+        try:
+            return max(int(value), 0)
+        except (TypeError, ValueError):
+            return max(int(self._learning_insight_limit), 0)
+
+    def _resolve_learning_insight_min_confidence(self, pipeline: Any) -> float:
+        value = self._learning_insight_min_confidence
+        config = getattr(pipeline, "config", None)
+        if isinstance(config, dict):
+            value = _nested_config_value(
+                config,
+                ("learning_insights", "prompt_bias_min_confidence"),
+                ("learning_insights", "min_confidence"),
+                ("lfitl", "learning_insight_min_confidence"),
+                ("learning_insight_min_confidence",),
+                default=value,
+            )
+        try:
+            return max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return max(0.0, min(1.0, self._learning_insight_min_confidence))
 
     @staticmethod
     def _extract_previous_iteration_feedback(pipeline: Any) -> Dict[str, Any]:
@@ -489,3 +770,20 @@ class LearningLoopOrchestrator:
             "distinct_fingerprints": sorted(fingerprints),
             "phase_manifests": list(self._phase_manifests),
         }
+
+
+def _nested_config_value(
+    config: Mapping[str, Any],
+    *paths: tuple[str, ...],
+    default: Any = None,
+) -> Any:
+    for path in paths:
+        current: Any = config
+        for part in path:
+            if not isinstance(current, Mapping) or part not in current:
+                current = None
+                break
+            current = current[part]
+        if current is not None:
+            return current
+    return default

@@ -26,20 +26,44 @@ Guard #35: Phase output 形状收口 — metadata 最小公约键（Phase F-3）
 Guard #36: Neo4j graph schema versioning、标签注册表与 hypothesis/evidence graph assets（Phase G-1/G-2）
 Guard #37: 图回归守卫与历史资产 backfill—schema v2 dry-run 摘要 / force 重生 / philology 资产模板（Phase G-4）
 Guard #38: review queue / quality summary / batch toolbar 持久化（Phase H-4）
+Guard #40: 主链语义建图入口只依赖 SemanticGraphService facade，禁止双入口回流
 """
 
 import ast
 import os
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable, Mapping
 
 _WORKSPACE = Path(__file__).resolve().parents[2]
 _SRC = _WORKSPACE / "src"
+
+RULE_SELF_LEARNING_SHIM_IMPORT = "no-self-learning-engine-shim-import"
+RULE_WEB_ROUTE_DIRECT_NEO4J = "no-web-route-direct-neo4j-driver"
+RULE_DIRECT_LLM_ENGINE = "no-business-direct-llm-engine"
+RULE_SEMANTIC_GRAPH_DUAL_ENTRYPOINTS = "no-dual-semantic-graph-entrypoints"
+
+SEMANTIC_GRAPH_CANONICAL_IMPORT = "src.analysis.semantic_graph"
+SEMANTIC_GRAPH_LEGACY_IMPORT = "src.semantic_modeling.semantic_graph_builder"
+SEMANTIC_GRAPH_MAIN_CHAIN_PATHS: dict[str, str] = {
+    "src/research/module_pipeline.py": "legacy 5-module chain must use SemanticGraphService facade",
+    "src/research/research_pipeline.py": "runtime module factory must resolve the facade, not mixed builders",
+}
+
+ALLOWED_GRAPH_DATABASE_DRIVER_CALLS: dict[str, str] = {
+    "src/storage/neo4j_driver.py": "storage adapter owns Neo4j driver construction",
+}
+ALLOWED_LLM_ENGINE_INSTANTIATION: dict[str, str] = {
+    "src/infra/llm_service.py": "LLM service factory owns concrete engine construction",
+    "src/llm/llm_engine.py": "LLM engine module may create its own fallback instance",
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Helper
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def _collect_imports(filepath: Path) -> list[str]:
     """Return all imported module names from a Python file."""
@@ -61,9 +85,242 @@ def _collect_all_names_in_source(filepath: Path) -> str:
     return filepath.read_text(encoding="utf-8")
 
 
+@dataclass(frozen=True)
+class ArchitectureViolation:
+    rule_id: str
+    path: str
+    line: int
+    message: str
+
+
+def scan_architecture_violations(src_root: Path = _SRC) -> list[ArchitectureViolation]:
+    violations: list[ArchitectureViolation] = []
+    for file_path in _iter_python_files(src_root):
+        relative_path = file_path.relative_to(_WORKSPACE).as_posix()
+        tree = ast.parse(file_path.read_text(encoding="utf-8"), filename=str(file_path))
+        violations.extend(_scan_self_learning_shim_imports(tree, relative_path))
+        violations.extend(_scan_graph_database_driver_calls(tree, relative_path))
+        violations.extend(_scan_llm_engine_instantiation(tree, relative_path))
+        violations.extend(_scan_semantic_graph_dual_entrypoints(tree, relative_path))
+    return violations
+
+
+def _iter_python_files(src_root: Path) -> Iterable[Path]:
+    return sorted(
+        path for path in src_root.rglob("*.py") if "__pycache__" not in path.parts
+    )
+
+
+def _scan_self_learning_shim_imports(
+    tree: ast.AST,
+    relative_path: str,
+) -> list[ArchitectureViolation]:
+    violations: list[ArchitectureViolation] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module == "src.learning.self_learning_engine":
+                violations.append(
+                    ArchitectureViolation(
+                        RULE_SELF_LEARNING_SHIM_IMPORT,
+                        relative_path,
+                        node.lineno,
+                        "business code must use the learning service/gateway, not the shim",
+                    )
+                )
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "src.learning.self_learning_engine":
+                    violations.append(
+                        ArchitectureViolation(
+                            RULE_SELF_LEARNING_SHIM_IMPORT,
+                            relative_path,
+                            node.lineno,
+                            "business code must use the learning service/gateway, not the shim",
+                        )
+                    )
+    return violations
+
+
+def _scan_graph_database_driver_calls(
+    tree: ast.AST,
+    relative_path: str,
+) -> list[ArchitectureViolation]:
+    violations: list[ArchitectureViolation] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not _is_attribute_call(node.func, "GraphDatabase", "driver"):
+            continue
+        if relative_path in ALLOWED_GRAPH_DATABASE_DRIVER_CALLS:
+            continue
+        rule_message = "web routes and business code must use storage graph adapters"
+        if relative_path.startswith("src/web/routes/"):
+            rule_message = "web routes must not open Neo4j drivers directly"
+        violations.append(
+            ArchitectureViolation(
+                RULE_WEB_ROUTE_DIRECT_NEO4J,
+                relative_path,
+                node.lineno,
+                rule_message,
+            )
+        )
+    return violations
+
+
+def _scan_llm_engine_instantiation(
+    tree: ast.AST,
+    relative_path: str,
+) -> list[ArchitectureViolation]:
+    violations: list[ArchitectureViolation] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not _is_name_or_attribute_call(node.func, "LLMEngine"):
+            continue
+        if relative_path in ALLOWED_LLM_ENGINE_INSTANTIATION:
+            continue
+        rule_message = "code must use the LLM gateway/service instead of LLMEngine()"
+        if relative_path.startswith("src/research/phases/"):
+            rule_message = "phase code must use the LLM gateway/service"
+        violations.append(
+            ArchitectureViolation(
+                RULE_DIRECT_LLM_ENGINE,
+                relative_path,
+                node.lineno,
+                rule_message,
+            )
+        )
+    return violations
+
+
+def _scan_semantic_graph_dual_entrypoints(
+    tree: ast.AST,
+    relative_path: str,
+) -> list[ArchitectureViolation]:
+    if relative_path not in SEMANTIC_GRAPH_MAIN_CHAIN_PATHS:
+        return []
+
+    references = _collect_module_references(tree)
+    canonical_lines = references.get(SEMANTIC_GRAPH_CANONICAL_IMPORT) or []
+    legacy_lines = references.get(SEMANTIC_GRAPH_LEGACY_IMPORT) or []
+    if not canonical_lines or not legacy_lines:
+        return []
+
+    return [
+        ArchitectureViolation(
+            RULE_SEMANTIC_GRAPH_DUAL_ENTRYPOINTS,
+            relative_path,
+            min(legacy_lines),
+            "main chain must use SemanticGraphService facade instead of mixed graph builders",
+        )
+    ]
+
+
+def _collect_module_references(tree: ast.AST) -> dict[str, list[int]]:
+    references: dict[str, list[int]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                references.setdefault(alias.name, []).append(node.lineno)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            references.setdefault(node.module, []).append(node.lineno)
+        elif isinstance(node, ast.Call) and _is_name_or_attribute_call(
+            node.func, "_try_import"
+        ):
+            if (
+                node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                references.setdefault(node.args[0].value, []).append(node.lineno)
+    return references
+
+
+def _is_attribute_call(func: ast.AST, owner_name: str, attribute_name: str) -> bool:
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == attribute_name
+        and isinstance(func.value, ast.Name)
+        and func.value.id == owner_name
+    )
+
+
+def _is_name_or_attribute_call(func: ast.AST, call_name: str) -> bool:
+    if isinstance(func, ast.Name):
+        return func.id == call_name
+    return isinstance(func, ast.Attribute) and func.attr == call_name
+
+
+def _format_architecture_violations(
+    violations: Iterable[ArchitectureViolation],
+) -> str:
+    lines = [_format_architecture_violation(violation) for violation in violations]
+    if not lines:
+        return ""
+    allowance_notes = [
+        "Allowed GraphDatabase.driver exceptions:",
+        *_format_allowance_notes(ALLOWED_GRAPH_DATABASE_DRIVER_CALLS),
+        "Allowed LLMEngine exceptions:",
+        *_format_allowance_notes(ALLOWED_LLM_ENGINE_INSTANTIATION),
+    ]
+    return "\n".join([*lines, "", *allowance_notes])
+
+
+def _format_architecture_violation(violation: ArchitectureViolation) -> str:
+    return f"{violation.path}:{violation.line} {violation.rule_id} {violation.message}"
+
+
+def _format_allowance_notes(allowance: Mapping[str, str]) -> list[str]:
+    if not allowance:
+        return ["  none"]
+    return [f"  {path}: {reason}" for path, reason in sorted(allowance.items())]
+
+
+class TestOldBypassRegressionGuard(unittest.TestCase):
+    """Guard #39: 禁止旧旁路通过业务层重新复活。"""
+
+    def test_no_old_bypass_violations(self):
+        violations = scan_architecture_violations()
+
+        self.assertEqual([], violations, _format_architecture_violations(violations))
+
+    def test_violation_message_includes_file_and_line(self):
+        violation = ArchitectureViolation(
+            rule_id=RULE_DIRECT_LLM_ENGINE,
+            path="src/research/phases/analyze_phase.py",
+            line=42,
+            message="phase code must use the LLM gateway/service",
+        )
+
+        self.assertEqual(
+            "src/research/phases/analyze_phase.py:42 "
+            "no-business-direct-llm-engine phase code must use the LLM gateway/service",
+            _format_architecture_violation(violation),
+        )
+
+    def test_semantic_graph_dual_entrypoint_violation_includes_file_and_line(self):
+        tree = ast.parse(
+            "from src.analysis.semantic_graph import SemanticGraphService\n"
+            "from src.semantic_modeling.semantic_graph_builder import SemanticGraphBuilder\n"
+        )
+
+        violations = _scan_semantic_graph_dual_entrypoints(
+            tree,
+            "src/research/module_pipeline.py",
+        )
+
+        self.assertEqual(1, len(violations))
+        self.assertEqual(RULE_SEMANTIC_GRAPH_DUAL_ENTRYPOINTS, violations[0].rule_id)
+        self.assertEqual(
+            "src/research/module_pipeline.py:2",
+            _format_architecture_violation(violations[0]).split()[0],
+        )
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Guard #1 — Web 层不得直接导入 cycle 层
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestWebLayerNoCycleImport(unittest.TestCase):
     """src/web/routes/ 和 src/web/ops/ 下所有文件不得 import src.cycle。"""
@@ -93,6 +350,7 @@ class TestWebLayerNoCycleImport(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════
 # Guard #2 — 已删除的 legacy store 符号不得复现
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestNoLegacyStoreResurrection(unittest.TestCase):
     """src/ 下不得出现 get_legacy_research_store / LegacyResearchRuntimeStore。"""
@@ -126,6 +384,7 @@ class TestNoLegacyStoreResurrection(unittest.TestCase):
 # Guard #3 — cycle_research_session.py 必须保持薄包装
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class TestDemoWrapperStaysThin(unittest.TestCase):
     """cycle_research_session.py 行数不超限，且只做参数透传。"""
 
@@ -134,13 +393,13 @@ class TestDemoWrapperStaysThin(unittest.TestCase):
 
     # 这些模式一旦出现意味着 demo wrapper 重新长回业务逻辑
     _FORBIDDEN_PATTERNS = (
-        "output/research_session_",        # 直写 session 文件
+        "output/research_session_",  # 直写 session 文件
         "export_research_session_reports",  # 导出逻辑回流
-        "generated_by",                    # demo 来源标记
-        "session_result[",                 # DTO 字段直写
-        "session_result.update",           # DTO 组装
-        '["status"]',                      # 本地 status 组装
-        "open(",                           # 文件 IO 回流
+        "generated_by",  # demo 来源标记
+        "session_result[",  # DTO 字段直写
+        "session_result.update",  # DTO 组装
+        '["status"]',  # 本地 status 组装
+        "open(",  # 文件 IO 回流
     )
 
     def test_line_count_within_budget(self):
@@ -156,8 +415,10 @@ class TestDemoWrapperStaysThin(unittest.TestCase):
         """唯一允许的业务导入是 ResearchRuntimeService。"""
         modules = _collect_imports(self._SESSION_FILE)
         business_imports = [
-            m for m in modules
-            if m.startswith("src.") and m != "src.orchestration.research_runtime_service"
+            m
+            for m in modules
+            if m.startswith("src.")
+            and m != "src.orchestration.research_runtime_service"
         ]
         self.assertEqual(
             business_imports,
@@ -174,6 +435,7 @@ class TestDemoWrapperStaysThin(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════
 # Guard #4 — research_utils.py 只追加环境路径
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestResearchUtilsCanonicalBaseline(unittest.TestCase):
     """research_utils.py 的 observe/publish 默认值必须基于 canonical 基线。"""
@@ -220,6 +482,7 @@ class TestResearchUtilsCanonicalBaseline(unittest.TestCase):
 # Guard #5 — runtime profile 嵌入 canonical 默认值
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class TestSharedRuntimeProfilesCanonical(unittest.TestCase):
     """_SHARED_RUNTIME_PROFILES 中每个 profile 都必须引用 canonical 基线。"""
 
@@ -228,6 +491,7 @@ class TestSharedRuntimeProfilesCanonical(unittest.TestCase):
             _SHARED_RUNTIME_PROFILES,
             CANONICAL_OBSERVE_DEFAULTS,
         )
+
         for name, profile in _SHARED_RUNTIME_PROFILES.items():
             ctx = profile.get("default_observe_context", {})
             for key, val in CANONICAL_OBSERVE_DEFAULTS.items():
@@ -242,6 +506,7 @@ class TestSharedRuntimeProfilesCanonical(unittest.TestCase):
             _SHARED_RUNTIME_PROFILES,
             CANONICAL_PUBLISH_DEFAULTS,
         )
+
         for name, profile in _SHARED_RUNTIME_PROFILES.items():
             ctx = profile.get("default_publish_context", {})
             for key, val in CANONICAL_PUBLISH_DEFAULTS.items():
@@ -255,6 +520,7 @@ class TestSharedRuntimeProfilesCanonical(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════
 # Guard #6 — job_manager / research_job_runner 边界约束
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestJobManagerBoundary(unittest.TestCase):
     """job_manager.py 仅负责任务生命周期、SSE 推送与调度协调。"""
@@ -358,6 +624,7 @@ class TestResearchJobRunnerBoundary(unittest.TestCase):
 # Guard #7 — Web 层不得散落 runtime profile 默认值
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class TestNoScatteredProfileDefaults(unittest.TestCase):
     """routes/ 和 ops/ 下所有文件不得出现研究配置常量或硬编码 phase list。"""
 
@@ -402,12 +669,15 @@ class TestNoScatteredProfileDefaults(unittest.TestCase):
             for mod in _collect_imports(fpath):
                 if "research_pipeline" in mod:
                     violations.append(f"{fpath.relative_to(_WORKSPACE)}: {mod}")
-        self.assertEqual(violations, [], f"route 直接导入 ResearchPipeline: {violations}")
+        self.assertEqual(
+            violations, [], f"route 直接导入 ResearchPipeline: {violations}"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Guard #8 — 结构化存储主写路径收口 + 一致性合同不可绕过
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestStorageConvergenceGuard(unittest.TestCase):
     """Guard #8: 结构化主写路径经由 StorageBackendFactory + TransactionCoordinator。
@@ -421,74 +691,127 @@ class TestStorageConvergenceGuard(unittest.TestCase):
 
     def test_persist_structured_uses_factory_transaction(self):
         """_persist_result_structured 必须调用 factory.transaction()。"""
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
-        self.assertIn("factory.transaction()", source,
-                       "_persist_result_structured 未使用 factory.transaction()")
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "factory.transaction()",
+            source,
+            "_persist_result_structured 未使用 factory.transaction()",
+        )
 
     def test_persist_structured_embeds_consistency_state(self):
         """storage_persistence 必须包含 consistency_state 与 eventual_consistency。"""
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
-        self.assertIn('"consistency_state": consistency_state.to_dict()', source,
-                       "storage_persistence 缺少 consistency_state.to_dict()")
-        self.assertIn('"eventual_consistency":', source,
-                       "storage_persistence 缺少 eventual_consistency 字段")
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            '"consistency_state": consistency_state.to_dict()',
+            source,
+            "storage_persistence 缺少 consistency_state.to_dict()",
+        )
+        self.assertIn(
+            '"eventual_consistency":',
+            source,
+            "storage_persistence 缺少 eventual_consistency 字段",
+        )
 
     def test_transaction_result_observation_fields(self):
         """TransactionResult 必须包含完整观测字段。"""
         from src.storage.transaction import TransactionResult
+
         r = TransactionResult(success=True)
         self.assertTrue(hasattr(r, "neo4j_error"), "缺少 neo4j_error 字段")
-        self.assertTrue(hasattr(r, "compensation_details"), "缺少 compensation_details 字段")
+        self.assertTrue(
+            hasattr(r, "compensation_details"), "缺少 compensation_details 字段"
+        )
         self.assertTrue(hasattr(r, "needs_backfill"), "缺少 needs_backfill 字段")
         self.assertTrue(hasattr(r, "storage_mode"), "缺少 storage_mode 字段")
 
     def test_monitoring_embeds_consistency_state(self):
         """monitoring._build_persistence_summary 内嵌 consistency_state。"""
         source = (_SRC / "infrastructure" / "monitoring.py").read_text(encoding="utf-8")
-        self.assertIn("consistency_state", source,
-                       "monitoring 缺少 consistency_state 嵌入")
-        self.assertIn("_get_consistency_state_dict", source,
-                       "monitoring 缺少 _get_consistency_state_dict 方法")
+        self.assertIn(
+            "consistency_state", source, "monitoring 缺少 consistency_state 嵌入"
+        )
+        self.assertIn(
+            "_get_consistency_state_dict",
+            source,
+            "monitoring 缺少 _get_consistency_state_dict 方法",
+        )
 
     def test_graph_report_includes_projection_scope(self):
         """_project_cycle_to_neo4j 返回 graph_projection_scope。"""
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
-        self.assertIn('"graph_projection_scope":', source,
-                       "graph_report 缺少 graph_projection_scope")
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            '"graph_projection_scope":',
+            source,
+            "graph_report 缺少 graph_projection_scope",
+        )
 
     def test_no_direct_neo4j_writes_in_research_main_path(self):
-        """研究主链 persist 路径不得绕过 transaction 直接写 Neo4j。
-
-        _project_cycle_to_neo4j 的 transaction 分支使用 transaction.neo4j_batch_*，
-        非 transaction 分支只用于 legacy/test；主链调用必须传 transaction。
-        """
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
-        # _persist_result_structured 调用 _project_cycle_to_neo4j 时必须传 transaction=txn
-        self.assertIn("transaction=txn", source,
-                       "_persist_result_structured 必须向 _project_cycle_to_neo4j 传递 transaction=txn")
+        """研究主链 persist 路径通过 transaction 写入 PG outbox 图投影事件。"""
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "transaction=txn",
+            source,
+            "_persist_result_structured 必须向 _project_cycle_to_neo4j 传递 transaction=txn",
+        )
+        self.assertIn(
+            "enqueue_graph_projection",
+            source,
+            "_project_cycle_to_neo4j transaction 分支必须写入 graph outbox",
+        )
+        self.assertIn(
+            '"graph_projection_mode": "outbox"',
+            source,
+            "graph_report 必须暴露 outbox 投影模式",
+        )
 
     def test_storage_factory_lazy_cached_not_per_call(self):
         """_persist_result_structured 必须使用缓存的 factory 而非每次新建。"""
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
-        self.assertIn("_get_storage_factory()", source,
-                       "_persist_result_structured 应通过 _get_storage_factory() 获取缓存 factory")
-        self.assertIn("self._storage_factory", source,
-                       "PhaseOrchestrator 应持有 _storage_factory 缓存字段")
-        self.assertIn("close_storage_factory", source,
-                       "PhaseOrchestrator 应提供 close_storage_factory() 显式释放方法")
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "_get_storage_factory()",
+            source,
+            "_persist_result_structured 应通过 _get_storage_factory() 获取缓存 factory",
+        )
+        self.assertIn(
+            "self._storage_factory",
+            source,
+            "PhaseOrchestrator 应持有 _storage_factory 缓存字段",
+        )
+        self.assertIn(
+            "close_storage_factory",
+            source,
+            "PhaseOrchestrator 应提供 close_storage_factory() 显式释放方法",
+        )
 
     def test_no_raw_sqlite3_in_persist_path(self):
         """phase_orchestrator 持久化路径不得绕过 factory 直连 sqlite3。"""
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
-        self.assertNotIn("import sqlite3", source,
-                         "phase_orchestrator 不应直接 import sqlite3，所有持久化经由 factory")
-        self.assertNotIn("sqlite3.connect", source,
-                         "phase_orchestrator 不应直接调用 sqlite3.connect")
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn(
+            "import sqlite3",
+            source,
+            "phase_orchestrator 不应直接 import sqlite3，所有持久化经由 factory",
+        )
+        self.assertNotIn(
+            "sqlite3.connect", source, "phase_orchestrator 不应直接调用 sqlite3.connect"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Guard #9 — 快照 backfill_dependency 标注不可缺失
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestSnapshotBackfillAnnotationGuard(unittest.TestCase):
     """Guard #9: 快照 backfill_dependency 标注完整性。
@@ -501,41 +824,58 @@ class TestSnapshotBackfillAnnotationGuard(unittest.TestCase):
 
     def test_snapshot_includes_backfill_dependency(self):
         """get_full_snapshot 必须返回 backfill_dependency 字段。"""
-        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(encoding="utf-8")
-        self.assertIn('backfill_dependency', source,
-                       "get_full_snapshot 缺少 backfill_dependency")
-        self.assertIn('_classify_backfill_dependency', source,
-                       "缺少 _classify_backfill_dependency 方法")
+        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "backfill_dependency", source, "get_full_snapshot 缺少 backfill_dependency"
+        )
+        self.assertIn(
+            "_classify_backfill_dependency",
+            source,
+            "缺少 _classify_backfill_dependency 方法",
+        )
 
     def test_backfill_dependency_covers_three_groups(self):
         """_classify_backfill_dependency 必须标注三组字段。"""
-        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(encoding="utf-8")
+        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(
+            encoding="utf-8"
+        )
         for group in ["observe_philology", "version_lineages", "graph_projection"]:
-            self.assertIn(f'"{group}":', source,
-                           f"backfill_dependency 缺少 {group} 分组")
+            self.assertIn(
+                f'"{group}":', source, f"backfill_dependency 缺少 {group} 分组"
+            )
 
     def test_backfill_dependency_includes_depends_on(self):
         """每组标注必须包含 depends_on 字段。"""
-        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(encoding="utf-8")
-        self.assertIn('"depends_on":', source,
-                       "backfill_dependency 缺少 depends_on")
+        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"depends_on":', source, "backfill_dependency 缺少 depends_on")
 
     def test_backfill_tool_annotates_fields_written(self):
         """backfill 工具输出必须包含 fields_written。"""
-        source = (_WORKSPACE / "tools" / "backfill_research_session_nodes.py").read_text(encoding="utf-8")
-        self.assertIn("fields_written", source,
-                       "backfill 工具缺少 fields_written 标注")
+        source = (
+            _WORKSPACE / "tools" / "backfill_research_session_nodes.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("fields_written", source, "backfill 工具缺少 fields_written 标注")
 
     def test_classify_eventual_consistency_exists(self):
         """_classify_eventual_consistency 必须存在于 phase_orchestrator。"""
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
-        self.assertIn("_classify_eventual_consistency", source,
-                       "缺少 _classify_eventual_consistency 方法")
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "_classify_eventual_consistency",
+            source,
+            "缺少 _classify_eventual_consistency 方法",
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Guard #10 — Schema 完整性：ORM 表与 Alembic 迁移覆盖一致
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestSchemaCompletenessGuard(unittest.TestCase):
     """Guard #10: 所有 ORM 表必须有对应的 Alembic migration 覆盖。
@@ -559,24 +899,33 @@ class TestSchemaCompletenessGuard(unittest.TestCase):
             for p in versions_dir.glob("*.py")
             if not p.name.startswith("__")
         )
-        covered_tables = set(re.findall(r"op\.create_table\(\s*['\"](\w+)['\"]", migration_sources))
+        covered_tables = set(
+            re.findall(r"op\.create_table\(\s*['\"](\w+)['\"]", migration_sources)
+        )
         missing = sorted(expected_tables - covered_tables)
         self.assertEqual(
-            missing, [],
+            missing,
+            [],
             f"以下 ORM 表缺少 Alembic migration 覆盖: {missing}",
         )
 
     def test_init_db_calls_schema_completeness_check(self):
         """DatabaseManager.init_db 必须调用 _verify_schema_completeness。"""
-        source = (_SRC / "infrastructure" / "persistence.py").read_text(encoding="utf-8")
-        self.assertIn("_verify_schema_completeness", source,
-                       "init_db 缺少 schema 完整性验证")
+        source = (_SRC / "infrastructure" / "persistence.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "_verify_schema_completeness", source, "init_db 缺少 schema 完整性验证"
+        )
 
     def test_factory_reports_schema_completeness(self):
         """backend_factory.initialize 报告中必须包含 schema_completeness。"""
         source = (_SRC / "storage" / "backend_factory.py").read_text(encoding="utf-8")
-        self.assertIn("schema_completeness", source,
-                       "factory initialize 报告缺少 schema_completeness")
+        self.assertIn(
+            "schema_completeness",
+            source,
+            "factory initialize 报告缺少 schema_completeness",
+        )
 
     def test_sqlite_init_creates_all_orm_tables(self):
         """SQLite 模式下 init_db 后所有 ORM 表都存在。"""
@@ -586,19 +935,24 @@ class TestSchemaCompletenessGuard(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             import os
+
             db_path = os.path.join(tmp, "test_schema.db")
             mgr = DatabaseManager(f"sqlite:///{db_path}")
             mgr.init_db()
             report = mgr.get_schema_completeness_report()
             mgr.close()
-            self.assertEqual(report["status"], "ok",
-                             f"SQLite schema 不完整: {report.get('missing_tables')}")
+            self.assertEqual(
+                report["status"],
+                "ok",
+                f"SQLite schema 不完整: {report.get('missing_tables')}",
+            )
             self.assertEqual(report["missing_tables"], [])
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Guard #11 — RuntimeService ↔ Factory 生命周期绑定
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestRuntimeServiceFactoryLifecycleGuard(unittest.TestCase):
     """Guard #11: ResearchRuntimeService 必须管理 StorageBackendFactory 生命周期。
@@ -613,48 +967,65 @@ class TestRuntimeServiceFactoryLifecycleGuard(unittest.TestCase):
 
     def test_runtime_service_owns_factory_attribute(self):
         """ResearchRuntimeService 必须声明 _storage_factory 属性。"""
-        source = (_SRC / "orchestration" / "research_runtime_service.py").read_text(encoding="utf-8")
+        source = (_SRC / "orchestration" / "research_runtime_service.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("self._storage_factory", source)
 
     def test_runtime_service_exposes_consistency_state(self):
         """ResearchRuntimeService 必须暴露 get_consistency_state 方法。"""
-        source = (_SRC / "orchestration" / "research_runtime_service.py").read_text(encoding="utf-8")
+        source = (_SRC / "orchestration" / "research_runtime_service.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("def get_consistency_state(self)", source)
 
     def test_runtime_service_has_close_method(self):
         """ResearchRuntimeService 必须有 close() 释放 factory 资源。"""
-        source = (_SRC / "orchestration" / "research_runtime_service.py").read_text(encoding="utf-8")
+        source = (_SRC / "orchestration" / "research_runtime_service.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("def close(self)", source)
 
     def test_pipeline_accepts_storage_factory(self):
         """ResearchPipeline.__init__ 必须接受 storage_factory 关键字参数。"""
-        source = (_SRC / "research" / "research_pipeline.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "research_pipeline.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("storage_factory", source)
 
     def test_orchestrator_accepts_storage_factory(self):
         """PhaseOrchestrator.__init__ 必须接受 storage_factory 关键字参数。"""
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("storage_factory: Any = None", source)
 
     def test_orchestrator_tracks_factory_ownership(self):
         """PhaseOrchestrator 必须跟踪 factory 所有权以避免双重 close。"""
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("_storage_factory_owned", source)
 
     def test_pipeline_injects_factory_to_orchestrator(self):
         """ResearchPipeline 必须将 storage_factory 传递给 PhaseOrchestrator。"""
-        source = (_SRC / "research" / "research_pipeline.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "research_pipeline.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("storage_factory=self._injected_storage_factory", source)
 
     def test_runtime_service_injects_factory_to_pipeline(self):
         """ResearchRuntimeService.run 创建 pipeline 时必须传入 storage_factory。"""
-        source = (_SRC / "orchestration" / "research_runtime_service.py").read_text(encoding="utf-8")
+        source = (_SRC / "orchestration" / "research_runtime_service.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("storage_factory=self._storage_factory", source)
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Guard #12 — 事务观测与收敛合同
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestTransactionObservabilityGuard(unittest.TestCase):
     """Guard #12: TransactionCoordinator 必须提供阶段耗时、观测摘要、observer 协议。
@@ -672,7 +1043,12 @@ class TestTransactionObservabilityGuard(unittest.TestCase):
     def test_transaction_result_has_timing_fields(self):
         """TransactionResult 必须包含阶段耗时字段。"""
         source = (_SRC / "storage" / "transaction.py").read_text(encoding="utf-8")
-        for field_name in ("pg_flush_ms", "neo4j_execute_ms", "pg_commit_ms", "total_ms"):
+        for field_name in (
+            "pg_flush_ms",
+            "neo4j_execute_ms",
+            "pg_commit_ms",
+            "total_ms",
+        ):
             self.assertIn(field_name, source, f"TransactionResult 缺少 {field_name}")
 
     def test_transaction_result_has_observation_dict(self):
@@ -703,18 +1079,23 @@ class TestTransactionObservabilityGuard(unittest.TestCase):
 
     def test_orchestrator_surfaces_transaction_observation(self):
         """_persist_result_structured 必须嵌入 transaction_observation。"""
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("transaction_observation", source)
 
     def test_orchestrator_logs_needs_backfill(self):
         """_persist_result_structured 必须在 needs_backfill 时记录警告。"""
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("needs_backfill", source)
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Guard #13 — 插件持久化路径收口到 StorageBackendFactory
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestPluginStorageConvergenceGuard(unittest.TestCase):
     """Guard #13: 论文插件持久化已收口到 StorageBackendFactory + TransactionCoordinator。
@@ -729,22 +1110,30 @@ class TestPluginStorageConvergenceGuard(unittest.TestCase):
 
     def test_cycle_persist_no_unified_storage_driver_import(self):
         """cycle_storage_persist 不得引用 UnifiedStorageDriver。"""
-        source = (_SRC / "cycle" / "cycle_storage_persist.py").read_text(encoding="utf-8")
+        source = (_SRC / "cycle" / "cycle_storage_persist.py").read_text(
+            encoding="utf-8"
+        )
         self.assertNotIn("UnifiedStorageDriver", source)
 
     def test_cycle_persist_no_storage_driver_module_import(self):
         """cycle_storage_persist 不得直接 import storage_driver 模块。"""
-        source = (_SRC / "cycle" / "cycle_storage_persist.py").read_text(encoding="utf-8")
+        source = (_SRC / "cycle" / "cycle_storage_persist.py").read_text(
+            encoding="utf-8"
+        )
         self.assertNotIn("storage_driver", source)
 
     def test_cycle_persist_uses_backend_factory(self):
         """cycle_storage_persist 必须通过 StorageBackendFactory 存储。"""
-        source = (_SRC / "cycle" / "cycle_storage_persist.py").read_text(encoding="utf-8")
+        source = (_SRC / "cycle" / "cycle_storage_persist.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("StorageBackendFactory", source)
 
     def test_cycle_persist_uses_transaction(self):
         """cycle_storage_persist 必须使用 factory.transaction() 保证原子性。"""
-        source = (_SRC / "cycle" / "cycle_storage_persist.py").read_text(encoding="utf-8")
+        source = (_SRC / "cycle" / "cycle_storage_persist.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("factory.transaction()", source)
 
     def test_unified_storage_driver_is_deprecated(self):
@@ -759,7 +1148,8 @@ class TestPluginStorageConvergenceGuard(unittest.TestCase):
         for py_file in research_dir.rglob("*.py"):
             source = py_file.read_text(encoding="utf-8")
             self.assertNotIn(
-                "UnifiedStorageDriver", source,
+                "UnifiedStorageDriver",
+                source,
                 f"{py_file.relative_to(_WORKSPACE)} 不应引用 UnifiedStorageDriver",
             )
 
@@ -769,7 +1159,8 @@ class TestPluginStorageConvergenceGuard(unittest.TestCase):
         for py_file in orch_dir.rglob("*.py"):
             source = py_file.read_text(encoding="utf-8")
             self.assertNotIn(
-                "UnifiedStorageDriver", source,
+                "UnifiedStorageDriver",
+                source,
                 f"{py_file.relative_to(_WORKSPACE)} 不应引用 UnifiedStorageDriver",
             )
 
@@ -777,6 +1168,7 @@ class TestPluginStorageConvergenceGuard(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════
 # Guard #14 — SelfLearningEngine 安全持久化与接线契约
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestSelfLearningEngineGuard(unittest.TestCase):
     """Guard #14: SelfLearningEngine 不使用 pickle 反序列化，使用 JSON 持久化。
@@ -791,52 +1183,68 @@ class TestSelfLearningEngineGuard(unittest.TestCase):
     - _persist_cycle_learning_feedback 落库 learning_feedback_library
     """
 
+    _LEGACY_ENGINE = (
+        _SRC / "learning" / "policy_adjuster_internals" / "self_learning_legacy.py"
+    )
+
     def test_no_toplevel_pickle_load(self):
-        """self_learning_engine.py 不得在顶层 import pickle。"""
-        source = (_SRC / "learning" / "self_learning_engine.py").read_text(encoding="utf-8")
+        """legacy implementation 不得在顶层 import pickle。"""
+        source = self._LEGACY_ENGINE.read_text(encoding="utf-8")
         # 仅检查顶层（无缩进）import，允许方法内局部 import（如迁移用途）
         import_lines = [
-            line for line in source.splitlines()
+            line
+            for line in source.splitlines()
             if not line.startswith((" ", "\t"))
-            and (line.strip().startswith("import pickle") or line.strip().startswith("from pickle"))
+            and (
+                line.strip().startswith("import pickle")
+                or line.strip().startswith("from pickle")
+            )
         ]
-        self.assertEqual(import_lines, [], "self_learning_engine.py 不应顶层 import pickle")
+        self.assertEqual(
+            import_lines, [], "self_learning_engine.py 不应顶层 import pickle"
+        )
 
     def test_save_uses_json(self):
         """_save_learning_data 必须使用 json.dump。"""
-        source = (_SRC / "learning" / "self_learning_engine.py").read_text(encoding="utf-8")
+        source = self._LEGACY_ENGINE.read_text(encoding="utf-8")
         self.assertIn("json.dump(", source)
 
     def test_load_uses_json(self):
         """_load_learning_data 必须使用 json.load。"""
-        source = (_SRC / "learning" / "self_learning_engine.py").read_text(encoding="utf-8")
+        source = self._LEGACY_ENGINE.read_text(encoding="utf-8")
         self.assertIn("json.load(", source)
 
     def test_improvement_log_has_cap(self):
         """model_improvement_log 必须有上限。"""
-        source = (_SRC / "learning" / "self_learning_engine.py").read_text(encoding="utf-8")
+        source = self._LEGACY_ENGINE.read_text(encoding="utf-8")
         self.assertIn("_MAX_IMPROVEMENT_LOG", source)
 
     def test_pipeline_bootstraps_learning_engine(self):
         """ResearchPipeline 必须通过 _bootstrap_self_learning_engine 装配学习引擎。"""
-        source = (_SRC / "research" / "research_pipeline.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "research_pipeline.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("_bootstrap_self_learning_engine", source)
         self.assertIn("self.self_learning_engine", source)
 
     def test_reflect_phase_feeds_learning_engine(self):
         """reflect 阶段必须调用 learn_from_cycle_reflection。"""
-        source = (_SRC / "research" / "phases" / "reflect_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "reflect_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("learn_from_cycle_reflection", source)
 
     def test_orchestrator_persists_learning_feedback(self):
         """phase_orchestrator 必须调用 _persist_cycle_learning_feedback。"""
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("_persist_cycle_learning_feedback", source)
         self.assertIn("replace_learning_feedback_library", source)
 
     def test_deferred_save_via_dirty_flag(self):
         """_save_learning_data 使用 _save_dirty 延迟写入。"""
-        source = (_SRC / "learning" / "self_learning_engine.py").read_text(encoding="utf-8")
+        source = self._LEGACY_ENGINE.read_text(encoding="utf-8")
         self.assertIn("_save_dirty", source)
 
 
@@ -857,7 +1265,9 @@ class TestLLMUnifiedEntryGuard(unittest.TestCase):
 
     def test_cycle_plugin_no_raw_llm_engine(self):
         """cycle_plugin_workflows.py 不得直接构造 LLMEngine()。"""
-        source = (_SRC / "cycle" / "cycle_plugin_workflows.py").read_text(encoding="utf-8")
+        source = (_SRC / "cycle" / "cycle_plugin_workflows.py").read_text(
+            encoding="utf-8"
+        )
         self.assertNotIn(
             '"LLMEngine")()',
             source,
@@ -866,18 +1276,24 @@ class TestLLMUnifiedEntryGuard(unittest.TestCase):
 
     def test_cycle_plugin_uses_get_llm_service(self):
         """cycle_plugin_workflows.py 通过 get_llm_service 获取 LLM 实例。"""
-        source = (_SRC / "cycle" / "cycle_plugin_workflows.py").read_text(encoding="utf-8")
+        source = (_SRC / "cycle" / "cycle_plugin_workflows.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("get_llm_service", source)
 
     def test_arxiv_helper_uses_generate(self):
         """arxiv_quick_helper 翻译路径必须优先使用 generate() 而非 query()。"""
-        source = (_SRC / "research" / "arxiv_quick_helper.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "arxiv_quick_helper.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn('hasattr(llm_engine, "generate")', source)
         self.assertIn("llm_engine.generate(", source)
 
     def test_google_scholar_helper_prefers_generate(self):
         """google_scholar_helper LLM 调用优先 generate()。"""
-        source = (_SRC / "research" / "google_scholar_helper.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "google_scholar_helper.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("llm_engine.generate(", source)
 
     def test_get_llm_service_returns_cached(self):
@@ -960,7 +1376,9 @@ class TestResearchRuntimeServiceMainlineGuard(unittest.TestCase):
 
     def test_research_orchestrator_init_deprecated(self):
         """ResearchOrchestrator.__init__ 必须发出 DeprecationWarning。"""
-        source = (_SRC / "orchestration" / "research_orchestrator.py").read_text(encoding="utf-8")
+        source = (_SRC / "orchestration" / "research_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         idx_init = source.index("def __init__(self, config")
         next_def = source.index("\n    def ", idx_init + 1)
         init_body = source[idx_init:next_def]
@@ -968,14 +1386,18 @@ class TestResearchRuntimeServiceMainlineGuard(unittest.TestCase):
 
     def test_run_research_deprecated(self):
         """run_research() 必须发出 DeprecationWarning。"""
-        source = (_SRC / "orchestration" / "research_orchestrator.py").read_text(encoding="utf-8")
+        source = (_SRC / "orchestration" / "research_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         idx_func = source.index("def run_research(")
         func_body = source[idx_func:]
         self.assertIn("DeprecationWarning", func_body)
 
     def test_real_observe_smoke_no_direct_pipeline(self):
         """real_observe_smoke 不得直接导入 ResearchPipeline。"""
-        source = (_SRC / "research" / "real_observe_smoke.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "real_observe_smoke.py").read_text(
+            encoding="utf-8"
+        )
         self.assertNotIn(
             "from src.research.research_pipeline import",
             source,
@@ -984,18 +1406,24 @@ class TestResearchRuntimeServiceMainlineGuard(unittest.TestCase):
 
     def test_real_observe_smoke_uses_runtime_service(self):
         """real_observe_smoke 必须通过 ResearchRuntimeService 执行。"""
-        source = (_SRC / "research" / "real_observe_smoke.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "real_observe_smoke.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("ResearchRuntimeService", source)
 
     def test_cycle_research_session_uses_runtime_service(self):
         """cycle_research_session 必须通过 ResearchRuntimeService 执行。"""
-        source = (_SRC / "cycle" / "cycle_research_session.py").read_text(encoding="utf-8")
+        source = (_SRC / "cycle" / "cycle_research_session.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("ResearchRuntimeService", source)
         self.assertNotIn("ResearchPipeline", source)
 
     def test_web_job_runner_uses_runtime_service(self):
         """Web research_job_runner 必须通过 ResearchRuntimeService 执行。"""
-        source = (_SRC / "web" / "ops" / "research_job_runner.py").read_text(encoding="utf-8")
+        source = (_SRC / "web" / "ops" / "research_job_runner.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("ResearchRuntimeService", source)
         self.assertNotIn("ResearchPipeline", source)
 
@@ -1032,7 +1460,11 @@ class TestResearchRuntimeServiceMainlineGuard(unittest.TestCase):
             # 排除注释和字符串中的引用 — 用简单行扫描
             for line_no, line in enumerate(source.splitlines(), 1):
                 stripped = line.strip()
-                if stripped.startswith("#") or stripped.startswith('"') or stripped.startswith("'"):
+                if (
+                    stripped.startswith("#")
+                    or stripped.startswith('"')
+                    or stripped.startswith("'")
+                ):
                     continue
                 if "ResearchPipeline(" in stripped:
                     violations.append(f"{py_file.relative_to(_SRC)}:{line_no}")
@@ -1048,7 +1480,10 @@ class TestResearchRuntimeServiceMainlineGuard(unittest.TestCase):
         _PROJECT_ROOT = _SRC.parent
         scan_dirs = [_PROJECT_ROOT / "examples", _PROJECT_ROOT / "tools"]
         # tools/ 下的 _extract_observe_phase.py 和 _rebuild_observe_phase.py 仅做类型注解，不构造实例
-        _TYPE_ANNOTATION_ONLY_FILES = {"_extract_observe_phase.py", "_rebuild_observe_phase.py"}
+        _TYPE_ANNOTATION_ONLY_FILES = {
+            "_extract_observe_phase.py",
+            "_rebuild_observe_phase.py",
+        }
 
         violations = []
         for scan_dir in scan_dirs:
@@ -1062,10 +1497,16 @@ class TestResearchRuntimeServiceMainlineGuard(unittest.TestCase):
                     continue
                 for line_no, line in enumerate(source.splitlines(), 1):
                     stripped = line.strip()
-                    if stripped.startswith("#") or stripped.startswith('"') or stripped.startswith("'"):
+                    if (
+                        stripped.startswith("#")
+                        or stripped.startswith('"')
+                        or stripped.startswith("'")
+                    ):
                         continue
                     if "ResearchPipeline(" in stripped:
-                        violations.append(f"{py_file.relative_to(_PROJECT_ROOT)}:{line_no}")
+                        violations.append(
+                            f"{py_file.relative_to(_PROJECT_ROOT)}:{line_no}"
+                        )
 
         self.assertEqual(
             violations,
@@ -1134,7 +1575,9 @@ class TestRuntimeConfigAssemblerGuard(unittest.TestCase):
             next_def_pos = len(source)
         func_body = source[idx_func:next_def_pos]
         self.assertIn("request", func_body, "settings_page 应接受 request 参数")
-        self.assertIn("app.state", func_body, "settings_page 应从 app.state 获取 settings")
+        self.assertIn(
+            "app.state", func_body, "settings_page 应从 app.state 获取 settings"
+        )
 
     def test_api_dependencies_fallback_has_warning(self):
         """api/dependencies.py 的 load_settings 兜底路径应有 warning 日志。"""
@@ -1161,15 +1604,24 @@ class TestRuntimeConfigAssemblerGuard(unittest.TestCase):
                 stripped = line.strip()
                 if stripped.startswith("#"):
                     continue
-                if "safe_load(" in stripped and "secret" in source[max(0, source.find(stripped) - 200):source.find(stripped)].lower():
+                if (
+                    "safe_load(" in stripped
+                    and "secret"
+                    in source[
+                        max(0, source.find(stripped) - 200) : source.find(stripped)
+                    ].lower()
+                ):
                     violations.append(f"{py_file.relative_to(_SRC)}:{line_no}")
                     break  # 每个文件只报一次
-        self.assertEqual(violations, [], f"以下 web 文件直接读取 secrets YAML: {violations}")
+        self.assertEqual(
+            violations, [], f"以下 web 文件直接读取 secrets YAML: {violations}"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Guard #19 — PG/Neo4j 事务边界、降级观测与回填治理
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestPgNeo4jTxnDegradationBackfillGuard(unittest.TestCase):
     """Guard #19: PG/Neo4j 事务边界收敛、降级状态可观测、回填元数据标注。"""
@@ -1181,30 +1633,45 @@ class TestPgNeo4jTxnDegradationBackfillGuard(unittest.TestCase):
         source = (_SRC / "api" / "app.py").read_text(encoding="utf-8")
         # 旧代码: return {"status": "ok" ...} — 无降级检查
         # 新代码: 包含 "degraded" 关键词作为降级状态
-        self.assertIn("degraded", source,
-                       "api/app.py /health 端点必须包含 'degraded' 降级状态分支")
+        self.assertIn(
+            "degraded",
+            source,
+            "api/app.py /health 端点必须包含 'degraded' 降级状态分支",
+        )
 
     def test_web_health_not_hardcoded_ok(self):
         """src/web/app.py 的 /health 端点必须包含 DB 可用性检查。"""
         source = (_SRC / "web" / "app.py").read_text(encoding="utf-8")
-        self.assertIn("degraded", source,
-                       "web/app.py /health 端点必须包含 'degraded' 降级状态分支")
+        self.assertIn(
+            "degraded",
+            source,
+            "web/app.py /health 端点必须包含 'degraded' 降级状态分支",
+        )
 
     # ---- D-2: fallback persist 路径必须标记 storage_persistence ——
 
     def test_fallback_persist_writes_storage_persistence_metadata(self):
         """_persist_result_via_factory 必须在 cycle.metadata 中写入 storage_persistence。"""
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         # 找到 _persist_result_via_factory 方法体
         idx = source.find("def _persist_result_via_factory")
         self.assertNotEqual(idx, -1, "_persist_result_via_factory 方法不存在")
-        body = source[idx:idx + 3000]
-        self.assertIn("storage_persistence", body,
-                       "fallback persist 路径必须写入 storage_persistence 元数据")
-        self.assertIn("needs_backfill", body,
-                       "fallback persist 路径必须声明 needs_backfill")
-        self.assertIn("factory_fallback", body,
-                       "fallback persist 路径必须标记 mode 为 factory_fallback")
+        body = source[idx : idx + 3000]
+        self.assertIn(
+            "storage_persistence",
+            body,
+            "fallback persist 路径必须写入 storage_persistence 元数据",
+        )
+        self.assertIn(
+            "needs_backfill", body, "fallback persist 路径必须声明 needs_backfill"
+        )
+        self.assertIn(
+            "factory_fallback",
+            body,
+            "fallback persist 路径必须标记 mode 为 factory_fallback",
+        )
 
     # ---- A-2: analysis.py ORM 路径标记 needs_backfill ————————
 
@@ -1213,9 +1680,19 @@ class TestPgNeo4jTxnDegradationBackfillGuard(unittest.TestCase):
         source = (_SRC / "web" / "routes" / "analysis.py").read_text(encoding="utf-8")
         idx = source.find("def _persist_to_orm")
         self.assertNotEqual(idx, -1, "_persist_to_orm 函数不存在")
-        body = source[idx:idx + 5000]
-        self.assertIn("needs_backfill", body,
-                       "_persist_to_orm 必须在返回值中标注 needs_backfill")
+        body = source[idx : idx + 5000]
+        self.assertIn(
+            "needs_backfill", body, "_persist_to_orm 必须在返回值中标注 needs_backfill"
+        )
+
+    def test_web_analysis_route_does_not_create_local_neo4j_driver(self):
+        """web/routes/analysis.py 不得通过本地 GraphDatabase.driver 创建 Neo4j driver。"""
+        source = (_SRC / "web" / "routes" / "analysis.py").read_text(encoding="utf-8")
+        self.assertNotIn(
+            "GraphDatabase.driver",
+            source,
+            "Web analysis route 不得直接创建 Neo4j driver，应走 StorageBackendFactory/outbox",
+        )
 
     # ---- B-2: monitoring 一致性获取失败不得静默返回 None ———————
 
@@ -1224,28 +1701,37 @@ class TestPgNeo4jTxnDegradationBackfillGuard(unittest.TestCase):
         source = (_SRC / "infrastructure" / "monitoring.py").read_text(encoding="utf-8")
         idx = source.find("def _get_consistency_state_dict")
         self.assertNotEqual(idx, -1, "_get_consistency_state_dict 方法不存在")
-        body = source[idx:idx + 1500]
+        body = source[idx : idx + 1500]
         # 不允许 except 块中直接 return None
         import re
+
         silent_none = re.search(r"except\s+Exception[^:]*:\s*\n\s*return\s+None", body)
-        self.assertIsNone(silent_none,
-                          "_get_consistency_state_dict except 块不得静默 return None，应返回降级字典")
+        self.assertIsNone(
+            silent_none,
+            "_get_consistency_state_dict except 块不得静默 return None，应返回降级字典",
+        )
 
     # ---- 主写路径必须保持 transaction() 语义 ——————————————
 
     def test_main_persist_uses_transaction_not_session_scope(self):
         """_persist_result_structured 必须使用 factory.transaction() 而非 session_scope()。"""
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         idx = source.find("def _persist_result_structured")
         self.assertNotEqual(idx, -1, "_persist_result_structured 方法不存在")
-        body = source[idx:idx + 4000]
-        self.assertIn("factory.transaction()", body,
-                       "主写路径必须使用 factory.transaction() 获取 TransactionCoordinator")
+        body = source[idx : idx + 4000]
+        self.assertIn(
+            "factory.transaction()",
+            body,
+            "主写路径必须使用 factory.transaction() 获取 TransactionCoordinator",
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Guard #20 — LLM 获取统一走 LLMGateway / CachedLLMService
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestLLMGatewayUnificationGuard(unittest.TestCase):
     """Guard #20: 禁止 src/ 和 tools/ 直接 new LLMEngine，必须通过 get_llm_service。
@@ -1281,7 +1767,8 @@ class TestLLMGatewayUnificationGuard(unittest.TestCase):
                     continue
                 # 检测 from src.llm.llm_engine import LLMEngine 或 LLMEngine(
                 if "LLMEngine(" in stripped or (
-                    "import" in stripped and "LLMEngine" in stripped
+                    "import" in stripped
+                    and "LLMEngine" in stripped
                     and "llm_service" not in stripped
                 ):
                     violations.append(f"{rel}:{line_no}: {stripped[:120]}")
@@ -1290,8 +1777,11 @@ class TestLLMGatewayUnificationGuard(unittest.TestCase):
     def test_src_no_direct_llm_engine(self):
         """src/ 业务代码不得直接 import 或实例化 LLMEngine（llm_service.py 工厂除外）。"""
         violations = self._scan_for_direct_llm_engine(_SRC, "src")
-        self.assertEqual(violations, [],
-                         f"以下 src/ 文件直接使用 LLMEngine，应改为 get_llm_service(): {violations}")
+        self.assertEqual(
+            violations,
+            [],
+            f"以下 src/ 文件直接使用 LLMEngine，应改为 get_llm_service(): {violations}",
+        )
 
     def test_tools_no_direct_llm_engine(self):
         """tools/ 脚本不得直接 import 或实例化 LLMEngine，应通过 get_llm_service()。"""
@@ -1299,22 +1789,30 @@ class TestLLMGatewayUnificationGuard(unittest.TestCase):
         if not tools_dir.exists():
             return
         violations = self._scan_for_direct_llm_engine(tools_dir, "tools")
-        self.assertEqual(violations, [],
-                         f"以下 tools/ 文件直接使用 LLMEngine，应改为 get_llm_service(): {violations}")
+        self.assertEqual(
+            violations,
+            [],
+            f"以下 tools/ 文件直接使用 LLMEngine，应改为 get_llm_service(): {violations}",
+        )
 
     def test_get_llm_service_is_canonical_entry(self):
         """src/infra/llm_service.py 必须导出 get_llm_service 函数。"""
         source = (_SRC / "infra" / "llm_service.py").read_text(encoding="utf-8")
-        self.assertIn("def get_llm_service(", source,
-                       "llm_service.py 必须定义 get_llm_service 工厂函数")
+        self.assertIn(
+            "def get_llm_service(",
+            source,
+            "llm_service.py 必须定义 get_llm_service 工厂函数",
+        )
 
     def test_cached_llm_service_wraps_engine(self):
         """CachedLLMService 必须在 llm_service.py 中定义并包含缓存逻辑。"""
         source = (_SRC / "infra" / "llm_service.py").read_text(encoding="utf-8")
-        self.assertIn("class CachedLLMService", source,
-                       "llm_service.py 必须定义 CachedLLMService 类")
-        self.assertIn("cache", source.lower(),
-                       "CachedLLMService 必须包含缓存相关逻辑")
+        self.assertIn(
+            "class CachedLLMService",
+            source,
+            "llm_service.py 必须定义 CachedLLMService 类",
+        )
+        self.assertIn("cache", source.lower(), "CachedLLMService 必须包含缓存相关逻辑")
 
     def test_purpose_profiles_exist(self):
         """get_llm_service 必须在 _LLM_PURPOSE_PROFILES 中定义 translation 和 paper_plugin，
@@ -1323,16 +1821,21 @@ class TestLLMGatewayUnificationGuard(unittest.TestCase):
         source = (_SRC / "infra" / "llm_service.py").read_text(encoding="utf-8")
         # 显式 profile 条目
         for purpose in ("translation", "paper_plugin"):
-            self.assertIn(f'"{purpose}"', source,
-                          f'llm_service.py _LLM_PURPOSE_PROFILES 必须包含 "{purpose}"')
+            self.assertIn(
+                f'"{purpose}"',
+                source,
+                f'llm_service.py _LLM_PURPOSE_PROFILES 必须包含 "{purpose}"',
+            )
         # default 是 get_llm_service 的默认参数值
-        self.assertIn('"default"', source,
-                      'get_llm_service 必须以 "default" 作为默认 purpose')
+        self.assertIn(
+            '"default"', source, 'get_llm_service 必须以 "default" 作为默认 purpose'
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Guard #21 — ResearchDossierBuilder 存在性、接口契约与集成点
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestResearchDossierBuilderGuard(unittest.TestCase):
     """Guard #21: ResearchDossierBuilder 模块契约。"""
@@ -1341,8 +1844,7 @@ class TestResearchDossierBuilderGuard(unittest.TestCase):
 
     def test_dossier_builder_module_exists(self):
         """src/research/dossier_builder.py 必须存在。"""
-        self.assertTrue(self._DOSSIER_FILE.exists(),
-                        "dossier_builder.py 模块不存在")
+        self.assertTrue(self._DOSSIER_FILE.exists(), "dossier_builder.py 模块不存在")
 
     def test_dossier_builder_class_exists(self):
         """模块必须导出 ResearchDossierBuilder 类。"""
@@ -1363,36 +1865,53 @@ class TestResearchDossierBuilderGuard(unittest.TestCase):
         """ResearchDossier 必须支持 to_text / to_dict / to_json 序列化。"""
         source = self._DOSSIER_FILE.read_text(encoding="utf-8")
         for method in ("def to_text(", "def to_dict(", "def to_json("):
-            self.assertIn(method, source,
-                          f"ResearchDossier 缺少 {method.split('(')[0]} 方法")
+            self.assertIn(
+                method, source, f"ResearchDossier 缺少 {method.split('(')[0]} 方法"
+            )
 
     def test_builder_uses_get_llm_service_not_llm_engine(self):
         """DossierBuilder 的 LLM 压缩必须通过 get_llm_service，不得直接 LLMEngine。"""
         source = self._DOSSIER_FILE.read_text(encoding="utf-8")
-        self.assertNotIn("from src.llm.llm_engine import", source,
-                         "dossier_builder 不得直接 import LLMEngine")
-        self.assertIn("get_llm_service", source,
-                      "dossier_builder 必须通过 get_llm_service 获取 LLM")
+        self.assertNotIn(
+            "from src.llm.llm_engine import",
+            source,
+            "dossier_builder 不得直接 import LLMEngine",
+        )
+        self.assertIn(
+            "get_llm_service",
+            source,
+            "dossier_builder 必须通过 get_llm_service 获取 LLM",
+        )
 
     def test_pipeline_orchestrator_integrates_dossier(self):
         """pipeline_orchestrator.py 必须在 cycle 完成时构建 dossier。"""
-        source = (_SRC / "research" / "pipeline_orchestrator.py").read_text(encoding="utf-8")
-        self.assertIn("dossier_builder", source,
-                      "pipeline_orchestrator 必须导入 dossier_builder")
-        self.assertIn("research_dossier", source,
-                      "pipeline_orchestrator 必须将 dossier 写入 cycle.metadata")
+        source = (_SRC / "research" / "pipeline_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "dossier_builder", source, "pipeline_orchestrator 必须导入 dossier_builder"
+        )
+        self.assertIn(
+            "research_dossier",
+            source,
+            "pipeline_orchestrator 必须将 dossier 写入 cycle.metadata",
+        )
 
     def test_config_has_dossier_section(self):
         """config.yml iteration_cycle.research_pipeline 下必须有 dossier 配置节。"""
         import yaml
+
         config_path = _WORKSPACE / "config.yml"
         with open(config_path, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
         ic = cfg.get("iteration_cycle", {})
         rp = ic.get("research_pipeline", {})
         dossier_cfg = rp.get("dossier", {})
-        self.assertIn("max_context_tokens", dossier_cfg,
-                      "config.yml iteration_cycle.research_pipeline.dossier 缺少 max_context_tokens")
+        self.assertIn(
+            "max_context_tokens",
+            dossier_cfg,
+            "config.yml iteration_cycle.research_pipeline.dossier 缺少 max_context_tokens",
+        )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1406,16 +1925,20 @@ class TestLearningLoopOrchestratorGuard(unittest.TestCase):
     _MODULE_PATH = _WORKSPACE / "src" / "research" / "learning_loop_orchestrator.py"
 
     def test_module_exists(self):
-        self.assertTrue(self._MODULE_PATH.exists(),
-                        "src/research/learning_loop_orchestrator.py 必须存在")
+        self.assertTrue(
+            self._MODULE_PATH.exists(),
+            "src/research/learning_loop_orchestrator.py 必须存在",
+        )
 
     def test_class_importable(self):
         from src.research.learning_loop_orchestrator import LearningLoopOrchestrator
+
         self.assertTrue(callable(LearningLoopOrchestrator))
 
     def test_lifecycle_methods_exist(self):
         """LearningLoopOrchestrator 必须提供完整生命周期方法。"""
         from src.research.learning_loop_orchestrator import LearningLoopOrchestrator
+
         required_methods = [
             "prepare_cycle",
             "inject_phase_context",
@@ -1439,29 +1962,40 @@ class TestLearningLoopOrchestratorGuard(unittest.TestCase):
     def test_does_not_bypass_self_learning_engine(self):
         """不得直接构造 SelfLearningEngine，应通过 pipeline.config 获取。"""
         source = self._MODULE_PATH.read_text(encoding="utf-8")
-        self.assertNotIn("SelfLearningEngine(", source,
-                         "LearningLoopOrchestrator 不应直接实例化 SelfLearningEngine")
+        self.assertNotIn(
+            "SelfLearningEngine(",
+            source,
+            "LearningLoopOrchestrator 不应直接实例化 SelfLearningEngine",
+        )
 
     def test_runtime_service_uses_learning_loop(self):
         """ResearchRuntimeService 必须集成 LearningLoopOrchestrator。"""
         rts_path = _WORKSPACE / "src" / "orchestration" / "research_runtime_service.py"
         source = rts_path.read_text(encoding="utf-8")
-        self.assertIn("LearningLoopOrchestrator", source,
-                      "research_runtime_service.py 必须引用 LearningLoopOrchestrator")
-        self.assertIn("prepare_cycle", source,
-                      "research_runtime_service.py 应调用 prepare_cycle")
+        self.assertIn(
+            "LearningLoopOrchestrator",
+            source,
+            "research_runtime_service.py 必须引用 LearningLoopOrchestrator",
+        )
+        self.assertIn(
+            "prepare_cycle", source, "research_runtime_service.py 应调用 prepare_cycle"
+        )
 
     def test_config_has_learning_loop_section(self):
         """config.yml iteration_cycle.research_pipeline 下必须有 learning_loop 配置节。"""
         import yaml
+
         config_path = _WORKSPACE / "config.yml"
         with open(config_path, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
         ic = cfg.get("iteration_cycle", {})
         rp = ic.get("research_pipeline", {})
         ll_cfg = rp.get("learning_loop", {})
-        self.assertIn("enabled", ll_cfg,
-                      "config.yml iteration_cycle.research_pipeline.learning_loop 缺少 enabled")
+        self.assertIn(
+            "enabled",
+            ll_cfg,
+            "config.yml iteration_cycle.research_pipeline.learning_loop 缺少 enabled",
+        )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1475,8 +2009,9 @@ class TestEvidenceContractV2Guard(unittest.TestCase):
     _MODULE_PATH = _WORKSPACE / "src" / "research" / "evidence_contract.py"
 
     def test_module_exists(self):
-        self.assertTrue(self._MODULE_PATH.exists(),
-                        "src/research/evidence_contract.py 必须存在")
+        self.assertTrue(
+            self._MODULE_PATH.exists(), "src/research/evidence_contract.py 必须存在"
+        )
 
     def test_typed_dataclasses_importable(self):
         """平台级统一证据对象必须可导入。"""
@@ -1488,25 +2023,42 @@ class TestEvidenceContractV2Guard(unittest.TestCase):
             EvidenceProvenance,
             EvidenceRecord,
         )
+
         self.assertEqual(CONTRACT_VERSION, "evidence-claim-v2")
 
     def test_evidence_record_has_required_fields(self):
         """EvidenceRecord 必须包含 evidence_id, source_entity, target_entity, confidence, evidence_grade, provenance。"""
         from src.research.evidence_contract import EvidenceRecord
+
         record = EvidenceRecord()
-        for field_name in ("evidence_id", "source_entity", "target_entity",
-                           "confidence", "evidence_grade", "provenance"):
-            self.assertTrue(hasattr(record, field_name),
-                            f"EvidenceRecord 缺少字段: {field_name}")
+        for field_name in (
+            "evidence_id",
+            "source_entity",
+            "target_entity",
+            "confidence",
+            "evidence_grade",
+            "provenance",
+        ):
+            self.assertTrue(
+                hasattr(record, field_name), f"EvidenceRecord 缺少字段: {field_name}"
+            )
 
     def test_evidence_claim_has_review_workflow(self):
         """EvidenceClaim 必须包含审核流程字段。"""
         from src.research.evidence_contract import EvidenceClaim
+
         claim = EvidenceClaim()
-        for field_name in ("review_status", "needs_manual_review", "review_reasons",
-                           "reviewer", "reviewed_at", "decision_basis"):
-            self.assertTrue(hasattr(claim, field_name),
-                            f"EvidenceClaim 缺少审核字段: {field_name}")
+        for field_name in (
+            "review_status",
+            "needs_manual_review",
+            "review_reasons",
+            "reviewer",
+            "reviewed_at",
+            "decision_basis",
+        ):
+            self.assertTrue(
+                hasattr(claim, field_name), f"EvidenceClaim 缺少审核字段: {field_name}"
+            )
 
     def test_evidence_envelope_round_trip(self):
         """EvidenceEnvelope.from_dict(envelope.to_dict()) 必须无损往返。"""
@@ -1515,6 +2067,7 @@ class TestEvidenceContractV2Guard(unittest.TestCase):
             EvidenceEnvelope,
             EvidenceRecord,
         )
+
         original = EvidenceEnvelope(
             records=[EvidenceRecord(evidence_id="e1", source_entity="麻黄")],
             claims=[EvidenceClaim(claim_id="c1", evidence_ids=["e1"])],
@@ -1528,34 +2081,51 @@ class TestEvidenceContractV2Guard(unittest.TestCase):
     def test_envelope_to_dict_compatible_with_protocol(self):
         """EvidenceEnvelope.to_dict() 必须输出与 build_evidence_protocol 兼容的键结构。"""
         from src.research.evidence_contract import EvidenceEnvelope
+
         d = EvidenceEnvelope().to_dict()
-        required_keys = {"contract_version", "evidence_records", "claims",
-                         "evidence_grade_summary", "citation_records", "contract"}
-        self.assertTrue(required_keys.issubset(d.keys()),
-                        f"EvidenceEnvelope.to_dict() 缺少键: {required_keys - d.keys()}")
+        required_keys = {
+            "contract_version",
+            "evidence_records",
+            "claims",
+            "evidence_grade_summary",
+            "citation_records",
+            "contract",
+        }
+        self.assertTrue(
+            required_keys.issubset(d.keys()),
+            f"EvidenceEnvelope.to_dict() 缺少键: {required_keys - d.keys()}",
+        )
 
     def test_build_evidence_protocol_uses_contract_version_constant(self):
         """build_evidence_protocol 必须引用 CONTRACT_VERSION 常量而非硬编码字符串。"""
         source = self._MODULE_PATH.read_text(encoding="utf-8")
         # The function body should use CONTRACT_VERSION, not a string literal
         # Find the build_evidence_protocol function and check
-        self.assertIn('CONTRACT_VERSION', source,
-                      "evidence_contract.py 必须定义 CONTRACT_VERSION 常量")
+        self.assertIn(
+            "CONTRACT_VERSION",
+            source,
+            "evidence_contract.py 必须定义 CONTRACT_VERSION 常量",
+        )
         # 确保 build_evidence_protocol 使用常量
         import re
+
         fn_match = re.search(
-            r'def build_evidence_protocol\b.*?(?=\ndef\s|\Z)',
+            r"def build_evidence_protocol\b.*?(?=\ndef\s|\Z)",
             source,
             re.DOTALL,
         )
         self.assertIsNotNone(fn_match, "找不到 build_evidence_protocol 函数")
         fn_body = fn_match.group(0)
-        self.assertIn("CONTRACT_VERSION", fn_body,
-                      "build_evidence_protocol 应使用 CONTRACT_VERSION 常量")
+        self.assertIn(
+            "CONTRACT_VERSION",
+            fn_body,
+            "build_evidence_protocol 应使用 CONTRACT_VERSION 常量",
+        )
 
     def test_from_protocol_alias(self):
         """EvidenceEnvelope.from_protocol 必须存在且等效于 from_dict。"""
         from src.research.evidence_contract import EvidenceEnvelope
+
         self.assertTrue(callable(getattr(EvidenceEnvelope, "from_protocol", None)))
 
 
@@ -1571,15 +2141,18 @@ class TestModuleWiringManifestGuard(unittest.TestCase):
 
     def test_manifest_module_exists(self):
         """src/core/module_wiring_manifest.py 必须存在。"""
-        self.assertTrue(self._MANIFEST_FILE.exists(),
-                        "module_wiring_manifest.py 模块不存在")
+        self.assertTrue(
+            self._MANIFEST_FILE.exists(), "module_wiring_manifest.py 模块不存在"
+        )
 
     def test_exports_module_manifest_dict(self):
         """模块必须导出 MODULE_MANIFEST 字典。"""
         from src.core.module_wiring_manifest import MODULE_MANIFEST
+
         self.assertIsInstance(MODULE_MANIFEST, dict)
-        self.assertGreater(len(MODULE_MANIFEST), 30,
-                           "MODULE_MANIFEST 应包含至少 30 个模块条目")
+        self.assertGreater(
+            len(MODULE_MANIFEST), 30, "MODULE_MANIFEST 应包含至少 30 个模块条目"
+        )
 
     def test_tier_constants_exported(self):
         """模块必须导出三个层级常量。"""
@@ -1589,14 +2162,17 @@ class TestModuleWiringManifestGuard(unittest.TestCase):
             TIER_OPTIONAL,
             VALID_TIERS,
         )
+
         self.assertEqual({TIER_ACTIVE, TIER_OPTIONAL, TIER_DORMANT}, VALID_TIERS)
 
     def test_all_manifest_paths_exist(self):
         """清单中所有模块路径必须指向真实文件。"""
         from src.core.module_wiring_manifest import validate_manifest_paths
+
         missing = validate_manifest_paths(str(_WORKSPACE))
         self.assertEqual(
-            missing, [],
+            missing,
+            [],
             f"清单中有不存在的路径: {[m['module_key'] for m in missing]}",
         )
 
@@ -1606,26 +2182,31 @@ class TestModuleWiringManifestGuard(unittest.TestCase):
             VALID_TIERS,
             get_manifest_summary,
         )
+
         s = get_manifest_summary()
         for tier in VALID_TIERS:
-            self.assertGreater(s["counts"][tier], 0,
-                               f"层级 {tier} 无任何模块条目")
+            self.assertGreater(s["counts"][tier], 0, f"层级 {tier} 无任何模块条目")
 
     def test_core_pipeline_modules_are_active(self):
         """核心管线模块必须被标记为 active。"""
         from src.core.module_wiring_manifest import MODULE_MANIFEST
+
         core_keys = [
-            "research_pipeline", "phase_orchestrator",
-            "pipeline_orchestrator", "research_runtime_service",
+            "research_pipeline",
+            "phase_orchestrator",
+            "pipeline_orchestrator",
+            "research_runtime_service",
         ]
         for key in core_keys:
             self.assertIn(key, MODULE_MANIFEST, f"缺少核心模块 {key}")
-            self.assertEqual(MODULE_MANIFEST[key]["tier"], "active",
-                             f"{key} 应为 active 层级")
+            self.assertEqual(
+                MODULE_MANIFEST[key]["tier"], "active", f"{key} 应为 active 层级"
+            )
 
     def test_deprecated_modules_are_dormant(self):
         """已弃用模块必须被标记为 dormant。"""
         from src.core.module_wiring_manifest import MODULE_MANIFEST
+
         self.assertEqual(
             MODULE_MANIFEST["research_orchestrator_deprecated"]["tier"],
             "dormant",
@@ -1634,18 +2215,26 @@ class TestModuleWiringManifestGuard(unittest.TestCase):
     def test_config_gated_modules_are_optional(self):
         """需要配置标志的模块必须为 optional。"""
         from src.core.module_wiring_manifest import MODULE_MANIFEST
+
         for key in ("self_learning_engine", "neo4j_driver"):
             self.assertIn(key, MODULE_MANIFEST, f"缺少可选模块 {key}")
-            self.assertEqual(MODULE_MANIFEST[key]["tier"], "optional",
-                             f"{key} 应为 optional 层级")
+            self.assertEqual(
+                MODULE_MANIFEST[key]["tier"], "optional", f"{key} 应为 optional 层级"
+            )
 
     def test_query_api_functions_exist(self):
         """清单模块必须提供 get_modules_by_tier / get_manifest_summary / validate_manifest_paths。"""
         from src.core import module_wiring_manifest as m
-        for fn_name in ("get_modules_by_tier", "get_manifest_summary",
-                         "validate_manifest_paths"):
-            self.assertTrue(callable(getattr(m, fn_name, None)),
-                            f"module_wiring_manifest 缺少函数: {fn_name}")
+
+        for fn_name in (
+            "get_modules_by_tier",
+            "get_manifest_summary",
+            "validate_manifest_paths",
+        ):
+            self.assertTrue(
+                callable(getattr(m, fn_name, None)),
+                f"module_wiring_manifest 缺少函数: {fn_name}",
+            )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1673,27 +2262,32 @@ class TestNeo4jCypherGovernanceGuard(unittest.TestCase):
     def test_canonical_read_templates_non_empty(self):
         """规范读查询模板至少包含 2 个条目。"""
         from tools.neo4j_query_templates import CANONICAL_READ_TEMPLATES
+
         self.assertGreaterEqual(len(CANONICAL_READ_TEMPLATES), 2)
 
     def test_canonical_write_templates_non_empty(self):
         """规范写查询模板至少包含 2 个条目。"""
         from tools.neo4j_query_templates import CANONICAL_WRITE_TEMPLATES
+
         self.assertGreaterEqual(len(CANONICAL_WRITE_TEMPLATES), 2)
 
     def test_anti_patterns_defined(self):
         """反模式列表至少包含 comma_separated_match。"""
         from tools.neo4j_query_templates import ANTI_PATTERNS
+
         names = {ap.name for ap in ANTI_PATTERNS}
         self.assertIn("comma_separated_match", names)
 
     def test_troubleshooting_templates_exist(self):
         """排障模板不为空且包含 cartesian_product_notification。"""
         from tools.neo4j_query_templates import TROUBLESHOOTING_TEMPLATES
+
         self.assertIn("cartesian_product_notification", TROUBLESHOOTING_TEMPLATES)
 
     def test_validate_cypher_snippet_api(self):
         """validate_cypher_snippet 函数可调用。"""
         from tools.neo4j_query_templates import validate_cypher_snippet
+
         self.assertTrue(callable(validate_cypher_snippet))
 
     def test_canonical_templates_pass_self_validation(self):
@@ -1703,31 +2297,40 @@ class TestNeo4jCypherGovernanceGuard(unittest.TestCase):
             CANONICAL_WRITE_TEMPLATES,
             validate_cypher_snippet,
         )
-        for name, tpl in {**CANONICAL_READ_TEMPLATES, **CANONICAL_WRITE_TEMPLATES}.items():
+
+        for name, tpl in {
+            **CANONICAL_READ_TEMPLATES,
+            **CANONICAL_WRITE_TEMPLATES,
+        }.items():
             violations = validate_cypher_snippet(tpl["cypher"])
-            self.assertEqual(violations, [],
-                             f"规范模板 {name} 自身未通过检测")
+            self.assertEqual(violations, [], f"规范模板 {name} 自身未通过检测")
 
     def test_repo_md_files_pass_cypher_lint(self):
         """仓库中所有 .md 文件的 Cypher 代码块不含已知反模式。"""
         from tools.cypher_doc_lint import lint_file
+
         md_files = list(_WORKSPACE.glob("*.md")) + list(_WORKSPACE.glob("docs/**/*.md"))
         all_violations = []
         for f in md_files:
             all_violations.extend(lint_file(f))
         self.assertEqual(
-            all_violations, [],
+            all_violations,
+            [],
             f"文档 Cypher 反模式: {[(v.file, v.line, v.rule) for v in all_violations]}",
         )
 
     def test_neo4j_driver_passes_cypher_lint(self):
         """neo4j_driver.py 不含 Cypher 反模式。"""
         from tools.cypher_doc_lint import lint_file
+
         driver = _WORKSPACE / "src" / "storage" / "neo4j_driver.py"
         if driver.exists():
             violations = lint_file(driver)
-            self.assertEqual(violations, [],
-                             f"neo4j_driver.py Cypher 违规: {[(v.line, v.rule) for v in violations]}")
+            self.assertEqual(
+                violations,
+                [],
+                f"neo4j_driver.py Cypher 违规: {[(v.line, v.rule) for v in violations]}",
+            )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1742,12 +2345,12 @@ class TestLLMTaskPolicyGuard(unittest.TestCase):
 
     def test_policy_module_exists(self):
         """src/infra/llm_task_policy.py 必须存在。"""
-        self.assertTrue(self._POLICY_FILE.exists(),
-                        "llm_task_policy.py 模块不存在")
+        self.assertTrue(self._POLICY_FILE.exists(), "llm_task_policy.py 模块不存在")
 
     def test_three_tier_enum(self):
         """SuitabilityTier 必须定义 suitable / cautious / unsuitable_solo 三级。"""
         from src.infra.llm_task_policy import SuitabilityTier
+
         self.assertEqual(
             {t.value for t in SuitabilityTier},
             {"suitable", "cautious", "unsuitable_solo"},
@@ -1756,15 +2359,24 @@ class TestLLMTaskPolicyGuard(unittest.TestCase):
     def test_task_policy_covers_audit_10_1(self):
         """TASK_POLICY 必须覆盖审计文档 §10.1 列出的所有任务类型。"""
         from src.infra.llm_task_policy import TASK_POLICY, SuitabilityTier
+
         # suitable 类
-        for key in ("hypothesis_generation", "question_rewrite",
-                     "terminology_explanation", "structured_summary",
-                     "discussion_draft", "reflect_diagnosis"):
+        for key in (
+            "hypothesis_generation",
+            "question_rewrite",
+            "terminology_explanation",
+            "structured_summary",
+            "discussion_draft",
+            "reflect_diagnosis",
+        ):
             self.assertIn(key, TASK_POLICY, f"缺少 §10.1 适合任务: {key}")
             self.assertEqual(TASK_POLICY[key].tier, SuitabilityTier.SUITABLE)
         # cautious 类
-        for key in ("long_form_generation", "graph_reasoning",
-                     "unsupported_conclusion"):
+        for key in (
+            "long_form_generation",
+            "graph_reasoning",
+            "unsupported_conclusion",
+        ):
             self.assertIn(key, TASK_POLICY, f"缺少 §10.1 谨慎任务: {key}")
             self.assertEqual(TASK_POLICY[key].tier, SuitabilityTier.CAUTIOUS)
         # unsuitable_solo 类
@@ -1775,33 +2387,43 @@ class TestLLMTaskPolicyGuard(unittest.TestCase):
     def test_evaluate_api_exists(self):
         """evaluate_task / evaluate_purpose / check_suitability 函数必须可调用。"""
         from src.infra import llm_task_policy as m
+
         for fn_name in ("evaluate_task", "evaluate_purpose", "check_suitability"):
-            self.assertTrue(callable(getattr(m, fn_name, None)),
-                            f"llm_task_policy 缺少函数: {fn_name}")
+            self.assertTrue(
+                callable(getattr(m, fn_name, None)),
+                f"llm_task_policy 缺少函数: {fn_name}",
+            )
 
     def test_purpose_task_map_covers_existing_purposes(self):
         """PURPOSE_TASK_MAP 必须覆盖已有的 get_llm_service purpose。"""
         from src.infra.llm_task_policy import PURPOSE_TASK_MAP
+
         for p in ("default", "translation", "paper_plugin"):
-            self.assertIn(p, PURPOSE_TASK_MAP,
-                          f"PURPOSE_TASK_MAP 缺少现有 purpose: {p}")
+            self.assertIn(
+                p, PURPOSE_TASK_MAP, f"PURPOSE_TASK_MAP 缺少现有 purpose: {p}"
+            )
 
     def test_get_llm_service_integrates_policy(self):
         """get_llm_service 源码必须调用 check_suitability。"""
         source = (_SRC / "infra" / "llm_service.py").read_text(encoding="utf-8")
-        self.assertIn("check_suitability", source,
-                      "get_llm_service 必须集成 check_suitability 调用")
+        self.assertIn(
+            "check_suitability",
+            source,
+            "get_llm_service 必须集成 check_suitability 调用",
+        )
 
     def test_config_has_task_policy_section(self):
         """config.yml models.llm 下必须有 task_policy 配置节。"""
         import yaml
+
         config_path = _WORKSPACE / "config.yml"
         with open(config_path, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
         llm_cfg = cfg.get("models", {}).get("llm", {})
         tp_cfg = llm_cfg.get("task_policy", {})
-        self.assertIn("enabled", tp_cfg,
-                      "config.yml models.llm.task_policy 缺少 enabled")
+        self.assertIn(
+            "enabled", tp_cfg, "config.yml models.llm.task_policy 缺少 enabled"
+        )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1816,12 +2438,12 @@ class TestPromptRegistryGuard(unittest.TestCase):
 
     def test_prompt_registry_module_exists(self):
         """src/infra/prompt_registry.py 必须存在。"""
-        self.assertTrue(self._REGISTRY_FILE.exists(),
-                        "prompt_registry.py 模块不存在")
+        self.assertTrue(self._REGISTRY_FILE.exists(), "prompt_registry.py 模块不存在")
 
     def test_prompt_registry_covers_high_value_structured_tasks(self):
         """注册表必须覆盖 GapAnalyzer / HypothesisEngine / ResearchAdvisor。"""
         from src.infra.prompt_registry import PROMPT_REGISTRY
+
         for name in (
             "research_advisor.hypothesis_suggestion",
             "research_advisor.experiment_design",
@@ -1835,28 +2457,45 @@ class TestPromptRegistryGuard(unittest.TestCase):
     def test_render_and_parse_apis_exist(self):
         """render_prompt / parse_registered_output API 必须可调用。"""
         from src.infra import prompt_registry as m
-        for fn_name in ("render_prompt", "parse_registered_output", "get_registry_summary"):
-            self.assertTrue(callable(getattr(m, fn_name, None)),
-                            f"prompt_registry 缺少函数: {fn_name}")
+
+        for fn_name in (
+            "render_prompt",
+            "parse_registered_output",
+            "get_registry_summary",
+        ):
+            self.assertTrue(
+                callable(getattr(m, fn_name, None)),
+                f"prompt_registry 缺少函数: {fn_name}",
+            )
 
     def test_llm_service_exposes_generate_registered(self):
         """LLMService 必须提供 generate_registered 便捷入口。"""
         source = (_SRC / "infra" / "llm_service.py").read_text(encoding="utf-8")
-        self.assertIn("def generate_registered", source,
-                      "LLMService 必须提供 generate_registered()")
+        self.assertIn(
+            "def generate_registered",
+            source,
+            "LLMService 必须提供 generate_registered()",
+        )
 
     def test_config_has_prompt_registry_section(self):
         """config.yml models.llm 下必须有 prompt_registry 配置节。"""
         import yaml
+
         config_path = _WORKSPACE / "config.yml"
         with open(config_path, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
         llm_cfg = cfg.get("models", {}).get("llm", {})
         registry_cfg = llm_cfg.get("prompt_registry", {})
-        self.assertIn("enabled", registry_cfg,
-                      "config.yml models.llm.prompt_registry 缺少 enabled")
-        self.assertIn("include_schema_in_prompt", registry_cfg,
-                      "config.yml models.llm.prompt_registry 缺少 include_schema_in_prompt")
+        self.assertIn(
+            "enabled",
+            registry_cfg,
+            "config.yml models.llm.prompt_registry 缺少 enabled",
+        )
+        self.assertIn(
+            "include_schema_in_prompt",
+            registry_cfg,
+            "config.yml models.llm.prompt_registry 缺少 include_schema_in_prompt",
+        )
 
     def test_high_value_modules_use_prompt_registry(self):
         """关键模块源码必须接入 render_prompt / parse_registered_output。"""
@@ -1866,10 +2505,14 @@ class TestPromptRegistryGuard(unittest.TestCase):
             _SRC / "ai_assistant" / "research_advisor.py",
         ):
             source = relative.read_text(encoding="utf-8")
-            self.assertIn("render_prompt", source,
-                          f"{relative.name} 尚未接入 render_prompt")
-            self.assertIn("parse_registered_output", source,
-                          f"{relative.name} 尚未接入 parse_registered_output")
+            self.assertIn(
+                "render_prompt", source, f"{relative.name} 尚未接入 render_prompt"
+            )
+            self.assertIn(
+                "parse_registered_output",
+                source,
+                f"{relative.name} 尚未接入 parse_registered_output",
+            )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1893,34 +2536,65 @@ class TestPhaseDossierGuard(unittest.TestCase):
             "def build_analyze_dossier(",
             "def build_publish_dossier(",
         ):
-            self.assertIn(method_name, source,
-                          f"ResearchDossierBuilder 缺少 phase dossier API: {method_name}")
+            self.assertIn(
+                method_name,
+                source,
+                f"ResearchDossierBuilder 缺少 phase dossier API: {method_name}",
+            )
 
     def test_pipeline_orchestrator_persists_phase_dossiers(self):
         source = self._PIPELINE_ORCHESTRATOR.read_text(encoding="utf-8")
-        self.assertIn("phase_dossiers", source,
-                      "pipeline_orchestrator 必须把 phase dossier 写入 cycle.metadata['phase_dossiers']")
-        self.assertIn("_sync_phase_dossier_metadata", source,
-                      "pipeline_orchestrator 缺少单阶段 dossier 同步逻辑")
-        self.assertIn("_attach_phase_dossiers_to_phase_context", source,
-                      "pipeline_orchestrator 缺少 phase dossier 注入 phase_context 逻辑")
+        self.assertIn(
+            "phase_dossiers",
+            source,
+            "pipeline_orchestrator 必须把 phase dossier 写入 cycle.metadata['phase_dossiers']",
+        )
+        self.assertIn(
+            "_sync_phase_dossier_metadata",
+            source,
+            "pipeline_orchestrator 缺少单阶段 dossier 同步逻辑",
+        )
+        self.assertIn(
+            "_attach_phase_dossiers_to_phase_context",
+            source,
+            "pipeline_orchestrator 缺少 phase dossier 注入 phase_context 逻辑",
+        )
 
     def test_publish_phase_consumes_phase_dossiers(self):
         source = self._PUBLISH_PHASE.read_text(encoding="utf-8")
-        for marker in ("observe_dossier", "analyze_dossier", "phase_dossiers", "paper_draft"):
-            self.assertIn(marker, source,
-                          f"publish_phase 缺少 phase dossier / paper_draft 集成标记: {marker}")
+        for marker in (
+            "observe_dossier",
+            "analyze_dossier",
+            "phase_dossiers",
+            "paper_draft",
+        ):
+            self.assertIn(
+                marker,
+                source,
+                f"publish_phase 缺少 phase dossier / paper_draft 集成标记: {marker}",
+            )
 
     def test_config_has_phase_dossier_settings(self):
         import yaml
+
         config_path = _WORKSPACE / "config.yml"
         with open(config_path, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
-        dossier_cfg = cfg.get("iteration_cycle", {}).get("research_pipeline", {}).get("dossier", {})
-        self.assertIn("build_phase_dossiers", dossier_cfg,
-                      "config.yml dossier 配置缺少 build_phase_dossiers")
-        self.assertIn("attach_phase_dossiers_to_context", dossier_cfg,
-                      "config.yml dossier 配置缺少 attach_phase_dossiers_to_context")
+        dossier_cfg = (
+            cfg.get("iteration_cycle", {})
+            .get("research_pipeline", {})
+            .get("dossier", {})
+        )
+        self.assertIn(
+            "build_phase_dossiers",
+            dossier_cfg,
+            "config.yml dossier 配置缺少 build_phase_dossiers",
+        )
+        self.assertIn(
+            "attach_phase_dossiers_to_context",
+            dossier_cfg,
+            "config.yml dossier 配置缺少 attach_phase_dossiers_to_context",
+        )
         phase_budget_cfg = dossier_cfg.get("phase_max_context_tokens", {})
         self.assertEqual(
             sorted(phase_budget_cfg.keys()),
@@ -1943,8 +2617,7 @@ class TestLayeredCacheGuard(unittest.TestCase):
     _OUTPUT_GENERATOR = _SRC / "generation" / "output_formatter.py"
 
     def test_layered_cache_module_exists(self):
-        self.assertTrue(self._LAYERED_CACHE.exists(),
-                        "layered_cache.py 模块不存在")
+        self.assertTrue(self._LAYERED_CACHE.exists(), "layered_cache.py 模块不存在")
 
     def test_layered_cache_exposes_expected_apis(self):
         from src.infra import layered_cache as m
@@ -1961,13 +2634,27 @@ class TestLayeredCacheGuard(unittest.TestCase):
         config_path = _WORKSPACE / "config.yml"
         with open(config_path, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
-        layered_cfg = cfg.get("iteration_cycle", {}).get("research_pipeline", {}).get("layered_cache", {})
-        self.assertIn("enabled", layered_cfg,
-                      "config.yml research_pipeline.layered_cache 缺少 enabled")
-        self.assertIn("cache_dir", layered_cfg,
-                      "config.yml research_pipeline.layered_cache 缺少 cache_dir")
+        layered_cfg = (
+            cfg.get("iteration_cycle", {})
+            .get("research_pipeline", {})
+            .get("layered_cache", {})
+        )
+        self.assertIn(
+            "enabled",
+            layered_cfg,
+            "config.yml research_pipeline.layered_cache 缺少 enabled",
+        )
+        self.assertIn(
+            "cache_dir",
+            layered_cfg,
+            "config.yml research_pipeline.layered_cache 缺少 cache_dir",
+        )
         self.assertEqual(
-            sorted(key for key in layered_cfg.keys() if key in {"prompt", "evidence", "artifact"}),
+            sorted(
+                key
+                for key in layered_cfg.keys()
+                if key in {"prompt", "evidence", "artifact"}
+            ),
             ["artifact", "evidence", "prompt"],
             "layered_cache 必须覆盖 prompt/evidence/artifact 三层",
         )
@@ -1977,14 +2664,24 @@ class TestLayeredCacheGuard(unittest.TestCase):
         evidence_source = self._EVIDENCE_CONTRACT.read_text(encoding="utf-8")
         artifact_source = self._OUTPUT_GENERATOR.read_text(encoding="utf-8")
 
-        self.assertIn("prompt-cache-v1", prompt_source,
-                      "prompt_registry 缺少 prompt cache 接线")
-        self.assertIn("call_registered_prompt", prompt_source,
-                      "prompt_registry 必须提供 call_registered_prompt")
-        self.assertIn("evidence-cache-v1", evidence_source,
-                      "evidence_contract 缺少 evidence cache 接线")
-        self.assertIn("artifact-cache-v1", artifact_source,
-                      "output_formatter 缺少 artifact cache 接线")
+        self.assertIn(
+            "prompt-cache-v1", prompt_source, "prompt_registry 缺少 prompt cache 接线"
+        )
+        self.assertIn(
+            "call_registered_prompt",
+            prompt_source,
+            "prompt_registry 必须提供 call_registered_prompt",
+        )
+        self.assertIn(
+            "evidence-cache-v1",
+            evidence_source,
+            "evidence_contract 缺少 evidence cache 接线",
+        )
+        self.assertIn(
+            "artifact-cache-v1",
+            artifact_source,
+            "output_formatter 缺少 artifact cache 接线",
+        )
         self.assertIn("get_layered_task_cache", prompt_source)
         self.assertIn("get_layered_task_cache", evidence_source)
         self.assertIn("get_layered_task_cache", artifact_source)
@@ -1996,8 +2693,11 @@ class TestLayeredCacheGuard(unittest.TestCase):
             _SRC / "ai_assistant" / "research_advisor.py",
         ):
             source = relative.read_text(encoding="utf-8")
-            self.assertIn("call_registered_prompt", source,
-                          f"{relative.name} 尚未通过 call_registered_prompt 接入 prompt cache")
+            self.assertIn(
+                "call_registered_prompt",
+                source,
+                f"{relative.name} 尚未通过 call_registered_prompt 接入 prompt cache",
+            )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2013,8 +2713,7 @@ class TestTokenBudgetPolicyGuard(unittest.TestCase):
     _LLM_SERVICE_FILE = _SRC / "infra" / "llm_service.py"
 
     def test_policy_module_exists(self):
-        self.assertTrue(self._POLICY_FILE.exists(),
-                        "token_budget_policy.py 模块不存在")
+        self.assertTrue(self._POLICY_FILE.exists(), "token_budget_policy.py 模块不存在")
 
     def test_policy_exports_expected_apis(self):
         from src.infra import token_budget_policy as m
@@ -2026,22 +2725,36 @@ class TestTokenBudgetPolicyGuard(unittest.TestCase):
             "resolve_token_budget",
             "apply_token_budget_to_prompt",
         ):
-            self.assertTrue(callable(getattr(m, fn_name, None)),
-                            f"token_budget_policy 缺少函数: {fn_name}")
+            self.assertTrue(
+                callable(getattr(m, fn_name, None)),
+                f"token_budget_policy 缺少函数: {fn_name}",
+            )
 
     def test_prompt_registry_integrates_policy(self):
         source = self._PROMPT_REGISTRY_FILE.read_text(encoding="utf-8")
-        self.assertIn("apply_token_budget_to_prompt", source,
-                      "prompt_registry 必须集成 apply_token_budget_to_prompt")
-        self.assertIn("suffix_prompt=schema_instruction", source,
-                      "prompt_registry 必须保留 schema 尾部预算")
+        self.assertIn(
+            "apply_token_budget_to_prompt",
+            source,
+            "prompt_registry 必须集成 apply_token_budget_to_prompt",
+        )
+        self.assertIn(
+            "suffix_prompt=schema_instruction",
+            source,
+            "prompt_registry 必须保留 schema 尾部预算",
+        )
 
     def test_llm_service_integrates_policy(self):
         source = self._LLM_SERVICE_FILE.read_text(encoding="utf-8")
-        self.assertIn("apply_token_budget_to_prompt", source,
-                      "llm_service 必须集成 apply_token_budget_to_prompt")
-        self.assertIn("purpose=self._purpose", source,
-                      "CachedLLMService.generate 必须携带 purpose 做兜底预算")
+        self.assertIn(
+            "apply_token_budget_to_prompt",
+            source,
+            "llm_service 必须集成 apply_token_budget_to_prompt",
+        )
+        self.assertIn(
+            "purpose=self._purpose",
+            source,
+            "CachedLLMService.generate 必须携带 purpose 做兜底预算",
+        )
 
     def test_config_has_token_budget_policy_section(self):
         import yaml
@@ -2050,16 +2763,31 @@ class TestTokenBudgetPolicyGuard(unittest.TestCase):
         with open(config_path, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
         policy_cfg = cfg.get("models", {}).get("llm", {}).get("token_budget_policy", {})
-        self.assertIn("enabled", policy_cfg,
-                      "config.yml models.llm.token_budget_policy 缺少 enabled")
-        self.assertIn("default_input_tokens", policy_cfg,
-                      "config.yml models.llm.token_budget_policy 缺少 default_input_tokens")
-        self.assertIn("reserve_output_tokens", policy_cfg,
-                      "config.yml models.llm.token_budget_policy 缺少 reserve_output_tokens")
-        self.assertIn("task_input_budgets", policy_cfg,
-                      "config.yml models.llm.token_budget_policy 缺少 task_input_budgets")
-        self.assertIn("purpose_input_budgets", policy_cfg,
-                      "config.yml models.llm.token_budget_policy 缺少 purpose_input_budgets")
+        self.assertIn(
+            "enabled",
+            policy_cfg,
+            "config.yml models.llm.token_budget_policy 缺少 enabled",
+        )
+        self.assertIn(
+            "default_input_tokens",
+            policy_cfg,
+            "config.yml models.llm.token_budget_policy 缺少 default_input_tokens",
+        )
+        self.assertIn(
+            "reserve_output_tokens",
+            policy_cfg,
+            "config.yml models.llm.token_budget_policy 缺少 reserve_output_tokens",
+        )
+        self.assertIn(
+            "task_input_budgets",
+            policy_cfg,
+            "config.yml models.llm.token_budget_policy 缺少 task_input_budgets",
+        )
+        self.assertIn(
+            "purpose_input_budgets",
+            policy_cfg,
+            "config.yml models.llm.token_budget_policy 缺少 purpose_input_budgets",
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -2115,14 +2843,27 @@ class TestStorageGovernanceInfraGuard(unittest.TestCase):
 
     def test_degradation_governor_module_structure(self):
         """degradation_governor.py 必须实现核心 API。"""
-        source = (_SRC / "storage" / "degradation_governor.py").read_text(encoding="utf-8")
-        for method in ("set_initial_mode", "record_transaction_result", "to_governance_report", "is_production_ready"):
+        source = (_SRC / "storage" / "degradation_governor.py").read_text(
+            encoding="utf-8"
+        )
+        for method in (
+            "set_initial_mode",
+            "record_transaction_result",
+            "to_governance_report",
+            "is_production_ready",
+        ):
             self.assertIn(method, source, f"DegradationGovernor 缺少 {method}")
 
     def test_backfill_ledger_module_structure(self):
         """backfill_ledger.py 必须实现核心 API。"""
         source = (_SRC / "storage" / "backfill_ledger.py").read_text(encoding="utf-8")
-        for method in ("record_pending", "record_from_transaction_result", "mark_completed", "get_pending", "get_summary"):
+        for method in (
+            "record_pending",
+            "record_from_transaction_result",
+            "mark_completed",
+            "get_pending",
+            "get_summary",
+        ):
             self.assertIn(method, source, f"BackfillLedger 缺少 {method}")
 
     def test_observability_module_structure(self):
@@ -2157,44 +2898,71 @@ class TestLearningLoopPhaseDGuard(unittest.TestCase):
     def test_policy_adjuster_module_exists(self):
         """policy_adjuster.py 必须实现核心 API。"""
         source = (_SRC / "learning" / "policy_adjuster.py").read_text(encoding="utf-8")
-        for method in ("def adjust(", "get_active_policy", "get_evidence_policy", "get_policy_history"):
+        for method in (
+            "def adjust(",
+            "get_active_policy",
+            "get_evidence_policy",
+            "get_policy_history",
+        ):
             self.assertIn(method, source, f"PolicyAdjuster 缺少 {method}")
 
     def test_import_quality_validator_module_exists(self):
         """import_quality_validator.py 必须实现核心 API。"""
-        source = (_SRC / "research" / "import_quality_validator.py").read_text(encoding="utf-8")
-        for method in ("validate_records", "validate_relationships", "ValidationReport", "ValidationSeverity"):
+        source = (_SRC / "research" / "import_quality_validator.py").read_text(
+            encoding="utf-8"
+        )
+        for method in (
+            "validate_records",
+            "validate_relationships",
+            "ValidationReport",
+            "ValidationSeverity",
+        ):
             self.assertIn(method, source, f"ImportQualityValidator 缺少 {method}")
 
     def test_orchestrator_imports_policy_adjuster(self):
         """LearningLoopOrchestrator 必须导入 PolicyAdjuster。"""
-        source = (_SRC / "research" / "learning_loop_orchestrator.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "learning_loop_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("from src.learning.policy_adjuster import PolicyAdjuster", source)
 
     def test_orchestrator_initializes_policy_adjuster(self):
         """LearningLoopOrchestrator.__init__ 必须创建 _policy_adjuster。"""
-        source = (_SRC / "research" / "learning_loop_orchestrator.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "learning_loop_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("self._policy_adjuster = PolicyAdjuster()", source)
 
     def test_orchestrator_calls_adjust_in_reflect(self):
         """execute_reflect_learning 必须调用 _policy_adjuster.adjust。"""
-        source = (_SRC / "research" / "learning_loop_orchestrator.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "learning_loop_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("self._policy_adjuster.adjust(", source)
 
     def test_orchestrator_outputs_evidence_policy(self):
         """prepare_next_cycle_strategy 必须输出 evidence_policy。"""
-        source = (_SRC / "research" / "learning_loop_orchestrator.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "learning_loop_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("evidence_policy", source)
         self.assertIn("template_preferences", source)
 
     def test_experiment_execution_imports_validator(self):
         """ExperimentExecutionPhase 必须导入 ImportQualityValidator。"""
-        source = (_SRC / "research" / "phases" / "experiment_execution_phase.py").read_text(encoding="utf-8")
-        self.assertIn("from src.research.import_quality_validator import ImportQualityValidator", source)
+        source = (
+            _SRC / "research" / "phases" / "experiment_execution_phase.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "from src.research.import_quality_validator import ImportQualityValidator",
+            source,
+        )
 
     def test_experiment_execution_calls_validate(self):
         """ExperimentExecutionPhase 必须调用 _validate_import_quality。"""
-        source = (_SRC / "research" / "phases" / "experiment_execution_phase.py").read_text(encoding="utf-8")
+        source = (
+            _SRC / "research" / "phases" / "experiment_execution_phase.py"
+        ).read_text(encoding="utf-8")
         self.assertIn("self._validate_import_quality(", source)
         self.assertIn("import_quality_validation", source)
 
@@ -2206,9 +2974,13 @@ class TestLearningLoopPhaseDGuard(unittest.TestCase):
 
     def test_import_validator_strictness_levels(self):
         """ImportQualityValidator 必须支持 strict/standard/lenient 三级。"""
-        source = (_SRC / "research" / "import_quality_validator.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "import_quality_validator.py").read_text(
+            encoding="utf-8"
+        )
         for level in ("STRICT", "STANDARD", "LENIENT"):
-            self.assertIn(level, source, f"ImportQualityValidator 缺少 strictness 等级 {level}")
+            self.assertIn(
+                level, source, f"ImportQualityValidator 缺少 strictness 等级 {level}"
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -2229,50 +3001,86 @@ class TestPhaseELLMOptimizationGuard(unittest.TestCase):
 
     def test_reasoning_template_selector_exists(self):
         """reasoning_template_selector.py 必须实现核心 API。"""
-        source = (_SRC / "infra" / "reasoning_template_selector.py").read_text(encoding="utf-8")
-        for method in ("class ReasoningTemplateSelector", "def select(", "SelectionResult", "ReasoningFramework"):
+        source = (_SRC / "infra" / "reasoning_template_selector.py").read_text(
+            encoding="utf-8"
+        )
+        for method in (
+            "class ReasoningTemplateSelector",
+            "def select(",
+            "SelectionResult",
+            "ReasoningFramework",
+        ):
             self.assertIn(method, source, f"ReasoningTemplateSelector 缺少 {method}")
 
     def test_reasoning_template_selector_has_five_frameworks(self):
         """必须有 5 个推理框架。"""
-        source = (_SRC / "infra" / "reasoning_template_selector.py").read_text(encoding="utf-8")
+        source = (_SRC / "infra" / "reasoning_template_selector.py").read_text(
+            encoding="utf-8"
+        )
         for fw in ("analytical", "dialectical", "comparative", "evidential", "concise"):
             self.assertIn(fw, source, f"缺少推理框架: {fw}")
 
     def test_dynamic_invocation_strategy_exists(self):
         """dynamic_invocation_strategy.py 必须实现核心 API。"""
-        source = (_SRC / "infra" / "dynamic_invocation_strategy.py").read_text(encoding="utf-8")
-        for method in ("class DynamicInvocationStrategy", "def decide(", "def record_completion(", "def get_cost_report("):
+        source = (_SRC / "infra" / "dynamic_invocation_strategy.py").read_text(
+            encoding="utf-8"
+        )
+        for method in (
+            "class DynamicInvocationStrategy",
+            "def decide(",
+            "def record_completion(",
+            "def get_cost_report(",
+        ):
             self.assertIn(method, source, f"DynamicInvocationStrategy 缺少 {method}")
 
     def test_dynamic_invocation_strategy_actions(self):
         """必须支持 proceed/decompose/skip/retry_simplified 四种动作。"""
-        source = (_SRC / "infra" / "dynamic_invocation_strategy.py").read_text(encoding="utf-8")
+        source = (_SRC / "infra" / "dynamic_invocation_strategy.py").read_text(
+            encoding="utf-8"
+        )
         for action in ("proceed", "decompose", "skip", "retry_simplified"):
             self.assertIn(f'"{action}"', source, f"缺少调用动作: {action}")
 
     def test_dossier_layer_compressor_exists(self):
         """dossier_layer_compressor.py 必须实现核心 API。"""
-        source = (_SRC / "infra" / "dossier_layer_compressor.py").read_text(encoding="utf-8")
-        for method in ("class DossierLayerCompressor", "def compress(", "LayeredDossier", "CompressedLayer"):
+        source = (_SRC / "infra" / "dossier_layer_compressor.py").read_text(
+            encoding="utf-8"
+        )
+        for method in (
+            "class DossierLayerCompressor",
+            "def compress(",
+            "LayeredDossier",
+            "CompressedLayer",
+        ):
             self.assertIn(method, source, f"DossierLayerCompressor 缺少 {method}")
 
     def test_dossier_layer_compressor_three_layers(self):
         """必须配置 3 个层级 (0=critical, 1=core, 2=full)。"""
-        source = (_SRC / "infra" / "dossier_layer_compressor.py").read_text(encoding="utf-8")
+        source = (_SRC / "infra" / "dossier_layer_compressor.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("0: 512", source)
         self.assertIn("1: 1536", source)
         self.assertIn("2: 3072", source)
 
     def test_small_model_optimizer_exists(self):
         """small_model_optimizer.py 必须实现核心 API。"""
-        source = (_SRC / "infra" / "small_model_optimizer.py").read_text(encoding="utf-8")
-        for method in ("class SmallModelOptimizer", "def prepare_call(", "CallPlan", "def get_cost_report("):
+        source = (_SRC / "infra" / "small_model_optimizer.py").read_text(
+            encoding="utf-8"
+        )
+        for method in (
+            "class SmallModelOptimizer",
+            "def prepare_call(",
+            "CallPlan",
+            "def get_cost_report(",
+        ):
             self.assertIn(method, source, f"SmallModelOptimizer 缺少 {method}")
 
     def test_small_model_optimizer_integrates_all_three(self):
         """SmallModelOptimizer 必须导入并集成三组件。"""
-        source = (_SRC / "infra" / "small_model_optimizer.py").read_text(encoding="utf-8")
+        source = (_SRC / "infra" / "small_model_optimizer.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("from src.infra.reasoning_template_selector import", source)
         self.assertIn("from src.infra.dynamic_invocation_strategy import", source)
         self.assertIn("from src.infra.dossier_layer_compressor import", source)
@@ -2291,7 +3099,9 @@ class TestPhaseELLMOptimizationGuard(unittest.TestCase):
 
     def test_call_plan_has_should_call_llm(self):
         """CallPlan 必须有 should_call_llm 属性。"""
-        source = (_SRC / "infra" / "small_model_optimizer.py").read_text(encoding="utf-8")
+        source = (_SRC / "infra" / "small_model_optimizer.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("should_call_llm", source)
 
 
@@ -2304,7 +3114,9 @@ class TestPhaseISmallModelPlannerWiringGuard(unittest.TestCase):
     """Guard #39: hypothesis / quality / reflect / experiment 必须接入 planner helper。"""
 
     def test_hypothesis_engine_uses_planner_helper(self):
-        source = (_SRC / "research" / "hypothesis_engine.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "hypothesis_engine.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("prepare_planned_llm_call", source)
 
     def test_quality_assessor_uses_planner_helper(self):
@@ -2312,15 +3124,21 @@ class TestPhaseISmallModelPlannerWiringGuard(unittest.TestCase):
         self.assertIn("prepare_planned_llm_call", source)
 
     def test_reflect_phase_uses_planner_helper(self):
-        source = (_SRC / "research" / "phases" / "reflect_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "reflect_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("prepare_planned_llm_call", source)
 
     def test_experiment_designer_uses_planner_helper(self):
-        source = (_SRC / "research" / "experiment_designer.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "experiment_designer.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("prepare_planned_llm_call", source)
 
     def test_publish_phase_exposes_section_planner_preview(self):
-        source = (_SRC / "research" / "phases" / "publish_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "publish_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("prepare_planned_llm_call", source)
         self.assertIn("publish_section_plans", source)
         self.assertIn("deterministic_paper_writer", source)
@@ -2349,12 +3167,16 @@ class TestEvidenceEnvelopePhasOriginGuard(unittest.TestCase):
 
     def test_evidence_envelope_has_phase_origin(self):
         """EvidenceEnvelope 数据类必须包含 phase_origin 字段。"""
-        source = (_SRC / "research" / "evidence_contract.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "evidence_contract.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("phase_origin", source, "EvidenceEnvelope 缺少 phase_origin 字段")
 
     def test_build_phase_evidence_protocol_exists(self):
         """build_phase_evidence_protocol 函数必须存在。"""
-        source = (_SRC / "research" / "evidence_contract.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "evidence_contract.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("def build_phase_evidence_protocol(", source)
 
     def test_phase_result_has_get_evidence_protocol(self):
@@ -2364,38 +3186,52 @@ class TestEvidenceEnvelopePhasOriginGuard(unittest.TestCase):
 
     def test_observe_phase_imports_evidence(self):
         """observe_phase.py 必须导入 evidence_contract。"""
-        source = (_SRC / "research" / "phases" / "observe_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "observe_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("build_phase_evidence_protocol", source)
 
     def test_hypothesis_phase_imports_evidence(self):
         """hypothesis_phase.py 必须导入 evidence_contract。"""
-        source = (_SRC / "research" / "phases" / "hypothesis_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "hypothesis_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("build_phase_evidence_protocol", source)
 
     def test_experiment_execution_phase_imports_evidence(self):
         """experiment_execution_phase.py 必须导入 evidence_contract。"""
-        source = (_SRC / "research" / "phases" / "experiment_execution_phase.py").read_text(encoding="utf-8")
+        source = (
+            _SRC / "research" / "phases" / "experiment_execution_phase.py"
+        ).read_text(encoding="utf-8")
         self.assertIn("build_phase_evidence_protocol", source)
 
     def test_reflect_phase_imports_evidence(self):
         """reflect_phase.py 必须导入 evidence_contract。"""
-        source = (_SRC / "research" / "phases" / "reflect_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "reflect_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("build_phase_evidence_protocol", source)
 
     def test_analyze_phase_sets_phase_origin(self):
         """analyze_phase.py 必须设置 phase_origin。"""
-        source = (_SRC / "research" / "phases" / "analyze_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "analyze_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("phase_origin", source)
 
     def test_experiment_phase_imports_evidence(self):
         """experiment_phase.py 必须导入 build_phase_evidence_protocol 并产出 evidence_protocol。"""
-        source = (_SRC / "research" / "phases" / "experiment_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "experiment_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("build_phase_evidence_protocol", source)
         self.assertIn("evidence_protocol", source)
 
     def test_publish_phase_imports_phase_evidence(self):
         """publish_phase.py 必须导入 build_phase_evidence_protocol 并产出 evidence_protocol。"""
-        source = (_SRC / "research" / "phases" / "publish_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "publish_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("build_phase_evidence_protocol", source)
         self.assertIn('"evidence_protocol"', source)
 
@@ -2430,14 +3266,19 @@ class TestPhaseOutputShapeGuard(unittest.TestCase):
 
     def test_observe_phase_has_learning_metadata(self):
         """observe_phase.py 必须在 metadata 中设置 learning。"""
-        source = (_SRC / "research" / "phases" / "observe_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "observe_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn('"learning"', source)
         self.assertIn("learning_strategy_applied", source)
 
     def test_reflect_phase_has_strategy_diff_in_extra_fields(self):
         """reflect_phase.py extra_fields 应包含 strategy_diff（非 results 重复的扩展键）。"""
-        source = (_SRC / "research" / "phases" / "reflect_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "reflect_phase.py").read_text(
+            encoding="utf-8"
+        )
         import re
+
         extra_block = re.search(r"extra_fields=\{([^}]+)\}", source, re.DOTALL)
         self.assertIsNotNone(extra_block, "reflect_phase 缺少 extra_fields")
         block_text = extra_block.group(1)
@@ -2445,7 +3286,9 @@ class TestPhaseOutputShapeGuard(unittest.TestCase):
 
     def test_experiment_execution_has_execution_boundary(self):
         """experiment_execution_phase.py results 必须包含 execution_boundary 子对象。"""
-        source = (_SRC / "research" / "phases" / "experiment_execution_phase.py").read_text(encoding="utf-8")
+        source = (
+            _SRC / "research" / "phases" / "experiment_execution_phase.py"
+        ).read_text(encoding="utf-8")
         self.assertIn("execution_boundary", source)
 
     def test_monitoring_has_storage_governance_gauges(self):
@@ -2460,6 +3303,7 @@ class TestPhaseOutputShapeGuard(unittest.TestCase):
 
 
 # Guard #36 — Neo4j graph schema versioning、标签注册表与 graph assets (Phase G-1/G-2)
+
 
 class TestGuard36_GraphSchemaVersioning(unittest.TestCase):
     """Guard #36: Neo4j graph schema 与 hypothesis/evidence graph assets 契约。"""
@@ -2499,14 +3343,18 @@ class TestGuard36_GraphSchemaVersioning(unittest.TestCase):
 
     def test_orchestrator_imports_graph_schema(self):
         """phase_orchestrator.py 的 _project_cycle_to_neo4j 必须使用 NodeLabel/RelType。"""
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("from src.storage.graph_schema import", source)
         self.assertIn("NodeLabel.", source)
         self.assertIn("RelType.", source)
 
     def test_backfill_imports_graph_schema(self):
         """research_session_graph_backfill.py 必须引用 graph_schema。"""
-        source = (_SRC / "research" / "research_session_graph_backfill.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "research_session_graph_backfill.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("from src.storage.graph_schema import", source)
         self.assertIn("NodeLabel.", source)
         self.assertIn("RelType.", source)
@@ -2524,52 +3372,70 @@ class TestGuard36_GraphSchemaVersioning(unittest.TestCase):
         self.assertIn("schema_version", source)
 
     def test_hypothesis_phase_emits_hypothesis_subgraph(self):
-        source = (_SRC / "research" / "phases" / "hypothesis_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "hypothesis_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn('"graph_assets"', source)
         self.assertIn("hypothesis_subgraph", source)
         self.assertIn("build_hypothesis_subgraph", source)
 
     def test_analyze_phase_emits_evidence_subgraph(self):
-        source = (_SRC / "research" / "phases" / "analyze_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "analyze_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn('"graph_assets"', source)
         self.assertIn("evidence_subgraph", source)
         self.assertIn("build_evidence_subgraph", source)
 
-    def test_orchestrator_projects_graph_assets_via_transaction(self):
-        source = (_SRC / "research" / "phase_orchestrator.py").read_text(encoding="utf-8")
+    def test_orchestrator_projects_graph_assets_via_transaction_outbox(self):
+        source = (_SRC / "research" / "phase_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("get_phase_graph_assets", source)
         self.assertIn("HAS_HYPOTHESIS", source)
         self.assertIn("DERIVED_FROM_PHASE", source)
-        self.assertIn("transaction.neo4j_batch_nodes", source)
+        self.assertIn("enqueue_graph_projection", source)
+        self.assertIn("session=transaction.pg_session", source)
+        self.assertIn('"graph_projection_mode": "outbox"', source)
 
     def test_backfill_reprojects_phase_graph_assets(self):
-        source = (_SRC / "research" / "research_session_graph_backfill.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "research_session_graph_backfill.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("get_phase_graph_assets", source)
         self.assertIn("graph_asset_subgraph_count", source)
         self.assertIn("NodeLabel.EXEGESIS_TERM", source)
         self.assertIn("NodeLabel.TEXTUAL_EVIDENCE_CHAIN", source)
 
     def test_backfill_tool_supports_schema_version_and_dry_run(self):
-        source = (_WORKSPACE / "tools" / "backfill_research_session_nodes.py").read_text(encoding="utf-8")
+        source = (
+            _WORKSPACE / "tools" / "backfill_research_session_nodes.py"
+        ).read_text(encoding="utf-8")
         self.assertIn("--dry-run", source)
         self.assertIn("--expected-graph-schema-version", source)
         self.assertIn("graph_schema", source)
         self.assertIn("dry_run", source)
 
     def test_pg_phase_graph_assets_writeback_is_wired(self):
-        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(encoding="utf-8")
+        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("def backfill_phase_graph_assets", source)
         self.assertIn("build_observe_philology_graph_assets", source)
         self.assertIn("build_hypothesis_subgraph", source)
         self.assertIn("build_evidence_subgraph", source)
 
-        tool_source = (_WORKSPACE / "tools" / "backfill_research_session_nodes.py").read_text(encoding="utf-8")
+        tool_source = (
+            _WORKSPACE / "tools" / "backfill_research_session_nodes.py"
+        ).read_text(encoding="utf-8")
         self.assertIn("--skip-pg-graph-assets-writeback", tool_source)
         self.assertIn("phase_graph_assets_writeback", tool_source)
         self.assertIn("backfill_phase_graph_assets", tool_source)
 
     def test_production_local_backfill_preflight_uses_dry_run(self):
-        source = (_WORKSPACE / ".vscode" / "production-local-backfill.ps1").read_text(encoding="utf-8")
+        source = (_WORKSPACE / ".vscode" / "production-local-backfill.ps1").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("ExpectedGraphSchemaVersion", source)
         self.assertIn("--dry-run", source)
         self.assertIn("--expected-graph-schema-version", source)
@@ -2577,39 +3443,55 @@ class TestGuard36_GraphSchemaVersioning(unittest.TestCase):
 
 # Guard #37 — 图回归守卫与历史资产 backfill（Phase G-4）
 
+
 class TestGuard37_GraphAssetRegression(unittest.TestCase):
     """Guard #37: schema v2 资产回填、dry-run 摘要、force 重生与回归测试套。"""
 
     def test_graph_asset_regression_test_module_exists(self):
         path = _WORKSPACE / "tests" / "unit" / "test_graph_asset_regression.py"
-        self.assertTrue(path.exists(), "tests/unit/test_graph_asset_regression.py 不存在")
+        self.assertTrue(
+            path.exists(), "tests/unit/test_graph_asset_regression.py 不存在"
+        )
 
     def test_backfill_dry_run_summary_carries_full_asset_counts(self):
         """backfill_structured_research_graph dry-run 必须输出三类资产计数。"""
-        source = (_SRC / "research" / "research_session_graph_backfill.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "research_session_graph_backfill.py").read_text(
+            encoding="utf-8"
+        )
         for token in (
-            "hypothesis_node_count", "hypothesis_edge_count",
-            "evidence_node_count", "evidence_edge_count",
-            "philology_node_count", "philology_edge_count",
-            "exegesis_term_node_count", "textual_evidence_chain_node_count",
-            "graph_asset_subgraph_count", "dry_run",
+            "hypothesis_node_count",
+            "hypothesis_edge_count",
+            "evidence_node_count",
+            "evidence_edge_count",
+            "philology_node_count",
+            "philology_edge_count",
+            "exegesis_term_node_count",
+            "textual_evidence_chain_node_count",
+            "graph_asset_subgraph_count",
+            "dry_run",
         ):
             self.assertIn(token, source, f"backfill summary 缺字段: {token}")
 
     def test_pg_backfill_phase_graph_assets_exposes_force(self):
         """PG 侧 backfill 入口必须支持 force 参数，用于重生旧 cycle 资产。"""
-        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(encoding="utf-8")
+        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("def backfill_phase_graph_assets", source)
         # 签名中必须出现 force 关键字
         self.assertRegex(source, r"def backfill_phase_graph_assets\([^)]*force")
 
     def test_cli_force_regen_flag_wired(self):
-        source = (_WORKSPACE / "tools" / "backfill_research_session_nodes.py").read_text(encoding="utf-8")
+        source = (
+            _WORKSPACE / "tools" / "backfill_research_session_nodes.py"
+        ).read_text(encoding="utf-8")
         self.assertIn("--force-pg-graph-assets-regen", source)
-        self.assertIn("force=bool(getattr(args, \"force_pg_graph_assets_regen\"", source)
+        self.assertIn('force=bool(getattr(args, "force_pg_graph_assets_regen"', source)
 
     def test_ps1_emits_preflight_summary_block(self):
-        source = (_WORKSPACE / ".vscode" / "production-local-backfill.ps1").read_text(encoding="utf-8")
+        source = (_WORKSPACE / ".vscode" / "production-local-backfill.ps1").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("PREFLIGHT SUMMARY", source)
         self.assertIn("projected nodes", source)
         self.assertIn("projected edges", source)
@@ -2620,7 +3502,8 @@ class TestGuard37_GraphAssetRegression(unittest.TestCase):
         """E2E 脚本必须同时覆盖 hypothesis / evidence / philology 资产。"""
         source = (_WORKSPACE / "test_kg_e2e.py").read_text(encoding="utf-8")
         for token in (
-            "hypothesis_node_count", "evidence_node_count",
+            "hypothesis_node_count",
+            "evidence_node_count",
             "philology_asset_graph",
         ):
             self.assertIn(token, source, f"test_kg_e2e.py 未覆盖资产家族: {token}")
@@ -2630,8 +3513,13 @@ class TestGuard37_GraphAssetRegression(unittest.TestCase):
 
         self.assertIn("philology_asset_graph", CANONICAL_READ_TEMPLATES)
         cypher = CANONICAL_READ_TEMPLATES["philology_asset_graph"]["cypher"]
-        for token in ("VersionWitness", "ATTESTS_TO", "ExegesisTerm",
-                       "FragmentCandidate", "graph_source"):
+        for token in (
+            "VersionWitness",
+            "ATTESTS_TO",
+            "ExegesisTerm",
+            "FragmentCandidate",
+            "graph_source",
+        ):
             self.assertIn(token, cypher)
 
 
@@ -2663,7 +3551,9 @@ class TestGuard38_ReviewQualityToolbar(unittest.TestCase):
             self.assertIn(token, source, f"review_sampling 模块缺关键符号: {token}")
 
     def test_repository_exposes_quality_aggregator(self):
-        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(encoding="utf-8")
+        source = (_SRC / "infrastructure" / "research_session_repo.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("def aggregate_review_quality_summary", source)
         # 必须复用 sampling 模块的纯函数，而不是另起一份算法
         self.assertIn("compute_review_quality_summary", source)
@@ -2700,15 +3590,20 @@ class TestGuard38_ReviewQualityToolbar(unittest.TestCase):
             "buildReviewQualitySummary",
             "data-batch-review-status",
         ):
-            self.assertIn(token, source, f"web console review 工具条缺关键函数: {token}")
+            self.assertIn(
+                token, source, f"web console review 工具条缺关键函数: {token}"
+            )
 
     def test_quality_summary_metrics_present_in_pydantic_schema(self):
         source = (_SRC / "api" / "schemas.py").read_text(encoding="utf-8")
         self.assertIn("class ReviewQualitySummary", source)
         self.assertIn("class ReviewSampleRequest", source)
         for token in (
-            "agreement_rate", "overturn_rate", "recheck_count",
-            "overdue_count", "median_backlog_age_hours",
+            "agreement_rate",
+            "overturn_rate",
+            "recheck_count",
+            "overdue_count",
+            "median_backlog_age_hours",
         ):
             self.assertIn(token, source, f"ReviewQualitySummary 缺指标字段: {token}")
 
@@ -2745,7 +3640,9 @@ class TestGuard40_FallbackQualityMatrix(unittest.TestCase):
             self.assertIn(token, source, f"quality_assessor 缺 fallback 原语: {token}")
 
     def test_dynamic_strategy_tracks_fallback_quality(self):
-        source = (_SRC / "infra" / "dynamic_invocation_strategy.py").read_text(encoding="utf-8")
+        source = (_SRC / "infra" / "dynamic_invocation_strategy.py").read_text(
+            encoding="utf-8"
+        )
         for token in (
             "fallback_acceptances",
             "fallback_quality_sum",
@@ -2754,10 +3651,16 @@ class TestGuard40_FallbackQualityMatrix(unittest.TestCase):
             "fallback_acceptance_rate",
             "avg_fallback_quality_score",
         ):
-            self.assertIn(token, source, f"dynamic_invocation_strategy 缺 fallback tracking: {token}")
+            self.assertIn(
+                token,
+                source,
+                f"dynamic_invocation_strategy 缺 fallback tracking: {token}",
+            )
 
     def test_benchmark_emits_fallback_matrix_and_baseline(self):
-        source = (_WORKSPACE / "tools" / "small_model_phase_benchmark.py").read_text(encoding="utf-8")
+        source = (_WORKSPACE / "tools" / "small_model_phase_benchmark.py").read_text(
+            encoding="utf-8"
+        )
         for token in (
             "_build_fallback_quality_matrix",
             "build_regression_baseline",
@@ -2768,29 +3671,39 @@ class TestGuard40_FallbackQualityMatrix(unittest.TestCase):
             "fallback_acceptance_rate_target",
             "fallback_baseline_delta_floor",
         ):
-            self.assertIn(token, source, f"small_model_phase_benchmark 缺 Phase I-4 接线: {token}")
+            self.assertIn(
+                token, source, f"small_model_phase_benchmark 缺 Phase I-4 接线: {token}"
+            )
 
     def test_hypothesis_phase_writes_fallback_metadata(self):
-        source = (_SRC / "research" / "phases" / "hypothesis_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "hypothesis_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("build_phase_fallback_metadata", source)
         self.assertIn("fallback_quality_score", source)
         self.assertIn("fallback_acceptance", source)
         self.assertIn("fallback_reason", source)
 
     def test_reflect_phase_writes_fallback_metadata(self):
-        source = (_SRC / "research" / "phases" / "reflect_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "reflect_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("build_phase_fallback_metadata", source)
         self.assertIn("fallback_quality_score", source)
         self.assertIn("fallback_acceptance", source)
 
     def test_publish_phase_writes_fallback_metadata(self):
-        source = (_SRC / "research" / "phases" / "publish_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "publish_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("build_phase_fallback_metadata", source)
         self.assertIn("fallback_quality_score", source)
         self.assertIn("fallback_acceptance", source)
 
     def test_experiment_designer_writes_fallback_metadata(self):
-        source = (_SRC / "research" / "experiment_designer.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "experiment_designer.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("build_phase_fallback_metadata", source)
         self.assertIn('protocol_source == "template"', source)
 
@@ -2809,7 +3722,9 @@ class TestGuard41_PhaseJContracts(unittest.TestCase):
     """
 
     def test_topic_discovery_contract_exports(self):
-        contract = (_SRC / "research" / "topic_discovery" / "contract.py").read_text(encoding="utf-8")
+        contract = (_SRC / "research" / "topic_discovery" / "contract.py").read_text(
+            encoding="utf-8"
+        )
         for token in (
             "class TopicProposal",
             "class TopicSourceCandidate",
@@ -2817,12 +3732,16 @@ class TestGuard41_PhaseJContracts(unittest.TestCase):
             "topic-proposal-v1",
         ):
             self.assertIn(token, contract, f"topic_discovery.contract 缺: {token}")
-        service = (_SRC / "research" / "topic_discovery" / "topic_discovery_service.py").read_text(encoding="utf-8")
+        service = (
+            _SRC / "research" / "topic_discovery" / "topic_discovery_service.py"
+        ).read_text(encoding="utf-8")
         for token in ("def propose_topics", "TopicDiscoveryService"):
             self.assertIn(token, service, f"topic_discovery_service 缺: {token}")
 
     def test_textual_criticism_contract_exports(self):
-        contract = (_SRC / "research" / "textual_criticism" / "verdict_contract.py").read_text(encoding="utf-8")
+        contract = (
+            _SRC / "research" / "textual_criticism" / "verdict_contract.py"
+        ).read_text(encoding="utf-8")
         for token in (
             "class AuthenticityVerdict",
             "class VerdictEvidence",
@@ -2832,8 +3751,12 @@ class TestGuard41_PhaseJContracts(unittest.TestCase):
             "AUTHOR_VERDICTS",
             "AUTHENTICITY_LEVELS",
         ):
-            self.assertIn(token, contract, f"textual_criticism.verdict_contract 缺: {token}")
-        service = (_SRC / "research" / "textual_criticism" / "textual_criticism_service.py").read_text(encoding="utf-8")
+            self.assertIn(
+                token, contract, f"textual_criticism.verdict_contract 缺: {token}"
+            )
+        service = (
+            _SRC / "research" / "textual_criticism" / "textual_criticism_service.py"
+        ).read_text(encoding="utf-8")
         for token in (
             "def assess_catalog_authenticity",
             "def assess_catalog_batch",
@@ -2882,13 +3805,17 @@ class TestGuard41_PhaseJContracts(unittest.TestCase):
             self.assertIn(token, source, f"self_refine 缺: {token}")
 
     def test_hypothesis_phase_wires_self_refine(self):
-        source = (_SRC / "research" / "phases" / "hypothesis_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "hypothesis_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("from src.research.self_refine import", source)
         self.assertIn("run_self_refine", source)
         self.assertIn("build_self_refine_metadata", source)
 
     def test_publish_phase_wires_self_refine(self):
-        source = (_SRC / "research" / "phases" / "publish_phase.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phases" / "publish_phase.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("from src.research.self_refine import", source)
         self.assertIn("run_self_refine", source)
         self.assertIn("build_self_refine_metadata", source)
@@ -2960,7 +3887,9 @@ class TestGuard42_PhaseKContracts(unittest.TestCase):
             self.assertIn(token, contract, f"trace_contract 缺: {token}")
 
     def test_tcm_reasoning_service_five_rules(self):
-        source = (_SRC / "research" / "tcm_reasoning" / "tcm_reasoning_service.py").read_text(encoding="utf-8")
+        source = (
+            _SRC / "research" / "tcm_reasoning" / "tcm_reasoning_service.py"
+        ).read_text(encoding="utf-8")
         for token in (
             "def rule_tongbing_yizhi",
             "def rule_yibing_tongzhi",
@@ -3002,7 +3931,9 @@ class TestGuard43_PhaseLContracts(unittest.TestCase):
     """
 
     def test_phase_orchestrator_facade_exports(self):
-        source = (_SRC / "research" / "phase_orchestrator_facade.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "phase_orchestrator_facade.py").read_text(
+            encoding="utf-8"
+        )
         for token in (
             'CONTRACT_VERSION = "phase-orchestrator-facade-v1"',
             "class PhaseRunner",
@@ -3030,7 +3961,9 @@ class TestGuard43_PhaseLContracts(unittest.TestCase):
             self.assertIn(token, contract, f"outbox.event_contract 缺: {token}")
 
     def test_outbox_store_exports(self):
-        source = (_SRC / "storage" / "outbox" / "outbox_store.py").read_text(encoding="utf-8")
+        source = (_SRC / "storage" / "outbox" / "outbox_store.py").read_text(
+            encoding="utf-8"
+        )
         for token in (
             "class InMemoryOutboxStore",
             "class OutboxReplaySummary",
@@ -3070,7 +4003,9 @@ class TestGuard43_PhaseLContracts(unittest.TestCase):
         )
 
     def test_config_schema_exports(self):
-        source = (_SRC / "infrastructure" / "config_schema.py").read_text(encoding="utf-8")
+        source = (_SRC / "infrastructure" / "config_schema.py").read_text(
+            encoding="utf-8"
+        )
         for token in (
             'CONTRACT_VERSION = "app-config-schema-v1"',
             "class AppConfigSchema",
@@ -3150,7 +4085,9 @@ class TestGuard44_PhaseMContracts(unittest.TestCase):
             self.assertIn(token, ds_source, f"rlaif/preference_dataset 缺: {token}")
 
     def test_strategy_feedback_exports(self):
-        source = (_SRC / "research" / "strategy_feedback.py").read_text(encoding="utf-8")
+        source = (_SRC / "research" / "strategy_feedback.py").read_text(
+            encoding="utf-8"
+        )
         for token in (
             'STRATEGY_FEEDBACK_CONTRACT_VERSION = "strategy-feedback-v1"',
             "class StrategySuggestion",

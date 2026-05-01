@@ -176,7 +176,8 @@ class PgOutboxStore:
                 session.delete(row)
                 logger.warning(
                     "outbox event %s moved to DLQ after %d failures",
-                    event_id, row.retry_count,
+                    event_id,
+                    row.retry_count,
                 )
                 return {"moved_to_dlq": True, "retry_count": row.retry_count}
             row.status = OutboxStatusEnum.PENDING.value
