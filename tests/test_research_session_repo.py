@@ -272,6 +272,25 @@ class TestSessionCRUD:
         assert result["id"]  # UUID assigned
         assert result["created_at"] is not None
 
+    def test_create_session_upserts_existing_cycle_id(self, repo):
+        payload = _make_payload(cycle_id="cycle-upsert")
+        created = repo.create_session(payload)
+
+        updated = repo.create_session(
+            {
+                **payload,
+                "cycle_name": "更新后的测试会话",
+                "status": "active",
+                "current_phase": "observe",
+            }
+        )
+
+        assert updated["id"] == created["id"]
+        assert updated["cycle_name"] == "更新后的测试会话"
+        assert updated["status"] == "active"
+        assert updated["current_phase"] == "observe"
+        assert repo.list_sessions()["total"] == 1
+
     def test_get_session(self, repo):
         payload = _make_payload()
         repo.create_session(payload)

@@ -104,6 +104,8 @@ class LLMGatewayRequest:
 
     prompt: str = ""
     system_prompt: str = ""
+    prompt_version: str = "unknown"
+    model_id: str = ""
     phase: str = "unknown"
     purpose: str = "default"
     task_type: str = "general"
@@ -113,12 +115,19 @@ class LLMGatewayRequest:
     )
     reasoning_mode: LLMReasoningMode | str = LLMReasoningMode.DIRECT
     max_input_tokens: Optional[int] = None
+    token_budget: Optional[int] = None
+    timeout_s: Optional[float] = None
+    retry_count: int = 0
+    json_output: bool = False
+    gpu_params: Dict[str, Any] = field(default_factory=dict)
     context: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.prompt = str(self.prompt or "")
         self.system_prompt = str(self.system_prompt or "")
+        self.prompt_version = str(self.prompt_version or "unknown").strip() or "unknown"
+        self.model_id = str(self.model_id or "").strip()
         self.phase = str(self.phase or "unknown").strip().lower() or "unknown"
         self.purpose = str(self.purpose or "default").strip() or "default"
         self.task_type = str(self.task_type or "general").strip() or "general"
@@ -126,13 +135,81 @@ class LLMGatewayRequest:
         self.graph_rag = _coerce_retrieval_policy(self.graph_rag)
         self.reasoning_mode = LLMReasoningMode.coerce(self.reasoning_mode)
         self.max_input_tokens = _normalize_optional_positive_int(self.max_input_tokens)
+        self.token_budget = _normalize_optional_positive_int(
+            self.token_budget or self.max_input_tokens
+        )
+        if self.max_input_tokens is None and self.token_budget is not None:
+            self.max_input_tokens = self.token_budget
+        self.timeout_s = _normalize_optional_positive_float(self.timeout_s)
+        try:
+            self.retry_count = max(int(self.retry_count or 0), 0)
+        except (TypeError, ValueError):
+            self.retry_count = 0
+        self.json_output = bool(self.json_output)
+        self.gpu_params = dict(self.gpu_params or {})
         self.context = dict(self.context or {})
         self.metadata = dict(self.metadata or {})
+        if self.prompt_version == "unknown":
+            for source in (self.metadata, self.context):
+                candidate = str(source.get("prompt_version") or "").strip()
+                if candidate:
+                    self.prompt_version = candidate
+                    break
+        if not self.model_id:
+            for source in (self.metadata, self.context):
+                candidate = str(source.get("model_id") or "").strip()
+                if candidate:
+                    self.model_id = candidate
+                    break
+        if self.token_budget is None:
+            for source in (self.metadata, self.context):
+                candidate = _normalize_optional_positive_int(source.get("token_budget"))
+                if candidate is not None:
+                    self.token_budget = candidate
+                    self.max_input_tokens = self.max_input_tokens or candidate
+                    break
+        if self.timeout_s is None:
+            for source in (self.metadata, self.context):
+                candidate = _normalize_optional_positive_float(
+                    source.get("timeout_s") or source.get("timeout_seconds")
+                )
+                if candidate is not None:
+                    self.timeout_s = candidate
+                    break
+        if self.retry_count == 0:
+            for source in (self.metadata, self.context):
+                try:
+                    candidate = int(source.get("retry_count") or 0)
+                except (TypeError, ValueError):
+                    candidate = 0
+                if candidate > 0:
+                    self.retry_count = candidate
+                    break
+        if not self.json_output:
+            for source in (self.metadata, self.context):
+                if source.get("json_output") is True:
+                    self.json_output = True
+                    break
+                if str(source.get("response_format") or "").strip().lower() in {
+                    "json",
+                    "json_object",
+                    "json_array",
+                }:
+                    self.json_output = True
+                    break
+        if not self.gpu_params:
+            for source in (self.metadata, self.context):
+                gpu_params = source.get("gpu_params")
+                if isinstance(gpu_params, Mapping):
+                    self.gpu_params = dict(gpu_params)
+                    break
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "prompt": self.prompt,
             "system_prompt": self.system_prompt,
+            "prompt_version": self.prompt_version,
+            "model_id": self.model_id,
             "phase": self.phase,
             "purpose": self.purpose,
             "task_type": self.task_type,
@@ -140,6 +217,11 @@ class LLMGatewayRequest:
             "graph_rag": self.graph_rag.to_dict(),
             "reasoning_mode": self.reasoning_mode.value,
             "max_input_tokens": self.max_input_tokens,
+            "token_budget": self.token_budget,
+            "timeout_s": self.timeout_s,
+            "retry_count": self.retry_count,
+            "json_output": self.json_output,
+            "gpu_params": _json_ready(self.gpu_params),
             "context": _json_ready(self.context),
             "metadata": _json_ready(self.metadata),
         }
@@ -157,6 +239,11 @@ class LLMGatewayResult:
     warnings: List[str] = field(default_factory=list)
     reasoning_mode: LLMReasoningMode | str = LLMReasoningMode.DIRECT
     schema_name: str = ""
+    prompt_version: str = "unknown"
+    model_id: str = "unknown"
+    latency_s: float = 0.0
+    token_budget: int = 0
+    json_repair_status: str = "not_requested"
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -169,7 +256,25 @@ class LLMGatewayResult:
         self.warnings = [str(item) for item in self.warnings if str(item).strip()]
         self.reasoning_mode = LLMReasoningMode.coerce(self.reasoning_mode)
         self.schema_name = str(self.schema_name or "").strip()
+        self.prompt_version = str(self.prompt_version or "unknown").strip() or "unknown"
+        self.model_id = str(self.model_id or "unknown").strip() or "unknown"
+        try:
+            self.latency_s = max(float(self.latency_s or 0.0), 0.0)
+        except (TypeError, ValueError):
+            self.latency_s = 0.0
+        try:
+            self.token_budget = max(int(self.token_budget or 0), 0)
+        except (TypeError, ValueError):
+            self.token_budget = 0
+        self.json_repair_status = (
+            str(self.json_repair_status or "not_requested").strip() or "not_requested"
+        )
         self.metadata = dict(self.metadata or {})
+        self.metadata.setdefault("prompt_version", self.prompt_version)
+        self.metadata.setdefault("model_id", self.model_id)
+        self.metadata.setdefault("latency_s", self.latency_s)
+        self.metadata.setdefault("token_budget", self.token_budget)
+        self.metadata.setdefault("json_repair_status", self.json_repair_status)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -181,6 +286,11 @@ class LLMGatewayResult:
             "warnings": list(self.warnings),
             "reasoning_mode": self.reasoning_mode.value,
             "schema_name": self.schema_name,
+            "prompt_version": self.prompt_version,
+            "model_id": self.model_id,
+            "latency_s": self.latency_s,
+            "token_budget": self.token_budget,
+            "json_repair_status": self.json_repair_status,
             "metadata": _json_ready(self.metadata),
         }
 
@@ -212,6 +322,16 @@ def _normalize_optional_positive_int(value: Any) -> Optional[int]:
         return None
     try:
         normalized = int(value)
+    except (TypeError, ValueError):
+        return None
+    return normalized if normalized > 0 else None
+
+
+def _normalize_optional_positive_float(value: Any) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    try:
+        normalized = float(value)
     except (TypeError, ValueError):
         return None
     return normalized if normalized > 0 else None

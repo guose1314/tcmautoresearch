@@ -115,6 +115,18 @@ class HypothesisPhaseMixin:
         )
         metadata.setdefault("used_llm_closed_loop", False)
         metadata.setdefault("llm_iteration_count", 0)
+        template_metadata = hypothesis_context.get("llm_reasoning_template")
+        if isinstance(template_metadata, dict) and template_metadata:
+            metadata.setdefault("llm_reasoning_template", template_metadata)
+            metadata.setdefault(
+                "llm_reasoning_template_task_type",
+                template_metadata.get("task_type"),
+            )
+            metadata.setdefault(
+                "llm_reasoning_template_version",
+                template_metadata.get("template_version")
+                or template_metadata.get("version"),
+            )
         # Phase I-4: 若没有任何 LLM 生成的假设（rules-only 或全部 fallback），写入 fallback 质量元数据
         if not metadata.get("used_llm_generation"):
             from src.quality.quality_assessor import build_phase_fallback_metadata
@@ -203,6 +215,46 @@ class HypothesisPhaseMixin:
                         ),
                     )
                 )
+        except Exception:
+            pass
+        try:
+            if metadata.get("used_llm_generation") or context.get(
+                "enable_evidence_self_refine_loop"
+            ):
+                from src.research.evaluation.self_refine_loop import (
+                    run_self_refine_loop,
+                )
+
+                top = next((h for h in hypotheses if isinstance(h, dict)), None)
+                top_text_loop = ""
+                if top is not None:
+                    top_text_loop = str(
+                        top.get("statement")
+                        or top.get("description")
+                        or top.get("hypothesis_text")
+                        or top.get("title")
+                        or ""
+                    ).strip()
+                if top_text_loop:
+                    loop_result = run_self_refine_loop(
+                        top_text_loop,
+                        context={
+                            "task_type": "hypothesis_generation",
+                            "evidence_grade": top.get("evidence_grade") if top else "",
+                            "counter_evidence": context.get("counter_evidence")
+                            or context.get("contradictions")
+                            or [],
+                            "require_citations": bool(
+                                context.get("require_hypothesis_citations", True)
+                            ),
+                        },
+                        llm_generate=context.get("self_refine_loop_llm")
+                        or context.get("llm_service"),
+                    )
+                    metadata["evidence_self_refine_loop"] = loop_result.to_dict()
+                    if loop_result.expert_review_required:
+                        metadata["expert_review_required"] = True
+                        metadata["expert_review_reason"] = "self_refine_loop_failed"
         except Exception:
             pass
         if hasattr(self, "_hypothesis_tracker"):
@@ -357,6 +409,21 @@ class HypothesisPhaseMixin:
                 )
             )
 
+        llm_reasoning_template: Dict[str, Any] = {}
+        try:
+            if hasattr(self.pipeline, "select_llm_reasoning_template"):
+                llm_reasoning_template = self.pipeline.select_llm_reasoning_template(
+                    "hypothesis_generation",
+                    {
+                        **context,
+                        "research_objective": getattr(cycle, "research_objective", "")
+                        or context.get("research_objective")
+                        or "",
+                    },
+                )
+        except Exception:
+            llm_reasoning_template = {}
+
         return {
             "research_objective": cycle.research_objective
             or context.get("research_objective")
@@ -388,6 +455,7 @@ class HypothesisPhaseMixin:
             "learning_strategy": learning_strategy,
             "reasoning_framework": reasoning_framework,
             "reasoning_guidance": reasoning_framework.hypothesis_guidance,
+            "llm_reasoning_template": llm_reasoning_template,
             "dynamic_few_shot": dynamic_few_shot,
         }
 

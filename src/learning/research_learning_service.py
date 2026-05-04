@@ -7,8 +7,14 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from src.contexts.lfitl.feedback_translator import PromptBiasAction, TranslationPlan
+from src.contexts.lfitl.graph_weight_updater import GraphWeightUpdater
 from src.contexts.lfitl.prompt_bias_compiler import PromptBiasCompiler
-from src.learning.learning_insight_repo import STATUS_ACTIVE
+from src.learning.learning_insight_repo import (
+    PROMPT_BIAS_ELIGIBLE_STATUSES,
+    STATUS_ACTIVE,
+    STATUS_REJECTED,
+    normalize_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,17 +34,25 @@ class ResearchLearningService:
         pg_asset_miner: Any = None,
         feedback_repo: Any = None,
         prompt_bias_compiler: Any = None,
+        graph_weight_updater: Any = None,
         active_insight_limit: int = 100,
+        rejected_insight_limit: int = 50,
         min_prompt_bias_confidence: float = 0.0,
+        min_graph_weight_confidence: float = 0.0,
     ) -> None:
         self._learning_insight_repo = learning_insight_repo
         self._graph_miner = graph_miner
         self._pg_asset_miner = pg_asset_miner
         self._feedback_repo = feedback_repo
         self._prompt_bias_compiler = prompt_bias_compiler or PromptBiasCompiler()
+        self._graph_weight_updater = graph_weight_updater or GraphWeightUpdater()
         self._active_insight_limit = max(int(active_insight_limit or 0), 0)
+        self._rejected_insight_limit = max(int(rejected_insight_limit or 0), 0)
         self._min_prompt_bias_confidence = max(
             0.0, min(1.0, float(min_prompt_bias_confidence or 0.0))
+        )
+        self._min_graph_weight_confidence = max(
+            0.0, min(1.0, float(min_graph_weight_confidence or 0.0))
         )
         self._last_run_insights: List[Dict[str, Any]] = []
 
@@ -50,19 +64,37 @@ class ResearchLearningService:
         neo4j_insights = self.mine_neo4j_patterns(normalized_cycle_id)
         insights = _dedupe_insights([*pg_insights, *neo4j_insights])
         self._last_run_insights = insights
+        lifecycle_summary = self._apply_repo_lifecycle_policy()
 
-        compiled = self.compile_prompt_bias(normalized_cycle_id, insights=insights)
+        compiled = self.compile_prompt_bias(normalized_cycle_id)
         warnings.extend(compiled.get("warnings") or [])
+        rejected_insights = self._load_rejected_insights()
+        negative_prompt_bias_blocks = self.compile_negative_prompt_bias(
+            normalized_cycle_id,
+            insights=rejected_insights,
+        )
+        prompt_bias_blocks = _merge_prompt_bias_blocks(
+            compiled.get("prompt_bias_blocks") or {},
+            negative_prompt_bias_blocks,
+        )
+        graph_weight_hints_result = self.build_graph_weight_hints(
+            normalized_cycle_id,
+            insights=compiled.get("insights") or [],
+        )
+        warnings.extend(graph_weight_hints_result.get("warnings") or [])
         policy_summary = {
             "cycle_id": normalized_cycle_id,
             "insight_count": len(insights),
             "pg_insight_count": len(pg_insights),
             "neo4j_insight_count": len(neo4j_insights),
-            "prompt_bias_phase_count": len(compiled.get("prompt_bias_blocks") or {}),
-            "prompt_bias_phases": sorted(
-                (compiled.get("prompt_bias_blocks") or {}).keys()
+            "prompt_bias_phase_count": len(prompt_bias_blocks),
+            "prompt_bias_phases": sorted(prompt_bias_blocks.keys()),
+            "negative_insight_count": len(rejected_insights),
+            "graph_weight_hint_count": len(
+                graph_weight_hints_result.get("graph_weight_hints") or []
             ),
-            "policy_adjustment_mode": "prompt_bias_only",
+            "lifecycle_policy": lifecycle_summary,
+            "policy_adjustment_mode": "prompt_bias_and_graph_weight_hints",
             "warnings": list(warnings),
         }
 
@@ -72,7 +104,12 @@ class ResearchLearningService:
             "insights": insights,
             "pg_insights": pg_insights,
             "neo4j_insights": neo4j_insights,
-            "prompt_bias_blocks": compiled.get("prompt_bias_blocks") or {},
+            "prompt_bias_blocks": prompt_bias_blocks,
+            "positive_prompt_bias_blocks": compiled.get("prompt_bias_blocks") or {},
+            "negative_prompt_bias_blocks": negative_prompt_bias_blocks,
+            "rejected_insights": rejected_insights,
+            "graph_weight_hints": graph_weight_hints_result.get("graph_weight_hints")
+            or [],
             "lfitl_plan": compiled.get("lfitl_plan") or {},
             "policy_adjustment_summary": policy_summary,
             "warnings": list(warnings),
@@ -153,8 +190,10 @@ class ResearchLearningService:
         eligible = [
             dict(item)
             for item in source_insights
-            if _text(item.get("status") or STATUS_ACTIVE) == STATUS_ACTIVE
-            and _confidence(item.get("confidence")) >= self._min_prompt_bias_confidence
+            if _is_prompt_bias_eligible(
+                item,
+                min_confidence=self._min_prompt_bias_confidence,
+            )
         ]
         actions = _build_prompt_bias_actions(eligible)
         plan = TranslationPlan(
@@ -186,6 +225,51 @@ class ResearchLearningService:
             "warnings": warnings,
         }
 
+    def compile_negative_prompt_bias(
+        self,
+        cycle_id: str,
+        *,
+        insights: Optional[Sequence[Mapping[str, Any]]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        _normalized_cycle_id = _text(cycle_id) or "unknown-cycle"
+        rejected = [
+            dict(item)
+            for item in (
+                insights if insights is not None else self._load_rejected_insights()
+            )
+            if normalize_status(item.get("status")) == STATUS_REJECTED
+        ]
+        return _build_negative_prompt_bias_blocks(rejected)
+
+    def build_graph_weight_hints(
+        self,
+        cycle_id: str,
+        *,
+        insights: Optional[Sequence[Mapping[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        normalized_cycle_id = _text(cycle_id) or "unknown-cycle"
+        if insights is not None:
+            source_insights = list(insights)
+        else:
+            source_insights = _dedupe_insights_by_id(
+                [*self._load_prompt_bias_insights(), *self._load_rejected_insights()]
+            )
+        warnings: List[str] = []
+        try:
+            hints = self._graph_weight_updater.build_weight_hints_from_insights(
+                source_insights,
+                min_confidence=self._min_graph_weight_confidence,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("research learning graph weight hint build failed: %s", exc)
+            hints = []
+            warnings.append(f"graph_weight_hint_failed:{type(exc).__name__}: {exc}")
+        return {
+            "cycle_id": normalized_cycle_id,
+            "graph_weight_hints": [dict(item) for item in hints or []],
+            "warnings": warnings,
+        }
+
     def _persist_insights(
         self, insights: Sequence[Mapping[str, Any]]
     ) -> List[Dict[str, Any]]:
@@ -205,8 +289,30 @@ class ResearchLearningService:
         return persisted
 
     def _load_active_insights(self) -> List[Dict[str, Any]]:
+        return self._load_prompt_bias_insights()
+
+    def _load_prompt_bias_insights(self) -> List[Dict[str, Any]]:
         if self._learning_insight_repo is None:
             return list(self._last_run_insights)
+        list_eligible = getattr(
+            self._learning_insight_repo, "list_prompt_bias_eligible", None
+        )
+        if callable(list_eligible):
+            try:
+                return list(list_eligible(limit=self._active_insight_limit))
+            except TypeError:
+                try:
+                    return list(list_eligible())
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "learning insight list_prompt_bias_eligible failed: %s", exc
+                    )
+                    return list(self._last_run_insights)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "learning insight list_prompt_bias_eligible failed: %s", exc
+                )
+                return list(self._last_run_insights)
         try:
             return list(
                 self._learning_insight_repo.list_active(
@@ -218,6 +324,63 @@ class ResearchLearningService:
         except Exception as exc:  # noqa: BLE001
             logger.warning("learning insight list_active failed: %s", exc)
             return list(self._last_run_insights)
+
+    def _load_rejected_insights(self) -> List[Dict[str, Any]]:
+        if self._learning_insight_repo is None:
+            return [
+                dict(item)
+                for item in self._last_run_insights
+                if normalize_status(item.get("status")) == STATUS_REJECTED
+            ]
+        list_rejected = getattr(self._learning_insight_repo, "list_rejected", None)
+        if not callable(list_rejected):
+            return []
+        try:
+            return list(list_rejected(limit=self._rejected_insight_limit))
+        except TypeError:
+            try:
+                return list(list_rejected())
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("learning insight list_rejected failed: %s", exc)
+                return []
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("learning insight list_rejected failed: %s", exc)
+            return []
+
+    def _apply_repo_lifecycle_policy(self) -> Dict[str, Any]:
+        if self._learning_insight_repo is None:
+            return {"status": "skipped", "reason": "repo_unavailable"}
+        summary: Dict[str, Any] = {}
+        migrate = getattr(self._learning_insight_repo, "migrate_legacy_statuses", None)
+        if callable(migrate):
+            try:
+                summary["legacy_status_migrated"] = int(migrate() or 0)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "learning insight legacy status migration failed: %s", exc
+                )
+                summary["legacy_status_migration_error"] = str(exc)
+        apply_policy = getattr(
+            self._learning_insight_repo, "apply_threshold_policy", None
+        )
+        if callable(apply_policy):
+            try:
+                result = apply_policy()
+                if isinstance(result, Mapping):
+                    summary["threshold_policy"] = dict(result)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("learning insight threshold policy failed: %s", exc)
+                summary["threshold_policy_error"] = str(exc)
+        expire_old = getattr(self._learning_insight_repo, "expire_old", None)
+        if callable(expire_old):
+            try:
+                summary["expired_count"] = int(expire_old() or 0)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("learning insight expire_old failed: %s", exc)
+                summary["expire_old_error"] = str(exc)
+        if not summary:
+            summary["status"] = "skipped"
+        return summary
 
     @staticmethod
     def _call_miner(
@@ -295,6 +458,106 @@ def _build_prompt_bias_actions(
             )
         )
     return actions
+
+
+def _build_negative_prompt_bias_blocks(
+    insights: Sequence[Mapping[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    per_phase: Dict[str, List[Mapping[str, Any]]] = defaultdict(list)
+    for item in insights or []:
+        phase = _text(item.get("target_phase")) or "hypothesis"
+        per_phase[phase].append(item)
+
+    blocks: Dict[str, Dict[str, Any]] = {}
+    for phase, phase_insights in sorted(per_phase.items()):
+        descriptions = [_text(item.get("description")) for item in phase_insights]
+        descriptions = [item for item in descriptions if item]
+        if not descriptions:
+            continue
+        blocks[phase] = {
+            "bias_text": "负例学习约束："
+            + " ".join(
+                f"{index}. 已驳回，下一轮候选生成不得直接采纳：{description}"
+                for index, description in enumerate(descriptions[:8], start=1)
+            ),
+            "avoid_fields": ["rejected_learning_insight"],
+            "severity": "high",
+        }
+    return blocks
+
+
+def _merge_prompt_bias_blocks(
+    primary: Mapping[str, Mapping[str, Any]],
+    secondary: Mapping[str, Mapping[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    merged: Dict[str, Dict[str, Any]] = {
+        str(phase): dict(block) for phase, block in (primary or {}).items()
+    }
+    severity_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+    for phase, block in (secondary or {}).items():
+        phase_key = str(phase)
+        incoming = dict(block)
+        if phase_key not in merged:
+            merged[phase_key] = incoming
+            continue
+        current = merged[phase_key]
+        current_text = _text(current.get("bias_text"))
+        incoming_text = _text(incoming.get("bias_text"))
+        if incoming_text and incoming_text not in current_text:
+            current["bias_text"] = "\n".join(
+                item for item in (current_text, incoming_text) if item
+            )
+        avoid_fields: List[str] = []
+        for item in list(current.get("avoid_fields") or []) + list(
+            incoming.get("avoid_fields") or []
+        ):
+            text = _text(item)
+            if text and text not in avoid_fields:
+                avoid_fields.append(text)
+        current["avoid_fields"] = avoid_fields
+        current["severity"] = max(
+            [
+                _text(current.get("severity")) or "medium",
+                _text(incoming.get("severity")) or "medium",
+            ],
+            key=lambda item: severity_order.get(item, 0),
+        )
+    return merged
+
+
+def _dedupe_insights_by_id(
+    insights: Sequence[Mapping[str, Any]],
+) -> List[Mapping[str, Any]]:
+    deduped: List[Mapping[str, Any]] = []
+    seen: set[str] = set()
+    for item in insights or []:
+        insight_id = _text(item.get("insight_id"))
+        key = insight_id or str(len(deduped))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _is_prompt_bias_eligible(
+    item: Mapping[str, Any],
+    *,
+    min_confidence: float,
+) -> bool:
+    if (
+        normalize_status(item.get("status") or STATUS_ACTIVE)
+        not in PROMPT_BIAS_ELIGIBLE_STATUSES
+    ):
+        return False
+    if _confidence(item.get("confidence")) < min_confidence:
+        return False
+    expires_at = _coerce_datetime(item.get("expires_at"))
+    if expires_at is not None and _as_aware_utc(expires_at) <= datetime.now(
+        timezone.utc
+    ):
+        return False
+    return True
 
 
 def _normalize_insight_payload(
@@ -493,6 +756,26 @@ def _max_severity(insights: Sequence[Mapping[str, Any]]) -> str:
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _coerce_datetime(value: Any) -> Optional[datetime]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _now_iso() -> str:

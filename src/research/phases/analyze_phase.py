@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import re
 from math import erfc, sqrt
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Sequence, Tuple
 
 from src.research.data_miner import StatisticalDataMiner
+from src.research.evidence.citation_evidence_synthesizer import (
+    CitationEvidenceSynthesizer,
+)
 from src.research.evidence_contract import build_evidence_protocol
 from src.research.graph_assets import (
     build_evidence_subgraph,
@@ -191,6 +194,14 @@ class AnalyzePhaseMixin:
             analysis_results["textual_criticism"] = textual_criticism
             analysis_results["textual_criticism_summary"] = textual_criticism_summary
         graph_rag = self._prepare_analyze_graph_rag_context(context, cycle)
+        analysis_results["graph_rag"] = graph_rag
+        graph_rag_trace_id = str(
+            graph_rag.get("trace_id")
+            or (graph_rag.get("retrieval_trace") or {}).get("trace_id")
+            or ""
+        ).strip()
+        if graph_rag_trace_id:
+            analysis_results["graph_rag_trace_id"] = graph_rag_trace_id
         tcm_reasoning = self._run_analyze_tcm_reasoning(
             cycle,
             context,
@@ -199,6 +210,23 @@ class AnalyzePhaseMixin:
         )
         if tcm_reasoning:
             analysis_results["tcm_reasoning"] = tcm_reasoning
+
+        citation_evidence_packages = self._build_analyze_citation_evidence_packages(
+            context,
+            evidence_protocol=evidence_protocol,
+            graph_rag=graph_rag,
+            reasoning_results=reasoning_results,
+            analyze_relationships=analyze_relationships,
+            textual_criticism=textual_criticism,
+        )
+        candidate_observations = [
+            package
+            for package in citation_evidence_packages
+            if package.get("conclusion_status") == "candidate_observation"
+        ]
+        analysis_results["citation_evidence_packages"] = citation_evidence_packages
+        if candidate_observations:
+            analysis_results["candidate_observations"] = candidate_observations
 
         # T2.4: methodology contract — methodology_tag 必填 + evidence_grade 默认 'C'
         methodology = _resolve_analyze_methodology(context, cycle)
@@ -252,6 +280,8 @@ class AnalyzePhaseMixin:
             if evidence_grade_payload
             else 0,
             "evidence_protocol_generated": bool(evidence_protocol),
+            "citation_evidence_package_count": len(citation_evidence_packages),
+            "candidate_observation_count": len(candidate_observations),
             "evidence_record_count": int(
                 (
                     (evidence_protocol.get("summary") or {}).get(
@@ -310,6 +340,8 @@ class AnalyzePhaseMixin:
             )
 
         metadata["graph_rag"] = graph_rag
+        if graph_rag_trace_id:
+            metadata["graph_rag_trace_id"] = graph_rag_trace_id
 
         # T4.5: enable_self_refine=True 时，对 analyze 主结论文本调用 SelfRefineRunner
         try:
@@ -412,6 +444,7 @@ class AnalyzePhaseMixin:
 
         topic_keys = list(context.get("graph_rag_topic_keys") or [])
         entity_ids = list(context.get("graph_rag_entity_ids") or [])
+        weight_hints = list(context.get("graph_weight_hints") or [])
         asset_type = str(context.get("graph_rag_asset_type") or "").strip().lower()
         question_type = (context.get("graph_rag_question_type") or "").strip().lower()
         if question_type not in VALID_QUESTION_TYPES:
@@ -429,19 +462,31 @@ class AnalyzePhaseMixin:
             or getattr(cycle, "research_objective", "")
             or context.get("research_objective", "")
         )
+        cycle_id = str(
+            context.get("graph_rag_cycle_id") or getattr(cycle, "cycle_id", "") or ""
+        )
         try:
-            result = rag.retrieve(
-                question_type,
-                query,
-                topic_keys=topic_keys or None,
-                entity_ids=entity_ids or None,
-                asset_type=asset_type or None,
-                cycle_id=str(
-                    context.get("graph_rag_cycle_id")
-                    or getattr(cycle, "cycle_id", "")
-                    or ""
-                ),
-            )
+            if self._resolve_analyze_tiered_graph_rag_enabled(context):
+                result = self._retrieve_analyze_tiered_graph_rag(
+                    rag,
+                    query,
+                    topic_keys=topic_keys or None,
+                    entity_ids=entity_ids or None,
+                    cycle_id=cycle_id,
+                    weight_hints=weight_hints or None,
+                )
+                question_type = "tiered"
+                asset_type = "tiered"
+            else:
+                result = rag.retrieve(
+                    question_type,
+                    query,
+                    topic_keys=topic_keys or None,
+                    entity_ids=entity_ids or None,
+                    asset_type=asset_type or None,
+                    cycle_id=cycle_id,
+                    weight_hints=weight_hints or None,
+                )
         except Exception as exc:  # noqa: BLE001
             return self._build_graph_rag_block(
                 status="degraded",
@@ -467,9 +512,101 @@ class AnalyzePhaseMixin:
                 asset_type=asset_type,
                 block=block,
             )
+        block = self._persist_analyze_graph_rag_trace(
+            block,
+            context=context,
+            cycle=cycle,
+            query=str(query or ""),
+        )
         # 写回 context 让 SelfRefineRunner 在 inputs 里看到
         context.setdefault("graph_rag_context", block)
         return block
+
+    def _persist_analyze_graph_rag_trace(
+        self,
+        block: Dict[str, Any],
+        *,
+        context: Dict[str, Any],
+        cycle: "ResearchCycle",
+        query: str,
+    ) -> Dict[str, Any]:
+        if not isinstance(block, dict) or self._is_empty_graph_rag_block(block):
+            return block
+        try:
+            from src.knowledge.graphrag.retrieval_trace_repo import RetrievalTraceRepo
+
+            repo = context.get("graph_rag_trace_repo")
+            if repo is None:
+                repo = RetrievalTraceRepo(
+                    cache_dir=context.get("graph_rag_trace_cache_dir"),
+                    log_path=context.get("graph_rag_trace_log_path"),
+                )
+            trace = repo.record_retrieval(
+                block,
+                query=query,
+                cycle_id=str(getattr(cycle, "cycle_id", "") or ""),
+                phase="analyze",
+                task_id=str(
+                    context.get("task_id") or getattr(cycle, "cycle_id", "") or ""
+                ),
+                metadata={
+                    "status": block.get("status"),
+                    "reason": block.get("reason"),
+                    "scope": block.get("scope"),
+                    "asset_type": block.get("asset_type"),
+                },
+            )
+        except Exception:
+            return block
+
+        payload = dict(block)
+        metadata = (
+            dict(payload.get("metadata") or {})
+            if isinstance(payload.get("metadata"), Mapping)
+            else {}
+        )
+        metadata["retrieval_trace_id"] = trace.get("trace_id")
+        metadata["retrieval_trace_cache_hit"] = bool(trace.get("cache_hit"))
+        payload["metadata"] = metadata
+        payload["trace_id"] = trace.get("trace_id")
+        payload["retrieval_trace"] = dict(trace)
+        traceability = (
+            dict(payload.get("traceability") or {})
+            if isinstance(payload.get("traceability"), Mapping)
+            else {}
+        )
+        traceability["trace_id"] = trace.get("trace_id")
+        traceability["trace_file"] = trace.get("trace_file")
+        payload["traceability"] = traceability
+        return payload
+
+    def _retrieve_analyze_tiered_graph_rag(
+        self,
+        rag: Any,
+        query: str,
+        *,
+        topic_keys: Sequence[str] | None,
+        entity_ids: Sequence[str] | None,
+        cycle_id: str,
+        weight_hints: Sequence[Mapping[str, Any]] | None = None,
+    ) -> Any:
+        if hasattr(rag, "retrieve_tiered"):
+            return rag.retrieve_tiered(
+                query,
+                topic_keys=topic_keys,
+                entity_ids=entity_ids,
+                cycle_id=cycle_id,
+                weight_hints=weight_hints,
+            )
+        from src.knowledge.graphrag.tiered_retriever import TieredGraphRAGRetriever
+
+        return TieredGraphRAGRetriever(base_retriever=rag).retrieve(
+            query,
+            topic_keys=topic_keys,
+            entity_ids=entity_ids,
+            cycle_id=cycle_id,
+            weight_hints=weight_hints,
+        )
 
     def _prepare_analyze_graph_rag_context(
         self,
@@ -505,6 +642,22 @@ class AnalyzePhaseMixin:
             return bool(graph_rag_config.get("default_enabled"))
         return True
 
+    def _resolve_analyze_tiered_graph_rag_enabled(
+        self, context: Dict[str, Any]
+    ) -> bool:
+        if "enable_tiered_graph_rag" in context:
+            return bool(context.get("enable_tiered_graph_rag"))
+        if str(context.get("graph_rag_asset_type") or "").strip():
+            return False
+        strategy = resolve_learning_strategy(context, self.pipeline.config)
+        for flag_name in ("analyze_enable_tiered_graph_rag", "enable_tiered_graph_rag"):
+            if flag_name in strategy:
+                return bool(strategy.get(flag_name))
+        graph_rag_config = self._resolve_graph_rag_config()
+        if "tiered_retrieval_enabled" in graph_rag_config:
+            return bool(graph_rag_config.get("tiered_retrieval_enabled"))
+        return True
+
     def _resolve_graph_rag_disabled_reason(self, context: Dict[str, Any]) -> str:
         if "enable_graph_rag" in context:
             return "explicit_context_disabled"
@@ -519,6 +672,71 @@ class AnalyzePhaseMixin:
         config = getattr(self.pipeline, "config", {}) or {}
         graph_rag_config = config.get("graph_rag") if isinstance(config, dict) else {}
         return dict(graph_rag_config) if isinstance(graph_rag_config, dict) else {}
+
+    def _build_analyze_citation_evidence_packages(
+        self,
+        context: Dict[str, Any],
+        *,
+        evidence_protocol: Dict[str, Any],
+        graph_rag: Dict[str, Any],
+        reasoning_results: Dict[str, Any],
+        analyze_relationships: List[Dict[str, Any]],
+        textual_criticism: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        targets: List[Dict[str, Any]] = []
+        if isinstance(evidence_protocol, dict):
+            for item in evidence_protocol.get("claims") or []:
+                if isinstance(item, dict):
+                    targets.append(dict(item))
+        reasoning_payload = (
+            reasoning_results.get("reasoning_results")
+            if isinstance(reasoning_results, dict)
+            else {}
+        )
+        for item in (reasoning_payload or {}).get("entity_relationships") or []:
+            if isinstance(item, dict):
+                targets.append(dict(item))
+        if not targets:
+            targets.extend(
+                dict(item)
+                for item in analyze_relationships[:20]
+                if isinstance(item, dict)
+            )
+        if not targets:
+            return []
+
+        text_segments = (
+            context.get("text_segments") or context.get("evidence_segments") or []
+        )
+        entities = context.get("entities") or context.get("observe_entities") or []
+        expert_feedback = []
+        for key in ("expert_feedback", "reviewed_evidence", "human_feedback"):
+            values = context.get(key)
+            if isinstance(values, list):
+                expert_feedback.extend(
+                    item for item in values if isinstance(item, dict)
+                )
+        version_info = []
+        if isinstance(textual_criticism, dict):
+            for key in ("verdicts", "version_witnesses", "witnesses"):
+                values = textual_criticism.get(key)
+                if isinstance(values, list):
+                    version_info.extend(
+                        item for item in values if isinstance(item, dict)
+                    )
+        packages = CitationEvidenceSynthesizer().synthesize_many(
+            targets[:50],
+            text_segments=text_segments if isinstance(text_segments, list) else [],
+            entities=entities if isinstance(entities, list) else [],
+            relationships=analyze_relationships,
+            version_info=version_info,
+            expert_feedback=expert_feedback,
+            graph_rag_results=[graph_rag] if isinstance(graph_rag, dict) else [],
+            evidence_protocol=evidence_protocol
+            if isinstance(evidence_protocol, dict)
+            else {},
+        )
+        return packages
 
     @staticmethod
     def _build_graph_rag_block(
@@ -538,6 +756,7 @@ class AnalyzePhaseMixin:
         payload.setdefault("citations", list(payload.get("citations") or []))
         payload.setdefault("truncated", bool(payload.get("truncated", False)))
         payload.setdefault("traceability", dict(payload.get("traceability") or {}))
+        payload.setdefault("metadata", dict(payload.get("metadata") or {}))
         payload["status"] = status
         payload["reason"] = reason
         if error:

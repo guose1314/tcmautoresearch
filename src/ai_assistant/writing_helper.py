@@ -9,6 +9,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.llm.llm_gateway import generate_with_gateway
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -73,7 +75,9 @@ class WritingHelper:
         """
         parts = [f"【研究主题】\n{topic}"]
         if research_data:
-            parts.append(f"【研究数据摘要】\n{json.dumps(research_data, ensure_ascii=False, default=str)[:3000]}")
+            parts.append(
+                f"【研究数据摘要】\n{json.dumps(research_data, ensure_ascii=False, default=str)[:3000]}"
+            )
         parts.append("请生成 IMRD 论文大纲（JSON 对象）。")
         prompt = "\n\n".join(parts)
 
@@ -109,8 +113,12 @@ class WritingHelper:
             f"【论文大纲】\n{json.dumps(outline, ensure_ascii=False, default=str)[:4000]}",
         ]
         if research_data:
-            prompt_parts.append(f"【研究数据】\n{json.dumps(research_data, ensure_ascii=False, default=str)[:3000]}")
-        prompt_parts.append("请为 Introduction、Methods、Results、Discussion 各节撰写完整学术段落（JSON 对象）。")
+            prompt_parts.append(
+                f"【研究数据】\n{json.dumps(research_data, ensure_ascii=False, default=str)[:3000]}"
+            )
+        prompt_parts.append(
+            "请为 Introduction、Methods、Results、Discussion 各节撰写完整学术段落（JSON 对象）。"
+        )
         prompt = "\n\n".join(prompt_parts)
 
         raw = self._call_llm(prompt, _FILL_SYSTEM)
@@ -123,7 +131,9 @@ class WritingHelper:
             "keywords": outline.get("keywords", []),
         }
         for section in _IMRD_SECTIONS:
-            result[section] = filled.get(section, self._section_placeholder(section, outline))
+            result[section] = filled.get(
+                section, self._section_placeholder(section, outline)
+            )
 
         return result
 
@@ -246,7 +256,21 @@ class WritingHelper:
         if engine is None:
             return ""
         try:
-            return engine.generate(prompt, system_prompt=system_prompt)
+            result = generate_with_gateway(
+                engine,
+                prompt,
+                system_prompt,
+                prompt_version="writing_helper.paper_writing@v1",
+                phase="writing",
+                purpose="paper_writing",
+                task_type="writing_generation",
+                json_output=True,
+                metadata={
+                    "prompt_name": "writing_helper.paper_writing",
+                    "response_format": "json",
+                },
+            )
+            return str(result.text or "")
         except Exception:
             logger.exception("LLM 生成失败")
             return ""
@@ -256,6 +280,7 @@ class WritingHelper:
             return self._llm
         try:
             from src.infra.llm_service import get_llm_service
+
             svc = get_llm_service("assistant")
             svc.load()
             self._llm = svc
@@ -279,13 +304,13 @@ class WritingHelper:
                 return parsed
         except json.JSONDecodeError:
             pass
-        m = re.search(r'```(?:json)?\s*(\{.*?})\s*```', text, re.DOTALL)
+        m = re.search(r"```(?:json)?\s*(\{.*?})\s*```", text, re.DOTALL)
         if m:
             try:
                 return json.loads(m.group(1))
             except json.JSONDecodeError:
                 pass
-        m = re.search(r'\{.*}', text, re.DOTALL)
+        m = re.search(r"\{.*}", text, re.DOTALL)
         if m:
             try:
                 return json.loads(m.group(0))
@@ -298,10 +323,17 @@ class WritingHelper:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _fallback_outline(topic: str, research_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _fallback_outline(
+        topic: str, research_data: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "title": f"{topic}的研究",
-            "abstract_outline": ["研究背景与目的", "方法概述", "主要结果", "结论与意义"],
+            "abstract_outline": [
+                "研究背景与目的",
+                "方法概述",
+                "主要结果",
+                "结论与意义",
+            ],
             "keywords": [topic, "中医药", "研究"],
             "introduction": {
                 "background": f"{topic}的研究背景",
@@ -334,12 +366,17 @@ class WritingHelper:
         data = outline.get(section, {})
         if isinstance(data, dict):
             return "\n\n".join(f"**{k}**: {v}" for k, v in data.items() if v)
-        return str(data) if data else f"[{_SECTION_TITLES_ZH.get(section, section)} 待撰写]"
+        return (
+            str(data)
+            if data
+            else f"[{_SECTION_TITLES_ZH.get(section, section)} 待撰写]"
+        )
 
 
 # ---------------------------------------------------------------------------
 # GB/T 7714-2015 reference formatter
 # ---------------------------------------------------------------------------
+
 
 def _format_gb_t_7714(idx: int, ref: Dict[str, Any]) -> str:
     """格式化单条参考文献为 GB/T 7714-2015 格式。"""

@@ -9,12 +9,11 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
 from src.core.module_base import BaseModule
-from src.infra.llm_service import prepare_planned_llm_call
 from src.infra.prompt_registry import (
-    call_registered_prompt,
     parse_registered_output,
     render_prompt,
 )
+from src.llm.llm_gateway import LLMGateway, LLMGatewayRequest
 from src.research.compute_tier_router import ComputeTierRouter, TierDecision
 from src.research.learning_strategy import (
     has_learning_strategy,
@@ -214,6 +213,7 @@ class HypothesisEngine(BaseModule):
             self.config.get("hypothesis_prompt_template")
             or self.DEFAULT_HYPOTHESIS_PROMPT
         )
+        self.llm_gateway = self.config.get("llm_gateway")
 
     def _do_initialize(self) -> bool:
         self.logger.info("HypothesisEngine 初始化完成")
@@ -223,6 +223,8 @@ class HypothesisEngine(BaseModule):
         self._last_small_model_plan = None
         self._last_llm_cost_report = None
         self._last_fallback_path = None
+        self._last_llm_gateway_audit = None
+        self._last_llm_gateway_audits = []
         knowledge_gap = context.get("knowledge_gap")
         runtime_graph = context.get("knowledge_graph")
         previous_graph = self.knowledge_graph
@@ -267,6 +269,8 @@ class HypothesisEngine(BaseModule):
                 "small_model_plan": self._last_small_model_plan,
                 "llm_cost_report": self._last_llm_cost_report,
                 "fallback_path": self._last_fallback_path,
+                "llm_gateway_audit": self._last_llm_gateway_audit,
+                "llm_gateway_audits": self._last_llm_gateway_audits,
             },
         }
 
@@ -458,18 +462,6 @@ class HypothesisEngine(BaseModule):
         if not hasattr(llm_engine, "generate"):
             return []
 
-        planned_call = prepare_planned_llm_call(
-            phase="hypothesis",
-            task_type="hypothesis_generation",
-            purpose="hypothesis",
-            dossier_sections=self._build_hypothesis_dossier_sections(gap, context),
-            llm_engine=llm_engine,
-            template_preferences=self._extract_template_preferences(context),
-        )
-        self._record_planned_call(planned_call)
-        if not planned_call.should_call_llm:
-            return []
-
         template_override = None
         if self.prompt_template != self.DEFAULT_HYPOTHESIS_PROMPT:
             template_override = self.prompt_template
@@ -485,10 +477,12 @@ class HypothesisEngine(BaseModule):
             dynamic_few_shot=context.get("dynamic_few_shot", ""),
         )
         try:
-            raw = call_registered_prompt(
-                planned_call.create_proxy(),
+            raw = self._call_registered_prompt_via_gateway(
+                llm_engine,
                 "hypothesis_engine.default_hypothesis",
-                rendered=rendered,
+                rendered,
+                context=context,
+                dossier_sections=self._build_hypothesis_dossier_sections(gap, context),
             )
         except Exception as exc:
             self.logger.warning("LLM 假设生成失败，回退规则引擎: %s", exc)
@@ -610,22 +604,12 @@ class HypothesisEngine(BaseModule):
         gap_details = self._format_kg_gaps(kg_gaps)
         kg_summary = self._build_kg_structure_summary(kg_gaps, context)
         context_summary = self._build_context_summary(context)
-        planned_call = prepare_planned_llm_call(
-            phase="hypothesis",
-            task_type="hypothesis_generation",
-            purpose="hypothesis",
-            dossier_sections={
-                "objective": str(context.get("research_objective") or "").strip(),
-                "kg_gap_details": gap_details,
-                "kg_structure_summary": kg_summary,
-                "context_summary": context_summary,
-            },
-            llm_engine=llm_engine,
-            template_preferences=self._extract_template_preferences(context),
-        )
-        self._record_planned_call(planned_call)
-        if not planned_call.should_call_llm:
-            return []
+        dossier_sections = {
+            "objective": str(context.get("research_objective") or "").strip(),
+            "kg_gap_details": gap_details,
+            "kg_structure_summary": kg_summary,
+            "context_summary": context_summary,
+        }
 
         rendered = render_prompt(
             "hypothesis_engine.kg_enhanced",
@@ -639,10 +623,12 @@ class HypothesisEngine(BaseModule):
         )
 
         try:
-            raw = call_registered_prompt(
-                planned_call.create_proxy(),
+            raw = self._call_registered_prompt_via_gateway(
+                llm_engine,
                 "hypothesis_engine.kg_enhanced",
-                rendered=rendered,
+                rendered,
+                context=context,
+                dossier_sections=dossier_sections,
             )
         except Exception as exc:
             self.logger.warning("KG 增强 LLM 生成失败，回退: %s", exc)
@@ -1077,6 +1063,106 @@ class HypothesisEngine(BaseModule):
         self._last_small_model_plan = planned_call.to_metadata()
         self._last_llm_cost_report = planned_call.get_cost_report()
         self._last_fallback_path = planned_call.fallback_path
+
+    def _call_registered_prompt_via_gateway(
+        self,
+        llm_engine: Any,
+        prompt_name: str,
+        rendered: Any,
+        *,
+        context: Dict[str, Any],
+        dossier_sections: Dict[str, str],
+    ) -> str:
+        gateway = self._resolve_llm_gateway(context, llm_engine)
+        prompt_version = f"{rendered.name}@{rendered.version}"
+        result = gateway.generate(
+            LLMGatewayRequest(
+                prompt=rendered.user_prompt,
+                system_prompt=rendered.system_prompt,
+                prompt_version=prompt_version,
+                phase="hypothesis",
+                purpose=rendered.purpose or "hypothesis",
+                task_type="hypothesis_generation",
+                schema_name="",
+                token_budget=context.get("token_budget")
+                or context.get("llm_token_budget")
+                or self.config.get("llm_token_budget"),
+                timeout_s=context.get("timeout_s")
+                or context.get("llm_timeout_s")
+                or self.config.get("llm_timeout_s"),
+                retry_count=int(
+                    context.get("retry_count")
+                    or context.get("llm_retry_count")
+                    or self.config.get("llm_retry_count", 1)
+                    or 0
+                ),
+                json_output=True,
+                context={
+                    "research_domain": context.get("research_domain"),
+                    "learning_strategy": context.get("learning_strategy"),
+                    "dynamic_few_shot": context.get("dynamic_few_shot", ""),
+                },
+                metadata={
+                    "prompt_name": prompt_name,
+                    "prompt_version": prompt_version,
+                    "schema_version": rendered.schema_version,
+                    "output_kind": rendered.output_kind,
+                    "prompt_task": rendered.task,
+                    "response_format": "json",
+                    "dossier_sections": dossier_sections,
+                    "template_preferences": self._extract_template_preferences(context),
+                },
+            )
+        )
+        self._record_gateway_result(result)
+        if not result.text.strip():
+            return ""
+        return result.text
+
+    def _resolve_llm_gateway(
+        self, context: Dict[str, Any], llm_engine: Any
+    ) -> LLMGateway:
+        gateway = context.get("llm_gateway") or self.llm_gateway
+        if isinstance(gateway, LLMGateway):
+            return gateway
+        if gateway is not None and hasattr(gateway, "generate"):
+            return gateway
+        return LLMGateway(llm_engine)
+
+    def _record_gateway_result(self, result: Any) -> None:
+        if result is None:
+            return
+        payload = result.to_dict() if hasattr(result, "to_dict") else {}
+        metadata = dict(
+            payload.get("metadata") or getattr(result, "metadata", {}) or {}
+        )
+        planned_call = metadata.get("planned_call")
+        if isinstance(planned_call, dict):
+            self._last_small_model_plan = planned_call
+            self._last_fallback_path = planned_call.get("fallback_path")
+        cost_report = payload.get("llm_cost_report") or getattr(
+            result, "llm_cost_report", None
+        )
+        if isinstance(cost_report, dict):
+            self._last_llm_cost_report = cost_report
+        audit = {
+            "prompt_version": payload.get("prompt_version")
+            or metadata.get("prompt_version"),
+            "model_id": payload.get("model_id") or metadata.get("model_id"),
+            "latency_s": payload.get("latency_s") or metadata.get("latency_s"),
+            "token_budget": payload.get("token_budget") or metadata.get("token_budget"),
+            "json_repair_status": payload.get("json_repair_status")
+            or metadata.get("json_repair_status"),
+            "attempts_used": metadata.get("attempts_used"),
+            "retry_count": metadata.get("retry_count"),
+            "timeout_s": metadata.get("timeout_s"),
+            "gpu_params": metadata.get("gpu_params") or {},
+            "warnings": list(payload.get("warnings") or []),
+        }
+        self._last_llm_gateway_audit = audit
+        audits = getattr(self, "_last_llm_gateway_audits", None)
+        if isinstance(audits, list):
+            audits.append(audit)
 
     def _extract_template_preferences(
         self, context: Dict[str, Any]

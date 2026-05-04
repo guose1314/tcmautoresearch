@@ -13,6 +13,7 @@ from src.infra.prompt_registry import (
     parse_registered_output,
     render_prompt,
 )
+from src.llm.llm_gateway import generate_with_gateway
 
 logger = logging.getLogger(__name__)
 
@@ -96,22 +97,34 @@ class ResearchAdvisor:
         rendered = render_prompt(
             "research_advisor.hypothesis_suggestion",
             topic=topic,
-            literature_section=(f"【已有文献摘要】\n{lit_summary}\n" if lit_summary else ""),
+            literature_section=(
+                f"【已有文献摘要】\n{lit_summary}\n" if lit_summary else ""
+            ),
         )
 
-        raw = self._call_registered_llm("research_advisor.hypothesis_suggestion", rendered)
-        validation = parse_registered_output("research_advisor.hypothesis_suggestion", raw)
-        hypotheses = validation.parsed if isinstance(validation.parsed, list) else self._parse_json_list(raw)
+        raw = self._call_registered_llm(
+            "research_advisor.hypothesis_suggestion", rendered
+        )
+        validation = parse_registered_output(
+            "research_advisor.hypothesis_suggestion", raw
+        )
+        hypotheses = (
+            validation.parsed
+            if isinstance(validation.parsed, list)
+            else self._parse_json_list(raw)
+        )
 
         # 确保每条都有必需字段
         result: List[Dict[str, Any]] = []
         for idx, h in enumerate(hypotheses[:3]):
-            result.append({
-                "hypothesis": h.get("hypothesis", f"假说 {idx + 1}"),
-                "confidence": self._clamp(h.get("confidence", 0.5), 0.0, 1.0),
-                "rationale": h.get("rationale", ""),
-                "suggested_methods": h.get("suggested_methods", []),
-            })
+            result.append(
+                {
+                    "hypothesis": h.get("hypothesis", f"假说 {idx + 1}"),
+                    "confidence": self._clamp(h.get("confidence", 0.5), 0.0, 1.0),
+                    "rationale": h.get("rationale", ""),
+                    "suggested_methods": h.get("suggested_methods", []),
+                }
+            )
 
         if not result:
             result = self._fallback_hypotheses(topic)
@@ -137,7 +150,11 @@ class ResearchAdvisor:
         )
         raw = self._call_registered_llm("research_advisor.experiment_design", rendered)
         validation = parse_registered_output("research_advisor.experiment_design", raw)
-        design = validation.parsed if isinstance(validation.parsed, dict) else self._parse_json_dict(raw)
+        design = (
+            validation.parsed
+            if isinstance(validation.parsed, dict)
+            else self._parse_json_dict(raw)
+        )
 
         # 确保核心字段存在
         defaults = {
@@ -181,12 +198,18 @@ class ResearchAdvisor:
         rendered = render_prompt(
             "research_advisor.novelty_evaluation",
             hypothesis=hypothesis,
-            literature_section=(f"【已有文献】\n{lit_summary}\n" if lit_summary else ""),
+            literature_section=(
+                f"【已有文献】\n{lit_summary}\n" if lit_summary else ""
+            ),
         )
 
         raw = self._call_registered_llm("research_advisor.novelty_evaluation", rendered)
         validation = parse_registered_output("research_advisor.novelty_evaluation", raw)
-        result = validation.parsed if isinstance(validation.parsed, dict) else self._parse_json_dict(raw)
+        result = (
+            validation.parsed
+            if isinstance(validation.parsed, dict)
+            else self._parse_json_dict(raw)
+        )
 
         defaults: Dict[str, Any] = {
             "novelty_score": 5,
@@ -211,7 +234,21 @@ class ResearchAdvisor:
             logger.warning("LLM 引擎不可用，返回空字符串")
             return ""
         try:
-            return engine.generate(prompt, system_prompt=system_prompt)
+            result = generate_with_gateway(
+                engine,
+                prompt,
+                system_prompt,
+                prompt_version="research_advisor.legacy_call@unknown",
+                phase="assistant",
+                purpose="research_advice",
+                task_type="assistant_research_advice",
+                json_output=True,
+                metadata={
+                    "prompt_name": "research_advisor.legacy_call",
+                    "response_format": "json",
+                },
+            )
+            return str(result.text or "")
         except Exception:
             logger.exception("LLM 生成失败")
             return ""
@@ -232,6 +269,7 @@ class ResearchAdvisor:
             return self._llm
         try:
             from src.infra.llm_service import get_llm_service
+
             svc = get_llm_service("assistant")
             svc.load()
             self._llm = svc
@@ -258,14 +296,14 @@ class ResearchAdvisor:
         except json.JSONDecodeError:
             pass
         # 尝试提取 ```json ... ``` 块
-        m = re.search(r'```(?:json)?\s*(\[.*?])\s*```', text, re.DOTALL)
+        m = re.search(r"```(?:json)?\s*(\[.*?])\s*```", text, re.DOTALL)
         if m:
             try:
                 return json.loads(m.group(1))
             except json.JSONDecodeError:
                 pass
         # 尝试找到第一个 [ ... ]
-        m = re.search(r'\[.*]', text, re.DOTALL)
+        m = re.search(r"\[.*]", text, re.DOTALL)
         if m:
             try:
                 return json.loads(m.group(0))
@@ -284,13 +322,13 @@ class ResearchAdvisor:
                 return parsed
         except json.JSONDecodeError:
             pass
-        m = re.search(r'```(?:json)?\s*(\{.*?})\s*```', text, re.DOTALL)
+        m = re.search(r"```(?:json)?\s*(\{.*?})\s*```", text, re.DOTALL)
         if m:
             try:
                 return json.loads(m.group(1))
             except json.JSONDecodeError:
                 pass
-        m = re.search(r'\{.*}', text, re.DOTALL)
+        m = re.search(r"\{.*}", text, re.DOTALL)
         if m:
             try:
                 return json.loads(m.group(0))
@@ -343,7 +381,11 @@ class ResearchAdvisor:
                 "hypothesis": f"「{topic}」相关经典方剂的核心药对存在剂量依赖性协同效应",
                 "confidence": 0.5,
                 "rationale": "基于经典文献记载的配伍规律推测量效关系",
-                "suggested_methods": ["等效线分析", "Chou-Talalay 联合指数法", "动物模型验证"],
+                "suggested_methods": [
+                    "等效线分析",
+                    "Chou-Talalay 联合指数法",
+                    "动物模型验证",
+                ],
             },
         ]
 

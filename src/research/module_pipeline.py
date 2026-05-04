@@ -133,6 +133,8 @@ def _llm_structured_quality(
     llm_engine: Any,
 ) -> Optional[float]:
     """调用 LLM 做方法学/证据强度/可重复性三维评分，返回均值或 None。"""
+    from src.llm.llm_gateway import generate_with_gateway
+
     summary_parts = [f"模块: {module_name}", f"状态: {result.get('status', 'unknown')}"]
     for key in (
         "entities",
@@ -162,7 +164,22 @@ def _llm_structured_quality(
     system = "你是中医研究质量评审专家。只输出 JSON，不要其他文字。"
 
     try:
-        raw = llm_engine.generate(prompt, system)
+        gateway_result = generate_with_gateway(
+            llm_engine,
+            prompt,
+            system,
+            prompt_version="module_pipeline.structured_quality@v1",
+            phase="quality",
+            purpose="module_quality_scoring",
+            task_type="quality_assessment",
+            json_output=True,
+            metadata={
+                "prompt_name": "module_pipeline.structured_quality",
+                "module_name": module_name,
+                "response_format": "json",
+            },
+        )
+        raw = gateway_result.text
         import json as _json
 
         parsed = _json.loads(raw)

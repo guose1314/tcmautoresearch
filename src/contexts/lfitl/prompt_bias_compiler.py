@@ -159,7 +159,10 @@ def _is_eligible_learning_insight(
     min_confidence: float,
     now: datetime,
 ) -> bool:
-    if str(insight.get("status") or "active").strip().lower() != "active":
+    if str(insight.get("status") or "active").strip().lower() not in {
+        "active",
+        "accepted",
+    }:
         return False
     insight_type = str(insight.get("insight_type") or "").strip().lower()
     if insight_type not in allowed_types:

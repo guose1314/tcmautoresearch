@@ -35,7 +35,8 @@ _DEFAULT_MAX_WORKERS = 3
 @dataclass
 class PdfTranslationResult:
     """PDF 翻译结果数据类"""
-    status: str                      # "completed" | "failed" | "partial"
+
+    status: str  # "completed" | "failed" | "partial"
     pdf_path: str
     title: str = ""
     abstract: str = ""
@@ -43,8 +44,8 @@ class PdfTranslationResult:
     fragment_total: int = 0
     fragment_ok: int = 0
     char_count: int = 0
-    output_markdown: str = ""        # 输出 Markdown 文件路径
-    output_html: str = ""            # 输出 HTML 对比文件路径
+    output_markdown: str = ""  # 输出 Markdown 文件路径
+    output_html: str = ""  # 输出 HTML 对比文件路径
     summary: str = ""
     output_json: str = ""
     error: str = ""
@@ -73,12 +74,13 @@ class PdfJsonPayload:
 
 # ────────────────────────────── PDF 工具函数 ──────────────────────────────
 
+
 def _read_pdf_with_fitz(pdf_path: str) -> Tuple[str, str, str]:
     """
     用 PyMuPDF (fitz) 读取 PDF 文件。
-    
+
     返回: (title, abstract, full_text)
-    
+
     说明：
       - 第一页通常含标题/作者/摘要信息
       - full_text = 所有页面的纯文本
@@ -123,7 +125,7 @@ def _split_pdf_content(
 ) -> List[str]:
     """
     智能拆分 PDF 全文内容为翻译片段。
-    
+
     策略：
       1. 优先按章节边界（\\n\\n）拆分
       2. 每片段字符数 ≈ max_tokens（启发式：1 token ≈ 4 字符）
@@ -185,7 +187,23 @@ def _translate_fragment_with_llm(
 
     if engine is not None:
         try:
-            return engine.generate(user_prompt, system_prompt)
+            from src.llm.llm_gateway import generate_with_gateway
+
+            result = generate_with_gateway(
+                engine,
+                user_prompt,
+                system_prompt,
+                prompt_version="pdf_translation.fragment@v1",
+                phase="translation",
+                purpose="pdf_translation",
+                task_type="translation",
+                metadata={
+                    "prompt_name": "pdf_translation.fragment",
+                    "target_language": target_lang,
+                    "fragment_chars": len(fragment),
+                },
+            )
+            return str(result.text or "")
         except Exception as exc:
             logger.warning(
                 f"LLM 翻译失败（片段长 {len(fragment)} 字符），原样返回: {exc}"
@@ -197,6 +215,7 @@ def _translate_fragment_with_llm(
 
 
 # ────────────────────────────── 元数据提取 ──────────────────────────────
+
 
 def _extract_pdf_metadata_with_llm(
     title: str,
@@ -215,7 +234,19 @@ def _extract_pdf_metadata_with_llm(
                 f"Preserve all technical terms and maintain clarity:\n\n{abstract}"
             )
             system_prompt = "You are an expert academic translator."
-            translated_abstract = engine.generate(user_prompt, system_prompt)
+            from src.llm.llm_gateway import generate_with_gateway
+
+            abstract_result = generate_with_gateway(
+                engine,
+                user_prompt,
+                system_prompt,
+                prompt_version="pdf_translation.abstract_metadata@v1",
+                phase="translation",
+                purpose="pdf_metadata_translation",
+                task_type="abstract_translation",
+                metadata={"prompt_name": "pdf_translation.abstract_metadata"},
+            )
+            translated_abstract = str(abstract_result.text or abstract)
         except Exception as exc:
             logger.warning(f"摘要翻译失败: {exc}")
 
@@ -225,14 +256,28 @@ def _extract_pdf_metadata_with_llm(
                 f"Translate the following paper title into Chinese:\n\n{title}"
             )
             system_prompt = "You are an expert academic translator."
-            translated_title = engine.generate(user_prompt, system_prompt)
+            from src.llm.llm_gateway import generate_with_gateway
+
+            title_result = generate_with_gateway(
+                engine,
+                user_prompt,
+                system_prompt,
+                prompt_version="pdf_translation.title_metadata@v1",
+                phase="translation",
+                purpose="pdf_metadata_translation",
+                task_type="title_translation",
+                metadata={"prompt_name": "pdf_translation.title_metadata"},
+            )
+            translated_title = str(title_result.text or title)
         except Exception as exc:
             logger.warning(f"标题翻译失败: {exc}")
 
     return translated_title, translated_abstract
 
 
-def _build_failed_pdf_result(out_dir: Path, ts: str, pdf_path: str, error: str) -> PdfTranslationResult:
+def _build_failed_pdf_result(
+    out_dir: Path, ts: str, pdf_path: str, error: str
+) -> PdfTranslationResult:
     return PdfTranslationResult(
         status="failed",
         pdf_path=pdf_path,
@@ -295,7 +340,9 @@ def _translate_pdf_fragments(
                 logger.error(f"片段 {idx} 翻译失败: {exc}")
                 fragment_results[idx] = fragments[idx]
 
-    return [item or fragments[i] for i, item in enumerate(fragment_results)], fragment_ok
+    return [
+        item or fragments[i] for i, item in enumerate(fragment_results)
+    ], fragment_ok
 
 
 def _build_pdf_artifact_paths(out_dir: Path, ts: str) -> PdfTranslationArtifacts:
@@ -366,6 +413,7 @@ def _unload_pdf_engine(engine) -> None:
 
 
 # ────────────────────────────── 输出生成 ──────────────────────────────
+
 
 def _write_markdown_output(
     output_path: str,
@@ -439,11 +487,11 @@ def _write_html_output(
         html += """    <div class="abstract-section">
         <h2>摘要对照 (Abstract Comparison)</h2>
 """
-        newline_pattern = r'\n+'
+        newline_pattern = r"\n+"
         if abstract:
-            abstract_html = re.sub(newline_pattern, '<br/>', abstract)
+            abstract_html = re.sub(newline_pattern, "<br/>", abstract)
             html += f"        <h3>原文</h3>\n        <p>{abstract_html}</p>\n"
-        abstract_translated_html = re.sub(newline_pattern, '<br/>', abstract_translated)
+        abstract_translated_html = re.sub(newline_pattern, "<br/>", abstract_translated)
         html += f"        <h3>翻译</h3>\n        <p>{abstract_translated_html}</p>\n"
         html += "    </div>\n"
 
@@ -474,6 +522,7 @@ def _write_html_output(
 
 
 # ────────────────────────────── 主函数 ──────────────────────────────
+
 
 def run_pdf_full_text_translation(
     pdf_path: str,
@@ -525,7 +574,9 @@ def run_pdf_full_text_translation(
     engine = _load_pdf_engine(use_llm)
 
     try:
-        title_trans, abstract_trans = _extract_pdf_metadata_with_llm(title, abstract, engine)
+        title_trans, abstract_trans = _extract_pdf_metadata_with_llm(
+            title, abstract, engine
+        )
         logger.info("元数据翻译完成")
         fragments_trans_final, fragment_ok = _translate_pdf_fragments(
             fragments,

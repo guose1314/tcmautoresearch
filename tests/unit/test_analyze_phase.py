@@ -577,6 +577,34 @@ class TestAnalyzeGraphRAGDefault(unittest.TestCase):
         self.assertEqual(result["metadata"]["graph_rag"]["status"], "applied")
         self.assertEqual(result["metadata"]["graph_rag"]["body"], "图谱证据上下文")
 
+    def test_graph_rag_trace_id_written_to_results_and_metadata(self):
+        mixin = _AnalyzeMixin(_FakePipeline())
+        mixin._apply_graph_rag = MagicMock(  # type: ignore[method-assign]
+            return_value={
+                "status": "applied",
+                "reason": "retrieved",
+                "body": "图谱证据上下文",
+                "trace_id": "graphrag-trace:test-1",
+                "retrieval_trace": {"trace_id": "graphrag-trace:test-1"},
+                "citations": [{"type": "Evidence", "id": "ev-1"}],
+            }
+        )
+
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(),
+            {"analysis_records": _sample_records()},
+        )
+
+        self.assertEqual(
+            result["results"]["graph_rag_trace_id"], "graphrag-trace:test-1"
+        )
+        self.assertEqual(
+            result["results"]["graph_rag"]["trace_id"], "graphrag-trace:test-1"
+        )
+        self.assertEqual(
+            result["metadata"]["graph_rag_trace_id"], "graphrag-trace:test-1"
+        )
+
     def test_explicit_disable_skips_apply_graph_rag(self):
         mixin = _AnalyzeMixin(_FakePipeline())
         mixin._apply_graph_rag = MagicMock(  # type: ignore[method-assign]
@@ -608,6 +636,36 @@ class TestAnalyzeGraphRAGDefault(unittest.TestCase):
         self.assertEqual(graph_rag["reason"], "missing_neo4j_driver")
         self.assertEqual(graph_rag["body"], "")
         self.assertEqual(graph_rag["citations"], [])
+
+    def test_analyze_results_include_citation_evidence_packages(self):
+        mixin = _AnalyzeMixin(_FakePipeline())
+
+        result = mixin.execute_analyze_phase(
+            _FakeCycle(),
+            {
+                "analysis_records": _sample_records(),
+                "enable_graph_rag": False,
+                "relationships": [
+                    {
+                        "source": "麻仁",
+                        "relation_type": "润肠",
+                        "target": "便秘",
+                    }
+                ],
+                "text_segments": [
+                    {
+                        "segment_id": "seg-1",
+                        "quote_text": "麻仁润肠通便，可用于便秘证。",
+                    }
+                ],
+            },
+        )
+
+        packages = result["results"]["citation_evidence_packages"]
+        self.assertEqual(len(packages), 1)
+        self.assertEqual(packages[0]["conclusion_status"], "formal_conclusion")
+        self.assertEqual(result["metadata"]["citation_evidence_package_count"], 1)
+        self.assertEqual(result["metadata"]["candidate_observation_count"], 0)
 
 
 if __name__ == "__main__":

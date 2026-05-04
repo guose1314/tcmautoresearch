@@ -14,6 +14,7 @@ from src.infra.prompt_registry import (
     parse_registered_output,
     render_prompt,
 )
+from src.llm.llm_gateway import generate_with_gateway
 from src.research.compute_tier_router import ComputeTierRouter
 
 logger = logging.getLogger(__name__)
@@ -47,12 +48,16 @@ class GapAnalyzerConfig:
     default_output_mode: str = "report"
     json_indent: int = 2
     default_clinical_question: str = _DEFAULT_CLINICAL_QUESTION
-    expected_sections: List[str] = field(default_factory=lambda: list(_DEFAULT_EXPECTED_SECTIONS))
+    expected_sections: List[str] = field(
+        default_factory=lambda: list(_DEFAULT_EXPECTED_SECTIONS)
+    )
     system_prompt: str = (
         "你是中医临床研究方法学专家与证据综合分析师。"
         "请基于输入数据与预分析结果形成严谨报告，不得编造文献。"
     )
-    report_requirements: List[str] = field(default_factory=lambda: list(_DEFAULT_REPORT_REQUIREMENTS))
+    report_requirements: List[str] = field(
+        default_factory=lambda: list(_DEFAULT_REPORT_REQUIREMENTS)
+    )
 
     @classmethod
     def from_dict(cls, config: Optional[Dict[str, Any]] = None) -> "GapAnalyzerConfig":
@@ -61,13 +66,23 @@ class GapAnalyzerConfig:
             max_summaries=int(raw.get("max_summaries", 20)),
             summary_text_limit=int(raw.get("summary_text_limit", 450)),
             use_llm_refinement=bool(raw.get("use_llm_refinement", True)),
-            default_output_language=str(raw.get("default_output_language") or raw.get("output_language") or "zh"),
-            default_output_mode=str(raw.get("default_output_mode") or raw.get("output_mode") or "report"),
+            default_output_language=str(
+                raw.get("default_output_language") or raw.get("output_language") or "zh"
+            ),
+            default_output_mode=str(
+                raw.get("default_output_mode") or raw.get("output_mode") or "report"
+            ),
             json_indent=int(raw.get("json_indent", 2)),
-            default_clinical_question=str(raw.get("default_clinical_question") or _DEFAULT_CLINICAL_QUESTION),
-            expected_sections=list(raw.get("expected_sections") or _DEFAULT_EXPECTED_SECTIONS),
+            default_clinical_question=str(
+                raw.get("default_clinical_question") or _DEFAULT_CLINICAL_QUESTION
+            ),
+            expected_sections=list(
+                raw.get("expected_sections") or _DEFAULT_EXPECTED_SECTIONS
+            ),
             system_prompt=str(raw.get("system_prompt") or cls().system_prompt),
-            report_requirements=list(raw.get("report_requirements") or _DEFAULT_REPORT_REQUIREMENTS),
+            report_requirements=list(
+                raw.get("report_requirements") or _DEFAULT_REPORT_REQUIREMENTS
+            ),
         )
 
 
@@ -146,7 +161,9 @@ class GapAnalysisCore:
                     "source": row.get("source", ""),
                     "title": row.get("title", ""),
                     "year": row.get("year"),
-                    "summary_text": (row.get("summary_text", "") or "")[: self.summary_text_limit],
+                    "summary_text": (row.get("summary_text", "") or "")[
+                        : self.summary_text_limit
+                    ],
                 }
             )
 
@@ -167,23 +184,56 @@ class GapAnalysisCore:
 
         gaps = []
         if not dimensions["condition"]:
-            gaps.append(self._gap("condition", "目标人群/证候定义不完整", "纳入标准可能异质，影响结论泛化", "高"))
+            gaps.append(
+                self._gap(
+                    "condition",
+                    "目标人群/证候定义不完整",
+                    "纳入标准可能异质，影响结论泛化",
+                    "高",
+                )
+            )
         if not dimensions["intervention"]:
-            gaps.append(self._gap("intervention", "干预描述不足", "剂量/疗程/配伍信息不完整", "高"))
+            gaps.append(
+                self._gap(
+                    "intervention", "干预描述不足", "剂量/疗程/配伍信息不完整", "高"
+                )
+            )
         if dimensions["outcome_count"] < 2:
-            gaps.append(self._gap("outcome", "关键结局覆盖不足", "仅少量终点，难以评估疗效与安全性平衡", "高"))
+            gaps.append(
+                self._gap(
+                    "outcome",
+                    "关键结局覆盖不足",
+                    "仅少量终点，难以评估疗效与安全性平衡",
+                    "高",
+                )
+            )
         if dimensions["method_count"] < 2:
-            gaps.append(self._gap("method", "研究设计单一", "缺少多中心或高质量对照研究", "中"))
+            gaps.append(
+                self._gap("method", "研究设计单一", "缺少多中心或高质量对照研究", "中")
+            )
         if knowledge_signals < 2:
-            gaps.append(self._gap("knowledge", "机制证据薄弱", "临床结论与作用机制链条尚未闭环", "中"))
+            gaps.append(
+                self._gap(
+                    "knowledge", "机制证据薄弱", "临床结论与作用机制链条尚未闭环", "中"
+                )
+            )
 
         while len(gaps) < 3:
-            gaps.append(self._gap("evidence", "证据密度不足", "现有研究数量或一致性不足以支持稳健结论", "中"))
+            gaps.append(
+                self._gap(
+                    "evidence",
+                    "证据密度不足",
+                    "现有研究数量或一致性不足以支持稳健结论",
+                    "中",
+                )
+            )
 
         recommendations = [
             {
                 "target_gap": gap["dimension"],
-                "study_design": "前瞻性随机对照研究" if gap["priority"] == "高" else "多中心队列研究",
+                "study_design": "前瞻性随机对照研究"
+                if gap["priority"] == "高"
+                else "多中心队列研究",
                 "inclusion_criteria": "明确证候分型、年龄分层、基线合并症",
                 "primary_endpoint": "临床主要结局 + 安全性复合终点",
             }
@@ -204,7 +254,9 @@ class GapAnalysisCore:
             "recommendations": recommendations,
         }
 
-    def build_prompt_payload(self, payload: Dict[str, Any], core_analysis: Dict[str, Any]) -> Dict[str, Any]:
+    def build_prompt_payload(
+        self, payload: Dict[str, Any], core_analysis: Dict[str, Any]
+    ) -> Dict[str, Any]:
         requirements = "\n".join(
             f"{index}. {item}"
             for index, item in enumerate(self.config.report_requirements, 1)
@@ -227,22 +279,36 @@ class GapAnalysisCore:
             "payload": payload,
         }
 
-    def render_structured_report(self, core_analysis: Dict[str, Any], output_language: str) -> str:
+    def render_structured_report(
+        self, core_analysis: Dict[str, Any], output_language: str
+    ) -> str:
         if output_language.lower().startswith("en"):
             return self._render_en(core_analysis)
         return self._render_zh(core_analysis)
 
     def _collect_dimensions(self, evidence_matrix: Dict[str, Any]) -> Dict[str, Any]:
-        condition = bool(evidence_matrix.get("condition") or evidence_matrix.get("population") or evidence_matrix.get("syndrome"))
+        condition = bool(
+            evidence_matrix.get("condition")
+            or evidence_matrix.get("population")
+            or evidence_matrix.get("syndrome")
+        )
         intervention = bool(
             evidence_matrix.get("intervention")
             or evidence_matrix.get("formula")
             or evidence_matrix.get("herb")
         )
-        outcomes = evidence_matrix.get("outcomes") or evidence_matrix.get("outcome") or []
-        methods = evidence_matrix.get("study_designs") or evidence_matrix.get("methods") or []
-        outcome_count = len(outcomes) if isinstance(outcomes, list) else (1 if outcomes else 0)
-        method_count = len(methods) if isinstance(methods, list) else (1 if methods else 0)
+        outcomes = (
+            evidence_matrix.get("outcomes") or evidence_matrix.get("outcome") or []
+        )
+        methods = (
+            evidence_matrix.get("study_designs") or evidence_matrix.get("methods") or []
+        )
+        outcome_count = (
+            len(outcomes) if isinstance(outcomes, list) else (1 if outcomes else 0)
+        )
+        method_count = (
+            len(methods) if isinstance(methods, list) else (1 if methods else 0)
+        )
         return {
             "condition": condition,
             "intervention": intervention,
@@ -254,11 +320,24 @@ class GapAnalysisCore:
         count = 0
         for item in summaries:
             text = f"{item.get('title', '')} {item.get('summary_text', '')}"
-            if any(token in text for token in ["机制", "通路", "靶点", "机制链", "pathway", "mechanism", "target"]):
+            if any(
+                token in text
+                for token in [
+                    "机制",
+                    "通路",
+                    "靶点",
+                    "机制链",
+                    "pathway",
+                    "mechanism",
+                    "target",
+                ]
+            ):
                 count += 1
         return count
 
-    def _gap(self, dimension: str, title: str, limitation: str, priority: str) -> Dict[str, Any]:
+    def _gap(
+        self, dimension: str, title: str, limitation: str, priority: str
+    ) -> Dict[str, Any]:
         return {
             "dimension": dimension,
             "title": title,
@@ -326,16 +405,38 @@ class GapAnalysisLLMAdapter:
         rendered_prompt: Any = None,
     ) -> str:
         if llm_service is None or not hasattr(llm_service, "generate"):
-            raise RuntimeError("GapAnalysisLLMAdapter 需要支持 generate(prompt, system_prompt) 的 llm_service")
+            raise RuntimeError(
+                "GapAnalysisLLMAdapter 需要支持 generate(prompt, system_prompt) 的 llm_service"
+            )
         if prompt_name and rendered_prompt is not None:
-            return str(call_registered_prompt(llm_service, prompt_name, rendered=rendered_prompt))
-        return str(llm_service.generate(user_prompt, system_prompt))
+            return str(
+                call_registered_prompt(
+                    llm_service, prompt_name, rendered=rendered_prompt
+                )
+            )
+        result = generate_with_gateway(
+            llm_service,
+            user_prompt,
+            system_prompt,
+            prompt_version="gap_analyzer.refinement@unknown",
+            phase="analyze",
+            purpose="gap_analysis",
+            task_type="gap_analysis_refinement",
+            json_output=True,
+            metadata={
+                "prompt_name": "gap_analyzer.refinement",
+                "response_format": "json",
+            },
+        )
+        return str(result.text or "")
 
 
 class GapAnalyzer(BaseModule):
     """临床/知识缺口分析器：组织分析核心、结构化解析与 LLM 适配层。"""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None, llm_service: Any = None):
+    def __init__(
+        self, config: Optional[Dict[str, Any]] = None, llm_service: Any = None
+    ):
         super().__init__("gap_analyzer", config)
         self.llm_service = llm_service
         self.settings = GapAnalyzerConfig.from_dict(self.config)
@@ -362,7 +463,9 @@ class GapAnalyzer(BaseModule):
         llm_service = context.get("llm_service") or self.llm_service
         raw_use_llm = context.get("use_llm_refinement")
         use_llm = self.use_llm_refinement if raw_use_llm is None else bool(raw_use_llm)
-        report = self.core.render_structured_report(core_analysis, request.output_language)
+        report = self.core.render_structured_report(
+            core_analysis, request.output_language
+        )
         used_llm = False
 
         # 动态算力分配：评估是否需要 LLM 精炼
@@ -372,7 +475,8 @@ class GapAnalyzer(BaseModule):
                 task_type="gap_analysis",
                 evidence={
                     "entity_count": len(core_analysis.get("gaps", [])),
-                    "evidence_items": len(request.evidence_matrix or []) + len(request.literature_summaries or []),
+                    "evidence_items": len(request.evidence_matrix or [])
+                    + len(request.literature_summaries or []),
                     "rule_confidence": core_analysis.get("confidence", 0.0),
                     "retrieval_hits": len(request.literature_summaries or []),
                 },
@@ -392,27 +496,44 @@ class GapAnalyzer(BaseModule):
         resolved_analysis = self._merge_analysis(core_analysis, parsed_analysis)
         json_payload = self._build_json_payload(request, resolved_analysis)
         if request.output_mode == "json":
-            report = json.dumps(json_payload, ensure_ascii=False, indent=self.settings.json_indent)
-        elif self._looks_like_json_payload(report) and not parsed_analysis.get("report"):
-            report = self.core.render_structured_report(resolved_analysis, request.output_language)
+            report = json.dumps(
+                json_payload, ensure_ascii=False, indent=self.settings.json_indent
+            )
+        elif self._looks_like_json_payload(report) and not parsed_analysis.get(
+            "report"
+        ):
+            report = self.core.render_structured_report(
+                resolved_analysis, request.output_language
+            )
 
         result = GapAnalysisResult(
             clinical_question=request.clinical_question,
             output_language=request.output_language,
             report=report,
             gaps=resolved_analysis.get("gaps", []),
-            priority_summary=self._build_priority_summary(resolved_analysis.get("gaps", [])),
+            priority_summary=self._build_priority_summary(
+                resolved_analysis.get("gaps", [])
+            ),
             recommendations=resolved_analysis.get("recommendations", []),
             coverage_overview=resolved_analysis.get("coverage_overview", {}),
             json_payload=json_payload,
             prompt_payload=prompt_data["payload"],
             core_analysis=core_analysis,
             metadata={
-                "literature_summary_count": len(prompt_data["payload"].get("literature_summaries", [])),
-                "expected_sections": prompt_data["payload"].get("expected_sections", []),
+                "literature_summary_count": len(
+                    prompt_data["payload"].get("literature_summaries", [])
+                ),
+                "expected_sections": prompt_data["payload"].get(
+                    "expected_sections", []
+                ),
                 "used_llm_refinement": used_llm,
-                "structured_parse_success": bool(parsed_analysis.get("gaps") or parsed_analysis.get("priority_summary")),
-                "structured_source": parsed_analysis.get("structured_source", "core_fallback"),
+                "structured_parse_success": bool(
+                    parsed_analysis.get("gaps")
+                    or parsed_analysis.get("priority_summary")
+                ),
+                "structured_source": parsed_analysis.get(
+                    "structured_source", "core_fallback"
+                ),
                 "output_mode": request.output_mode,
             },
         )
@@ -527,7 +648,8 @@ class GapAnalyzer(BaseModule):
             "output_language": request.output_language,
             "coverage_overview": analysis.get("coverage_overview", {}),
             "gaps": analysis.get("gaps", []),
-            "priority_summary": analysis.get("priority_summary") or self._build_priority_summary(analysis.get("gaps", [])),
+            "priority_summary": analysis.get("priority_summary")
+            or self._build_priority_summary(analysis.get("gaps", [])),
             "recommendations": analysis.get("recommendations", []),
         }
 
@@ -551,7 +673,12 @@ class GapAnalyzer(BaseModule):
             if not text:
                 return {}
             if text.startswith("```"):
-                text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+                text = re.sub(
+                    r"^```(?:json)?\s*|\s*```$",
+                    "",
+                    text,
+                    flags=re.IGNORECASE | re.DOTALL,
+                ).strip()
             if not self._looks_like_json_payload(text):
                 return {}
             try:
@@ -564,7 +691,9 @@ class GapAnalyzer(BaseModule):
             "report": str(payload.get("report") or "").strip(),
             "gaps": self._normalize_gaps(payload.get("gaps") or []),
             "priority_summary": payload.get("priority_summary") or {},
-            "recommendations": self._normalize_recommendations(payload.get("recommendations") or []),
+            "recommendations": self._normalize_recommendations(
+                payload.get("recommendations") or []
+            ),
             "coverage_overview": payload.get("coverage_overview") or {},
         }
 
@@ -615,7 +744,9 @@ class GapAnalyzer(BaseModule):
         if not title:
             return {}
         return {
-            "dimension": self._normalize_dimension(match.group("dimension") or "evidence"),
+            "dimension": self._normalize_dimension(
+                match.group("dimension") or "evidence"
+            ),
             "title": title,
             "limitation": str(match.group("limitation") or "").strip(),
             "priority": self._normalize_priority(match.group("priority") or "中"),
@@ -625,28 +756,48 @@ class GapAnalyzer(BaseModule):
         cleaned = re.sub(r"^(?:[-*]|\d+[.)])\s*", "", line).strip()
         if not cleaned:
             return {}
-        segments = [segment.strip() for segment in re.split(r"[;；]", cleaned) if segment.strip()]
+        segments = [
+            segment.strip()
+            for segment in re.split(r"[;；]", cleaned)
+            if segment.strip()
+        ]
         result: Dict[str, Any] = {}
         for segment in segments:
             if "设计" in segment or segment.lower().startswith("design"):
-                result["study_design"] = segment.split(":", 1)[-1].split("：", 1)[-1].strip()
+                result["study_design"] = (
+                    segment.split(":", 1)[-1].split("：", 1)[-1].strip()
+                )
             elif "纳入" in segment or segment.lower().startswith("inclusion"):
-                result["inclusion_criteria"] = segment.split(":", 1)[-1].split("：", 1)[-1].strip()
+                result["inclusion_criteria"] = (
+                    segment.split(":", 1)[-1].split("：", 1)[-1].strip()
+                )
             elif "终点" in segment or segment.lower().startswith("endpoint"):
-                result["primary_endpoint"] = segment.split(":", 1)[-1].split("：", 1)[-1].strip()
+                result["primary_endpoint"] = (
+                    segment.split(":", 1)[-1].split("：", 1)[-1].strip()
+                )
         return result
 
-    def _merge_analysis(self, core_analysis: Dict[str, Any], parsed_analysis: Dict[str, Any]) -> Dict[str, Any]:
-        gaps = self._normalize_gaps(parsed_analysis.get("gaps") or core_analysis.get("gaps") or [])
+    def _merge_analysis(
+        self, core_analysis: Dict[str, Any], parsed_analysis: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        gaps = self._normalize_gaps(
+            parsed_analysis.get("gaps") or core_analysis.get("gaps") or []
+        )
         recommendations = self._normalize_recommendations(
-            parsed_analysis.get("recommendations") or core_analysis.get("recommendations") or []
+            parsed_analysis.get("recommendations")
+            or core_analysis.get("recommendations")
+            or []
         )
         return {
-            "clinical_question": parsed_analysis.get("clinical_question") or core_analysis.get("clinical_question", ""),
-            "coverage_overview": parsed_analysis.get("coverage_overview") or core_analysis.get("coverage_overview") or {},
+            "clinical_question": parsed_analysis.get("clinical_question")
+            or core_analysis.get("clinical_question", ""),
+            "coverage_overview": parsed_analysis.get("coverage_overview")
+            or core_analysis.get("coverage_overview")
+            or {},
             "gaps": gaps,
             "recommendations": recommendations,
-            "priority_summary": parsed_analysis.get("priority_summary") or self._build_priority_summary(gaps),
+            "priority_summary": parsed_analysis.get("priority_summary")
+            or self._build_priority_summary(gaps),
         }
 
     def _normalize_gaps(self, gaps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -659,24 +810,34 @@ class GapAnalyzer(BaseModule):
                 continue
             normalized.append(
                 {
-                    "dimension": self._normalize_dimension(item.get("dimension") or "evidence"),
+                    "dimension": self._normalize_dimension(
+                        item.get("dimension") or "evidence"
+                    ),
                     "title": title,
-                    "limitation": str(item.get("limitation") or item.get("evidence_limitation") or "").strip(),
+                    "limitation": str(
+                        item.get("limitation") or item.get("evidence_limitation") or ""
+                    ).strip(),
                     "priority": self._normalize_priority(item.get("priority") or "中"),
                 }
             )
         return normalized
 
-    def _normalize_recommendations(self, recommendations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _normalize_recommendations(
+        self, recommendations: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         normalized: List[Dict[str, Any]] = []
         for item in recommendations:
             if not isinstance(item, dict):
                 continue
             normalized.append(
                 {
-                    "target_gap": str(item.get("target_gap") or item.get("dimension") or "").strip(),
+                    "target_gap": str(
+                        item.get("target_gap") or item.get("dimension") or ""
+                    ).strip(),
                     "study_design": str(item.get("study_design") or "").strip(),
-                    "inclusion_criteria": str(item.get("inclusion_criteria") or "").strip(),
+                    "inclusion_criteria": str(
+                        item.get("inclusion_criteria") or ""
+                    ).strip(),
                     "primary_endpoint": str(item.get("primary_endpoint") or "").strip(),
                 }
             )
@@ -738,7 +899,11 @@ class GapAnalyzer(BaseModule):
 
     def _looks_like_json_payload(self, text: str) -> bool:
         stripped = str(text or "").strip()
-        return stripped.startswith("{") or stripped.startswith("[") or stripped.startswith("```")
+        return (
+            stripped.startswith("{")
+            or stripped.startswith("[")
+            or stripped.startswith("```")
+        )
 
 
 __all__ = [

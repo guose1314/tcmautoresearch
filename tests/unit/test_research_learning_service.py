@@ -26,6 +26,22 @@ class _FakeLearningInsightRepo:
             rows = [row for row in rows if row.get("target_phase") == target_phase]
         return rows[:limit]
 
+    def list_prompt_bias_eligible(self, target_phase=None, *, limit=100):
+        rows = [
+            row
+            for row in self.rows
+            if row.get("status") in {"active", "accepted"} and not row.get("expires_at")
+        ]
+        if target_phase:
+            rows = [row for row in rows if row.get("target_phase") == target_phase]
+        return rows[:limit]
+
+    def list_rejected(self, target_phase=None, *, limit=100):
+        rows = [row for row in self.rows if row.get("status") == "rejected"]
+        if target_phase:
+            rows = [row for row in rows if row.get("target_phase") == target_phase]
+        return rows[:limit]
+
 
 class _FakeGraphMiner:
     def execute_incremental_mining(self):
@@ -49,7 +65,9 @@ class _FakePgAssetMiner:
                 "insight_type": "method_policy",
                 "description": "分析阶段需优先复核 EvidenceClaim 与引用出处的一致性。",
                 "confidence": 0.78,
-                "evidence_refs_json": [{"cycle_id": cycle_id, "source": "feedback"}],
+                "evidence_refs_json": [
+                    {"cycle_id": cycle_id, "source": "feedback", "node_id": "ev-1"}
+                ],
                 "status": "active",
             }
         ]
@@ -96,12 +114,15 @@ def test_run_cycle_learning_compiles_phase_specific_prompt_bias() -> None:
     assert "EvidenceClaim" in prompt_bias_blocks["analyze"]["bias_text"]
     assert "桂枝汤" in prompt_bias_blocks["hypothesis"]["bias_text"]
     assert prompt_bias_blocks["hypothesis"]["severity"] == "high"
+    assert result["graph_weight_hints"]
+    assert result["graph_weight_hints"][0]["node_ids"] == ["ev-1"]
 
     summary = result["policy_adjustment_summary"]
     assert summary["insight_count"] == 2
     assert summary["pg_insight_count"] == 1
     assert summary["neo4j_insight_count"] == 1
     assert summary["prompt_bias_phases"] == ["analyze", "hypothesis"]
+    assert summary["graph_weight_hint_count"] == 1
 
 
 def test_compile_prompt_bias_can_load_active_insights_from_repo() -> None:
@@ -124,10 +145,22 @@ def test_compile_prompt_bias_can_load_active_insights_from_repo() -> None:
             "source": "pg_quality_feedback",
             "target_phase": "observe",
             "insight_type": "prompt_bias",
-            "description": "已复核，不应进入 prompt。",
+            "description": "已接受，应进入 prompt。",
             "confidence": 0.99,
             "evidence_refs_json": [],
-            "status": "reviewed",
+            "status": "accepted",
+        }
+    )
+    repo.upsert(
+        {
+            "insight_id": "rejected-observe",
+            "source": "pg_quality_feedback",
+            "target_phase": "observe",
+            "insight_type": "prompt_bias",
+            "description": "已驳回，不应进入正向 prompt。",
+            "confidence": 0.99,
+            "evidence_refs_json": [],
+            "status": "rejected",
         }
     )
     compiler = _RecordingPromptBiasCompiler()
@@ -140,5 +173,46 @@ def test_compile_prompt_bias_can_load_active_insights_from_repo() -> None:
 
     assert list(compiled["prompt_bias_blocks"]) == ["observe"]
     assert "版本 witness" in compiled["prompt_bias_blocks"]["observe"]["bias_text"]
-    assert "已复核" not in compiled["prompt_bias_blocks"]["observe"]["bias_text"]
+    assert "已接受" in compiled["prompt_bias_blocks"]["observe"]["bias_text"]
+    assert "已驳回" not in compiled["prompt_bias_blocks"]["observe"]["bias_text"]
     assert compiler.plan.summary["prompt_bias_action_count"] == 1
+
+
+def test_run_cycle_learning_adds_rejected_insights_as_negative_prompt_bias() -> None:
+    repo = _FakeLearningInsightRepo()
+    repo.upsert(
+        {
+            "insight_id": "active-hypothesis",
+            "source": "pg_quality_feedback",
+            "target_phase": "hypothesis",
+            "insight_type": "prompt_bias",
+            "description": "正向学习：优先核查方证证据。",
+            "confidence": 0.88,
+            "evidence_refs_json": [],
+            "status": "active",
+        }
+    )
+    repo.upsert(
+        {
+            "insight_id": "rejected-hypothesis",
+            "source": "expert_feedback",
+            "target_phase": "hypothesis",
+            "insight_type": "prompt_bias",
+            "description": "不要把单次共现直接升级为强关系。",
+            "confidence": 0.93,
+            "evidence_refs_json": [],
+            "status": "rejected",
+        }
+    )
+    service = ResearchLearningService(
+        learning_insight_repo=repo,
+        prompt_bias_compiler=_RecordingPromptBiasCompiler(),
+    )
+
+    result = service.run_cycle_learning("cycle-learning-3")
+
+    hypothesis_bias = result["prompt_bias_blocks"]["hypothesis"]["bias_text"]
+    assert "正向学习" in hypothesis_bias
+    assert "负例学习约束" in hypothesis_bias
+    assert "单次共现" in hypothesis_bias
+    assert result["rejected_insights"][0]["insight_id"] == "rejected-hypothesis"

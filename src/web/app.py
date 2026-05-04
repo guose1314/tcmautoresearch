@@ -190,15 +190,48 @@ def create_app(
     # ---- 业务路由 ----
     from src.web.routes.analysis import router as analysis_router
     from src.web.routes.assistant import router as assistant_router
+    from src.web.routes.candidate_edge_review import (
+        router as candidate_edge_review_router,
+    )
     from src.web.routes.catalog import router as catalog_router
     from src.web.routes.dashboard import router as dashboard_router
+    from src.web.routes.production_monitoring import (
+        router as production_monitoring_router,
+    )
     from src.web.routes.research import router as research_router
 
     app.include_router(research_router)
     app.include_router(analysis_router)
     app.include_router(assistant_router)
     app.include_router(dashboard_router)
+    app.include_router(production_monitoring_router)
     app.include_router(catalog_router)
+    app.include_router(candidate_edge_review_router)
+
+    @app.on_event("startup")
+    async def _start_production_quality_aggregator() -> None:
+        try:
+            from src.monitoring.production_quality import (
+                start_production_quality_aggregation_task,
+            )
+
+            app.state.production_quality_task = (
+                start_production_quality_aggregation_task(app.state)
+            )
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "生产质量聚合任务启动失败", exc_info=True
+            )
+
+    @app.on_event("shutdown")
+    async def _stop_production_quality_aggregator() -> None:
+        from src.monitoring.production_quality import (
+            stop_production_quality_aggregation_task,
+        )
+
+        await stop_production_quality_aggregation_task(
+            getattr(app.state, "production_quality_task", None)
+        )
 
     # ---- 健康检查 ----
     @app.get("/health", tags=["system"])

@@ -54,6 +54,20 @@ try:
 except Exception:
     EvidenceGrader = None
 
+try:
+    from src.research.evaluation.citation_grounding_evaluator import (
+        CitationGroundingEvaluator,
+    )
+except Exception:
+    CitationGroundingEvaluator = None
+
+try:
+    from src.research.evidence.citation_evidence_synthesizer import (
+        CitationEvidenceSynthesizer as ResearchCitationEvidenceSynthesizer,
+    )
+except Exception:
+    ResearchCitationEvidenceSynthesizer = None
+
 from src.infra.llm_service import prepare_planned_llm_call
 from src.research.evidence_contract import (
     build_citation_records_from_evidence_protocol,
@@ -93,6 +107,7 @@ _PUBLISH_LLM_ANALYSIS_MODULE_ALIASES: Dict[str, tuple[str, ...]] = (
         "summary_analysis": ("summary_analysis",),
         "publish_graph_context": ("publish_graph_context",),
         "graph_rag_citations": ("graph_rag_citations",),
+        "citation_evidence_packages": ("citation_evidence_packages",),
     }
 )
 _PUBLISH_LLM_ANALYSIS_MODULE_ALIASES.setdefault(
@@ -100,6 +115,9 @@ _PUBLISH_LLM_ANALYSIS_MODULE_ALIASES.setdefault(
 )
 _PUBLISH_LLM_ANALYSIS_MODULE_ALIASES.setdefault(
     "graph_rag_citations", ("graph_rag_citations",)
+)
+_PUBLISH_LLM_ANALYSIS_MODULE_ALIASES.setdefault(
+    "citation_evidence_packages", ("citation_evidence_packages",)
 )
 
 _REMOVED_PUBLISH_ANALYSIS_ALIAS_FIELDS: tuple[str, ...] = (
@@ -187,6 +205,32 @@ class PublishPhaseMixin:
             paper_result = self._execute_paper_writer(paper_writer, paper_context)
         else:
             paper_result = {}
+        citation_grounding_evaluation = self._evaluate_publish_grounding(
+            context=context,
+            paper_result=paper_result if isinstance(paper_result, dict) else {},
+            paper_context=paper_context,
+            citation_records=citation_records,
+        )
+        grounding_gate_blocked = not bool(
+            citation_grounding_evaluation.get("formal_conclusion_allowed", True)
+        )
+        citation_evidence_packages = (
+            paper_context.get("citation_evidence_packages")
+            if isinstance(paper_context.get("citation_evidence_packages"), list)
+            else []
+        )
+        evidence_package_gate_blocked = any(
+            package.get("conclusion_status") == "candidate_observation"
+            for package in citation_evidence_packages
+            if isinstance(package, dict)
+        )
+        grounding_gate_blocked = grounding_gate_blocked or evidence_package_gate_blocked
+        paper_context["citation_grounding_evaluation"] = copy.deepcopy(
+            citation_grounding_evaluation
+        )
+        paper_context["formal_conclusion_allowed"] = not grounding_gate_blocked
+        paper_context["pending_review_draft"] = grounding_gate_blocked
+        paper_context["evidence_package_gate_blocked"] = evidence_package_gate_blocked
         publish_section_plan_summary = self._build_publish_section_plan_summary(
             paper_context,
             paper_result if isinstance(paper_result, dict) else {},
@@ -212,10 +256,26 @@ class PublishPhaseMixin:
             citation_result,
             merged_output_files,
         )
-        if generate_reports:
+        if generate_reports and not grounding_gate_blocked:
             report_generation_result = self._generate_publish_reports(
                 report_session_payload, context
             )
+        elif grounding_gate_blocked:
+            report_generation_result = {
+                "reports": {
+                    "pending_review_draft": {
+                        "status": "pending_review",
+                        "grounding_score": citation_grounding_evaluation.get(
+                            "grounding_score", 0.0
+                        ),
+                        "threshold": citation_grounding_evaluation.get(
+                            "threshold", 0.0
+                        ),
+                    }
+                },
+                "output_files": {},
+                "errors": [],
+            }
         else:
             report_generation_result = {"reports": {}, "output_files": {}, "errors": []}
         report_output_files = (
@@ -238,6 +298,11 @@ class PublishPhaseMixin:
             if generate_paper
             else []
         )
+        if grounding_gate_blocked:
+            publications = self._mark_publish_publications_pending_review(
+                publications,
+                citation_grounding_evaluation,
+            )
 
         deliverables = [
             "研究报告",
@@ -245,6 +310,8 @@ class PublishPhaseMixin:
             "分析工具包",
             "可视化图表",
         ]
+        if grounding_gate_blocked:
+            deliverables.append("待审草稿")
         if citation_result.get("bibtex"):
             deliverables.append("BibTeX 参考文献")
         if citation_result.get("gbt7714"):
@@ -259,14 +326,16 @@ class PublishPhaseMixin:
             deliverables.append("DOCX IMRD 报告")
 
         cycle.metadata.setdefault("phase_dossier_sources", {})["publish"] = {
-            "paper_draft": copy.deepcopy(paper_result.get("paper_draft", {}))
-            if isinstance(paper_result, dict)
-            else {},
-            "paper_review_summary": copy.deepcopy(
-                paper_result.get("review_summary", {})
-            )
-            if isinstance(paper_result, dict)
-            else {},
+            "paper_draft": (
+                copy.deepcopy(paper_result.get("paper_draft", {}))
+                if isinstance(paper_result, dict)
+                else {}
+            ),
+            "paper_review_summary": (
+                copy.deepcopy(paper_result.get("review_summary", {}))
+                if isinstance(paper_result, dict)
+                else {}
+            ),
             "publish_graph_context": copy.deepcopy(
                 paper_context.get("publish_graph_context", {})
             ),
@@ -292,6 +361,17 @@ class PublishPhaseMixin:
             if isinstance(paper_context.get("citation_grounding_summary"), dict)
             else self._summarize_publish_citation_grounding(citation_grounding_records)
         )
+        citation_evidence_packages = (
+            paper_context.get("citation_evidence_packages")
+            if isinstance(paper_context.get("citation_evidence_packages"), list)
+            else []
+        )
+        candidate_observation_count = sum(
+            1
+            for package in citation_evidence_packages
+            if isinstance(package, dict)
+            and package.get("conclusion_status") == "candidate_observation"
+        )
 
         metadata = {
             "publication_count": len(publications),
@@ -306,28 +386,58 @@ class PublishPhaseMixin:
                 publish_graph_context.get("trace_counts") or {}
             ),
             "citation_grounding_summary": copy.deepcopy(citation_grounding_summary),
+            "citation_grounding_evaluation": copy.deepcopy(
+                citation_grounding_evaluation
+            ),
+            "grounding_score": float(
+                citation_grounding_evaluation.get("grounding_score", 1.0)
+            ),
+            "grounding_threshold": float(
+                citation_grounding_evaluation.get("threshold", 0.0)
+            ),
+            "formal_conclusion_allowed": not grounding_gate_blocked,
+            "pending_review_draft": grounding_gate_blocked,
+            "unsupported_claim_count": len(
+                citation_grounding_evaluation.get("unsupported_claims") or []
+            ),
+            "citation_mismatch_count": len(
+                citation_grounding_evaluation.get("citation_mismatch") or []
+            ),
             "citation_grounding_record_count": len(citation_grounding_records),
+            "citation_evidence_package_count": len(citation_evidence_packages),
+            "candidate_observation_count": candidate_observation_count,
+            "evidence_package_gate_blocked": bool(
+                paper_context.get("evidence_package_gate_blocked")
+            ),
             "unsupported_citation_grounding_count": int(
                 citation_grounding_summary.get("unsupported_count") or 0
             ),
-            "paper_section_count": paper_result.get("section_count", 0)
-            if isinstance(paper_result, dict)
-            else 0,
-            "paper_reference_count": paper_result.get("reference_count", 0)
-            if isinstance(paper_result, dict)
-            else 0,
-            "paper_review_summary": copy.deepcopy(
-                paper_result.get("review_summary", {})
-            )
-            if isinstance(paper_result, dict)
-            and isinstance(paper_result.get("review_summary"), dict)
-            else {},
-            "report_count": len(report_generation_result.get("reports", {}))
-            if isinstance(report_generation_result, dict)
-            else 0,
-            "report_error_count": len(report_generation_result.get("errors", []))
-            if isinstance(report_generation_result, dict)
-            else 0,
+            "paper_section_count": (
+                paper_result.get("section_count", 0)
+                if isinstance(paper_result, dict)
+                else 0
+            ),
+            "paper_reference_count": (
+                paper_result.get("reference_count", 0)
+                if isinstance(paper_result, dict)
+                else 0
+            ),
+            "paper_review_summary": (
+                copy.deepcopy(paper_result.get("review_summary", {}))
+                if isinstance(paper_result, dict)
+                and isinstance(paper_result.get("review_summary"), dict)
+                else {}
+            ),
+            "report_count": (
+                len(report_generation_result.get("reports", {}))
+                if isinstance(report_generation_result, dict)
+                else 0
+            ),
+            "report_error_count": (
+                len(report_generation_result.get("errors", []))
+                if isinstance(report_generation_result, dict)
+                else 0
+            ),
             "learning_strategy_applied": has_learning_strategy(
                 context, self.pipeline.config
             ),
@@ -370,7 +480,7 @@ class PublishPhaseMixin:
             if isinstance(report_generation_result, dict)
             else []
         )
-        status = "degraded" if report_errors else "completed"
+        status = "degraded" if report_errors or grounding_gate_blocked else "completed"
         # Phase J-4: 对论文标题 + 摘要文本执行 self-refine，写入 quality delta 元数据
         try:
             from src.research.self_refine import (
@@ -476,6 +586,9 @@ class PublishPhaseMixin:
                 "graph_rag_citations": copy.deepcopy(graph_rag_citations),
                 "citation_grounding_records": copy.deepcopy(citation_grounding_records),
                 "citation_grounding_summary": copy.deepcopy(citation_grounding_summary),
+                "citation_grounding_evaluation": copy.deepcopy(
+                    citation_grounding_evaluation
+                ),
                 "evidence_protocol": evidence_protocol,
             },
             artifacts=merged_output_files,
@@ -1025,6 +1138,21 @@ class PublishPhaseMixin:
         citation_grounding_summary = self._summarize_publish_citation_grounding(
             citation_grounding_records
         )
+        citation_evidence_packages = self._build_publish_citation_evidence_packages(
+            selected_hypothesis=selected_hypothesis,
+            publish_hypotheses=publish_hypotheses,
+            evidence_protocol=evidence_protocol,
+            observe_entities=observe_entities,
+            reasoning_results=reasoning_results,
+            observe_philology=observe_philology,
+            publish_graph_context=publish_graph_context,
+            citation_grounding_records=citation_grounding_records,
+        )
+        candidate_observations = [
+            package
+            for package in citation_evidence_packages
+            if package.get("conclusion_status") == "candidate_observation"
+        ]
         if publish_graph_context:
             research_artifact["publish_graph_context"] = copy.deepcopy(
                 publish_graph_context
@@ -1038,6 +1166,13 @@ class PublishPhaseMixin:
         research_artifact["citation_grounding_summary"] = copy.deepcopy(
             citation_grounding_summary
         )
+        research_artifact["citation_evidence_packages"] = copy.deepcopy(
+            citation_evidence_packages
+        )
+        if candidate_observations:
+            research_artifact["candidate_observations"] = copy.deepcopy(
+                candidate_observations
+            )
         research_artifact = self._enrich_publish_research_artifact(
             research_artifact,
             statistical_analysis,
@@ -1079,6 +1214,13 @@ class PublishPhaseMixin:
         analysis_results_payload["citation_grounding_summary"] = copy.deepcopy(
             citation_grounding_summary
         )
+        analysis_results_payload["citation_evidence_packages"] = copy.deepcopy(
+            citation_evidence_packages
+        )
+        if candidate_observations:
+            analysis_results_payload["candidate_observations"] = copy.deepcopy(
+                candidate_observations
+            )
         output_dir = (
             context.get("paper_output_dir")
             or context.get("output_dir")
@@ -1155,6 +1297,8 @@ class PublishPhaseMixin:
             "graph_rag_citations": graph_rag_citations,
             "citation_grounding_records": citation_grounding_records,
             "citation_grounding_summary": citation_grounding_summary,
+            "citation_evidence_packages": citation_evidence_packages,
+            "candidate_observations": candidate_observations,
             "traceability": copy.deepcopy(
                 publish_graph_context.get("traceability") or {}
             ),
@@ -1172,12 +1316,16 @@ class PublishPhaseMixin:
             or phase_dossier_texts.get("analyze")
             or "",
             "output_data": structured_payload,
-            "quality_metrics": structured_payload.get("quality_metrics")
-            if isinstance(structured_payload, dict)
-            else {},
-            "recommendations": structured_payload.get("recommendations")
-            if isinstance(structured_payload, dict)
-            else [],
+            "quality_metrics": (
+                structured_payload.get("quality_metrics")
+                if isinstance(structured_payload, dict)
+                else {}
+            ),
+            "recommendations": (
+                structured_payload.get("recommendations")
+                if isinstance(structured_payload, dict)
+                else []
+            ),
             "research_perspectives": research_perspectives,
             "output_dir": output_dir,
             "output_formats": output_formats,
@@ -1220,6 +1368,7 @@ class PublishPhaseMixin:
         query = self._resolve_publish_graph_query(cycle, context)
         cycle_id = str(getattr(cycle, "cycle_id", "") or "").strip()
         claim_ids = self._extract_publish_claim_ids(evidence_protocol)
+        tiered_retrieval: Dict[str, Any] = {}
 
         if graph_rag_enabled:
             claim_payload, claim_warning = self._retrieve_publish_graph_rag_payload(
@@ -1256,6 +1405,19 @@ class PublishPhaseMixin:
                     witness_payload,
                 )
             )
+            tiered_retrieval, tiered_warning = (
+                self._retrieve_publish_tiered_graph_rag_payload(
+                    context,
+                    cycle_id=cycle_id,
+                    query=query,
+                    entity_ids=claim_ids
+                    + self._extract_publish_witness_ids(
+                        citation_records, observe_result
+                    ),
+                )
+            )
+            if tiered_warning:
+                warnings.append(tiered_warning)
         else:
             warnings.append("publish_graph_rag_disabled")
 
@@ -1297,6 +1459,7 @@ class PublishPhaseMixin:
             "traces": traces,
             "trace_counts": trace_counts,
             "traceability": traceability,
+            "tiered_retrieval": tiered_retrieval,
             "graph_rag_citations": graph_rag_citations,
             "unsupported_claim_warning_count": unsupported_claim_warning_count,
             "warnings": warnings,
@@ -1340,6 +1503,63 @@ class PublishPhaseMixin:
             )
         except Exception as exc:  # noqa: BLE001
             return {}, f"graph_rag_retrieve_failed:{asset_type}:{exc}"
+        if hasattr(result, "to_dict"):
+            payload = result.to_dict()
+        elif isinstance(result, dict):
+            payload = dict(result)
+        else:
+            payload = {}
+        return payload if isinstance(payload, dict) else {}, ""
+
+    def _retrieve_publish_tiered_graph_rag_payload(
+        self,
+        context: Dict[str, Any],
+        *,
+        cycle_id: str,
+        query: str,
+        entity_ids: List[str],
+    ) -> tuple[Dict[str, Any], str]:
+        if context.get("enable_publish_tiered_graph_rag") is False:
+            return {}, ""
+        runner = context.get("publish_graph_rag_runner") or context.get(
+            "graph_rag_runner"
+        )
+        if runner is None:
+            try:
+                from src.llm.graph_rag import GraphRAG
+            except Exception as exc:  # noqa: BLE001
+                return {}, f"tiered_graph_rag_unavailable:{exc}"
+            driver = getattr(self.pipeline, "neo4j_driver", None) or context.get(
+                "neo4j_driver"
+            )
+            token_budget = int(
+                context.get("publish_graph_rag_token_budget")
+                or context.get("graph_rag_token_budget")
+                or 4000
+            )
+            runner = GraphRAG(neo4j_driver=driver, token_budget=token_budget)
+        weight_hints = list(context.get("graph_weight_hints") or [])
+        try:
+            if hasattr(runner, "retrieve_tiered"):
+                result = runner.retrieve_tiered(
+                    query,
+                    entity_ids=entity_ids or None,
+                    cycle_id=cycle_id,
+                    weight_hints=weight_hints or None,
+                )
+            else:
+                from src.knowledge.graphrag.tiered_retriever import (
+                    TieredGraphRAGRetriever,
+                )
+
+                result = TieredGraphRAGRetriever(base_retriever=runner).retrieve(
+                    query,
+                    entity_ids=entity_ids or None,
+                    cycle_id=cycle_id,
+                    weight_hints=weight_hints or None,
+                )
+        except Exception as exc:  # noqa: BLE001
+            return {}, f"tiered_graph_rag_retrieve_failed:{exc}"
         if hasattr(result, "to_dict"):
             payload = result.to_dict()
         elif isinstance(result, dict):
@@ -1753,6 +1973,188 @@ class PublishPhaseMixin:
             "supported_count": total - counts["unsupported"],
         }
 
+    def _build_publish_citation_evidence_packages(
+        self,
+        *,
+        selected_hypothesis: Dict[str, Any],
+        publish_hypotheses: List[Dict[str, Any]],
+        evidence_protocol: Dict[str, Any],
+        observe_entities: List[Dict[str, Any]],
+        reasoning_results: Dict[str, Any],
+        observe_philology: Dict[str, Any],
+        publish_graph_context: Dict[str, Any],
+        citation_grounding_records: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        if ResearchCitationEvidenceSynthesizer is None:
+            return []
+        targets: List[Dict[str, Any]] = []
+        for hypothesis in publish_hypotheses or []:
+            if isinstance(hypothesis, dict):
+                targets.append(dict(hypothesis))
+        if (
+            not targets
+            and isinstance(selected_hypothesis, dict)
+            and selected_hypothesis
+        ):
+            targets.append(dict(selected_hypothesis))
+        if isinstance(evidence_protocol, dict):
+            for claim in evidence_protocol.get("claims") or []:
+                if isinstance(claim, dict):
+                    targets.append(dict(claim))
+        reasoning_payload = (
+            reasoning_results.get("reasoning_results")
+            if isinstance(reasoning_results, dict)
+            else {}
+        )
+        for relation in (reasoning_payload or {}).get("entity_relationships") or []:
+            if isinstance(relation, dict):
+                targets.append(dict(relation))
+        if not targets:
+            return []
+
+        version_info: List[Dict[str, Any]] = []
+        for key in (
+            "verdicts",
+            "version_witnesses",
+            "witnesses",
+            "document_philology_assets",
+        ):
+            values = (
+                observe_philology.get(key)
+                if isinstance(observe_philology, dict)
+                else []
+            )
+            if isinstance(values, list):
+                version_info.extend(item for item in values if isinstance(item, dict))
+        graph_contexts = (
+            [publish_graph_context] if isinstance(publish_graph_context, dict) else []
+        )
+        if isinstance(publish_graph_context.get("tiered_retrieval"), dict):
+            graph_contexts.append(publish_graph_context["tiered_retrieval"])
+        try:
+            return ResearchCitationEvidenceSynthesizer().synthesize_many(
+                targets[:80],
+                entities=observe_entities,
+                relationships=(reasoning_payload or {}).get("entity_relationships")
+                or [],
+                version_info=version_info,
+                expert_feedback=citation_grounding_records,
+                graph_rag_results=graph_contexts,
+                evidence_protocol=evidence_protocol
+                if isinstance(evidence_protocol, dict)
+                else {},
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.pipeline.logger.warning(
+                "Publish 阶段构建 citation evidence package 失败: %s", exc
+            )
+            return []
+
+    def _evaluate_publish_grounding(
+        self,
+        *,
+        context: Dict[str, Any],
+        paper_result: Dict[str, Any],
+        paper_context: Dict[str, Any],
+        citation_records: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        threshold = self._resolve_publish_grounding_threshold(context)
+        if CitationGroundingEvaluator is None:
+            return {
+                "contract_version": "citation-grounding-evaluator-unavailable",
+                "grounding_score": 1.0,
+                "threshold": threshold,
+                "formal_conclusion_allowed": True,
+                "asset_count": 0,
+                "supported_asset_count": 0,
+                "unsupported_claims": [],
+                "citation_mismatch": [],
+                "warning": "CitationGroundingEvaluator unavailable",
+            }
+        analysis_results = (
+            paper_context.get("analysis_results")
+            if isinstance(paper_context.get("analysis_results"), dict)
+            else {}
+        )
+        evidence_protocol = (
+            analysis_results.get("evidence_protocol")
+            if isinstance(analysis_results.get("evidence_protocol"), dict)
+            else {}
+        )
+        evaluator_payload = {
+            "paper_result": copy.deepcopy(paper_result),
+            "paper_draft": copy.deepcopy(paper_result.get("paper_draft", {})),
+            "research_artifact": copy.deepcopy(
+                paper_context.get("research_artifact", {})
+            ),
+            "analysis_results": copy.deepcopy(analysis_results),
+            "citation_grounding_records": copy.deepcopy(
+                paper_context.get("citation_grounding_records", [])
+            ),
+            "citation_grounding_summary": copy.deepcopy(
+                paper_context.get("citation_grounding_summary", {})
+            ),
+            "publish_graph_context": copy.deepcopy(
+                paper_context.get("publish_graph_context", {})
+            ),
+            "graph_rag_citations": copy.deepcopy(
+                paper_context.get("graph_rag_citations", [])
+            ),
+        }
+        return CitationGroundingEvaluator(threshold=threshold).evaluate(
+            llm_output=evaluator_payload,
+            evidence_protocol=evidence_protocol,
+            graph_rag_context=paper_context.get("publish_graph_context", {}),
+            citation_records=citation_records,
+        )
+
+    def _resolve_publish_grounding_threshold(
+        self,
+        context: Dict[str, Any],
+    ) -> float:
+        for source in (
+            context,
+            (
+                self.pipeline.config.get("publish", {})
+                if isinstance(self.pipeline.config.get("publish"), dict)
+                else {}
+            ),
+            (
+                self.pipeline.config.get("citation_grounding", {})
+                if isinstance(self.pipeline.config.get("citation_grounding"), dict)
+                else {}
+            ),
+        ):
+            value = source.get("citation_grounding_threshold") or source.get(
+                "grounding_threshold"
+            )
+            if value is None:
+                continue
+            try:
+                return max(0.0, min(1.0, float(value)))
+            except (TypeError, ValueError):
+                continue
+        return 0.72
+
+    def _mark_publish_publications_pending_review(
+        self,
+        publications: List[Dict[str, Any]],
+        grounding_evaluation: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        marked: List[Dict[str, Any]] = []
+        for publication in publications or []:
+            item = dict(publication)
+            item["status"] = (
+                "section_pending_review"
+                if item.get("section_type")
+                else "pending_review_draft"
+            )
+            item["grounding_score"] = grounding_evaluation.get("grounding_score", 0.0)
+            item["grounding_threshold"] = grounding_evaluation.get("threshold", 0.0)
+            item["review_required_reason"] = "citation_grounding_below_threshold"
+            marked.append(item)
+        return marked
+
     def _resolve_publish_selected_hypothesis(
         self,
         hypothesis_result: Dict[str, Any],
@@ -1835,6 +2237,13 @@ class PublishPhaseMixin:
             "citation_grounding_summary": copy.deepcopy(
                 paper_context.get("citation_grounding_summary", {})
             ),
+            "citation_grounding_evaluation": copy.deepcopy(
+                paper_context.get("citation_grounding_evaluation", {})
+            ),
+            "formal_conclusion_allowed": bool(
+                paper_context.get("formal_conclusion_allowed", True)
+            ),
+            "pending_review_draft": bool(paper_context.get("pending_review_draft")),
             "traceability": copy.deepcopy(paper_context.get("traceability", {})),
             "unsupported_claim_warning_count": int(
                 paper_context.get("unsupported_claim_warning_count") or 0
@@ -1898,6 +2307,16 @@ class PublishPhaseMixin:
                 "citation_grounding_summary": copy.deepcopy(
                     paper_context.get("citation_grounding_summary", {})
                 ),
+                "citation_grounding_evaluation": copy.deepcopy(
+                    paper_context.get("citation_grounding_evaluation", {})
+                ),
+                "grounding_score": (
+                    paper_context.get("citation_grounding_evaluation", {}) or {}
+                ).get("grounding_score"),
+                "formal_conclusion_allowed": bool(
+                    paper_context.get("formal_conclusion_allowed", True)
+                ),
+                "pending_review_draft": bool(paper_context.get("pending_review_draft")),
                 "unsupported_citation_grounding_count": int(
                     (paper_context.get("citation_grounding_summary", {}) or {}).get(
                         "unsupported_count", 0
@@ -2439,15 +2858,21 @@ class PublishPhaseMixin:
     ) -> Dict[str, Any]:
         candidates = [
             self._resolve_publish_context_reasoning_results(context) or None,
-            get_phase_results(analyze_result).get("reasoning_results")
-            if isinstance(analyze_result, dict)
-            else None,
-            analyze_results.get("reasoning_results")
-            if isinstance(analyze_results, dict)
-            else None,
-            get_phase_results(experiment_result).get("reasoning_results")
-            if isinstance(experiment_result, dict)
-            else None,
+            (
+                get_phase_results(analyze_result).get("reasoning_results")
+                if isinstance(analyze_result, dict)
+                else None
+            ),
+            (
+                analyze_results.get("reasoning_results")
+                if isinstance(analyze_results, dict)
+                else None
+            ),
+            (
+                get_phase_results(experiment_result).get("reasoning_results")
+                if isinstance(experiment_result, dict)
+                else None
+            ),
         ]
         reasoning_results: Dict[str, Any] = {}
         for candidate in candidates:
@@ -2910,11 +3335,13 @@ class PublishPhaseMixin:
             or paper_context.get("research_domain"),
             "methods": paper_context.get("literature_pipeline")
             or paper_context.get("citation_records"),
-            "results": (paper_context.get("analysis_results") or {}).get(
-                "statistical_analysis"
-            )
-            if isinstance(paper_context.get("analysis_results"), dict)
-            else {},
+            "results": (
+                (paper_context.get("analysis_results") or {}).get(
+                    "statistical_analysis"
+                )
+                if isinstance(paper_context.get("analysis_results"), dict)
+                else {}
+            ),
             "discussion": paper_context.get("limitations")
             or paper_context.get("research_perspectives"),
             "conclusion": paper_context.get("recommendations")

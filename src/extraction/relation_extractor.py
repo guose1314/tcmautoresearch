@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List
 
+from src.extraction.rule_relation_quality import tier_rule_edges
 from src.knowledge.ontology_manager import OntologyManager
 from src.semantic_modeling.tcm_relationships import (
     RelationshipType,
@@ -16,9 +17,17 @@ class RelationExtractor:
 
     def __init__(self) -> None:
         self.relationship_counts: Dict[str, int] = {}
+        self.relationship_tier_counts: Dict[str, int] = {
+            "strong_rule": 0,
+            "weak_rule": 0,
+            "candidate_rule": 0,
+            "rejected_rule": 0,
+        }
         self.ontology = OntologyManager()
 
-    def extract(self, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def extract(
+        self, entities: List[Dict[str, Any]], raw_text: str = ""
+    ) -> List[Dict[str, Any]]:
         self.relationship_counts.clear()
         edges: List[Dict[str, Any]] = []
 
@@ -33,7 +42,10 @@ class RelationExtractor:
         edges.extend(self._extract_herb_efficacy_edges(herbs))
         edges.extend(self._extract_treats_edges(formulas, herbs, syndromes))
 
-        return edges
+        scored_edges, self.relationship_tier_counts = tier_rule_edges(
+            edges, normalized_entities, raw_text
+        )
+        return scored_edges
 
     def _filter_entities_by_type(
         self,
@@ -44,7 +56,8 @@ class RelationExtractor:
         return [
             entity
             for entity in entities
-            if self.ontology.normalize_node_type(str(entity.get("type") or "")) == expected_type
+            if self.ontology.normalize_node_type(str(entity.get("type") or ""))
+            == expected_type
             and entity.get("name")
         ]
 
@@ -55,7 +68,9 @@ class RelationExtractor:
     ) -> Dict[str, str]:
         """构建实体名到节点 ID 的映射。"""
         return {
-            str(entity["name"]): self.ontology.make_node_id(node_type, str(entity["name"]))
+            str(entity["name"]): self.ontology.make_node_id(
+                node_type, str(entity["name"])
+            )
             for entity in entities
         }
 
@@ -69,7 +84,9 @@ class RelationExtractor:
         for formula in formulas:
             formula_name = str(formula["name"])
             formula_node = self.ontology.make_node_id("formula", formula_name)
-            composition = TCMRelationshipDefinitions.get_formula_composition(formula_name)
+            composition = TCMRelationshipDefinitions.get_formula_composition(
+                formula_name
+            )
             if not composition:
                 continue
 
@@ -89,7 +106,9 @@ class RelationExtractor:
                         edges.append(self._edge(formula_node, herb_node, role, 0.95))
         return edges
 
-    def _extract_herb_efficacy_edges(self, herbs: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _extract_herb_efficacy_edges(
+        self, herbs: Iterable[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """抽取药物到功效关系。"""
         edges: List[Dict[str, Any]] = []
         for herb in herbs:
@@ -98,8 +117,14 @@ class RelationExtractor:
             efficacies = TCMRelationshipDefinitions.get_herb_efficacy(herb_name)
             for efficacy in efficacies:
                 efficacy_node = self.ontology.make_node_id("efficacy", str(efficacy))
-                if self.ontology.validate_edge(herb_node, efficacy_node, RelationshipType.EFFICACY.value):
-                    edges.append(self._edge(herb_node, efficacy_node, RelationshipType.EFFICACY, 0.90))
+                if self.ontology.validate_edge(
+                    herb_node, efficacy_node, RelationshipType.EFFICACY.value
+                ):
+                    edges.append(
+                        self._edge(
+                            herb_node, efficacy_node, RelationshipType.EFFICACY, 0.90
+                        )
+                    )
         return edges
 
     def _extract_treats_edges(
@@ -111,17 +136,33 @@ class RelationExtractor:
         """抽取方剂/药物到证候治疗关系。"""
         edges: List[Dict[str, Any]] = []
         for syndrome in syndromes:
-            syndrome_node = self.ontology.make_node_id("syndrome", str(syndrome["name"]))
+            syndrome_node = self.ontology.make_node_id(
+                "syndrome", str(syndrome["name"])
+            )
 
             for formula in formulas:
-                formula_node = self.ontology.make_node_id("formula", str(formula["name"]))
-                if self.ontology.validate_edge(formula_node, syndrome_node, RelationshipType.TREATS.value):
-                    edges.append(self._edge(formula_node, syndrome_node, RelationshipType.TREATS, 0.75))
+                formula_node = self.ontology.make_node_id(
+                    "formula", str(formula["name"])
+                )
+                if self.ontology.validate_edge(
+                    formula_node, syndrome_node, RelationshipType.TREATS.value
+                ):
+                    edges.append(
+                        self._edge(
+                            formula_node, syndrome_node, RelationshipType.TREATS, 0.75
+                        )
+                    )
 
             for herb in herbs:
                 herb_node = self.ontology.make_node_id("herb", str(herb["name"]))
-                if self.ontology.validate_edge(herb_node, syndrome_node, RelationshipType.TREATS.value):
-                    edges.append(self._edge(herb_node, syndrome_node, RelationshipType.TREATS, 0.60))
+                if self.ontology.validate_edge(
+                    herb_node, syndrome_node, RelationshipType.TREATS.value
+                ):
+                    edges.append(
+                        self._edge(
+                            herb_node, syndrome_node, RelationshipType.TREATS, 0.60
+                        )
+                    )
 
         return edges
 
@@ -137,8 +178,11 @@ class RelationExtractor:
             )
             stats[rel_type] = {
                 "count": count,
-                "description": TCMRelationshipDefinitions.get_relationship_description(enum_value),
+                "description": TCMRelationshipDefinitions.get_relationship_description(
+                    enum_value
+                ),
             }
+        stats["quality_tiers"] = dict(self.relationship_tier_counts)
         return stats
 
     def _edge(
@@ -149,14 +193,34 @@ class RelationExtractor:
         confidence: float,
     ) -> Dict[str, Any]:
         rel_type_value = rel_type.value
-        self.relationship_counts[rel_type_value] = self.relationship_counts.get(rel_type_value, 0) + 1
+        self.relationship_counts[rel_type_value] = (
+            self.relationship_counts.get(rel_type_value, 0) + 1
+        )
+        source_type, source_name = self._node_parts(source)
+        target_type, target_name = self._node_parts(target)
         return {
             "source": source,
             "target": target,
+            "relation": rel_type_value,
+            "source_type": source_type,
+            "target_type": target_type,
             "attributes": {
                 "relationship_type": rel_type_value,
                 "relationship_name": rel_type.name,
-                "description": TCMRelationshipDefinitions.get_relationship_description(rel_type),
+                "description": TCMRelationshipDefinitions.get_relationship_description(
+                    rel_type
+                ),
                 "confidence": confidence,
+                "source_name": source_name,
+                "target_name": target_name,
+                "source_type": source_type,
+                "target_type": target_type,
             },
         }
+
+    def _node_parts(self, node_id: str) -> tuple[str, str]:
+        text = str(node_id or "")
+        if ":" in text:
+            node_type, name = text.split(":", 1)
+            return node_type, name
+        return "generic", text

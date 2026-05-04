@@ -149,6 +149,50 @@ class TestSemanticGraphBuilderRefactor(unittest.TestCase):
         self.assertIn("semantic_graph", out)
         self.assertEqual(out["graph_statistics"]["nodes_count"], 0)
 
+    def test_execute_includes_rule_relation_quality_tiers(self):
+        with (
+            patch.object(
+                self.builder, "_generate_research_perspectives", return_value={}
+            ),
+            patch.object(self.builder, "_analyze_herb_properties", return_value={}),
+            patch.object(
+                self.builder, "_analyze_formula_similarities", return_value=[]
+            ),
+            patch.object(self.builder, "_collect_pharmacology_data", return_value={}),
+            patch.object(
+                self.builder,
+                "_collect_advanced_formula_analyses",
+                return_value={
+                    "network_pharmacology_systems_biology": {},
+                    "supramolecular_physicochemistry": {},
+                    "knowledge_archaeology": {},
+                    "complexity_nonlinear_dynamics": {},
+                },
+            ),
+            patch(
+                "src.semantic_modeling.semantic_graph_builder.SummaryAnalysisEngine.analyze",
+                return_value={},
+            ),
+        ):
+            out = self.builder.execute(
+                {
+                    "raw_text": "桂枝汤主治营卫不和。",
+                    "entities": [
+                        {"type": "formula", "name": "桂枝汤", "position": 0},
+                        {"type": "syndrome", "name": "营卫不和", "position": 6},
+                    ],
+                }
+            )
+
+        edges = out["semantic_graph"]["edges"]
+        tier_counts = out["graph_statistics"]["relationships_by_type"]["quality_tiers"]
+        self.assertGreaterEqual(sum(tier_counts.values()), 1)
+        self.assertIn("rule_quality", edges[0]["attributes"])
+        self.assertIn(
+            edges[0]["attributes"]["rule_quality"]["tier"],
+            {"strong_rule", "weak_rule", "candidate_rule", "rejected_rule"},
+        )
+
     def test_generate_research_perspectives_adds_similar_formula_matches_with_graph_evidence(
         self,
     ):

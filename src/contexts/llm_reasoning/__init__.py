@@ -8,6 +8,15 @@ from src.contexts.llm_reasoning.contracts import (
     LLMReasoningMode,
     LLMRetrievalPolicy,
 )
+from src.contexts.llm_reasoning.philology_templates import (
+    PHILOLOGY_REASONING_TEMPLATE_LIBRARY_VERSION,
+    SUPPORTED_PHILOLOGY_TEMPLATE_TASKS,
+    PhilologyReasoningTemplate,
+    PhilologyRenderedPrompt,
+    get_philology_reasoning_template,
+    render_philology_reasoning_prompt,
+    select_philology_reasoning_template,
+)
 from src.contexts.llm_reasoning.self_discover import (
     SUPPORTED_SELF_DISCOVER_TASKS,
     SelfDiscoverPlan,
@@ -22,8 +31,15 @@ __all__ = [
     "LLMGatewayResult",
     "LLMReasoningMode",
     "LLMRetrievalPolicy",
+    "PHILOLOGY_REASONING_TEMPLATE_LIBRARY_VERSION",
+    "SUPPORTED_PHILOLOGY_TEMPLATE_TASKS",
     "SUPPORTED_SELF_DISCOVER_TASKS",
+    "PhilologyReasoningTemplate",
+    "PhilologyRenderedPrompt",
     "SelfDiscoverPlan",
     "SelfDiscoverStep",
     "build_self_discover_plan",
+    "get_philology_reasoning_template",
+    "render_philology_reasoning_prompt",
+    "select_philology_reasoning_template",
 ]

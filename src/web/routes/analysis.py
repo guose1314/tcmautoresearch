@@ -18,6 +18,26 @@ from src.analysis.unsupervised_research_enhancer import (
     apply_unsupervised_annotations,
     build_unsupervised_research_view,
 )
+from src.contexts.llm_reasoning.philology_templates import (
+    render_philology_reasoning_prompt,
+)
+from src.extraction.rule_relation_quality import (
+    CANDIDATE_RULE_TIERS,
+    is_promotable_rule_edge,
+    rule_quality_tier_counts,
+)
+from src.learning.weak_edge_candidate_repo import (
+    build_weak_edge_learning_insight,
+    extract_weak_edge_candidate_payload,
+    weak_edge_candidate_insight_id,
+)
+from src.llm.llm_gateway import LLMGateway, LLMGatewayRequest
+from src.research.evidence.text_segment_provenance import (
+    TextSegmentIndex,
+    attach_provenance_to_edges,
+    attach_provenance_to_entities,
+    attach_provenance_to_research_view,
+)
 from src.web.auth import get_current_user
 from src.web.ops.research_session_service import (
     get_research_observe_graph,
@@ -54,6 +74,7 @@ class LLMDistillRequest(BaseModel):
 
     raw_text: str = Field(..., min_length=1, max_length=500_000)
     source_file: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +258,153 @@ def _mapping_payload(value: Any) -> Dict[str, Any]:
     return {}
 
 
+def _replace_provenance_document_id(value: Any, document_id: str) -> Any:
+    if isinstance(value, list):
+        return [_replace_provenance_document_id(item, document_id) for item in value]
+    if isinstance(value, Mapping):
+        payload = {
+            key: _replace_provenance_document_id(item, document_id)
+            for key, item in value.items()
+        }
+        if "segment_id" in payload and "quote_text" in payload:
+            payload["document_id"] = str(document_id)
+        return payload
+    return value
+
+
+def _edge_provenance(edge: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    direct = edge.get("provenance")
+    if isinstance(direct, list):
+        return [dict(item) for item in direct if isinstance(item, Mapping)]
+    attrs = (
+        edge.get("attributes") if isinstance(edge.get("attributes"), Mapping) else {}
+    )
+    nested = attrs.get("provenance")
+    if isinstance(nested, list):
+        return [dict(item) for item in nested if isinstance(item, Mapping)]
+    return []
+
+
+def _edge_rule_quality(edge: Mapping[str, Any]) -> Dict[str, Any]:
+    direct = edge.get("rule_quality")
+    if isinstance(direct, Mapping):
+        return dict(direct)
+    attrs = (
+        edge.get("attributes") if isinstance(edge.get("attributes"), Mapping) else {}
+    )
+    nested = attrs.get("rule_quality")
+    return dict(nested) if isinstance(nested, Mapping) else {}
+
+
+def _edge_relation_label(edge: Mapping[str, Any]) -> str:
+    attrs = (
+        edge.get("attributes") if isinstance(edge.get("attributes"), Mapping) else {}
+    )
+    return str(
+        edge.get("relation")
+        or edge.get("rel_type")
+        or attrs.get("relationship_type")
+        or edge.get("label")
+        or "related"
+    ).strip()
+
+
+def _edge_name(value: Any) -> str:
+    text = str(value or "").strip()
+    return text.split(":", 1)[1] if ":" in text else text
+
+
+def _store_candidate_relation_insight(
+    session: Any,
+    LearningInsight: Any,
+    *,
+    document_id: str,
+    source_file: str,
+    edge: Mapping[str, Any],
+    reason: str,
+    source_entity_id: str = "",
+    target_entity_id: str = "",
+    source_type: str = "",
+    target_type: str = "",
+) -> bool:
+    source = _edge_name(edge.get("source") or edge.get("from"))
+    target = _edge_name(edge.get("target") or edge.get("to"))
+    relation = _edge_relation_label(edge)
+    quality = _edge_rule_quality(edge)
+    provenance = _edge_provenance(edge)
+    snippet = next(
+        (
+            str(
+                item.get("quote_text") or item.get("text") or item.get("excerpt") or ""
+            ).strip()
+            for item in provenance
+            if isinstance(item, Mapping)
+            and str(
+                item.get("quote_text") or item.get("text") or item.get("excerpt") or ""
+            ).strip()
+        ),
+        "",
+    )
+    candidate = {
+        "source_entity_id": str(source_entity_id or "").strip(),
+        "target_entity_id": str(target_entity_id or "").strip(),
+        "source_name": source,
+        "target_name": target,
+        "source_type": str(source_type or "").strip(),
+        "target_type": str(target_type or "").strip(),
+        "relationship_type": relation,
+        "confidence": float(quality.get("score") or 0.0),
+        "source": "rule_relation_quality",
+        "signals": [str(quality.get("tier") or "candidate_rule")],
+        "evidence": {
+            "snippet": snippet,
+            "reason": reason,
+            "rule_quality": quality,
+            "provenance": provenance,
+            "document_id": str(document_id),
+            "source_file": source_file,
+        },
+        "created_at": datetime.utcnow().replace(tzinfo=None).isoformat(),
+    }
+    insight_id = weak_edge_candidate_insight_id(candidate)
+    row = session.get(LearningInsight, insight_id)
+    existing_payload = {}
+    if row is not None:
+        existing_payload = extract_weak_edge_candidate_payload(
+            {
+                "insight_type": row.insight_type,
+                "source": row.source,
+                "status": row.status,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "evidence_refs_json": list(row.evidence_refs_json or []),
+            }
+        )
+    if row is None:
+        row = LearningInsight(insight_id=insight_id)
+        session.add(row)
+    insight = build_weak_edge_learning_insight(
+        candidate,
+        target_phase="analysis",
+        source_algorithm="rule_relation_quality",
+        existing_payload=existing_payload,
+        existing_status=row.status if row is not None else None,
+        created_at=row.created_at if row is not None else None,
+        discovered_at=candidate.get("created_at"),
+        legacy_insight_types=["candidate_rule_relation"],
+    )
+    row.source = str(insight.get("source") or "weak_edge_candidate_repo")
+    row.target_phase = str(insight.get("target_phase") or "analysis")
+    row.insight_type = str(insight.get("insight_type") or "weak_edge_candidate")
+    row.description = str(insight.get("description") or "")
+    row.confidence = float(insight.get("confidence") or 0.0)
+    row.evidence_refs_json = _json_ready(list(insight.get("evidence_refs_json") or []))
+    row.status = str(insight.get("status") or "needs_review")
+    created_at = str(insight.get("created_at") or "").strip()
+    if created_at:
+        row.created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    return True
+
+
 def _build_unsupervised_research_assets(
     raw_text: str,
     source_file: Optional[str],
@@ -272,6 +440,14 @@ def _build_research_response_summary(
         ),
         "novelty_candidates": _json_ready(
             list(research_view.get("novelty_candidates") or [])[:5]
+        ),
+        "hypothesis_candidates": _json_ready(
+            list(
+                research_view.get("hypotheses")
+                or research_view.get("hypothesis_candidates")
+                or research_view.get("novelty_candidates")
+                or []
+            )[:5]
         ),
         "literature_alignment": _json_ready(
             list(research_view.get("literature_alignment") or [])
@@ -385,6 +561,8 @@ def _persist_to_kg(
     edges = graph_data.get("edges", [])
     rel_rows = []
     for e in edges:
+        if not is_promotable_rule_edge(e):
+            continue
         src = e.get("source") or e.get("from", "")
         dst = e.get("target") or e.get("to", "")
         rel = e.get("relation") or e.get("rel_type") or e.get("label") or "related"
@@ -437,6 +615,10 @@ _REL_TYPE_MAP = {
     "臣": "MINISTER",
     "佐": "ASSISTANT",
     "使": "ENVOY",
+    "sovereign": "SOVEREIGN",
+    "minister": "MINISTER",
+    "assistant": "ASSISTANT",
+    "envoy": "ENVOY",
     "治疗": "TREATS",
     "treats": "TREATS",
     "功效": "HAS_EFFICACY",
@@ -490,6 +672,7 @@ def _persist_to_orm(
     source_file: Optional[str] = None,
     created_by: str = "text_analysis",
     raw_text: str = "",
+    metadata: Optional[Mapping[str, Any]] = None,
     semantic_result: Optional[Dict[str, Any]] = None,
     research_view: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, int]:
@@ -501,6 +684,7 @@ def _persist_to_orm(
         return {
             "orm_entities": 0,
             "orm_relations": 0,
+            "candidate_relations": 0,
             "orm_statistics": 0,
             "orm_analyses": 0,
             "neo4j_nodes": 0,
@@ -513,6 +697,7 @@ def _persist_to_orm(
         Entity,
         EntityRelationship,
         EntityTypeEnum,
+        LearningInsight,
         ProcessingStatistics,
         ProcessStatusEnum,
         RelationshipType,
@@ -521,6 +706,7 @@ def _persist_to_orm(
 
     orm_ent_count = 0
     orm_rel_count = 0
+    candidate_relation_count = 0
     orm_stats_count = 0
     orm_analysis_count = 0
     projection_entities: List[Dict[str, Any]] = []
@@ -534,6 +720,54 @@ def _persist_to_orm(
     }
     semantic_result = semantic_result or {}
     research_view = research_view or {}
+    request_metadata = dict(metadata or {}) if isinstance(metadata, Mapping) else {}
+
+    def _document_identity_fields() -> Dict[str, Any]:
+        identity = request_metadata.get("canonical_document_identity") or {}
+        if not isinstance(identity, Mapping):
+            return {}
+        fields: Dict[str, Any] = {}
+        for key in (
+            "canonical_document_key",
+            "canonical_title",
+            "normalized_title",
+            "source_file_hash",
+            "edition_hint",
+            "document_key_version",
+            "dynasty",
+            "author",
+        ):
+            value = str(identity.get(key) or "").strip()
+            if value:
+                fields[key] = (
+                    value.lower()
+                    if key.endswith("hash") or key == "canonical_document_key"
+                    else value
+                )
+        return fields
+
+    def _apply_document_identity(doc: Any, identity_fields: Mapping[str, Any]) -> None:
+        for key, value in identity_fields.items():
+            if value and not getattr(doc, key, None):
+                setattr(doc, key, value)
+        if identity_fields.get("canonical_title") and not doc.document_title:
+            doc.document_title = str(identity_fields["canonical_title"])
+        if identity_fields.get("canonical_title") and not doc.work_title:
+            doc.work_title = str(identity_fields["canonical_title"])
+        if identity_fields.get("edition_hint") and not doc.edition:
+            doc.edition = str(identity_fields["edition_hint"])
+
+        version_metadata = dict(doc.version_metadata_json or {})
+        encoding_report = request_metadata.get("encoding_report")
+        if isinstance(encoding_report, Mapping):
+            version_metadata["corpus_encoding"] = _json_ready(encoding_report)
+        canonical_identity = request_metadata.get("canonical_document_identity")
+        if isinstance(canonical_identity, Mapping):
+            version_metadata["canonical_document_identity"] = _json_ready(
+                canonical_identity
+            )
+        if version_metadata:
+            doc.version_metadata_json = version_metadata
 
     try:
         with db_mgr.session_scope() as session:
@@ -549,16 +783,34 @@ def _persist_to_orm(
             uid = _uuid.uuid4().hex[:8]
             sf = (source_file or created_by or "").strip() or created_by
             text_for_hash = raw_text or ""
+            provenance_index = (
+                TextSegmentIndex(text_for_hash, document_id="")
+                if text_for_hash
+                else None
+            )
             content_hash = _hashlib.sha256(
                 text_for_hash.encode("utf-8", errors="replace")
             ).hexdigest()
             ingest_run_id = f"{ts}_{uid}"
-            existing = (
-                session.query(Document)
-                .filter_by(source_file=sf, content_hash=content_hash)
-                .one_or_none()
-            )
+            identity_fields = _document_identity_fields()
+            canonical_document_key = identity_fields.get("canonical_document_key")
+            existing = None
+            if canonical_document_key:
+                existing = (
+                    session.query(Document)
+                    .filter_by(canonical_document_key=canonical_document_key)
+                    .order_by(Document.created_at.asc())
+                    .first()
+                )
+            if existing is None:
+                existing = (
+                    session.query(Document)
+                    .filter_by(source_file=sf, content_hash=content_hash)
+                    .one_or_none()
+                )
             if existing is not None:
+                _apply_document_identity(existing, identity_fields)
+                session.flush()
                 # T2.3 dedup short-circuit: 同 source_file + 同内容 hash 已入库 → 返回 no-op，
                 # 避免重复 entities/relationships 写入。
                 logger.info(
@@ -570,6 +822,7 @@ def _persist_to_orm(
                 return {
                     "orm_entities": 0,
                     "orm_relations": 0,
+                    "candidate_relations": 0,
                     "orm_statistics": 0,
                     "orm_analyses": 0,
                     "neo4j_nodes": 0,
@@ -578,19 +831,54 @@ def _persist_to_orm(
                     "deduplicated": True,
                     "document_id": str(existing.id),
                     "content_hash": content_hash,
+                    "canonical_document_key": existing.canonical_document_key,
                 }
             doc = Document(
                 source_file=sf,
                 content_hash=content_hash,
                 ingest_run_id=ingest_run_id,
+                canonical_document_key=identity_fields.get("canonical_document_key"),
+                canonical_title=identity_fields.get("canonical_title"),
+                normalized_title=identity_fields.get("normalized_title"),
+                source_file_hash=identity_fields.get("source_file_hash"),
+                edition_hint=identity_fields.get("edition_hint"),
+                document_key_version=identity_fields.get("document_key_version"),
+                dynasty=identity_fields.get("dynasty"),
+                author=identity_fields.get("author"),
+                document_title=identity_fields.get("canonical_title"),
+                work_title=identity_fields.get("canonical_title"),
+                edition=identity_fields.get("edition_hint"),
                 raw_text_size=len(text_for_hash)
                 or sum(len(e.get("name", "")) for e in entities),
                 entities_extracted_count=len(entities),
                 process_status=ProcessStatusEnum.COMPLETED,
                 notes=f"由 {created_by} 自动写入；已附加无监督科研增强信号",
             )
+            _apply_document_identity(doc, identity_fields)
             session.add(doc)
             session.flush()  # 获取 doc.id
+            if provenance_index is not None:
+                provenance_index.document_id = str(doc.id)
+                provenance_index.segments = [
+                    segment.with_document_id(str(doc.id))
+                    for segment in provenance_index.segments
+                ]
+
+            entities = (
+                attach_provenance_to_entities(entities, provenance_index)
+                if provenance_index is not None
+                else entities
+            )
+            graph_data = (
+                {
+                    **graph_data,
+                    "edges": attach_provenance_to_edges(
+                        graph_data.get("edges", []), provenance_index
+                    ),
+                }
+                if provenance_index is not None
+                else graph_data
+            )
 
             # 2) 预加载 RelationshipType 映射
             rel_types = {
@@ -618,11 +906,15 @@ def _persist_to_orm(
                     type=etype,
                     confidence=float(ent.get("confidence", 0.6)),
                     entity_metadata=_json_ready(
-                        {
-                            k: v
-                            for k, v in ent.items()
-                            if k not in ("name", "type", "entity_type", "confidence")
-                        }
+                        _replace_provenance_document_id(
+                            {
+                                k: v
+                                for k, v in ent.items()
+                                if k
+                                not in ("name", "type", "entity_type", "confidence")
+                            },
+                            str(doc.id),
+                        )
                     ),
                 )
                 session.add(entity_obj)
@@ -655,6 +947,58 @@ def _persist_to_orm(
                     continue
                 src_ent = _resolve_entity(src_name)
                 dst_ent = _resolve_entity(dst_name)
+                source_type = (
+                    getattr(src_ent.type, "value", src_ent.type)
+                    if src_ent is not None
+                    and getattr(src_ent, "type", None) is not None
+                    else ""
+                )
+                target_type = (
+                    getattr(dst_ent.type, "value", dst_ent.type)
+                    if dst_ent is not None
+                    and getattr(dst_ent, "type", None) is not None
+                    else ""
+                )
+                edge_quality = _edge_rule_quality(e)
+                edge_provenance = _edge_provenance(e)
+                edge_tier = str(edge_quality.get("tier") or "").strip()
+                if edge_quality and (
+                    edge_tier in CANDIDATE_RULE_TIERS
+                    or not is_promotable_rule_edge(e)
+                    or not edge_provenance
+                ):
+                    if _store_candidate_relation_insight(
+                        session,
+                        LearningInsight,
+                        document_id=str(doc.id),
+                        source_file=sf,
+                        edge=e,
+                        reason=str(
+                            edge_quality.get("evidence_reason")
+                            or "candidate_or_missing_provenance"
+                        ),
+                        source_entity_id=str(src_ent.id) if src_ent is not None else "",
+                        target_entity_id=str(dst_ent.id) if dst_ent is not None else "",
+                        source_type=str(source_type),
+                        target_type=str(target_type),
+                    ):
+                        candidate_relation_count += 1
+                    continue
+                if not edge_provenance:
+                    if _store_candidate_relation_insight(
+                        session,
+                        LearningInsight,
+                        document_id=str(doc.id),
+                        source_file=sf,
+                        edge=e,
+                        reason="missing_text_segment",
+                        source_entity_id=str(src_ent.id) if src_ent is not None else "",
+                        target_entity_id=str(dst_ent.id) if dst_ent is not None else "",
+                        source_type=str(source_type),
+                        target_type=str(target_type),
+                    ):
+                        candidate_relation_count += 1
+                    continue
                 # 若目标实体不在本批实体中，自动补录
                 if dst_ent is None and dst_name:
                     plain_dst = (
@@ -730,6 +1074,9 @@ def _persist_to_orm(
                 }
                 if attrs:
                     relationship_metadata["attributes"] = attrs
+                relationship_metadata = _replace_provenance_document_id(
+                    relationship_metadata, str(doc.id)
+                )
                 rel_obj = EntityRelationship(
                     source_entity_id=src_ent.id,
                     target_entity_id=dst_ent.id,
@@ -772,6 +1119,8 @@ def _persist_to_orm(
                 "semantic_graph",
                 "unsupervised_research_enhancer",
             ]
+            if candidate_relation_count:
+                source_modules.append("rule_relation_quality")
             processing_stats = ProcessingStatistics(
                 document_id=doc.id,
                 formulas_count=int(entity_type_counts.get("formula", 0)),
@@ -880,9 +1229,11 @@ def _persist_to_orm(
                     {
                         "id": e_obj.id,
                         "name": e_obj.name,
-                        "type": e_obj.type.value
-                        if hasattr(e_obj.type, "value")
-                        else str(e_obj.type),
+                        "type": (
+                            e_obj.type.value
+                            if hasattr(e_obj.type, "value")
+                            else str(e_obj.type)
+                        ),
                         "props": _flat_neo4j_props(
                             {
                                 "confidence": float(e_obj.confidence or 0.0),
@@ -971,9 +1322,10 @@ def _persist_to_orm(
 
     if orm_ent_count > 0 or orm_rel_count > 0:
         logger.info(
-            "ORM 持久化完成 (entities=%d, relations=%d, statistics=%d, analyses=%d); Neo4j 投影 (nodes=%d, edges=%d); Catalog topics=%d",
+            "ORM 持久化完成 (entities=%d, relations=%d, candidate_relations=%d, statistics=%d, analyses=%d); Neo4j 投影 (nodes=%d, edges=%d); Catalog topics=%d",
             orm_ent_count,
             orm_rel_count,
+            candidate_relation_count,
             orm_stats_count,
             orm_analysis_count,
             neo4j_proj.get("neo4j_nodes", 0),
@@ -984,6 +1336,7 @@ def _persist_to_orm(
     return {
         "orm_entities": orm_ent_count,
         "orm_relations": orm_rel_count,
+        "candidate_relations": candidate_relation_count,
         "orm_statistics": orm_stats_count,
         "orm_analyses": orm_analysis_count,
         "neo4j_nodes": neo4j_proj.get("neo4j_nodes", 0),
@@ -1114,6 +1467,89 @@ def _normalize_relation(rel_type: str) -> str:
     return _RELATION_CN_TO_EN.get(rel_type.strip(), rel_type.strip() or "related")
 
 
+def _resolve_distill_template_task(metadata: Optional[Mapping[str, Any]]) -> str:
+    metadata = dict(metadata or {}) if isinstance(metadata, Mapping) else {}
+    requested = str(
+        metadata.get("distill_template_task")
+        or metadata.get("llm_reasoning_task")
+        or metadata.get("llm_task_type")
+        or "entity_extraction"
+    ).strip()
+    if requested == "relation_judgment":
+        return "relation_judgement"
+    if requested in {"entity_extraction", "relation_judgement"}:
+        return requested
+    return "entity_extraction"
+
+
+def _resolve_positive_int_from_metadata(
+    metadata: Optional[Mapping[str, Any]], keys: List[str]
+) -> Optional[int]:
+    if not isinstance(metadata, Mapping):
+        return None
+    for key in keys:
+        value = metadata.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError):
+            continue
+        if normalized > 0:
+            return normalized
+    return None
+
+
+def _build_distill_prompt_version(metadata: Mapping[str, Any]) -> str:
+    template_id = str(metadata.get("template_id") or "analysis.distill").strip()
+    version = str(
+        metadata.get("template_version") or metadata.get("version") or "unknown"
+    ).strip()
+    if template_id and version and "@" not in template_id:
+        return f"{template_id}@{version}"
+    return template_id or version or "analysis.distill@unknown"
+
+
+def _summarize_llm_gateway_result(result: Any, *, chunk_index: int) -> Dict[str, Any]:
+    metadata = dict(getattr(result, "metadata", {}) or {})
+    return {
+        "chunk_index": chunk_index,
+        "prompt_version": getattr(result, "prompt_version", None)
+        or metadata.get("prompt_version"),
+        "model_id": getattr(result, "model_id", None) or metadata.get("model_id"),
+        "latency_s": getattr(result, "latency_s", None) or metadata.get("latency_s"),
+        "token_budget": getattr(result, "token_budget", None)
+        or metadata.get("token_budget"),
+        "json_repair_status": getattr(result, "json_repair_status", None)
+        or metadata.get("json_repair_status"),
+        "attempts_used": metadata.get("attempts_used"),
+        "retry_count": metadata.get("retry_count"),
+        "timeout_s": metadata.get("timeout_s"),
+        "gpu_params": metadata.get("gpu_params") or {},
+        "warnings": list(getattr(result, "warnings", []) or []),
+    }
+
+
+def _summarize_llm_gateway_calls(calls: List[Dict[str, Any]]) -> Dict[str, Any]:
+    statuses = Counter(
+        str(item.get("json_repair_status") or "unknown") for item in calls
+    )
+    latency_values = [
+        float(item.get("latency_s") or 0.0)
+        for item in calls
+        if item.get("latency_s") is not None
+    ]
+    return {
+        "call_count": len(calls),
+        "prompt_versions": sorted(
+            {str(item.get("prompt_version") or "unknown") for item in calls}
+        ),
+        "model_ids": sorted({str(item.get("model_id") or "unknown") for item in calls}),
+        "json_repair_status_counts": dict(statuses),
+        "latency_s_total": round(sum(latency_values), 4),
+    }
+
+
 @router.post("/distill")
 def llm_distill(
     request: Request,
@@ -1138,15 +1574,36 @@ def llm_distill(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"本地 LLM 引擎未加载，无法进行知识蒸馏：{reason}",
             )
+        llm_gateway = LLMGateway(llm)
 
         # 分片蒸馏 — 长文本按 _DISTILL_TEXT_LIMIT 切片逐段调用 LLM
         full_text = body.raw_text
+        provenance_index = TextSegmentIndex(
+            full_text,
+            document_id=(body.source_file or "llm_distill"),
+            max_segment_chars=_DISTILL_TEXT_LIMIT,
+        )
         chunks = [
             full_text[i : i + _DISTILL_TEXT_LIMIT]
             for i in range(0, len(full_text), _DISTILL_TEXT_LIMIT)
         ]
         llm_entities: List[Dict[str, Any]] = []
         llm_relations: List[Dict[str, Any]] = []
+        distill_template_task = _resolve_distill_template_task(body.metadata)
+        distill_template_metadata: Dict[str, Any] = {}
+        llm_gateway_calls: List[Dict[str, Any]] = []
+        distill_token_budget = _resolve_positive_int_from_metadata(
+            body.metadata,
+            ["token_budget", "llm_token_budget", "distill_token_budget"],
+        )
+        distill_retry_count = _resolve_positive_int_from_metadata(
+            body.metadata,
+            ["retry_count", "llm_retry_count", "distill_retry_count"],
+        )
+        distill_timeout_s = _resolve_positive_int_from_metadata(
+            body.metadata,
+            ["timeout_s", "llm_timeout_s", "distill_timeout_s"],
+        )
 
         # 临时收紧 max_tokens 以加速蒸馏（结束后恢复）
         _saved_max_tokens = getattr(llm, "max_tokens", None)
@@ -1157,13 +1614,59 @@ def llm_distill(
 
         for idx, chunk in enumerate(chunks):
             try:
-                prompt = _LLM_DISTILL_PROMPT.format(text=chunk)
-                raw_output = llm.generate(
-                    prompt,
-                    system_prompt="你是中医知识图谱专家，只输出JSON，不加任何解释。",
+                rendered_prompt = render_philology_reasoning_prompt(
+                    distill_template_task,
+                    payload={
+                        "text": chunk,
+                        "source_file": body.source_file or "",
+                        "chunk_index": idx,
+                        "chunk_count": len(chunks),
+                        "metadata": body.metadata or {},
+                    },
+                    context={
+                        "route": "analysis.distill",
+                        "task": distill_template_task,
+                    },
+                )
+                distill_template_metadata = dict(rendered_prompt.metadata)
+                prompt = rendered_prompt.user_prompt
+                gateway_result = llm_gateway.generate(
+                    LLMGatewayRequest(
+                        prompt=prompt,
+                        system_prompt=rendered_prompt.system_prompt,
+                        prompt_version=_build_distill_prompt_version(
+                            distill_template_metadata
+                        ),
+                        phase="analysis",
+                        purpose="knowledge_distill",
+                        task_type=distill_template_task,
+                        token_budget=distill_token_budget,
+                        timeout_s=distill_timeout_s,
+                        retry_count=distill_retry_count or 1,
+                        json_output=True,
+                        context={
+                            "route": "analysis.distill",
+                            "source_file": body.source_file or "",
+                            "chunk_index": idx,
+                            "chunk_count": len(chunks),
+                        },
+                        metadata={
+                            "prompt_name": distill_template_metadata.get("template_id"),
+                            "prompt_version": _build_distill_prompt_version(
+                                distill_template_metadata
+                            ),
+                            "schema_version": distill_template_metadata.get(
+                                "template_version"
+                            ),
+                            "response_format": "json",
+                        },
+                    )
+                )
+                llm_gateway_calls.append(
+                    _summarize_llm_gateway_result(gateway_result, chunk_index=idx)
                 )
 
-                json_text = _repair_json(raw_output)
+                json_text = gateway_result.text or _repair_json(gateway_result.text)
                 parsed = _json.loads(json_text)
 
                 # LLM 可能返回 dict 或 list
@@ -1237,7 +1740,12 @@ def llm_distill(
         rule_entities = extraction_result.get("entities", [])
 
         graph_builder = _get_graph_builder()
-        semantic_result = graph_builder.execute(extraction_result)
+        semantic_input = {
+            **extraction_result,
+            "processed_text": preprocess_result.get("processed_text") or body.raw_text,
+            "raw_text": body.raw_text,
+        }
+        semantic_result = graph_builder.execute(semantic_input)
         rule_graph = semantic_result.get("semantic_graph", {})
 
         # 合并 LLM 实体（去重）
@@ -1261,6 +1769,7 @@ def llm_distill(
 
         # 合并 LLM 关系
         rule_edges = rule_graph.get("edges", [])
+        rule_tier_counts = rule_quality_tier_counts(rule_edges)
         seen_edges = {(e.get("source", ""), e.get("target", "")) for e in rule_edges}
         merged_edges = list(rule_edges)
         for rel in llm_relations:
@@ -1296,11 +1805,40 @@ def llm_distill(
                 merged_graph,
             )
         )
+        merged_entities = attach_provenance_to_entities(
+            merged_entities, provenance_index
+        )
+        merged_graph = {
+            **merged_graph,
+            "edges": attach_provenance_to_edges(
+                merged_graph.get("edges", []), provenance_index
+            ),
+        }
+        research_view = attach_provenance_to_research_view(
+            research_view, provenance_index
+        )
+        logger.info(
+            "distill rule relation tiers: strong=%d weak=%d candidate=%d rejected=%d",
+            rule_tier_counts.get("strong_rule", 0),
+            rule_tier_counts.get("weak_rule", 0),
+            rule_tier_counts.get("candidate_rule", 0),
+            rule_tier_counts.get("rejected_rule", 0),
+        )
 
         # 持久化到知识图谱
         persisted = _persist_to_kg(merged_entities, merged_graph)
 
         # 写入主应用数据库 (ORM)
+        persist_metadata = (
+            dict(body.metadata or {}) if isinstance(body.metadata, Mapping) else {}
+        )
+        if distill_template_metadata:
+            persist_metadata["llm_reasoning_template"] = distill_template_metadata
+        llm_gateway_summary = _summarize_llm_gateway_calls(llm_gateway_calls)
+        persist_metadata["llm_gateway"] = {
+            "summary": llm_gateway_summary,
+            "calls": llm_gateway_calls,
+        }
         orm_result = _persist_to_orm(
             request,
             merged_entities,
@@ -1308,6 +1846,7 @@ def llm_distill(
             source_file=body.source_file,
             created_by="llm_distill",
             raw_text=body.raw_text,
+            metadata=persist_metadata,
             semantic_result=semantic_result,
             research_view=research_view,
         )
@@ -1318,10 +1857,21 @@ def llm_distill(
             "llm_extracted": {
                 "entities": len(llm_entities),
                 "relations": len(llm_relations),
+                "template": distill_template_metadata,
+                "llm_gateway": {
+                    "summary": llm_gateway_summary,
+                    "calls": llm_gateway_calls,
+                },
+            },
+            "llm_reasoning_template": distill_template_metadata,
+            "llm_gateway": {
+                "summary": llm_gateway_summary,
+                "calls": llm_gateway_calls,
             },
             "rule_extracted": {
                 "entities": len(rule_entities),
                 "relations": len(rule_edges),
+                "quality_tiers": rule_tier_counts,
             },
             "merged": {
                 "entities": len(merged_entities),
@@ -1338,6 +1888,7 @@ def llm_distill(
                 "orm_analyses": orm_result["orm_analyses"],
                 "neo4j_nodes": orm_result["neo4j_nodes"],
                 "neo4j_edges": orm_result["neo4j_edges"],
+                "candidate_relations": orm_result.get("candidate_relations", 0),
             },
             "entities": {"items": merged_entities},
             "semantic_graph": {

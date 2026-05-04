@@ -188,7 +188,8 @@ python -m src.web.main --config config.yml --environment development --port 8080
 Legacy Web 启动后可访问：
 
 - 登录页面：`http://127.0.0.1:8000/login`
-- 主控台：`http://127.0.0.1:8000/dashboard`
+- 当前控制台：`http://127.0.0.1:8000/console`
+- Legacy 主控页：`http://127.0.0.1:8000/dashboard`
 - API 文档：`http://127.0.0.1:8000/docs`
 - 健康检查：`http://127.0.0.1:8000/health`
 

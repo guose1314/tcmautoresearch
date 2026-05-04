@@ -17,6 +17,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
+from src.llm.llm_gateway import generate_with_gateway
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -24,8 +26,16 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _WRITE_KEYWORDS: Set[str] = {
-    "CREATE", "DELETE", "DETACH", "SET", "MERGE", "REMOVE",
-    "DROP", "CALL", "FOREACH", "LOAD",
+    "CREATE",
+    "DELETE",
+    "DETACH",
+    "SET",
+    "MERGE",
+    "REMOVE",
+    "DROP",
+    "CALL",
+    "FOREACH",
+    "LOAD",
 }
 
 _WRITE_PATTERN = re.compile(
@@ -46,30 +56,40 @@ def _is_safe_cypher(cypher: str) -> bool:
 # 查询意图
 # ---------------------------------------------------------------------------
 
-INTENT_COMPOSITION = "composition"          # 方剂组成
-INTENT_EFFICACY = "efficacy"                # 中药功效
-INTENT_TREATING = "treating"                # 治疗某证候的方剂
-INTENT_SIMILAR = "similar"                  # 类似方剂
-INTENT_PATH = "path"                        # 两实体间路径
-INTENT_HERB_FORMULAS = "herb_formulas"      # 含某药的方剂
-INTENT_STATISTICS = "statistics"            # 统计
+INTENT_COMPOSITION = "composition"  # 方剂组成
+INTENT_EFFICACY = "efficacy"  # 中药功效
+INTENT_TREATING = "treating"  # 治疗某证候的方剂
+INTENT_SIMILAR = "similar"  # 类似方剂
+INTENT_PATH = "path"  # 两实体间路径
+INTENT_HERB_FORMULAS = "herb_formulas"  # 含某药的方剂
+INTENT_STATISTICS = "statistics"  # 统计
 INTENT_UNKNOWN = "unknown"
 
 _INTENT_PATTERNS: List[Tuple[str, re.Pattern]] = [
-    (INTENT_COMPOSITION, re.compile(
-        r"(组成|君臣佐使|配伍|组方|由.{0,6}组成|包含.{0,6}药)", re.IGNORECASE)),
-    (INTENT_EFFICACY, re.compile(
-        r"(功效|作用|主治|功能|效果|药效|有什么用)", re.IGNORECASE)),
-    (INTENT_TREATING, re.compile(
-        r"(治疗|治|主治|用于|可治|哪些方.{0,4}治)", re.IGNORECASE)),
-    (INTENT_SIMILAR, re.compile(
-        r"(类似|相似|近似|替代|同类|像.{0,4}方)", re.IGNORECASE)),
-    (INTENT_PATH, re.compile(
-        r"(关系|路径|关联|相关|联系|之间)", re.IGNORECASE)),
-    (INTENT_HERB_FORMULAS, re.compile(
-        r"(含有|用了|使用了|哪些方.{0,4}含|哪些方.{0,4}用)", re.IGNORECASE)),
-    (INTENT_STATISTICS, re.compile(
-        r"(统计|多少|数量|总共|总计|有几)", re.IGNORECASE)),
+    (
+        INTENT_COMPOSITION,
+        re.compile(
+            r"(组成|君臣佐使|配伍|组方|由.{0,6}组成|包含.{0,6}药)", re.IGNORECASE
+        ),
+    ),
+    (
+        INTENT_EFFICACY,
+        re.compile(r"(功效|作用|主治|功能|效果|药效|有什么用)", re.IGNORECASE),
+    ),
+    (
+        INTENT_TREATING,
+        re.compile(r"(治疗|治|主治|用于|可治|哪些方.{0,4}治)", re.IGNORECASE),
+    ),
+    (
+        INTENT_SIMILAR,
+        re.compile(r"(类似|相似|近似|替代|同类|像.{0,4}方)", re.IGNORECASE),
+    ),
+    (INTENT_PATH, re.compile(r"(关系|路径|关联|相关|联系|之间)", re.IGNORECASE)),
+    (
+        INTENT_HERB_FORMULAS,
+        re.compile(r"(含有|用了|使用了|哪些方.{0,4}含|哪些方.{0,4}用)", re.IGNORECASE),
+    ),
+    (INTENT_STATISTICS, re.compile(r"(统计|多少|数量|总共|总计|有几)", re.IGNORECASE)),
 ]
 
 # ---------------------------------------------------------------------------
@@ -88,6 +108,7 @@ def _load_entity_dicts() -> None:
         from src.semantic_modeling.tcm_relationships import (
             TCMRelationshipDefinitions as Defs,
         )
+
         _KNOWN_FORMULAS = set(Defs.FORMULA_COMPOSITIONS.keys())
         _KNOWN_HERBS = set(Defs.HERB_EFFICACY_MAP.keys())
     except ImportError:
@@ -162,8 +183,7 @@ _CYPHER_TEMPLATES: Dict[str, str] = {
         "RETURN f.name AS formula, type(r) AS role"
     ),
     INTENT_STATISTICS: (
-        "MATCH (n) RETURN labels(n)[0] AS label, count(*) AS count "
-        "ORDER BY count DESC"
+        "MATCH (n) RETURN labels(n)[0] AS label, count(*) AS count ORDER BY count DESC"
     ),
 }
 
@@ -210,7 +230,9 @@ class KGQueryEngine:
         """
         if not natural_language or not natural_language.strip():
             return QueryResult(
-                success=False, intent=INTENT_UNKNOWN, cypher="",
+                success=False,
+                intent=INTENT_UNKNOWN,
+                cypher="",
                 error="查询不能为空",
             )
 
@@ -226,7 +248,9 @@ class KGQueryEngine:
 
         if cypher is None:
             return QueryResult(
-                success=False, intent=intent, cypher="",
+                success=False,
+                intent=intent,
+                cypher="",
                 error="无法将该查询转换为图谱查询，请尝试更具体的提问",
             )
 
@@ -234,14 +258,18 @@ class KGQueryEngine:
         if not _is_safe_cypher(cypher):
             logger.warning("拒绝不安全的 Cypher: %s", cypher[:200])
             return QueryResult(
-                success=False, intent=intent, cypher=cypher,
+                success=False,
+                intent=intent,
+                cypher=cypher,
                 error="安全校验未通过：仅允许只读查询",
             )
 
         # 执行
         if self._driver is None:
             return QueryResult(
-                success=True, intent=intent, cypher=cypher,
+                success=True,
+                intent=intent,
+                cypher=cypher,
                 parameters=params,
                 summary="（翻译成功，未连接数据库，仅返回 Cypher）",
             )
@@ -364,13 +392,23 @@ class KGQueryEngine:
     ) -> Tuple[Optional[str], Dict[str, Any]]:
         """使用 LLM 将自然语言翻译为 Cypher（带安全校验）。"""
         try:
-            raw = self._llm.generate(
+            gateway_result = generate_with_gateway(
+                self._llm,
                 natural_language,
-                system_prompt=self._CYPHER_SYSTEM_PROMPT,
+                self._CYPHER_SYSTEM_PROMPT,
+                prompt_version="kg_query_engine.cypher_generation@v1",
+                phase="query",
+                purpose="kg_cypher_generation",
+                task_type="cypher_generation",
+                metadata={
+                    "prompt_name": "kg_query_engine.cypher_generation",
+                    "response_format": "cypher",
+                },
             )
+            raw = gateway_result.text
             cypher = self._extract_cypher_from_llm(raw)
             if cypher and _is_safe_cypher(cypher):
-                return cypher, {}
+                return cypher, {"llm_gateway": dict(gateway_result.metadata or {})}
             return None, {}
         except Exception as exc:
             logger.debug("LLM Cypher 生成失败: %s", exc)
@@ -400,9 +438,7 @@ class KGQueryEngine:
     # 执行
     # ------------------------------------------------------------------
 
-    def _execute(
-        self, cypher: str, params: Dict[str, Any], intent: str
-    ) -> QueryResult:
+    def _execute(self, cypher: str, params: Dict[str, Any], intent: str) -> QueryResult:
         """在 Neo4j 上执行 Cypher 并包装结果。"""
         try:
             with self._driver.driver.session(database=self._driver.database) as session:
@@ -422,8 +458,11 @@ class KGQueryEngine:
         except Exception as exc:
             logger.warning("Cypher 执行失败: %s", exc)
             return QueryResult(
-                success=False, intent=intent, cypher=cypher,
-                parameters=params, error=str(exc),
+                success=False,
+                intent=intent,
+                cypher=cypher,
+                parameters=params,
+                error=str(exc),
             )
 
     # ------------------------------------------------------------------

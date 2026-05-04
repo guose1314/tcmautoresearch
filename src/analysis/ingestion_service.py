@@ -97,6 +97,7 @@ class AnalysisIngestionService:
             source_file=source_file,
             created_by=self._created_by,
             raw_text=raw_text,
+            metadata=metadata,
             semantic_result=semantic_result,
             research_view=research_view,
         )

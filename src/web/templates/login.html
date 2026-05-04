@@ -12,14 +12,23 @@
     <link rel="stylesheet" href="/static/css/login.css" />
     <noscript>
       <style>
-        [x-cloak]{display:block !important;}
-        #passwordForm,#apiKeyForm{display:block !important;}
+        [x-cloak] {
+          display: block !important;
+        }
+        #passwordForm,
+        #apiKeyForm {
+          display: block !important;
+        }
       </style>
     </noscript>
     <!-- 即使 Alpine 未加载，也保证账号密码表单首屏直接可见 -->
     <style>
-      #passwordForm{display:block;}
-      #apiKeyForm{display:none;}
+      #passwordForm {
+        display: block;
+      }
+      #apiKeyForm {
+        display: none;
+      }
     </style>
   </head>
   <body class="min-h-screen overflow-x-hidden">
@@ -121,6 +130,7 @@
           :aria-busy="loading"
           novalidate
           id="passwordForm"
+          data-login-endpoint="/api/auth/login"
         >
           <div>
             <label
@@ -365,7 +375,8 @@
       </section>
 
       <footer class="mt-8 text-center text-xs text-slate-400">
-        © 2026 中医智慧科研平台 · 认证后进入可执行任务、AI 助手、知识图谱与输出管理界面
+        © 2026 中医智慧科研平台 · 认证后进入可执行任务、AI
+        助手、知识图谱与输出管理界面
       </footer>
     </main>
   </body>

@@ -61,6 +61,10 @@ def test_auth_login_still_works_when_cwd_changes(tmp_path: Path, monkeypatch) ->
         assert status_payload["supports_password_login"] is True
         assert status_payload["supports_api_key_login"] is True
 
+        console_resp = client.get("/console")
+        assert console_resp.status_code == 200
+        assert "中医自动科研控制台" in console_resp.text
+
         password_login_resp = client.post(
             "/api/auth/login",
             json={"username": "login_user", "password": "login_pass"},

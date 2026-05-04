@@ -90,7 +90,10 @@ class SemanticGraphBuilder(BaseModule):
             entities = self._validate_entities(context)
 
             # 构建语义图
-            graph = self._build_semantic_graph(entities)
+            raw_text = str(
+                context.get("raw_text") or context.get("processed_text") or ""
+            )
+            graph = self._build_semantic_graph(entities, raw_text=raw_text)
 
             # 统计关系分布
             relationship_stats = self._calculate_relationship_statistics()
@@ -154,11 +157,11 @@ class SemanticGraphBuilder(BaseModule):
                     "nodes_count": graph.number_of_nodes(),
                     "edges_count": graph.number_of_edges(),
                     "density": nx.density(graph) if graph.number_of_nodes() > 0 else 0,
-                    "connected_components": nx.number_connected_components(
-                        graph.to_undirected()
-                    )
-                    if graph.number_of_nodes() > 0
-                    else 0,
+                    "connected_components": (
+                        nx.number_connected_components(graph.to_undirected())
+                        if graph.number_of_nodes() > 0
+                        else 0
+                    ),
                     "relationships_by_type": relationship_stats,
                 },
                 "research_perspectives": research_perspectives,
@@ -248,7 +251,9 @@ class SemanticGraphBuilder(BaseModule):
             )
         return results
 
-    def _build_semantic_graph(self, entities: List[Dict]) -> nx.MultiDiGraph:
+    def _build_semantic_graph(
+        self, entities: List[Dict], *, raw_text: str = ""
+    ) -> nx.MultiDiGraph:
         """
         构建语义图 - 支持君臣佐使等TCM关系
         """
@@ -262,7 +267,7 @@ class SemanticGraphBuilder(BaseModule):
             self._add_node(entity)
 
         # 添加边（关系）
-        self._add_relationships(entities)
+        self._add_relationships(entities, raw_text=raw_text)
 
         return self.graph
 
@@ -293,11 +298,11 @@ class SemanticGraphBuilder(BaseModule):
             self.entity_map[entity_name] = []
         self.entity_map[entity_name].append(node_id)
 
-    def _add_relationships(self, entities: List[Dict]):
+    def _add_relationships(self, entities: List[Dict], *, raw_text: str = ""):
         """
         添加语义关系边（委托给独立 RelationExtractor）
         """
-        extracted_edges = self.relation_extractor.extract(entities)
+        extracted_edges = self.relation_extractor.extract(entities, raw_text=raw_text)
         for edge in extracted_edges:
             self.graph.add_edge(
                 edge["source"],

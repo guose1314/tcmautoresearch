@@ -2,64 +2,97 @@
 
 <!-- markdownlint-configure-file {"MD022": false, "MD024": false, "MD032": false, "MD060": false} -->
 
-## 阶段性收口（2026-05-XX）
+## 阶段性收口（2026-05-04）
 
-同步说明（2026-05-XX）：
+同步说明（2026-05-04）：
 
-- 本节取代下方 2026-04-28 条目，成为当前总续接入口；本轮收口不再讨论在线 distill，而是聚焦研究主链里已经打通并实测过的“三上下文 + outbox + GraphRAG”。
-- 本文中的“三上下文”统一指：`CollationContext`（四校）、`CatalogContext`（Topic / BELONGS_TO_TOPIC 投影）、`LFITL`（Learning Feedback Into The Loop）。`transactional outbox` 与 `GraphRAG` 单列，因为它们分别是图投影主链与 analyze 检索主链的横切基础设施。
-- 下方结论只引用已跑过的验收面：T7.1 五篇经典七阶段 E2E、T7.2 双盲专家复核导出/导入闭环、T6.1-T6.3 outbox focused validation、T5.5 GraphRAG 三档摘要与 traceability 测试。
+- 本节取代下方 2026-04-28 条目，成为当前总续接入口；本轮收口不再围绕旧的在线 distill 主链，而是聚焦 2026-05-04 这一批已经落到仓库、且已完成关键回归的五条主线：文献入库身份治理、文献学能力补齐、证据约束与研究质量、GraphRAG traceability、候选边审核与生产监控。
+- 当前工作区路径仍显示为 `C:\Users\hgk\tcmautoresearch`，但实际目标路径是 D 盘；C 盘目录是 junction，续接时不要把“当前在 C 盘”误判为另一套独立工作区。
+- 当前 development PostgreSQL 测试库已经完成缺失 schema repair，并补建 `alembic_version` 后 stamp 到 `c4d5e6f7a9b0`；后续如果再遇到历史混合库，不要直接从 base 强推 upgrade，先做 metadata diff，再幂等补齐，最后 stamp。
 
 ### 本轮收口目标
 
-- 让 Observe / Analyze / Reflect / 图投影不再依赖零散旁路，而是分别收口到可指认的上下文与基础设施：四校走 `CollationContext`，主题归档走 `CatalogContext`，下一轮 prompt 偏置走 `LFITL`，图写入走 `transactional outbox`，图检索走 `GraphRAG`。
-- 用一条可复现的七阶段主链证明：假说、证据分级、Topic 归档、IMRD 输出和 outbox drain 已能在同一条 runtime service 调度链里闭环，而不是靠手工拼装。
-- 用双盲专家复核闭环证明：导出给专家批注的 jsonl 可以反向沉淀进 PostgreSQL `research_learning_feedback`，并在下一轮 `prepare_cycle()` 中显式表现为 prompt bias。
+- 让文本入库阶段先得到稳定的 canonical document identity，再把版本谱系、异文、义项消歧这些中医文献学能力补到结构化主链里，而不是继续停留在文档旁路或手工解释层。
+- 给 LLM 研究输出补上“证据必须可定位、候选不能写成事实、反证必须可处理”的质量护栏，并把质量回归整理成可直接执行的 golden-set regression。
+- 让 GraphRAG 检索、候选边复核、生产监控这三条运行面各自具备 trace、review、DLQ 与 dashboard 入口，避免继续依赖一次性脚本排障。
+- 把登录后界面、README、阶段摘要和 PG 测试库状态对齐到当前现态，保证任意一天回来都能从同一份入口继续接，而不是先靠口头还原上下文。
 
 ### 当前已落地成果
 
-#### 1. 三上下文已经落到研究主链，不再只是孤立组件
+#### 1. 文本入库身份与文献学结构化能力已经补齐到持久化主链
 
-- `CollationContext` 已通过 `ObservePhase` 正式接线，四校策略固定为 `cross / intra / external / rational`，不再需要在 observe 侧手工拼接多份校勘结果。
-- `CatalogContext` 已成为 topic 归档的唯一投影面；T7.1 的七阶段 E2E 不是直接写图，而是通过 outbox worker 把 Topic 归档事件异步投到 `BELONGS_TO_TOPIC`，避免 PG 成功但图写半途失败时的主链分叉。
-- `LFITL` 已从“Reflect 结果可查看”推进到“专家反馈可驱动下一轮提示偏置”：T7.2 新增的 expert review export/import 脚本会把专家结论写回 `research_learning_feedback`，再由 `ExpertReviewFeedbackRepo` 适配进 `LearningLoopOrchestrator.prepare_cycle()` 的 `prompt_bias_blocks`。
+- 新增 `src/ingestion/corpus_encoding_service.py` 与 `src/ingestion/__init__.py`，把编码识别、换行归一、可疑文件名修复建议、`source_file_hash` / `text_sha256` / `canonical_document_key` 统一收口为 `CanonicalDocumentIdentity`，不再把同一文献的文件级差异留给下游各自猜测。
+- Alembic 已补上 `f6a7b8c9d0e1_add_canonical_document_identity.py`、`a2b4c6d8e9f0_migrate_learning_insight_status_lifecycle.py`、`b3c4d5e6f7a8_add_edition_lineage_variant_readings.py`、`c4d5e6f7a9b0_p19_production_quality_monitoring.py`，当前 head 为 `c4d5e6f7a9b0`。
+- `src/infrastructure/persistence.py` 已新增 `EditionLineage` / `VariantReading` ORM，并扩展 `PersistenceService.persist_document_graph()` 支持同一 canonical document 挂接多版 witness、异文、校注与证据引用。
+- `tools/version_lineage_cli.py` 已提供最小 CLI，可直接导入和查看版本谱系 / 异文记录；这意味着版本差异已进入可持久化、可回放、可查询状态，而不再只是临时 JSON。
 
-#### 2. Outbox 主链已从存储模式变成可监督、可恢复、可在 E2E 中观察的运行链
+#### 2. 中医文献学理解能力已经补到抽取与推理主链
 
-- T6.1 已把 PG 侧业务写入与 `outbox_events` 放进同一事务，并补齐 `outbox_dlq`、重试计数和状态机，图投影不再依赖“请求线程顺手写 Neo4j”的弱一致性路径。
-- T6.3 给 outbox worker 增加了独立 CLI 与 watchdog 监督；已实测 worker 被杀后可在约 3 秒内自动拉起，且与 web 进程分离，不会把 Topic 投影责任继续塞回 API 线程。
-- T7.1 的验收不是只看 PG 内有事件，而是显式断言 5 篇 fixture 跑完后 `outbox_events.status='processed'`，这意味着 Topic 投影主链在 runtime smoke 中已经真实 drain 过一轮。
+- `src/contexts/philology/term_sense_disambiguation.py` 已实现高频术语义项消歧，首批支持“风、寒、湿、热、虚、实、气、血、经、方”；只有置信度和领先 margin 足够时才落 `sense_id`，否则只保留 `sense_candidates`，避免古籍同词多义被强行定论。
+- `src/analysis/entity_extractor.py` 已接入 `TermSenseDisambiguator`，实体抽取产物现在会把义项候选和确定义项同步写回实体 metadata。
+- `src/contexts/llm_reasoning/philology_templates.py` 已把 entity extraction、relation judgement、variant comparison、evidence grading、hypothesis generation、counter-evidence retrieval 六类 philology reasoning template 收口为可选模板库。
+- `src/research/evidence/text_segment_provenance.py`、`src/research/evidence/citation_evidence_synthesizer.py`、`src/research/evaluation/citation_grounding_evaluator.py`、`src/research/evaluation/self_refine_loop.py` 已形成一条证据约束链：先把实体 / 关系 / 假说绑定到文本片段，再综合 citation / reviewed evidence / GraphRAG trace 生成 evidence package，最后在 LLM 初稿层做一次缺引文、过强表述、忽略反证的自校验。
+- `tools/run_research_quality_regression.py` 与 `tests/golden/` 已补上研究质量 golden set 和 baseline，使证据 grounding、unsupported claim、candidate acceptance 这些指标可以单独回归，而不是混在大型 E2E 里被动观察。
 
-#### 3. GraphRAG 已具备三档摘要检索，并且 Analyze 侧接线边界清晰
+#### 3. GraphRAG traceability、候选边审核与生产监控已经形成独立运行面
 
-- `GraphRAG` 当前只保留三类问题面：`global`（全库 `CommunitySummary` 拼接）、`community`（按 `topic_keys` 过滤）、`local`（按 `entity_ids` 取 1-hop 子图）；问题类型和返回契约已经被单测锁定。
-- Token 预算已有显式守门：默认单 query `<= 8000`，超预算时会截断并返回 `truncated=true`，避免 analyze 阶段把图上下文无限放大成新的 LLM 成本黑洞。
-- `AnalyzePhase` 只在 `enable_graph_rag` 为真时注入 `graph_rag_context` / `metadata.graph_rag`，因此后续如果继续扩展 GraphRAG，应该围绕这一注入点演进，而不是再新增平行的图检索入口。
+- `src/knowledge/graphrag/tiered_retriever.py` 把检索输出收口为 four-tier prompt ordering：`literature / segment / entity_relation / expert_insight`，并且把 `expert_reviewed` 与 `traceability` 一起写入统一返回契约。
+- `src/knowledge/graphrag/retrieval_trace_repo.py` 已提供 trace file + jsonl log 双写仓储，`Analyze` 侧现在可以落盘 trace id，而不是只把 GraphRAG 上下文留在临时内存里。
+- `src/learning/weak_edge_candidate_repo.py`、`src/learning/kg_node_self_learning.py` 与 `src/web/routes/candidate_edge_review.py` 已把候选边挖掘、去重、专家 accept/reject/merge、PG/Neo4j 写回串成完整链路，review 不再依赖离线手改。
+- `src/monitoring/production_quality.py` 与 `src/web/routes/production_monitoring.py` 已补上 production quality snapshot、监控 outbox / DLQ、失败 replay 和 dashboard 读取入口；对应 schema 已落到 `production_monitoring_outbox / production_monitoring_dlq / production_quality_snapshots`。
 
-#### 4. T7.1 + T7.2 已把“主链能跑”推进到“主链可复验、可学习”
+#### 4. Web Console、测试库迁移与当前续接入口已对齐到现态
 
-- T7.1 七阶段冒烟使用 5 篇真实体量较小的经典文献 fixture，通过 `ResearchRuntimeService.run()` 跑通 `observe → hypothesis → analyze → publish` 等完整链路，并同时验证 `methodology_tag / evidence_grade` 回传、5 份 IMRD 报告落盘、Topic 关系经 outbox 正常处理。
-- T7.2 双盲专家复核把“人工 review”从口头流程变成结构化闭环：先导出假说 + 四校结论 + 证据等级到 jsonl，再导入专家给出的 `expert_grade / expert_notes`，最终以高权重 `expert_review` 记录回写 PG；重复导入同一批 jsonl 会被 `expert_review_id` 幂等跳过。
-- 这两条验收串起来后的直接含义是：主链现在不仅能产出结果，也能把专家修正重新折返成下一轮 prompt 偏置，而不是把 expert review 停留在文件夹或人工备注里。
+- 登录后当前主界面是 `/console`，对应静态 SPA 为 `web_console/static/index.html`；README 中过去把 `/dashboard` 写成主控台入口已经过时，现已修正为 `/console` 为当前控制台，`/dashboard` 仅视作 legacy 页面。
+- development PostgreSQL 测试库此前缺失 `documents`、`research_artifacts`、`research_learning_feedback` 的若干后续列，现已完成幂等 schema repair，并 stamp 到 `c4d5e6f7a9b0`。
+- `src/infrastructure/research_session_repo.py` 已修正 learning feedback library 的稳定排序：`cycle_summary` 优先，其后按 `strength`、`weakness` 和稳定 tiebreaker 排序，避免 PostgreSQL 下同事务批量写入导致 dashboard / API 顺序漂移。
+- 当前总续接入口统一以本文件与 README 为准；后续若再改登录后 UI、测试库迁移或继续增加 philology / evidence 能力，不要只改代码不回写总摘要，否则很快又会回到“代码先走、入口文档失真”的状态。
 
 ### 关键验证记录
 
-- T7.1：`tests/e2e/test_seven_phase_pipeline.py` 已对 5 篇 fixture 跑通七阶段主链，验收点包括 `status=completed`、7 个 phase 齐全、`BELONGS_TO_TOPIC` 写入出现、`outbox_events` 全部 `processed`、IMRD 报告 5 份独立落盘。
-- T7.2：`tests/integration_tests/test_expert_review_roundtrip.py` 已验证 5 条 expert review `export → annotate → import` 完整闭环、二次导入幂等、`research_learning_feedback` 中新增 5 条 `feedback_scope="expert_review"` 记录，且下一轮 `prompt_bias_blocks["hypothesis"]` 可见 `expert_review` 偏置。
-- Outbox 监督：T6.3 已手工验证 worker 异常退出后约 3 秒自动重启；Topic 投影责任从此可归因到独立 worker，而不是归因到 web 请求线程。
-- GraphRAG：`tests/unit/test_graph_rag.py` 已锁定 `global / community / local` 三档检索、token budget 截断和 `CommunitySummary` 构建契约；`tests/integration_tests/test_graph_rag_traceability.py` 继续兜住链路追溯面。
+- `tests/test_web_console_api.py`：102 passed。当前已经覆盖 dashboard、learning feedback library、登录后聚合查询等 Web Console 主回归面。
+- `tests/unit/test_dashboard_copy.py`、`tests/unit/test_term_sense_disambiguation.py`、`tests/unit/test_version_lineage_persistence.py`：38 passed。覆盖本轮 UI 文案、义项消歧和版本谱系结构化持久化的关键小面。
+- development PG 库已完成 metadata 对齐复核：缺失列计数为 0，且 `alembic_version` 已建立并指向 `c4d5e6f7a9b0`。
+- 本轮其余新增能力均已配套 unit / evaluation test 文件：包括 corpus encoding、tiered GraphRAG retriever、retrieval trace repo、candidate edge review、production quality monitor、citation grounding、citation evidence package、self-refine loop、research quality regression 等，后续续接优先以这些 focused tests 为最小回归面。
 
 ### 当前续接锚点
 
-- 如果继续推进“四校 → 假说 → 主题归档”主链，事实源应依次看 `CollationContext`、`ResearchRuntimeService.run()`、`PgOutboxStore / OutboxWorker`、`CatalogContext`；不要重新引入“阶段里直接写 Neo4j”的旁路。
-- 如果继续推进“专家意见 → 下一轮 prompt 偏置”，事实源应看 `tools/export_for_expert_review.py`、`tools/import_expert_review.py`、`research_learning_feedback.feedback_scope="expert_review"` 和 `ExpertReviewFeedbackRepo.recent()`；不要再单独追加一套 prompt 配置文件或手工 bias 文本。
-- 如果继续推进 GraphRAG，事实源应看 `GraphRAG.retrieve()` 三档契约与 `AnalyzePhase._apply_graph_rag()` 注入点；新增 retrieval scope 之前，先明确它属于 `global / community / local` 哪一类缺口，而不是把 question type 继续摊平。
-- 如果继续推进运行稳定性，优先守住 outbox supervisor 与 focused smoke：七阶段 E2E 和 expert review roundtrip 已经是当前最便宜的回归面，新的改动先过这两层，再考虑扩展更重的全量链路。
+- 如果继续推进文献入库与文献学主链，优先看 `src/ingestion/corpus_encoding_service.py`、`src/infrastructure/persistence.py`、`tools/version_lineage_cli.py`；canonical document identity、版本 witness 和异文证据已经有统一事实源，不要再新增平行字段。
+- 如果继续推进术语理解与证据约束，优先看 `src/contexts/philology/term_sense_disambiguation.py`、`src/research/evidence/`、`src/research/evaluation/`；当前候选义项、文本片段 provenance、citation grounding 与 self-refine 已经是一条连续链，不要把某一环又拆回松散 helper。
+- 如果继续推进 GraphRAG 或候选边审核，优先看 `src/knowledge/graphrag/`、`src/learning/weak_edge_candidate_repo.py`、`src/web/routes/candidate_edge_review.py`；trace、review 状态和最终写回已经有统一 contract，后续不要再引入第二套 review payload。
+- 如果继续推进 production monitoring，优先看 `src/monitoring/production_quality.py` 与 `/api/production-monitoring/*`；当前 monitor 已经同时观测 batch log、candidate edge、outbox、DLQ 和 Neo4j projection，不要把相同指标拆散到多个页面或脚本里。
+- 如果继续处理 PostgreSQL 历史测试库，优先复用“metadata diff -> 幂等 repair -> stamp head”的修复顺序；当前 development 库就是按这条路径收口的。
+
+### 任意日期继续接手命令清单
+
+1. 启动当前控制台：
+  ```powershell
+  venv310\Scripts\python.exe web_console/main.py --config config.yml --environment development --host 127.0.0.1 --port 8000
+  ```
+  当前登录后入口是 `http://127.0.0.1:8000/console`。
+2. 新库执行迁移到最新 head：
+  ```powershell
+  alembic -x environment=development upgrade head
+  ```
+  如果是历史混合库，先做 schema diff 与 repair，再 stamp；不要直接假定可从 base 顺滑升级。
+3. 回归 Web Console API：
+  ```powershell
+  venv310\Scripts\python.exe -m pytest tests/test_web_console_api.py -q
+  ```
+4. 回归研究质量 golden set：
+  ```powershell
+  venv310\Scripts\python.exe tools/run_research_quality_regression.py
+  ```
+5. 查看或导入版本谱系 / 异文：
+  ```powershell
+  venv310\Scripts\python.exe tools/version_lineage_cli.py list --canonical-document-key <key>
+  venv310\Scripts\python.exe tools/version_lineage_cli.py import --json <path>
+  ```
 
 ### 提交边界说明
 
-- 本节收口覆盖的事实边界是：三上下文（Catalog / Collation / LFITL）、transactional outbox、GraphRAG 三档摘要、T7.1 七阶段 E2E、T7.2 双盲专家复核闭环。
-- 本节不试图复述更早的 distill / 批处理 / 无监督增强治理；这些内容以下方 2026-04-28 条目为准。本节只负责给当前研究主链的续接者一个最近、最短、最可执行的入口。
+- 本节收口覆盖的事实边界是：canonical document identity、EditionLineage / VariantReading、TermSenseDisambiguator、philology reasoning templates、text provenance / citation grounding / self-refine、tiered GraphRAG traceability、weak edge candidate review、production monitoring、Web Console 当前入口以及 PG 测试库迁移修补。
+- 下方 2026-04-28 及更早条目仍保留，用于回看旧阶段收口；但从今天起，继续接当前主线时应先以本节为准，而不是先回到 4 月底那一套上下文假设。
 
 ## 阶段性收口（2026-04-28）
 

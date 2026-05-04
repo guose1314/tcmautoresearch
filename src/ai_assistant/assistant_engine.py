@@ -8,6 +8,8 @@ import re
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
+from src.llm.llm_gateway import generate_with_gateway
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -22,20 +24,58 @@ INTENT_GENERAL = "general_qa"
 
 _INTENT_KEYWORDS: Dict[str, List[str]] = {
     INTENT_LITERATURE: [
-        "文献", "论文", "检索", "搜索", "查找", "参考", "引用",
-        "PubMed", "CNKI", "知网", "文章", "综述", "meta",
+        "文献",
+        "论文",
+        "检索",
+        "搜索",
+        "查找",
+        "参考",
+        "引用",
+        "PubMed",
+        "CNKI",
+        "知网",
+        "文章",
+        "综述",
+        "meta",
     ],
     INTENT_HYPOTHESIS: [
-        "假说", "假设", "推测", "猜想", "机制", "可能",
-        "为什么", "原因", "联系", "关联", "通路",
+        "假说",
+        "假设",
+        "推测",
+        "猜想",
+        "机制",
+        "可能",
+        "为什么",
+        "原因",
+        "联系",
+        "关联",
+        "通路",
     ],
     INTENT_EXPERIMENT: [
-        "实验", "设计", "方案", "对照", "样本", "统计",
-        "随机", "盲法", "指标", "方法学", "protocol",
+        "实验",
+        "设计",
+        "方案",
+        "对照",
+        "样本",
+        "统计",
+        "随机",
+        "盲法",
+        "指标",
+        "方法学",
+        "protocol",
     ],
     INTENT_WRITING: [
-        "论文", "撰写", "写作", "摘要", "引言", "讨论",
-        "结论", "投稿", "期刊", "格式", "abstract",
+        "论文",
+        "撰写",
+        "写作",
+        "摘要",
+        "引言",
+        "讨论",
+        "结论",
+        "投稿",
+        "期刊",
+        "格式",
+        "abstract",
     ],
 }
 
@@ -217,7 +257,9 @@ class AssistantEngine:
             if context.get("project_name"):
                 ctx_lines.append(f"当前项目：{context['project_name']}")
             if context.get("entities"):
-                ctx_lines.append(f"相关实体：{', '.join(str(e) for e in context['entities'][:10])}")
+                ctx_lines.append(
+                    f"相关实体：{', '.join(str(e) for e in context['entities'][:10])}"
+                )
             if context.get("research_phase"):
                 ctx_lines.append(f"研究阶段：{context['research_phase']}")
             if context.get("extra"):
@@ -258,7 +300,27 @@ class AssistantEngine:
         if engine is None:
             return f"[AI 助手] 已收到您的问题，但 LLM 引擎尚未加载。\n提示词摘要：{prompt[:200]}…"
         try:
-            return engine.generate(prompt, system_prompt=system_prompt)
+            result = generate_with_gateway(
+                engine,
+                prompt,
+                system_prompt,
+                prompt_version="assistant_engine.chat@v1",
+                phase="assistant",
+                purpose="assistant_chat",
+                task_type="assistant_response",
+                metadata={"prompt_name": "assistant_engine.chat"},
+            )
+            failure = next(
+                (
+                    warning
+                    for warning in result.warnings
+                    if warning.startswith("llm_generate_failed")
+                ),
+                "",
+            )
+            if failure:
+                return f"[AI 助手] 抱歉，生成回复时出现错误：{failure}"
+            return str(result.text or "")
         except Exception as exc:
             logger.exception("LLM 生成失败")
             return f"[AI 助手] 抱歉，生成回复时出现错误：{exc}"
@@ -269,6 +331,7 @@ class AssistantEngine:
             return self._llm
         try:
             from src.infra.llm_service import get_llm_service
+
             svc = get_llm_service("assistant")
             svc.load()
             self._llm = svc
@@ -327,7 +390,7 @@ class AssistantEngine:
 
         # 简单正则匹配回复中的引用标记
         # 匹配 [1], [2] 等编号引用
-        numbered = re.findall(r'\[(\d+)\]', reply)
+        numbered = re.findall(r"\[(\d+)\]", reply)
         if numbered:
             refs.append(f"回复中引用了 {len(set(numbered))} 篇文献")
 

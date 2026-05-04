@@ -1,0 +1,110 @@
+{
+  "contract_version": "research-quality-gold-set-v1",
+  "cases": [
+    {
+      "case_id": "gzt_relation_with_text_provenance",
+      "category": "evidence_reference",
+      "input": {"query": "桂枝汤主治营卫不和的证据定位"},
+      "expected": {
+        "entities": [
+          {"type": "formula", "name": "桂枝汤"},
+          {"type": "syndrome", "name": "营卫不和"}
+        ],
+        "relationships": [
+          {"type": "treats", "source": "桂枝汤", "target": "营卫不和"}
+        ]
+      },
+      "actual": {
+        "text_segments": [
+          {
+            "document_id": "shanghanlun",
+            "segment_id": "seg_000001",
+            "char_start": 0,
+            "char_end": 12,
+            "line_start": 1,
+            "line_end": 1,
+            "quote_text": "桂枝汤主治营卫不和。",
+            "normalization_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "entities": [
+          {"type": "formula", "name": "桂枝汤", "provenance": [{"document_id": "shanghanlun", "segment_id": "seg_000001", "quote_text": "桂枝汤主治营卫不和。"}]},
+          {"type": "syndrome", "name": "营卫不和", "provenance": [{"document_id": "shanghanlun", "segment_id": "seg_000001", "quote_text": "桂枝汤主治营卫不和。"}]}
+        ],
+        "relationships": [
+          {"type": "treats", "source": "桂枝汤", "target": "营卫不和", "provenance": [{"document_id": "shanghanlun", "segment_id": "seg_000001", "quote_text": "桂枝汤主治营卫不和。"}]}
+        ],
+        "claims": [
+          {"claim_id": "claim-gzt-yingwei", "claim_text": "桂枝汤主治营卫不和。", "provenance": [{"document_id": "shanghanlun", "segment_id": "seg_000001", "quote_text": "桂枝汤主治营卫不和。"}]}
+        ]
+      }
+    },
+    {
+      "case_id": "variant_expert_feedback",
+      "category": "expert_feedback",
+      "input": {"query": "芍药异文的专家反馈"},
+      "expected": {
+        "entities": [
+          {"type": "variant_reading", "name": "芍药"},
+          {"type": "variant_reading", "name": "芍药三两"}
+        ],
+        "relationships": [
+          {"type": "has_variant", "source": "伤寒论", "target": "芍药三两"}
+        ]
+      },
+      "actual": {
+        "text_segments": [
+          {"document_id": "variant-doc", "segment_id": "seg_000002", "quote_text": "伤寒论宋本作芍药，别本作芍药三两。", "char_start": 0, "char_end": 19, "line_start": 1, "line_end": 1, "normalization_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+        ],
+        "entities": [
+          {"type": "variant_reading", "name": "芍药", "provenance": [{"document_id": "variant-doc", "segment_id": "seg_000002", "quote_text": "伤寒论宋本作芍药，别本作芍药三两。"}]},
+          {"type": "variant_reading", "name": "芍药三两", "provenance": [{"document_id": "variant-doc", "segment_id": "seg_000002", "quote_text": "伤寒论宋本作芍药，别本作芍药三两。"}]}
+        ],
+        "relationships": [
+          {"type": "has_variant", "source": "伤寒论", "target": "芍药三两", "provenance": [{"document_id": "variant-doc", "segment_id": "seg_000002", "quote_text": "伤寒论宋本作芍药，别本作芍药三两。"}]}
+        ],
+        "expert_feedback": [
+          {"candidate_id": "variant-accepted", "review_status": "accepted"},
+          {"candidate_id": "variant-rejected", "review_status": "rejected"}
+        ]
+      }
+    },
+    {
+      "case_id": "graphrag_claim_trace",
+      "category": "graphrag_retrieval",
+      "input": {"query": "GraphRAG 检索 EvidenceClaim"},
+      "expected": {
+        "entities": [],
+        "relationships": []
+      },
+      "actual": {
+        "claims": [
+          {"claim_id": "claim-graph-gzt", "claim_text": "GraphRAG 支持桂枝汤与营卫不和的方证关系。", "citation_keys": ["claim-graph-gzt"]}
+        ],
+        "graph_rag_context": {
+          "traces": {
+            "EvidenceClaim": [
+              {"id": "claim-graph-gzt", "body": "GraphRAG 支持桂枝汤与营卫不和的方证关系。", "review_status": "accepted"}
+            ],
+            "CitationRecord": [
+              {"id": "claim-graph-gzt", "source_ref": "urn:graph:gzt"}
+            ]
+          }
+        },
+        "citation_records": [{"citation_key": "claim-graph-gzt"}]
+      }
+    },
+    {
+      "case_id": "unsupported_pretty_claim",
+      "category": "unsupported_claim",
+      "input": {"query": "识别无证据漂亮话"},
+      "expected": {"entities": [], "relationships": []},
+      "actual": {
+        "claims": [
+          {"claim_id": "claim-hallucinated", "claim_text": "桂枝汤可直接治疗高血压且疗效确切。", "citation_keys": ["unknown_modern_trial"]}
+        ],
+        "citation_records": [{"citation_key": "shanghanlun_taiyang_12"}]
+      }
+    }
+  ]
+}

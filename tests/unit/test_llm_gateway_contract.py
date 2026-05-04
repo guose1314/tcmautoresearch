@@ -13,6 +13,8 @@ from src.contexts.llm_reasoning import (
 )
 from src.infra.prompt_registry import reset_prompt_registry_settings_cache
 from src.infra.token_budget_policy import reset_token_budget_policy_settings_cache
+from src.llm.llm_gateway import LLMGateway as CanonicalLLMGateway
+from src.llm.llm_gateway import generate_with_gateway
 
 
 class _SchemaFakeService:
@@ -40,8 +42,36 @@ class LLMGatewayContractTest(unittest.TestCase):
         self.assertEqual(payload["schema_name"], "")
         self.assertEqual(payload["reasoning_mode"], "direct")
         self.assertIsNone(payload["max_input_tokens"])
+        self.assertEqual(payload["prompt_version"], "unknown")
+        self.assertIsNone(payload["token_budget"])
+        self.assertEqual(payload["json_output"], False)
         self.assertFalse(payload["graph_rag"]["enabled"])
         json.dumps(payload, ensure_ascii=False)
+
+    def test_canonical_llm_module_exports_gateway(self) -> None:
+        self.assertIs(CanonicalLLMGateway, LLMGateway)
+
+    def test_generate_with_gateway_facade_records_telemetry(self) -> None:
+        service = _SchemaFakeService('{"ok": true}')
+
+        result = generate_with_gateway(
+            service,
+            "输出 JSON。",
+            prompt_version="facade.prompt@v1",
+            phase="analysis",
+            purpose="facade_test",
+            task_type="contract_test",
+            token_budget=123,
+            json_output=True,
+        )
+
+        payload = result.to_dict()
+        self.assertEqual(payload["prompt_version"], "facade.prompt@v1")
+        self.assertEqual(payload["token_budget"], 123)
+        self.assertEqual(payload["json_repair_status"], "valid_json")
+        self.assertIn("model_id", payload)
+        self.assertIn("latency_s", payload)
+        self.assertEqual(payload["structured"], {"ok": True})
 
     def test_request_accepts_graph_rag_policy_mapping(self) -> None:
         request = LLMGatewayRequest(
@@ -96,6 +126,11 @@ class LLMGatewayContractTest(unittest.TestCase):
             "retrieval_trace",
             "llm_cost_report",
             "warnings",
+            "prompt_version",
+            "model_id",
+            "latency_s",
+            "token_budget",
+            "json_repair_status",
         ):
             self.assertIn(key, payload)
         self.assertEqual(payload["text"], "grounded answer")
@@ -147,8 +182,96 @@ class LLMGatewayContractTest(unittest.TestCase):
         self.assertEqual(payload["text"], "fake response")
         self.assertEqual(payload["llm_cost_report"]["service"], {"calls": 1})
         self.assertEqual(payload["metadata"]["planned_call"]["phase"], "unknown")
+        self.assertIn("prompt_version", payload)
+        self.assertIn("model_id", payload)
+        self.assertIn("latency_s", payload)
+        self.assertIn("token_budget", payload)
+        self.assertIn("json_repair_status", payload)
         self.assertTrue(payload["retrieval_trace"]["graph_rag"]["enabled"])
         json.dumps(payload, ensure_ascii=False)
+
+    def test_gateway_records_production_observability_fields(self) -> None:
+        class _LocalGGUFService:
+            def __init__(self) -> None:
+                self.calls = []
+                self.model_path = "models/local-qwen.gguf"
+                self.n_gpu_layers = 28
+                self.n_ctx = 4096
+                self.max_tokens = 256
+                self.temperature = 0.2
+
+            def generate(self, prompt: str, system_prompt: str = "") -> str:
+                self.calls.append((prompt, system_prompt))
+                return '{"ok": true}'
+
+        service = _LocalGGUFService()
+        result = LLMGateway(service).generate(
+            LLMGatewayRequest(
+                prompt="输出 JSON。",
+                prompt_version="analysis.distill@v1",
+                phase="analysis",
+                task_type="distill",
+                token_budget=2048,
+                json_output=True,
+            )
+        )
+
+        payload = result.to_dict()
+        self.assertEqual(payload["prompt_version"], "analysis.distill@v1")
+        self.assertEqual(payload["model_id"], "models/local-qwen.gguf")
+        self.assertGreaterEqual(payload["latency_s"], 0.0)
+        self.assertEqual(payload["token_budget"], 2048)
+        self.assertEqual(payload["json_repair_status"], "valid_json")
+        self.assertEqual(payload["structured"], {"ok": True})
+        self.assertEqual(payload["metadata"]["gpu_params"]["n_gpu_layers"], 28)
+        self.assertEqual(payload["metadata"]["gpu_params"]["n_ctx"], 4096)
+        json.dumps(payload, ensure_ascii=False)
+
+    def test_gateway_repairs_json_when_requested(self) -> None:
+        service = _SchemaFakeService("```json\n{'answer': '可采纳',}\n```")
+
+        result = LLMGateway(service).generate(
+            LLMGatewayRequest(
+                prompt="输出 JSON。",
+                prompt_version="test.prompt@v1",
+                json_output=True,
+            )
+        )
+
+        payload = result.to_dict()
+        self.assertEqual(payload["json_repair_status"], "repaired")
+        self.assertEqual(payload["structured"], {"answer": "可采纳"})
+        self.assertTrue(
+            any("json_repair_applied" in item for item in payload["warnings"])
+        )
+        json.dumps(payload, ensure_ascii=False)
+
+    def test_gateway_retries_failed_generation_once(self) -> None:
+        class _FlakyService:
+            n_ctx = 512
+            max_tokens = 64
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def generate(self, prompt: str, system_prompt: str = "") -> str:
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("temporary outage")
+                return "retry ok"
+
+        service = _FlakyService()
+        result = LLMGateway(service).generate(
+            LLMGatewayRequest(prompt="x", retry_count=1)
+        )
+
+        payload = result.to_dict()
+        self.assertEqual(service.calls, 2)
+        self.assertEqual(payload["text"], "retry ok")
+        self.assertEqual(payload["metadata"]["attempts_used"], 2)
+        self.assertTrue(
+            any("llm_generate_retry" in item for item in payload["warnings"])
+        )
 
     def test_gateway_applies_planner_token_budget_before_service_call(self) -> None:
         class _FakeService:

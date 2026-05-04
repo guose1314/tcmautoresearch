@@ -143,7 +143,9 @@ def _parse_google_scholar_html(html: str, max_papers: int) -> List[ScholarPaperI
         title = re.sub(r"\[[^\]]+\]\s*", "", title).strip()
 
         authors_venue_el = row.select_one(".gs_a")
-        authors_venue = authors_venue_el.get_text(" ", strip=True) if authors_venue_el else ""
+        authors_venue = (
+            authors_venue_el.get_text(" ", strip=True) if authors_venue_el else ""
+        )
 
         snippet_el = row.select_one(".gs_rs")
         snippet = snippet_el.get_text(" ", strip=True) if snippet_el else ""
@@ -177,7 +179,18 @@ def _run_llm_prompt(llm_engine, prompt: str) -> str:
 
     if hasattr(llm_engine, "generate"):
         try:
-            return llm_engine.generate(prompt)
+            from src.llm.llm_gateway import generate_with_gateway
+
+            result = generate_with_gateway(
+                llm_engine,
+                prompt,
+                prompt_version="google_scholar_helper.prompt@v1",
+                phase="literature",
+                purpose="literature_helper",
+                task_type="scholar_prompt",
+                metadata={"prompt_name": "google_scholar_helper.prompt"},
+            )
+            return str(result.text or "")
         except Exception:
             pass
 
@@ -209,7 +222,9 @@ def _build_related_works_prompt(
         )
 
     topic_text = topic_hint.strip() or "(未提供主题，按论文共性自动归纳)"
-    extra = f"\nAdditional requirements: {additional_prompt}\n" if additional_prompt else ""
+    extra = (
+        f"\nAdditional requirements: {additional_prompt}\n" if additional_prompt else ""
+    )
 
     return (
         f"You are an expert academic writer. Based on the papers below, write a high-quality Related Works section in {target_lang}.\n"
@@ -221,13 +236,16 @@ def _build_related_works_prompt(
         "5) End with a gap statement motivating current work.\n"
         f"Research topic: {topic_text}\n"
         f"{extra}\n"
-        "Paper list:\n"
-        + "\n".join(lines)
+        "Paper list:\n" + "\n".join(lines)
     )
 
 
 def _fallback_related_works(papers: List[ScholarPaperItem], target_lang: str) -> str:
-    header = "## Related Works\n\n" if target_lang.lower().startswith("en") else "## 相关工作\n\n"
+    header = (
+        "## Related Works\n\n"
+        if target_lang.lower().startswith("en")
+        else "## 相关工作\n\n"
+    )
     if not papers:
         return header + "未提取到可用文献条目。\n"
 
@@ -237,7 +255,9 @@ def _fallback_related_works(papers: List[ScholarPaperItem], target_lang: str) ->
             f"{p.author_year_citation} {p.title} 提出了相关方法；"
             f"其摘要片段显示研究重点为：{p.snippet or 'N/A'}。"
         )
-    lines.append("\n上述工作覆盖了该方向的主要基线和变体，但在任务设定与泛化能力方面仍有改进空间。")
+    lines.append(
+        "\n上述工作覆盖了该方向的主要基线和变体，但在任务设定与泛化能力方面仍有改进空间。"
+    )
     return "\n".join(lines)
 
 
@@ -294,7 +314,9 @@ def run_google_scholar_related_works(
         response = session.get(scholar_url, timeout=30)
         response.raise_for_status()
 
-        papers = _parse_google_scholar_html(response.text, max_papers=resolved["max_papers"])
+        papers = _parse_google_scholar_html(
+            response.text, max_papers=resolved["max_papers"]
+        )
         result.total_papers = len(papers)
         result.papers = [asdict(p) for p in papers]
 
@@ -314,7 +336,9 @@ def run_google_scholar_related_works(
             related_works = _run_llm_prompt(resolved["llm_engine"], prompt).strip()
 
         if not related_works:
-            related_works = _fallback_related_works(papers, target_lang=resolved["target_lang"])
+            related_works = _fallback_related_works(
+                papers, target_lang=resolved["target_lang"]
+            )
 
         result.related_works_md = related_works
 
@@ -348,7 +372,9 @@ def run_google_scholar_related_works(
         result.output_json = str(json_path)
         result.status = "success"
         md_path.write_text(md_text, encoding="utf-8")
-        json_path.write_text(json.dumps(result.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        json_path.write_text(
+            json.dumps(result.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
         return result
 

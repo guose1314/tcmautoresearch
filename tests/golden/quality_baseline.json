@@ -1,0 +1,17 @@
+{
+  "contract_version": "research-quality-baseline-v1",
+  "metrics": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "grounding_score": 0.888889,
+    "candidate_acceptance_rate": 0.5,
+    "unsupported_claim_rate": 0.111111
+  },
+  "allowed_regression": {
+    "precision": 0.001,
+    "recall": 0.001,
+    "grounding_score": 0.001,
+    "candidate_acceptance_rate": 0.001,
+    "unsupported_claim_rate": 0.001
+  }
+}

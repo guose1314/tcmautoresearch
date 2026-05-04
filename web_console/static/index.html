@@ -142,6 +142,42 @@
             margin-top: 14px;
         }
 
+        .iteration-strip {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            margin-top: 18px;
+        }
+
+        .iteration-card {
+            min-height: 118px;
+            padding: 15px 16px;
+            border-radius: 16px;
+            border: 1px solid rgba(37, 49, 45, 0.12);
+            background: rgba(255, 255, 255, 0.58);
+            display: grid;
+            gap: 8px;
+        }
+
+        .iteration-card span {
+            color: var(--muted);
+            font-size: 0.76rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .iteration-card strong {
+            font-size: 0.98rem;
+            line-height: 1.35;
+        }
+
+        .iteration-card p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 0.8rem;
+            line-height: 1.55;
+        }
+
         .auth-shell {
             position: fixed;
             inset: 0;
@@ -251,6 +287,249 @@
             display: grid;
             gap: 18px;
             grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.9fr);
+        }
+
+        .workflow-panel {
+            margin-bottom: 18px;
+        }
+
+        .workflow-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        .workflow-title {
+            margin: 0;
+            font-size: 1.22rem;
+        }
+
+        .workflow-subtitle {
+            margin: 6px 0 0;
+            color: var(--muted);
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .workflow-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(47, 106, 73, 0.18);
+            background: rgba(47, 106, 73, 0.08);
+            color: var(--success);
+            font-size: 0.82rem;
+            white-space: nowrap;
+        }
+
+        .workflow-rail {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(7, minmax(0, 1fr));
+        }
+
+        .workflow-step {
+            position: relative;
+            min-height: 156px;
+            padding: 13px 12px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.58);
+            display: grid;
+            grid-template-rows: auto auto 1fr auto;
+            gap: 7px;
+            transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .workflow-step::after {
+            content: "";
+            position: absolute;
+            top: 22px;
+            right: -10px;
+            width: 10px;
+            height: 1px;
+            background: rgba(37, 49, 45, 0.18);
+        }
+
+        .workflow-step:last-child::after {
+            display: none;
+        }
+
+        .workflow-step-index {
+            width: 28px;
+            height: 28px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(37, 49, 45, 0.08);
+            color: var(--muted);
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+
+        .workflow-step strong {
+            font-size: 0.92rem;
+            line-height: 1.35;
+        }
+
+        .workflow-step p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 0.78rem;
+            line-height: 1.55;
+        }
+
+        .workflow-step-status {
+            width: fit-content;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: rgba(37, 49, 45, 0.08);
+            color: var(--muted);
+            font-size: 0.74rem;
+            white-space: nowrap;
+        }
+
+        .workflow-step.running,
+        .workflow-step.queued,
+        .workflow-step.pending,
+        .workflow-step.active {
+            border-color: rgba(179, 92, 46, 0.36);
+            background: rgba(179, 92, 46, 0.08);
+            box-shadow: 0 8px 18px rgba(179, 92, 46, 0.12);
+        }
+
+        .workflow-step.completed {
+            border-color: rgba(47, 106, 73, 0.24);
+            background: rgba(47, 106, 73, 0.07);
+        }
+
+        .workflow-step.failed,
+        .workflow-step.partial {
+            border-color: rgba(137, 44, 44, 0.28);
+            background: rgba(137, 44, 44, 0.08);
+        }
+
+        .workflow-step.running .workflow-step-index,
+        .workflow-step.queued .workflow-step-index,
+        .workflow-step.pending .workflow-step-index,
+        .workflow-step.active .workflow-step-index {
+            background: rgba(179, 92, 46, 0.16);
+            color: var(--accent);
+        }
+
+        .workflow-step.completed .workflow-step-index {
+            background: rgba(47, 106, 73, 0.14);
+            color: var(--success);
+        }
+
+        .workflow-step.failed .workflow-step-index,
+        .workflow-step.partial .workflow-step-index {
+            background: rgba(137, 44, 44, 0.14);
+            color: #892c2c;
+        }
+
+        .module-grid {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            margin-top: 14px;
+        }
+
+        .module-card {
+            display: grid;
+            gap: 5px;
+            min-height: 88px;
+            padding: 12px 13px;
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.55);
+            color: inherit;
+            text-decoration: none;
+            transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+        }
+
+        .module-card:hover {
+            transform: translateY(-1px);
+            border-color: rgba(47, 106, 73, 0.28);
+            background: rgba(255, 255, 255, 0.74);
+        }
+
+        .module-card strong {
+            font-size: 0.9rem;
+        }
+
+        .module-card span {
+            color: var(--muted);
+            font-size: 0.78rem;
+            line-height: 1.45;
+        }
+
+        .form-section {
+            display: grid;
+            gap: 12px;
+            padding: 14px;
+            border-radius: 18px;
+            border: 1px solid rgba(37, 49, 45, 0.1);
+            background: rgba(255, 255, 255, 0.42);
+        }
+
+        .form-section h3 {
+            margin: 0;
+            font-size: 0.98rem;
+        }
+
+        .field-grid {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .field-grid .full-span {
+            grid-column: 1 / -1;
+        }
+
+        .ops-checklist {
+            display: grid;
+            gap: 9px;
+            margin-bottom: 18px;
+        }
+
+        .ops-check-item {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 9px;
+            padding: 10px 12px;
+            border-radius: 14px;
+            border: 1px solid rgba(37, 49, 45, 0.1);
+            background: rgba(255, 255, 255, 0.48);
+        }
+
+        .ops-check-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            margin-top: 6px;
+            background: var(--success);
+            box-shadow: 0 0 0 4px rgba(47, 106, 73, 0.1);
+        }
+
+        .ops-check-item strong {
+            display: block;
+            font-size: 0.88rem;
+        }
+
+        .ops-check-item span {
+            display: block;
+            margin-top: 3px;
+            color: var(--muted);
+            font-size: 0.78rem;
+            line-height: 1.45;
         }
 
         .panel {
@@ -562,6 +841,228 @@
             gap: 8px;
             flex-wrap: wrap;
             margin-bottom: 12px;
+        }
+
+        .candidate-review-head,
+        .candidate-review-toolbar,
+        .candidate-edge-actions,
+        .candidate-edge-meta-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .candidate-review-head {
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .candidate-review-subtitle {
+            margin: -6px 0 0;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .candidate-review-toolbar select {
+            min-width: 128px;
+            padding: 9px 12px;
+            border-radius: 999px;
+        }
+
+        .candidate-review-summary {
+            margin-bottom: 12px;
+            color: var(--muted);
+            font-size: 0.92rem;
+        }
+
+        .candidate-review-layout {
+            display: grid;
+            grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
+            gap: 14px;
+            align-items: start;
+        }
+
+        .candidate-edge-list,
+        .candidate-edge-detail {
+            display: grid;
+            gap: 10px;
+        }
+
+        .candidate-edge-card,
+        .candidate-edge-detail-card {
+            padding: 14px 16px;
+            border-radius: 18px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.62);
+        }
+
+        .candidate-edge-card {
+            cursor: pointer;
+            text-align: left;
+            width: 100%;
+            color: var(--ink);
+            box-shadow: none;
+            background: rgba(255, 255, 255, 0.62);
+        }
+
+        .candidate-edge-card.active {
+            border-color: rgba(47, 106, 73, 0.32);
+            background: rgba(47, 106, 73, 0.08);
+        }
+
+        .candidate-edge-title {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 700;
+            word-break: break-word;
+        }
+
+        .candidate-edge-meta-row,
+        .candidate-edge-small {
+            color: var(--muted);
+            font-size: 0.84rem;
+        }
+
+        .candidate-edge-section {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+
+        .candidate-edge-section h4 {
+            margin: 0 0 8px;
+            font-size: 0.98rem;
+        }
+
+        .candidate-edge-code {
+            margin: 0;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.66);
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 0.84rem;
+        }
+
+        .candidate-edge-actions textarea,
+        .candidate-edge-actions input {
+            min-width: min(240px, 100%);
+            padding: 10px 12px;
+            border-radius: 12px;
+        }
+
+        .candidate-edge-actions button {
+            padding: 9px 14px;
+        }
+
+        .candidate-edge-actions .danger-button {
+            color: #892c2c;
+            border-color: rgba(137, 44, 44, 0.24);
+        }
+
+        .production-quality-head,
+        .production-quality-toolbar,
+        .production-quality-meta {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .production-quality-head {
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .production-quality-subtitle,
+        .production-quality-summary,
+        .production-quality-meta,
+        .production-quality-note {
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .production-quality-subtitle {
+            margin: -6px 0 0;
+        }
+
+        .production-quality-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .production-quality-card {
+            min-height: 94px;
+            padding: 14px 16px;
+            border-radius: 18px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.62);
+        }
+
+        .production-quality-card span {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--muted);
+            font-size: 0.82rem;
+        }
+
+        .production-quality-card strong {
+            display: block;
+            font-size: 1.2rem;
+            word-break: break-word;
+        }
+
+        .production-quality-card.good {
+            border-color: rgba(47, 106, 73, 0.24);
+        }
+
+        .production-quality-card.watch {
+            border-color: rgba(148, 106, 45, 0.28);
+        }
+
+        .production-quality-card.risk {
+            border-color: rgba(137, 44, 44, 0.24);
+        }
+
+        .production-quality-dlq {
+            display: grid;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .production-quality-dlq-item {
+            padding: 12px 14px;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.58);
+        }
+
+        .production-quality-dlq-item strong {
+            display: block;
+            margin-bottom: 4px;
+            word-break: break-word;
+        }
+
+        .production-quality-dlq-item code {
+            display: block;
+            margin-top: 6px;
+            color: #892c2c;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        @media (max-width: 840px) {
+            .candidate-review-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .production-quality-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
         }
 
         .ghost-button {
@@ -1707,7 +2208,27 @@
                 grid-template-columns: 1fr;
             }
 
+            .iteration-strip {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
             .dashboard-review-filters {
+                grid-template-columns: 1fr;
+            }
+
+            .workflow-rail {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .workflow-step::after {
+                display: none;
+            }
+
+            .module-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .field-grid {
                 grid-template-columns: 1fr;
             }
 
@@ -1722,6 +2243,19 @@
             }
 
             .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .iteration-strip {
+                grid-template-columns: 1fr;
+            }
+
+            .production-quality-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .workflow-rail,
+            .module-grid {
                 grid-template-columns: 1fr;
             }
 
@@ -1752,7 +2286,7 @@
                 <div class="hero-copy">
                     <span class="eyebrow">TCM Research Command</span>
                     <h1>中医自动科研控制台</h1>
-                    <p>输入研究主题后，页面会创建后台任务，并通过可选的 WebSocket 或 SSE 实时通道展示当前阶段、总进度和关键事件。</p>
+                    <p>围绕文献观察、实体抽取、语义建模、知识图谱、假说生成、证据分级与专家反馈闭环组织任务，实时展示当前阶段、总进度和关键事件。</p>
                 </div>
 
                 <div class="console-session">
@@ -1764,61 +2298,181 @@
                     </div>
                 </div>
             </div>
+
+            <div class="iteration-strip" aria-label="当前迭代能力概览">
+                <article class="iteration-card">
+                    <span>Path Check</span>
+                    <strong>D 盘目标路径已接管</strong>
+                    <p>C 盘工作区入口保持为 junction，实际目标为 D:\tcmautoresearch 与 D:\tcmautoresearch_env。</p>
+                </article>
+                <article class="iteration-card">
+                    <span>Philology</span>
+                    <strong>术语义项消歧上线</strong>
+                    <p>实体抽取新增 sense_id / sense_candidates，风、寒、湿、热等高频词不再强行定义。</p>
+                </article>
+                <article class="iteration-card">
+                    <span>Version Evidence</span>
+                    <strong>版本谱系与异文证据</strong>
+                    <p>同一 canonical document 可挂多个 edition，异文记录可定位到具体 witness 与来源。</p>
+                </article>
+                <article class="iteration-card">
+                    <span>Human Loop</span>
+                    <strong>专家反馈影响排序</strong>
+                    <p>候选边 accepted 后才入图，被拒绝关系会反馈学习洞察并降低后续 GraphRAG 排名。</p>
+                </article>
+            </div>
+        </section>
+
+        <section class="panel workflow-panel" aria-label="科研流程总览">
+            <div class="workflow-head">
+                <div>
+                    <h2 class="workflow-title">科研流程总览</h2>
+                    <p class="workflow-subtitle">按系统现有主链串联：古籍文献入库与文献学治理先行，随后生成假说、设计方案、执行蒸馏，再进入语义分析、报告发布与 LFITL 反馈复盘。</p>
+                </div>
+                <span class="workflow-badge">本地 LLM / PG / Neo4j 闭环</span>
+            </div>
+
+            <div id="workflow-guide" class="workflow-rail">
+                <article class="workflow-step" data-workflow-phase="observe">
+                    <span class="workflow-step-index">1</span>
+                    <strong>Observe 文献观察</strong>
+                    <p>分段、目录学、术语标准化、校勘与来源证据整理。</p>
+                    <span class="workflow-step-status">待开始</span>
+                </article>
+                <article class="workflow-step" data-workflow-phase="hypothesis">
+                    <span class="workflow-step-index">2</span>
+                    <strong>Hypothesis 假说</strong>
+                    <p>基于证据链生成候选假说、证据等级与可检验问题。</p>
+                    <span class="workflow-step-status">待开始</span>
+                </article>
+                <article class="workflow-step" data-workflow-phase="experiment">
+                    <span class="workflow-step-index">3</span>
+                    <strong>Experiment 方案</strong>
+                    <p>形成研究设计、结局指标、对照方案与执行计划。</p>
+                    <span class="workflow-step-status">待开始</span>
+                </article>
+                <article class="workflow-step" data-workflow-phase="experiment_execution">
+                    <span class="workflow-step-index">4</span>
+                    <strong>Execute 执行</strong>
+                    <p>运行 LLM 蒸馏、结构化写入、图谱生成和过程追踪。</p>
+                    <span class="workflow-step-status">待开始</span>
+                </article>
+                <article class="workflow-step" data-workflow-phase="analyze">
+                    <span class="workflow-step-index">5</span>
+                    <strong>Analyze 语义分析</strong>
+                    <p>汇总实体、关系、统计关联、证据协议和知识图谱信号。</p>
+                    <span class="workflow-step-status">待开始</span>
+                </article>
+                <article class="workflow-step" data-workflow-phase="publish">
+                    <span class="workflow-step-index">6</span>
+                    <strong>Publish 输出</strong>
+                    <p>生成报告、JSON 资产、图谱摘要和可复核证据包。</p>
+                    <span class="workflow-step-status">待开始</span>
+                </article>
+                <article class="workflow-step" data-workflow-phase="reflect">
+                    <span class="workflow-step-index">7</span>
+                    <strong>Reflect 复盘</strong>
+                    <p>接收专家批注，写回高权重反馈并影响下一轮提示。</p>
+                    <span class="workflow-step-status">待开始</span>
+                </article>
+            </div>
+
+            <div class="module-grid" aria-label="常用模块入口">
+                <a class="module-card" href="#research-form"><strong>任务启动</strong><span>定义主题、PICO 要素与实时通道。</span></a>
+                <a class="module-card" href="#phase-list"><strong>阶段追踪</strong><span>查看当前阶段、状态和进度。</span></a>
+                <a class="module-card" href="#research-dashboard"><strong>研究看板</strong><span>浏览证据、图谱、质量和校核工作台。</span></a>
+                <a class="module-card" href="#result-summary"><strong>资产输出</strong><span>打开报告、JSON 和最终科研产物。</span></a>
+                <a class="module-card" href="#research-dashboard"><strong>义项消歧</strong><span>查看实体义项候选、置信度与上下文依据。</span></a>
+                <a class="module-card" href="#research-dashboard"><strong>版本证据</strong><span>关注 edition、witness、异文和校注来源。</span></a>
+            </div>
         </section>
 
         <div class="layout">
             <section class="panel">
-                <h2>启动任务</h2>
+                <h2>发起科研任务</h2>
                 <form id="research-form">
-                    <label>
-                        研究主题
-                        <input id="topic-input" name="topic" type="text" placeholder="例如：桂枝汤治疗太阳中风证的证据整合研究" required>
-                    </label>
-                    <label>
-                        备注说明
-                        <textarea id="description-input" name="description" rows="4" placeholder="可选：补充研究范围、关注证型或预期输出"></textarea>
-                    </label>
-                    <label>
-                        研究类型（可选）
-                        <select id="study-type-input" name="study_type">
-                            <option value="" selected>自动推断</option>
-                            <option value="rct">RCT（随机对照）</option>
-                            <option value="cohort">队列研究</option>
-                            <option value="case_control">病例对照</option>
-                            <option value="systematic_review">系统综述</option>
-                            <option value="meta_analysis">Meta 分析</option>
-                            <option value="network_pharmacology">网络药理</option>
-                        </select>
-                    </label>
-                    <label>
-                        主要结局（可选）
-                        <input id="primary-outcome-input" name="primary_outcome" type="text" placeholder="例如：收缩压变化" />
-                    </label>
-                    <label>
-                        干预方案（可选）
-                        <input id="intervention-input" name="intervention" type="text" placeholder="例如：黄芪颗粒" />
-                    </label>
-                    <label>
-                        对照方案（可选）
-                        <input id="comparison-input" name="comparison" type="text" placeholder="例如：安慰剂 + 常规治疗" />
-                    </label>
-                    <label>
-                        实时通道
-                        <select id="transport-select" name="transport">
-                            <option value="auto" selected>自动优先 WebSocket</option>
-                            <option value="websocket">仅 WebSocket</option>
-                            <option value="sse">仅 SSE</option>
-                        </select>
-                    </label>
+                    <div class="form-section">
+                        <h3>1. 研究设定</h3>
+                        <label>
+                            研究主题
+                            <input id="topic-input" name="topic" type="text" placeholder="例如：桂枝汤治疗太阳中风证的证据整合研究" required>
+                        </label>
+                        <label>
+                            备注说明
+                            <textarea id="description-input" name="description" rows="4" placeholder="可选：补充研究范围、关注证型、古籍版本或预期输出"></textarea>
+                        </label>
+                    </div>
+                    <div class="form-section">
+                        <h3>2. 方法与 PICO 要素</h3>
+                        <div class="field-grid">
+                            <label class="full-span">
+                                研究类型（可选）
+                                <select id="study-type-input" name="study_type">
+                                    <option value="" selected>自动推断</option>
+                                    <option value="rct">RCT（随机对照）</option>
+                                    <option value="cohort">队列研究</option>
+                                    <option value="case_control">病例对照</option>
+                                    <option value="systematic_review">系统综述</option>
+                                    <option value="meta_analysis">Meta 分析</option>
+                                    <option value="network_pharmacology">网络药理</option>
+                                </select>
+                            </label>
+                            <label>
+                                主要结局（可选）
+                                <input id="primary-outcome-input" name="primary_outcome" type="text" placeholder="例如：证候积分变化" />
+                            </label>
+                            <label>
+                                干预方案（可选）
+                                <input id="intervention-input" name="intervention" type="text" placeholder="例如：桂枝汤加减" />
+                            </label>
+                            <label class="full-span">
+                                对照方案（可选）
+                                <input id="comparison-input" name="comparison" type="text" placeholder="例如：常规治疗或异方对照" />
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-section">
+                        <h3>3. 运行与订阅</h3>
+                        <label>
+                            实时通道
+                            <select id="transport-select" name="transport">
+                                <option value="auto" selected>自动优先 WebSocket</option>
+                                <option value="websocket">仅 WebSocket</option>
+                                <option value="sse">仅 SSE</option>
+                            </select>
+                        </label>
+                    </div>
                     <div class="actions">
                         <button id="submit-button" type="submit">创建并订阅任务</button>
-                        <span class="hint">自动模式会优先使用 WebSocket，短暂抖动时指数退避重连，仍不可用时回退到 SSE。</span>
+                        <span class="hint">任务创建后会按上方流程推进，并在看板、结果摘要和事件流中同步更新。</span>
                     </div>
                 </form>
             </section>
 
             <aside class="panel">
-                <h3>任务概览</h3>
+                <h3>运行状态</h3>
+                <div class="ops-checklist" aria-label="运行前检查">
+                    <div class="ops-check-item">
+                        <span class="ops-check-dot"></span>
+                        <div><strong>文献资产</strong><span>data 语料、分段结果和文献学资产进入 Observe 底座。</span></div>
+                    </div>
+                    <div class="ops-check-item">
+                        <span class="ops-check-dot"></span>
+                        <div><strong>术语理解</strong><span>高频歧义词进入义项候选，不足证据时保留 sense_candidates。</span></div>
+                    </div>
+                    <div class="ops-check-item">
+                        <span class="ops-check-dot"></span>
+                        <div><strong>版本证据</strong><span>edition、witness、异文与校注来源作为证据粒度保留。</span></div>
+                    </div>
+                    <div class="ops-check-item">
+                        <span class="ops-check-dot"></span>
+                        <div><strong>科研存储</strong><span>结构化资产写入 PostgreSQL，并投影到 Neo4j 图谱。</span></div>
+                    </div>
+                    <div class="ops-check-item">
+                        <span class="ops-check-dot"></span>
+                        <div><strong>专家反馈</strong><span>校核意见进入 LFITL，供下一轮提示偏置使用。</span></div>
+                    </div>
+                </div>
                 <div id="status-banner" class="status-banner">等待创建任务。</div>
                 <div class="stats">
                     <div class="stat-card">
@@ -1883,6 +2537,52 @@
             <h3>研究看板</h3>
             <div id="research-dashboard" class="dashboard-shell">
                 <div class="empty">任务启动后将自动展示研究状态可视化看板。</div>
+            </div>
+        </section>
+
+        <section class="panel production-quality-panel" style="margin-top: 18px;">
+            <div class="production-quality-head">
+                <div>
+                    <h3>生产质量</h3>
+                    <p class="production-quality-subtitle">Batch、LLM、JSON、弱边、证据和 Neo4j 投影。</p>
+                </div>
+                <div class="production-quality-toolbar">
+                    <button id="production-quality-refresh" type="button" class="ghost-button">刷新</button>
+                </div>
+            </div>
+            <div id="production-quality-summary" class="production-quality-summary">等待加载生产质量指标。</div>
+            <div id="production-quality-grid" class="production-quality-grid">
+                <div class="empty">暂无生产质量指标。</div>
+            </div>
+            <div id="production-quality-dlq" class="production-quality-dlq">
+                <div class="empty">暂无 DLQ 事件。</div>
+            </div>
+        </section>
+
+        <section class="panel candidate-review-panel" style="margin-top: 18px;">
+            <div class="candidate-review-head">
+                <div>
+                    <h3>候选边专家审核</h3>
+                    <p class="candidate-review-subtitle">机器候选关系进入图谱前的人工闸口。</p>
+                </div>
+                <div class="candidate-review-toolbar">
+                    <select id="candidate-edge-status-filter" aria-label="候选边状态筛选">
+                        <option value="pending">待审核</option>
+                        <option value="accepted">已接受</option>
+                        <option value="rejected">已拒绝</option>
+                        <option value="all">全部</option>
+                    </select>
+                    <button id="candidate-edge-refresh" type="button" class="ghost-button">刷新</button>
+                </div>
+            </div>
+            <div id="candidate-edge-summary" class="candidate-review-summary">等待加载候选边。</div>
+            <div class="candidate-review-layout">
+                <div id="candidate-edge-list" class="candidate-edge-list">
+                    <div class="empty">暂无候选边。</div>
+                </div>
+                <div id="candidate-edge-detail" class="candidate-edge-detail">
+                    <div class="empty">选择一条候选边查看证据、生成原因和 GraphRAG 上下文。</div>
+                </div>
             </div>
         </section>
 
@@ -1956,6 +2656,10 @@
         const eventLogNode = document.getElementById("event-log");
         const resultSummaryNode = document.getElementById("result-summary");
         const researchDashboardNode = document.getElementById("research-dashboard");
+        const productionQualityRefreshButton = document.getElementById("production-quality-refresh");
+        const productionQualitySummaryNode = document.getElementById("production-quality-summary");
+        const productionQualityGridNode = document.getElementById("production-quality-grid");
+        const productionQualityDlqNode = document.getElementById("production-quality-dlq");
         const dashboardPhaseModalNode = document.getElementById("dashboard-phase-modal");
         const dashboardModalBackdropNode = document.getElementById("dashboard-modal-backdrop");
         const dashboardModalCloseNode = document.getElementById("dashboard-modal-close");
@@ -1977,6 +2681,11 @@
         const refreshRecentJobsButton = document.getElementById("refresh-recent-jobs");
         const pruneLocalRecordsButton = document.getElementById("prune-local-records");
         const clearLocalRecordsButton = document.getElementById("clear-local-records");
+        const candidateEdgeStatusFilter = document.getElementById("candidate-edge-status-filter");
+        const candidateEdgeRefreshButton = document.getElementById("candidate-edge-refresh");
+        const candidateEdgeSummaryNode = document.getElementById("candidate-edge-summary");
+        const candidateEdgeListNode = document.getElementById("candidate-edge-list");
+        const candidateEdgeDetailNode = document.getElementById("candidate-edge-detail");
         const LAST_JOB_STORAGE_KEY = "tcm-auto-research.lastJobId";
         const RECENT_JOBS_STORAGE_KEY = "tcm-auto-research.recentJobIds";
         const RECENT_JOB_LIMIT = 8;
@@ -1984,12 +2693,43 @@
         const phaseLabels = {
             observe: "观察阶段",
             analyze: "分析阶段",
+            analysis: "分析阶段",
+            hypothesis: "假说阶段",
             hypothesize: "假设阶段",
             experiment: "实验方案阶段",
+            experiment_design: "实验方案阶段",
             experiment_execution: "实验执行阶段",
             publish: "发布阶段",
             reflect: "复盘阶段",
             summarize: "总结阶段",
+        };
+
+        const workflowPhaseOrder = [
+            "observe",
+            "hypothesis",
+            "experiment",
+            "experiment_execution",
+            "analyze",
+            "publish",
+            "reflect",
+        ];
+
+        const workflowPhaseAliases = {
+            analysis: "analyze",
+            hypothesize: "hypothesis",
+            experiment_design: "experiment",
+            execute: "experiment_execution",
+            summarize: "reflect",
+        };
+
+        const phaseDescriptions = {
+            observe: "文献分段、目录学、术语标准化、校勘与来源证据整理",
+            hypothesis: "生成候选假说、证据分级、可检验问题与推理依据",
+            experiment: "形成研究设计、结局指标、对照方案和执行计划",
+            experiment_execution: "运行 LLM 蒸馏、结构化写入、图谱生成和过程追踪",
+            analyze: "汇总实体、关系、统计关联、证据协议和图谱信号",
+            publish: "生成报告、JSON 资产、图谱摘要和可复核证据包",
+            reflect: "汇总专家批注、LFITL 反馈和下一轮提示偏置",
         };
 
         const summaryFieldLabels = {
@@ -2059,6 +2799,16 @@
             needs_source: "待补据",
         };
 
+        const candidateEdgeStatusLabels = {
+            active: "待审核",
+            needs_review: "待审核",
+            pending: "待审核",
+            accepted: "已接受",
+            rejected: "已拒绝",
+            superseded: "已合并",
+            expired: "已过期",
+        };
+
         const WEBSOCKET_RECONNECT_BASE_DELAY_MS = 500;
         const WEBSOCKET_RECONNECT_MAX_DELAY_MS = 4000;
         const WEBSOCKET_RECONNECT_MAX_ATTEMPTS = 4;
@@ -2082,6 +2832,9 @@
         let currentDashboardWorkbenchItems = {};
         let dashboardModalBound = false;
         let dashboardGraphModalBound = false;
+        let candidateEdgeReviewItems = [];
+        let selectedCandidateEdgeInsightId = "";
+        let productionQualityRefreshTimerId = 0;
 
         // ---- JWT 统一认证 ----
         let currentAuthSession = {
@@ -2126,6 +2879,8 @@
                 bindDashboardModalEvents();
                 bindDashboardGraphModalEvents();
                 restoreLastJob();
+                startProductionQualityPolling();
+                refreshCandidateEdgeReviewQueue();
             }
             refreshRecentJobs();
         }
@@ -2194,6 +2949,15 @@
 
         function formatPhaseName(phase) {
             return phaseLabels[phase] || phase || "-";
+        }
+
+        function normalizeWorkflowPhase(phase) {
+            const key = String(phase || "").trim().toLowerCase();
+            return workflowPhaseAliases[key] || key;
+        }
+
+        function describePhase(phase) {
+            return phaseDescriptions[normalizeWorkflowPhase(phase)] || String(phase || "-");
         }
 
         function formatStatus(status) {
@@ -3908,6 +4672,119 @@
             return lines;
         }
 
+        function firstObjectCandidate(candidates) {
+            return candidates.find((item) => item && typeof item === "object" && !Array.isArray(item)) || {};
+        }
+
+        function resolveTermSenseBoard(payload, evidenceBoard) {
+            const philology = evidenceBoard?.philology && typeof evidenceBoard.philology === "object" ? evidenceBoard.philology : {};
+            const analysisResults = payload?.analysis_results && typeof payload.analysis_results === "object" ? payload.analysis_results : {};
+            return firstObjectCandidate([
+                payload?.term_sense_board,
+                payload?.term_sense_summary,
+                evidenceBoard?.term_sense_board,
+                evidenceBoard?.term_sense_summary,
+                philology.term_sense_board,
+                philology.term_sense_summary,
+                philology.term_sense_disambiguation,
+                analysisResults.term_sense_summary,
+                analysisResults.term_sense_disambiguation,
+            ]);
+        }
+
+        function buildDashboardTermSenseLines(payload, evidenceBoard) {
+            const board = resolveTermSenseBoard(payload, evidenceBoard);
+            const supported = safeNumber(board.supported_term_count, 10);
+            const candidateCount = safeNumber(board.sense_candidate_count ?? board.candidate_count, 0);
+            const resolvedCount = safeNumber(board.sense_resolved_count ?? board.resolved_count, 0);
+            const ambiguousCount = safeNumber(board.ambiguous_count ?? board.candidate_only_count, 0);
+            const lines = [`支持术语：${supported} 个高频词`];
+
+            if (candidateCount || resolvedCount || ambiguousCount) {
+                lines.push(`候选义项：${candidateCount}`);
+                lines.push(`已确定义项：${resolvedCount}`);
+                if (ambiguousCount) {
+                    lines.push(`候选保留：${ambiguousCount}`);
+                }
+            } else {
+                lines.push("实体字段：sense_id / sense_candidates");
+                lines.push("弱证据场景只保留候选，不强行定义。");
+            }
+
+            const sampleTerms = Array.isArray(board.sample_terms) ? board.sample_terms.filter(Boolean).slice(0, 6) : [];
+            if (sampleTerms.length > 0) {
+                lines.push(`样例术语：${sampleTerms.join("、")}`);
+            } else {
+                lines.push("覆盖：风、寒、湿、热、虚、实、气、血、经、方");
+            }
+            return lines;
+        }
+
+        function resolveVersionEvidenceBoard(payload, evidenceBoard) {
+            const philology = evidenceBoard?.philology && typeof evidenceBoard.philology === "object" ? evidenceBoard.philology : {};
+            const storageOverview = payload?.storage_overview && typeof payload.storage_overview === "object" ? payload.storage_overview : {};
+            return firstObjectCandidate([
+                payload?.version_evidence_board,
+                payload?.version_lineage_board,
+                evidenceBoard?.version_evidence_board,
+                evidenceBoard?.version_lineage_board,
+                philology.version_evidence_board,
+                philology.version_lineage_summary,
+                philology.edition_lineage_summary,
+                storageOverview,
+            ]);
+        }
+
+        function buildDashboardVersionEvidenceLines(payload, evidenceBoard) {
+            const board = resolveVersionEvidenceBoard(payload, evidenceBoard);
+            const editionCount = safeNumber(board.edition_lineage_count ?? board.edition_count ?? board.edition_lineages, 0);
+            const variantCount = safeNumber(board.variant_reading_count ?? board.variant_count ?? board.variant_readings, 0);
+            const witnessCount = safeNumber(board.witness_count ?? board.witnesses, 0);
+            const lineageCount = safeNumber(board.version_lineage_count ?? board.lineage_count ?? board.version_lineages, 0);
+            const lines = [];
+
+            if (editionCount || variantCount || witnessCount || lineageCount) {
+                lines.push(`Edition：${editionCount}`);
+                lines.push(`异文：${variantCount}`);
+                if (lineageCount) {
+                    lines.push(`谱系：${lineageCount}`);
+                }
+                if (witnessCount) {
+                    lines.push(`见证本：${witnessCount}`);
+                }
+            } else {
+                lines.push("模型：EditionLineage / VariantReading");
+                lines.push("同一 canonical document 可挂多个 edition。");
+                lines.push("证据引用可定位到具体 witness 与来源。");
+            }
+
+            const sourcePreview = Array.isArray(board.source_refs) ? board.source_refs.filter(Boolean).slice(0, 2) : [];
+            if (sourcePreview.length > 0) {
+                lines.push(`来源：${sourcePreview.join("；")}`);
+            }
+            return lines;
+        }
+
+        function buildDashboardFeedbackLoopLines(evidenceBoard) {
+            const reviewQueue = evidenceBoard?.review_queue && typeof evidenceBoard.review_queue === "object" ? evidenceBoard.review_queue : {};
+            const queueSummary = reviewQueue.queue_summary && typeof reviewQueue.queue_summary === "object" ? reviewQueue.queue_summary : reviewQueue;
+            const pendingCount = safeNumber(queueSummary.total_pending ?? reviewQueue.total_pending, 0);
+            const acceptedCount = safeNumber(queueSummary.accepted ?? reviewQueue.accepted, 0);
+            const rejectedCount = safeNumber(queueSummary.rejected ?? reviewQueue.rejected, 0);
+            const lines = [];
+
+            if (pendingCount || acceptedCount || rejectedCount) {
+                lines.push(`待审：${pendingCount}`);
+                lines.push(`已接受：${acceptedCount}`);
+                lines.push(`已拒绝：${rejectedCount}`);
+            } else {
+                lines.push("候选边 accepted 后写入关系与 Neo4j。");
+                lines.push("rejected 原因回流 LearningInsight。");
+            }
+            lines.push("被拒绝边在同查询 GraphRAG prompt 中降权。");
+            return lines;
+        }
+
         function formatCatalogReviewMeta(record) {
             if (!record || typeof record !== "object") {
                 return "尚无人工校核记录。";
@@ -5321,6 +6198,18 @@
             );
 
             auxGrid.appendChild(
+                buildDashboardBox("义项消歧", buildDashboardTermSenseLines(payload, evidenceBoard))
+            );
+
+            auxGrid.appendChild(
+                buildDashboardBox("版本与异文", buildDashboardVersionEvidenceLines(payload, evidenceBoard))
+            );
+
+            auxGrid.appendChild(
+                buildDashboardBox("审核反馈排序", buildDashboardFeedbackLoopLines(evidenceBoard))
+            );
+
+            auxGrid.appendChild(
                 buildDashboardBox(
                     "证据态势",
                     (() => {
@@ -5429,6 +6318,7 @@
         function renderPhaseList() {
             if (phaseState.size === 0) {
                 phaseListNode.innerHTML = '<div class="empty">暂无阶段事件。</div>';
+                syncWorkflowGuide();
                 return;
             }
 
@@ -5445,7 +6335,7 @@
 
                     const note = document.createElement("span");
                     note.className = "phase-note";
-                    note.textContent = phase;
+                    note.textContent = describePhase(phase);
                     label.appendChild(note);
 
                     const status = document.createElement("div");
@@ -5459,6 +6349,37 @@
 
             phaseListNode.innerHTML = "";
             phaseListNode.appendChild(fragment);
+            syncWorkflowGuide();
+        }
+
+        function syncWorkflowGuide() {
+            const workflowRoot = document.getElementById("workflow-guide");
+            if (!workflowRoot) {
+                return;
+            }
+            const statusByPhase = new Map();
+            phaseState.forEach((info, phase) => {
+                const normalizedPhase = normalizeWorkflowPhase(phase);
+                if (workflowPhaseOrder.includes(normalizedPhase)) {
+                    statusByPhase.set(normalizedPhase, info.status || "pending");
+                }
+            });
+            const activeWorkflowPhase = normalizeWorkflowPhase(activePhaseKey);
+            workflowRoot.querySelectorAll("[data-workflow-phase]").forEach((step) => {
+                const phase = step.getAttribute("data-workflow-phase") || "";
+                const status = statusByPhase.get(phase) || "";
+                step.classList.remove("active", "idle", "queued", "pending", "running", "completed", "partial", "failed", "skipped");
+                if (status) {
+                    step.classList.add(status);
+                }
+                if (phase && phase === activeWorkflowPhase) {
+                    step.classList.add("active");
+                }
+                const statusNode = step.querySelector(".workflow-step-status");
+                if (statusNode) {
+                    statusNode.textContent = status ? formatStatus(status) : "待开始";
+                }
+            });
         }
 
         function prependEvent(eventType, payload, transportKind = activeConnectionKind) {
@@ -5726,6 +6647,394 @@
             }
         }
 
+        function startProductionQualityPolling() {
+            refreshProductionQualityDashboard({ silent: true });
+            if (productionQualityRefreshTimerId) {
+                return;
+            }
+            productionQualityRefreshTimerId = window.setInterval(function() {
+                refreshProductionQualityDashboard({ silent: true });
+            }, 10000);
+        }
+
+        function productionQualityTone(value, goodThreshold, watchThreshold, inverse = false) {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric)) {
+                return "watch";
+            }
+            if (inverse) {
+                if (numeric <= goodThreshold) {
+                    return "good";
+                }
+                return numeric <= watchThreshold ? "watch" : "risk";
+            }
+            if (numeric >= goodThreshold) {
+                return "good";
+            }
+            return numeric >= watchThreshold ? "watch" : "risk";
+        }
+
+        async function refreshProductionQualityDashboard(options = {}) {
+            if (!productionQualityGridNode || !productionQualitySummaryNode || !productionQualityDlqNode) {
+                return null;
+            }
+            if (!options.silent) {
+                productionQualitySummaryNode.textContent = "正在刷新生产质量指标...";
+            }
+            try {
+                const response = await authenticatedFetch("/api/production-monitoring/quality?recent_failure_limit=8");
+                if (!response.ok) {
+                    const errorPayload = await response.json().catch(() => ({}));
+                    throw new Error(errorPayload.detail || `HTTP ${response.status}`);
+                }
+                const payload = await response.json();
+                renderProductionQualityDashboard(payload);
+                return payload;
+            } catch (error) {
+                productionQualitySummaryNode.textContent = `生产质量指标加载失败：${error.message}`;
+                if (!options.silent) {
+                    setBanner(`生产质量指标刷新失败：${error.message}`, "error");
+                }
+                return null;
+            }
+        }
+
+        function renderProductionQualityDashboard(payload) {
+            const metrics = payload?.metrics || {};
+            const source = payload?.source || {};
+            const batch = metrics.batch || {};
+            const llm = metrics.llm || {};
+            const graphQuality = metrics.graph_quality || {};
+            const evidence = metrics.evidence || {};
+            const neo4j = metrics.neo4j || {};
+            const dlq = metrics.dlq || {};
+            const outbox = metrics.outbox || {};
+            const generatedAt = payload?.generated_at ? new Date(payload.generated_at) : null;
+            const generatedText = generatedAt && !Number.isNaN(generatedAt.getTime())
+                ? generatedAt.toLocaleString()
+                : "-";
+            productionQualitySummaryNode.textContent = `最近 ${safeNumber(source.log_record_count_window, 0)} 条 batch 记录 · 总日志 ${safeNumber(source.log_record_count_total, 0)} 行 · ${generatedText}`;
+
+            const cards = [
+                {
+                    label: "Batch 成功率",
+                    value: formatPercentLike(batch.success_rate || 0, 1),
+                    note: `${safeNumber(batch.success, 0)} / ${safeNumber(batch.total, 0)}`,
+                    tone: productionQualityTone(batch.success_rate || 0, 0.92, 0.8),
+                },
+                {
+                    label: "LLM 超时",
+                    value: String(safeNumber(llm.timeout_count, 0)),
+                    note: `${safeNumber(llm.call_count, 0)} 次 LLM 调用`,
+                    tone: productionQualityTone(llm.timeout_count || 0, 0, 2, true),
+                },
+                {
+                    label: "JSON 修复率",
+                    value: formatPercentLike(llm.json_repair_rate || 0, 1),
+                    note: `${safeNumber(llm.json_repair_count, 0)} 次修复`,
+                    tone: productionQualityTone(llm.json_repair_rate || 0, 0.02, 0.08, true),
+                },
+                {
+                    label: "弱边比例",
+                    value: formatPercentLike(graphQuality.weak_edge_ratio || 0, 1),
+                    note: `${safeNumber(graphQuality.weak_edge_count, 0)} / ${safeNumber(graphQuality.edge_tier_total, 0)}`,
+                    tone: productionQualityTone(graphQuality.weak_edge_ratio || 0, 0.25, 0.45, true),
+                },
+                {
+                    label: "候选边接受率",
+                    value: formatPercentLike(graphQuality.candidate_edge_acceptance_rate || 0, 1),
+                    note: `${safeNumber(graphQuality.candidate_edge_counts?.accepted, 0)} / ${safeNumber(graphQuality.candidate_edge_counts?.terminal_review_count, 0)}`,
+                    tone: productionQualityTone(graphQuality.candidate_edge_acceptance_rate || 0, 0.55, 0.35),
+                },
+                {
+                    label: "无证据结论率",
+                    value: formatPercentLike(evidence.no_evidence_conclusion_rate || 0, 1),
+                    note: `${safeNumber(evidence.no_evidence_conclusion_count, 0)} / ${safeNumber(evidence.conclusion_count, 0)}`,
+                    tone: productionQualityTone(evidence.no_evidence_conclusion_rate || 0, 0.02, 0.1, true),
+                },
+                {
+                    label: "Neo4j 投影失败",
+                    value: String(safeNumber(neo4j.projection_failure_count, 0)),
+                    note: `Graph DLQ ${safeNumber(neo4j.graph_outbox_dlq_count, 0)}`,
+                    tone: productionQualityTone(neo4j.projection_failure_count || 0, 0, 3, true),
+                },
+                {
+                    label: "DLQ / Outbox",
+                    value: `${safeNumber(dlq.total, 0)} / ${safeNumber(outbox.production_pending, 0) + safeNumber(outbox.graph_pending, 0)}`,
+                    note: `生产失败 ${safeNumber(outbox.production_failed, 0)}`,
+                    tone: productionQualityTone(dlq.total || 0, 0, 5, true),
+                },
+            ];
+
+            const fragment = document.createDocumentFragment();
+            cards.forEach((item) => {
+                const card = document.createElement("div");
+                card.className = `production-quality-card ${item.tone}`;
+                const label = document.createElement("span");
+                label.textContent = item.label;
+                const value = document.createElement("strong");
+                value.textContent = item.value;
+                const note = document.createElement("div");
+                note.className = "production-quality-note";
+                note.textContent = item.note;
+                card.appendChild(label);
+                card.appendChild(value);
+                card.appendChild(note);
+                fragment.appendChild(card);
+            });
+            productionQualityGridNode.innerHTML = "";
+            productionQualityGridNode.appendChild(fragment);
+            renderProductionQualityDlq(payload?.recent_failures || []);
+        }
+
+        function renderProductionQualityDlq(items) {
+            const rows = Array.isArray(items) ? items : [];
+            if (rows.length === 0) {
+                productionQualityDlqNode.innerHTML = '<div class="empty">暂无 DLQ 事件。</div>';
+                return;
+            }
+            const fragment = document.createDocumentFragment();
+            rows.slice(0, 8).forEach((item) => {
+                const row = document.createElement("div");
+                row.className = "production-quality-dlq-item";
+                const title = document.createElement("strong");
+                title.textContent = `${item.category || "dlq"} · ${item.aggregate_id || item.event_key || "-"}`;
+                const meta = document.createElement("div");
+                meta.className = "production-quality-meta";
+                meta.textContent = `${item.event_type || "-"} · replay ${safeNumber(item.replay_count, 0)} · ${item.last_seen_at || "-"}`;
+                const error = document.createElement("code");
+                error.textContent = item.last_error || "-";
+                row.appendChild(title);
+                row.appendChild(meta);
+                row.appendChild(error);
+                fragment.appendChild(row);
+            });
+            productionQualityDlqNode.innerHTML = "";
+            productionQualityDlqNode.appendChild(fragment);
+        }
+
+        function formatCandidateEdgeStatus(status) {
+            return candidateEdgeStatusLabels[String(status || "").trim().toLowerCase()] || status || "-";
+        }
+
+        function buildCandidateEdgeListUrl() {
+            const status = candidateEdgeStatusFilter?.value || "pending";
+            return `/api/review/candidate-edges?status=${encodeURIComponent(status)}&limit=80`;
+        }
+
+        async function refreshCandidateEdgeReviewQueue(options = {}) {
+            if (!candidateEdgeListNode || !candidateEdgeDetailNode) {
+                return [];
+            }
+            candidateEdgeSummaryNode.textContent = "正在加载候选边...";
+            try {
+                const response = await authenticatedFetch(buildCandidateEdgeListUrl());
+                if (!response.ok) {
+                    const errorPayload = await response.json().catch(() => ({}));
+                    throw new Error(errorPayload.detail || `HTTP ${response.status}`);
+                }
+                const payload = await response.json();
+                candidateEdgeReviewItems = Array.isArray(payload.items) ? payload.items : [];
+                renderCandidateEdgeList(candidateEdgeReviewItems);
+                candidateEdgeSummaryNode.textContent = `候选边 ${candidateEdgeReviewItems.length} 条 · ${formatCandidateEdgeStatus(payload.status)}`;
+                const preferredId = options.preferredInsightId || selectedCandidateEdgeInsightId;
+                const nextItem = candidateEdgeReviewItems.find((item) => item.insight_id === preferredId) || candidateEdgeReviewItems[0];
+                if (nextItem) {
+                    await loadCandidateEdgeDetail(nextItem.insight_id);
+                } else {
+                    selectedCandidateEdgeInsightId = "";
+                    candidateEdgeDetailNode.innerHTML = '<div class="empty">暂无候选边详情。</div>';
+                }
+                return candidateEdgeReviewItems;
+            } catch (error) {
+                candidateEdgeReviewItems = [];
+                candidateEdgeListNode.innerHTML = `<div class="empty">候选边加载失败：${error.message}</div>`;
+                candidateEdgeDetailNode.innerHTML = '<div class="empty">候选边详情不可用。</div>';
+                candidateEdgeSummaryNode.textContent = "候选边加载失败。";
+                return [];
+            }
+        }
+
+        function renderCandidateEdgeList(items) {
+            if (!Array.isArray(items) || items.length === 0) {
+                candidateEdgeListNode.innerHTML = '<div class="empty">暂无候选边。</div>';
+                return;
+            }
+            const fragment = document.createDocumentFragment();
+            items.forEach((item) => {
+                const entityPair = item.entity_pair || {};
+                const card = document.createElement("button");
+                card.type = "button";
+                card.className = `candidate-edge-card ${item.insight_id === selectedCandidateEdgeInsightId ? "active" : ""}`.trim();
+                card.dataset.insightId = item.insight_id || "";
+                const title = document.createElement("span");
+                title.className = "candidate-edge-title";
+                title.textContent = `${entityPair.source_name || "-"} -> ${entityPair.target_name || "-"}`;
+                const meta = document.createElement("span");
+                meta.className = "candidate-edge-small";
+                meta.textContent = `${item.candidate_relation || "RELATED"} · ${formatCandidateEdgeStatus(item.status)} · 重复 ${item.historical_repeat_count || 1}`;
+                card.appendChild(title);
+                card.appendChild(meta);
+                card.addEventListener("click", async function() {
+                    await loadCandidateEdgeDetail(item.insight_id);
+                });
+                fragment.appendChild(card);
+            });
+            candidateEdgeListNode.innerHTML = "";
+            candidateEdgeListNode.appendChild(fragment);
+        }
+
+        async function loadCandidateEdgeDetail(insightId) {
+            const normalizedId = String(insightId || "").trim();
+            if (!normalizedId) {
+                return;
+            }
+            try {
+                const response = await authenticatedFetch(`/api/review/candidate-edges/${encodeURIComponent(normalizedId)}`);
+                if (!response.ok) {
+                    const errorPayload = await response.json().catch(() => ({}));
+                    throw new Error(errorPayload.detail || `HTTP ${response.status}`);
+                }
+                const item = await response.json();
+                selectedCandidateEdgeInsightId = item.insight_id || normalizedId;
+                renderCandidateEdgeList(candidateEdgeReviewItems);
+                renderCandidateEdgeDetail(item);
+            } catch (error) {
+                candidateEdgeDetailNode.innerHTML = `<div class="empty">候选边详情加载失败：${error.message}</div>`;
+            }
+        }
+
+        function appendCandidateEdgeSection(root, title, value, options = {}) {
+            const section = document.createElement("section");
+            section.className = "candidate-edge-section";
+            const heading = document.createElement("h4");
+            heading.textContent = title;
+            const body = document.createElement(options.code ? "pre" : "div");
+            body.className = options.code ? "candidate-edge-code" : "candidate-edge-small";
+            body.textContent = value || "-";
+            section.appendChild(heading);
+            section.appendChild(body);
+            root.appendChild(section);
+        }
+
+        function renderCandidateEdgeDetail(item) {
+            const entityPair = item.entity_pair || {};
+            const card = document.createElement("div");
+            card.className = "candidate-edge-detail-card";
+            const title = document.createElement("strong");
+            title.className = "candidate-edge-title";
+            title.textContent = `${entityPair.source_name || "-"} -> ${entityPair.target_name || "-"}`;
+            const meta = document.createElement("div");
+            meta.className = "candidate-edge-meta-row";
+            [
+                `关系 ${item.candidate_relation || "RELATED"}`,
+                `状态 ${formatCandidateEdgeStatus(item.status)}`,
+                `置信度 ${formatPercentLike(item.confidence || 0, 1)}`,
+                `重复 ${item.historical_repeat_count || 1}`,
+            ].forEach((text) => {
+                const node = document.createElement("span");
+                node.textContent = text;
+                meta.appendChild(node);
+            });
+            card.appendChild(title);
+            card.appendChild(meta);
+
+            const fragments = Array.isArray(item.evidence_fragments)
+                ? item.evidence_fragments.map((fragment) => fragment.text || "").filter(Boolean).join("\n\n")
+                : "";
+            appendCandidateEdgeSection(card, "证据片段", fragments);
+            appendCandidateEdgeSection(card, "生成原因", item.generation_reason || "-");
+            appendCandidateEdgeSection(card, "GraphRAG 上下文", JSON.stringify(item.graph_rag_context || {}, null, 2), { code: true });
+
+            const reviewEvents = Array.isArray(item.review_events) ? item.review_events : [];
+            if (reviewEvents.length > 0) {
+                appendCandidateEdgeSection(card, "审核记录", JSON.stringify(reviewEvents.slice(-3), null, 2), { code: true });
+            }
+
+            const actionSection = document.createElement("section");
+            actionSection.className = "candidate-edge-section";
+            const heading = document.createElement("h4");
+            heading.textContent = "审核动作";
+            const actions = document.createElement("div");
+            actions.className = "candidate-edge-actions";
+            const reasonInput = document.createElement("textarea");
+            reasonInput.rows = 2;
+            reasonInput.placeholder = "理由";
+            const correctedTypeInput = document.createElement("input");
+            correctedTypeInput.placeholder = "修正关系类型";
+            const mergeTargetInput = document.createElement("input");
+            mergeTargetInput.placeholder = "合并目标 ID";
+            const isFinal = ["accepted", "rejected", "superseded"].includes(String(item.status || "").toLowerCase());
+            const actionSpecs = [
+                ["accept", "接受", ""],
+                ["reject", "拒绝", "danger-button"],
+                ["merge", "合并", ""],
+                ["relationship-type-error", "类型错误", "danger-button"],
+            ];
+            actions.appendChild(reasonInput);
+            actions.appendChild(correctedTypeInput);
+            actions.appendChild(mergeTargetInput);
+            actionSpecs.forEach(([action, label, className]) => {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = `ghost-button ${className}`.trim();
+                button.textContent = label;
+                button.disabled = isFinal;
+                button.addEventListener("click", async function() {
+                    await submitCandidateEdgeDecision(item, action, {
+                        reason: reasonInput.value.trim(),
+                        corrected_relationship_type: correctedTypeInput.value.trim(),
+                        merge_target_relationship_id: mergeTargetInput.value.trim(),
+                    });
+                });
+                actions.appendChild(button);
+            });
+            actionSection.appendChild(heading);
+            actionSection.appendChild(actions);
+            card.appendChild(actionSection);
+
+            candidateEdgeDetailNode.innerHTML = "";
+            candidateEdgeDetailNode.appendChild(card);
+        }
+
+        async function submitCandidateEdgeDecision(item, action, fields) {
+            const insightId = String(item.insight_id || "").trim();
+            if (!insightId) {
+                setBanner("候选边缺少 insight_id。", "error");
+                return;
+            }
+            const body = {
+                reason: fields.reason || "",
+                graph_rag_context: item.graph_rag_context || {},
+            };
+            if (action === "accept" && fields.corrected_relationship_type) {
+                body.corrected_relationship_type = fields.corrected_relationship_type;
+            }
+            if (action === "merge") {
+                body.merge_target_relationship_id = fields.merge_target_relationship_id || "";
+            }
+            if (action === "relationship-type-error") {
+                body.repeated_error_type = "relationship_type_error";
+                body.corrected_relationship_type = fields.corrected_relationship_type || "";
+            }
+            try {
+                const response = await authenticatedFetch(`/api/review/candidate-edges/${encodeURIComponent(insightId)}/${action}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                });
+                if (!response.ok) {
+                    const errorPayload = await response.json().catch(() => ({}));
+                    throw new Error(errorPayload.detail || `HTTP ${response.status}`);
+                }
+                const result = await response.json();
+                setBanner(`候选边审核已写回：${formatCandidateEdgeStatus(result.status || action)}`, "success");
+                await refreshCandidateEdgeReviewQueue({ preferredInsightId: insightId });
+            } catch (error) {
+                setBanner(`候选边审核失败：${error.message}`, "error");
+            }
+        }
+
         function resetView(topic) {
             closeRealtimeChannel();
             clearPendingDashboardRefresh();
@@ -5778,6 +7087,7 @@
                 renderResultSummary(snapshot.result);
             }
             queueResearchDashboardRefresh(snapshot.job_id || jobIdNode.textContent.trim(), 0);
+            refreshProductionQualityDashboard({ silent: true });
             refreshRecentJobs();
         }
 
@@ -6213,6 +7523,22 @@
         refreshRecentJobsButton.addEventListener("click", async function() {
             const jobs = await refreshRecentJobs();
             setBanner(`最近任务列表已刷新，共 ${jobs.length} 条。`);
+        });
+
+        candidateEdgeRefreshButton.addEventListener("click", async function() {
+            const items = await refreshCandidateEdgeReviewQueue();
+            setBanner(`候选边队列已刷新，共 ${items.length} 条。`);
+        });
+
+        productionQualityRefreshButton.addEventListener("click", async function() {
+            const payload = await refreshProductionQualityDashboard();
+            const total = safeNumber(payload?.metrics?.dlq?.total, 0);
+            setBanner(`生产质量指标已刷新，DLQ ${total} 条。`);
+        });
+
+        candidateEdgeStatusFilter.addEventListener("change", async function() {
+            selectedCandidateEdgeInsightId = "";
+            await refreshCandidateEdgeReviewQueue();
         });
 
         pruneLocalRecordsButton.addEventListener("click", async function() {

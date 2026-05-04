@@ -6,8 +6,8 @@ import logging
 import time
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from src.orchestration.orchestration_contract import (
     OrchestrationResult,
@@ -290,6 +290,11 @@ class ResearchRuntimeService:
         self.phase_names = normalized_phases or list(_DEFAULT_PHASES)
 
         self._storage_factory: Optional[Any] = None
+        self._runtime_prompt_bias_blocks: Dict[str, Dict[str, Any]] = {}
+        self._runtime_graph_weight_hints: List[Dict[str, Any]] = []
+        self._documents_since_research_learning: int = 0
+        self._last_research_learning_at: Optional[datetime] = None
+        self._last_research_learning_result: Dict[str, Any] = {}
         self._initialize_storage_factory()
 
     @staticmethod
@@ -358,6 +363,396 @@ class ResearchRuntimeService:
                 logger.warning("ResearchRuntimeService: factory 关闭失败: %s", exc)
             self._storage_factory = None
 
+    # ── ResearchLearningService 生产调度 ───────────────────────────────
+
+    def _resolve_research_learning_runtime_config(self) -> Dict[str, Any]:
+        merged: Dict[str, Any] = {}
+        for source in (self.pipeline_config, self.config):
+            if not isinstance(source, Mapping):
+                continue
+            for key in (
+                "research_learning_runtime",
+                "learning_runtime",
+                "research_learning",
+            ):
+                value = source.get(key)
+                if isinstance(value, Mapping):
+                    merged.update(dict(value))
+        return merged
+
+    def _build_research_learning_service(
+        self,
+        runtime_config: Optional[Mapping[str, Any]] = None,
+    ) -> Optional[Any]:
+        config = dict(
+            runtime_config or self._resolve_research_learning_runtime_config()
+        )
+        override = config.get("service") or config.get("research_learning_service")
+        if override is not None:
+            return override
+
+        db_manager = config.get("db_manager") or getattr(
+            self._storage_factory, "db_manager", None
+        )
+        neo4j_driver = config.get("neo4j_driver") or getattr(
+            self._storage_factory, "neo4j_driver", None
+        )
+        learning_insight_repo = config.get("learning_insight_repo")
+        if learning_insight_repo is None and db_manager is not None:
+            try:
+                from src.learning.learning_insight_repo import LearningInsightRepo
+
+                learning_insight_repo = LearningInsightRepo(
+                    db_manager,
+                    threshold_policy=config.get("threshold_policy")
+                    or config.get("learning_insight_threshold_policy"),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ResearchLearningService repo 构建失败: %s", exc)
+                learning_insight_repo = None
+
+        pg_asset_miner = config.get("pg_asset_miner")
+        if (
+            pg_asset_miner is None
+            and db_manager is not None
+            and _truthy(config.get("enable_pg_asset_mining", True))
+        ):
+            try:
+                from src.learning.kg_node_self_learning import (
+                    KGNodeSelfLearningEnhancer,
+                )
+
+                pg_asset_miner = KGNodeSelfLearningEnhancer(
+                    db_manager,
+                    learning_insight_repo=learning_insight_repo,
+                    max_candidates=_positive_int(config.get("pg_max_candidates"), 200),
+                    min_confidence=_safe_float(config.get("pg_min_confidence"), 0.58),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ResearchLearningService PG asset miner 构建失败: %s", exc
+                )
+                pg_asset_miner = None
+
+        graph_miner = config.get("graph_miner")
+        if (
+            graph_miner is None
+            and neo4j_driver is not None
+            and _truthy(config.get("enable_neo4j_mining", True))
+        ):
+            try:
+                from src.learning.graph_pattern_miner import GraphPatternMiningDaemon
+
+                graph_miner = GraphPatternMiningDaemon(
+                    neo4j_driver=neo4j_driver,
+                    state_dir=str(
+                        config.get("graph_miner_state_dir") or "data/miner_state"
+                    ),
+                    allow_mock_patterns=False,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ResearchLearningService Neo4j miner 构建失败: %s", exc)
+                graph_miner = None
+
+        feedback_repo = config.get("feedback_repo")
+        if (
+            feedback_repo is None
+            and db_manager is not None
+            and _truthy(config.get("enable_expert_feedback", True))
+        ):
+            try:
+                from src.infrastructure.research_session_repo import (
+                    ResearchSessionRepository,
+                )
+                from src.learning.expert_review_feedback_repo import (
+                    ExpertReviewFeedbackRepo,
+                )
+
+                feedback_repo = ExpertReviewFeedbackRepo(
+                    ResearchSessionRepository(db_manager)
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ResearchLearningService expert feedback repo 构建失败: %s", exc
+                )
+                feedback_repo = None
+
+        try:
+            from src.learning.research_learning_service import ResearchLearningService
+
+            return ResearchLearningService(
+                learning_insight_repo=learning_insight_repo,
+                graph_miner=graph_miner,
+                pg_asset_miner=pg_asset_miner,
+                feedback_repo=feedback_repo,
+                active_insight_limit=_positive_int(
+                    config.get("active_insight_limit"), 100
+                ),
+                rejected_insight_limit=_positive_int(
+                    config.get("rejected_insight_limit"), 50
+                ),
+                min_prompt_bias_confidence=_safe_float(
+                    config.get("min_prompt_bias_confidence"), 0.0
+                ),
+                min_graph_weight_confidence=_safe_float(
+                    config.get("min_graph_weight_confidence"), 0.0
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ResearchLearningService 构建失败: %s", exc)
+            return None
+
+    def _maybe_run_research_learning_cycle(
+        self,
+        *,
+        cycle_id: str,
+        phase_results: Mapping[str, Any],
+        cycle_snapshot: Mapping[str, Any],
+        emit: Optional[RuntimeEmitFn],
+    ) -> Dict[str, Any]:
+        config = self._resolve_research_learning_runtime_config()
+        if not _truthy(config.get("enabled", False)):
+            return {"status": "skipped", "reason": "disabled"}
+
+        processed_documents = self._extract_processed_document_count(
+            phase_results, cycle_snapshot
+        )
+        self._documents_since_research_learning += processed_documents
+        due_reasons = self._resolve_research_learning_due_reasons(
+            config, processed_documents=processed_documents
+        )
+        if not due_reasons:
+            return {
+                "status": "skipped",
+                "reason": "not_due",
+                "processed_documents": processed_documents,
+                "documents_since_learning": self._documents_since_research_learning,
+            }
+
+        now = datetime.now(timezone.utc)
+        min_interval_hours = _safe_float(config.get("min_interval_hours"), 0.0)
+        if (
+            min_interval_hours > 0
+            and self._last_research_learning_at is not None
+            and (now - self._last_research_learning_at).total_seconds()
+            < min_interval_hours * 3600.0
+        ):
+            return {
+                "status": "skipped",
+                "reason": "cooldown",
+                "processed_documents": processed_documents,
+                "documents_since_learning": self._documents_since_research_learning,
+            }
+
+        learning_cycle_id = f"{cycle_id}:learning:{now.strftime('%Y%m%d%H%M%S')}"
+        self._emit(
+            emit,
+            "research_learning_started",
+            {
+                "cycle_id": cycle_id,
+                "learning_cycle_id": learning_cycle_id,
+                "due_reasons": list(due_reasons),
+                "processed_documents": processed_documents,
+            },
+        )
+        logger.info(
+            "ResearchRuntimeService: research learning cycle started (learning_cycle_id=%s, reasons=%s)",
+            learning_cycle_id,
+            ",".join(due_reasons),
+        )
+
+        service = self._build_research_learning_service(config)
+        if service is None:
+            return {
+                "status": "skipped",
+                "reason": "service_unavailable",
+                "learning_cycle_id": learning_cycle_id,
+            }
+
+        try:
+            result = service.run_cycle_learning(learning_cycle_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ResearchRuntimeService: research learning cycle 失败: %s", exc
+            )
+            failure = {
+                "status": "failed",
+                "learning_cycle_id": learning_cycle_id,
+                "error": str(exc),
+            }
+            self._emit(emit, "research_learning_failed", failure)
+            return failure
+
+        result = dict(result or {})
+        result.setdefault("cycle_id", learning_cycle_id)
+        result["status"] = "completed"
+        result["runtime_schedule"] = {
+            "due_reasons": list(due_reasons),
+            "processed_documents": processed_documents,
+            "documents_since_learning": self._documents_since_research_learning,
+        }
+        self._last_research_learning_at = now
+        self._documents_since_research_learning = 0
+        self._store_runtime_learning_result(result)
+
+        summary = self._summarize_research_learning_result(result)
+        logger.info(
+            "ResearchRuntimeService: research learning cycle completed (learning_cycle_id=%s, prompt_bias_phases=%s, graph_weight_hints=%s)",
+            learning_cycle_id,
+            summary.get("prompt_bias_phases"),
+            summary.get("graph_weight_hint_count"),
+        )
+        self._emit(emit, "research_learning_completed", summary)
+        return result
+
+    def _resolve_research_learning_due_reasons(
+        self,
+        config: Mapping[str, Any],
+        *,
+        processed_documents: int,
+    ) -> List[str]:
+        reasons: List[str] = []
+        if _truthy(config.get("force", False)):
+            reasons.append("forced")
+        if _truthy(config.get("run_after_batch", False)):
+            reasons.append("batch_completed")
+        interval = _positive_int(
+            config.get("every_n_documents")
+            or config.get("document_interval")
+            or config.get("every_n_docs"),
+            0,
+        )
+        if interval > 0 and self._documents_since_research_learning >= interval:
+            reasons.append("document_interval")
+        if _truthy(config.get("daily_batch", config.get("daily", False))):
+            now = datetime.now(timezone.utc)
+            if (
+                self._last_research_learning_at is None
+                or self._last_research_learning_at.date() < now.date()
+            ):
+                reasons.append("daily_batch")
+        if (
+            not reasons
+            and processed_documents <= 0
+            and _truthy(config.get("run_empty_batch", False))
+        ):
+            reasons.append("empty_batch")
+        return reasons
+
+    @staticmethod
+    def _extract_processed_document_count(
+        phase_results: Mapping[str, Any],
+        cycle_snapshot: Mapping[str, Any],
+    ) -> int:
+        candidates = [
+            phase_results.get("observe") if isinstance(phase_results, Mapping) else None
+        ]
+        if isinstance(cycle_snapshot, Mapping):
+            candidates.append(cycle_snapshot.get("observe_documents"))
+            candidates.append(cycle_snapshot)
+        values = [_find_document_count(item) for item in candidates]
+        return max(values, default=0)
+
+    def _store_runtime_learning_result(self, result: Mapping[str, Any]) -> None:
+        prompt_bias_blocks = {
+            str(phase): dict(block)
+            for phase, block in (result.get("prompt_bias_blocks") or {}).items()
+            if isinstance(block, Mapping)
+        }
+        graph_weight_hints = [
+            dict(item)
+            for item in result.get("graph_weight_hints") or []
+            if isinstance(item, Mapping)
+        ]
+        self._runtime_prompt_bias_blocks = prompt_bias_blocks
+        self._runtime_graph_weight_hints = graph_weight_hints
+        self._last_research_learning_result = dict(result)
+        runtime_learning = dict(self.pipeline_config.get("runtime_learning") or {})
+        runtime_learning.update(
+            {
+                "last_learning_cycle_id": result.get("cycle_id"),
+                "prompt_bias_blocks": deepcopy(prompt_bias_blocks),
+                "graph_weight_hints": deepcopy(graph_weight_hints),
+                "policy_adjustment_summary": deepcopy(
+                    result.get("policy_adjustment_summary") or {}
+                ),
+            }
+        )
+        self.pipeline_config["runtime_learning"] = runtime_learning
+        self.pipeline_config["prompt_bias_blocks"] = deepcopy(prompt_bias_blocks)
+        self.pipeline_config["graph_weight_hints"] = deepcopy(graph_weight_hints)
+
+    def _resolve_runtime_graph_weight_hints(
+        self,
+        stored_runtime_learning: Mapping[str, Any],
+    ) -> List[Dict[str, Any]]:
+        candidates: Iterable[Any] = self._runtime_graph_weight_hints
+        if not candidates:
+            candidates = self.pipeline_config.get("graph_weight_hints") or []
+        if not candidates and isinstance(stored_runtime_learning, Mapping):
+            candidates = stored_runtime_learning.get("graph_weight_hints") or []
+        return [dict(item) for item in candidates or [] if isinstance(item, Mapping)]
+
+    @staticmethod
+    def _summarize_research_learning_result(
+        result: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        summary = result.get("policy_adjustment_summary")
+        summary_dict = dict(summary) if isinstance(summary, Mapping) else {}
+        return {
+            "status": result.get("status") or "completed",
+            "learning_cycle_id": result.get("cycle_id"),
+            "prompt_bias_phases": sorted(
+                (result.get("prompt_bias_blocks") or {}).keys()
+            )
+            if isinstance(result.get("prompt_bias_blocks"), Mapping)
+            else [],
+            "graph_weight_hint_count": len(result.get("graph_weight_hints") or []),
+            "negative_insight_count": len(result.get("rejected_insights") or []),
+            "policy_adjustment_summary": summary_dict,
+        }
+
+    @staticmethod
+    def _merge_prompt_bias_blocks(
+        *blocks: Optional[Mapping[str, Mapping[str, Any]]],
+    ) -> Dict[str, Dict[str, Any]]:
+        merged: Dict[str, Dict[str, Any]] = {}
+        severity_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+        for block_map in blocks:
+            if not isinstance(block_map, Mapping):
+                continue
+            for phase, block in block_map.items():
+                if not isinstance(block, Mapping):
+                    continue
+                phase_key = str(phase)
+                incoming = dict(block)
+                if phase_key not in merged:
+                    merged[phase_key] = incoming
+                    continue
+                current = merged[phase_key]
+                current_text = str(current.get("bias_text") or "").strip()
+                incoming_text = str(incoming.get("bias_text") or "").strip()
+                if incoming_text and incoming_text not in current_text:
+                    current["bias_text"] = "\n".join(
+                        item for item in (current_text, incoming_text) if item
+                    )
+                avoid_fields: List[str] = []
+                for item in list(current.get("avoid_fields") or []) + list(
+                    incoming.get("avoid_fields") or []
+                ):
+                    text = str(item or "").strip()
+                    if text and text not in avoid_fields:
+                        avoid_fields.append(text)
+                current["avoid_fields"] = avoid_fields
+                current["severity"] = max(
+                    [
+                        str(current.get("severity") or "medium"),
+                        str(incoming.get("severity") or "medium"),
+                    ],
+                    key=lambda item: severity_order.get(item, 0),
+                )
+        return merged
+
     def run(
         self,
         topic: str,
@@ -408,6 +803,7 @@ class ResearchRuntimeService:
         overall_status = "completed"
         publish_highlights: Dict[str, Dict[str, Any]] = {}
         observe_philology: Dict[str, Any] = {}
+        research_learning_result: Dict[str, Any] = {}
 
         pipeline = ResearchPipeline(
             self.pipeline_config, storage_factory=self._storage_factory
@@ -416,6 +812,27 @@ class ResearchRuntimeService:
         _learning_prep = learning_loop.prepare_cycle(pipeline)
         learning_strategy = _learning_prep["learning_strategy"]
         previous_iteration_feedback = _learning_prep["previous_iteration_feedback"]
+        stored_runtime_learning = self.pipeline_config.get("runtime_learning")
+        if not isinstance(stored_runtime_learning, dict):
+            stored_runtime_learning = {}
+        prompt_bias_blocks = self._merge_prompt_bias_blocks(
+            _learning_prep.get("prompt_bias_blocks"),
+            self.pipeline_config.get("prompt_bias_blocks")
+            if isinstance(self.pipeline_config.get("prompt_bias_blocks"), dict)
+            else {},
+            stored_runtime_learning.get("prompt_bias_blocks")
+            if isinstance(stored_runtime_learning.get("prompt_bias_blocks"), dict)
+            else {},
+            self._runtime_prompt_bias_blocks,
+        )
+        graph_weight_hints = self._resolve_runtime_graph_weight_hints(
+            stored_runtime_learning
+        )
+        lfitl_plan = (
+            _learning_prep.get("lfitl_plan")
+            or _learning_prep.get("learning_insight_plan")
+            or stored_runtime_learning.get("lfitl_plan")
+        )
         cycle = pipeline.create_research_cycle(
             cycle_id=resolved_cycle_id,
             cycle_name=resolved_cycle_name,
@@ -472,6 +889,9 @@ class ResearchRuntimeService:
                     normalized_phase_contexts,
                     learning_strategy=learning_strategy,
                     previous_iteration_feedback=previous_iteration_feedback,
+                    prompt_bias_blocks=prompt_bias_blocks,
+                    lfitl_plan=lfitl_plan if isinstance(lfitl_plan, dict) else None,
+                    graph_weight_hints=graph_weight_hints,
                     study_type=study_type,
                     primary_outcome=primary_outcome,
                     intervention=intervention,
@@ -554,6 +974,24 @@ class ResearchRuntimeService:
             )
             if not observe_philology.get("available"):
                 observe_philology = {}
+
+            research_learning_result = self._maybe_run_research_learning_cycle(
+                cycle_id=cycle_id,
+                phase_results=phase_results,
+                cycle_snapshot=cycle_snapshot,
+                emit=emit,
+            )
+            if research_learning_result:
+                snapshot_metadata = (
+                    cycle_snapshot.get("metadata")
+                    if isinstance(cycle_snapshot.get("metadata"), dict)
+                    else {}
+                )
+                snapshot_metadata = dict(snapshot_metadata or {})
+                snapshot_metadata["research_learning"] = (
+                    self._summarize_research_learning_result(research_learning_result)
+                )
+                cycle_snapshot["metadata"] = snapshot_metadata
         finally:
             try:
                 pipeline.cleanup()
@@ -588,6 +1026,11 @@ class ResearchRuntimeService:
                     if isinstance(learning_strategy.get("tuned_parameters"), dict)
                     else {}
                 ),
+                "research_learning": self._summarize_research_learning_result(
+                    research_learning_result
+                )
+                if research_learning_result
+                else {},
             },
             analysis_results=publish_highlights.get("analysis_results") or {},
             research_artifact=publish_highlights.get("research_artifact") or {},
@@ -650,6 +1093,9 @@ class ResearchRuntimeService:
         *,
         learning_strategy: Optional[Dict[str, Any]],
         previous_iteration_feedback: Optional[Dict[str, Any]],
+        prompt_bias_blocks: Optional[Dict[str, Dict[str, Any]]],
+        lfitl_plan: Optional[Dict[str, Any]],
+        graph_weight_hints: Optional[List[Dict[str, Any]]],
         study_type: Optional[str],
         primary_outcome: Optional[str],
         intervention: Optional[str],
@@ -691,6 +1137,24 @@ class ResearchRuntimeService:
         ):
             merged["previous_iteration_feedback"] = deepcopy(
                 previous_iteration_feedback
+            )
+        if isinstance(prompt_bias_blocks, dict) and prompt_bias_blocks:
+            merged.setdefault("prompt_bias_blocks", deepcopy(prompt_bias_blocks))
+            phase_bias = prompt_bias_blocks.get(phase.value)
+            if isinstance(phase_bias, dict) and phase_bias:
+                merged.setdefault("prompt_bias_block", deepcopy(phase_bias))
+                bias_text = str(phase_bias.get("bias_text") or "").strip()
+                if bias_text and "bias" not in merged:
+                    merged["bias"] = bias_text
+                if "avoid_fields" not in merged:
+                    merged["avoid_fields"] = list(phase_bias.get("avoid_fields") or [])
+        if isinstance(lfitl_plan, dict) and lfitl_plan:
+            merged.setdefault("lfitl_plan", deepcopy(lfitl_plan))
+        if isinstance(graph_weight_hints, list) and graph_weight_hints:
+            merged.setdefault("graph_weight_hints", deepcopy(graph_weight_hints))
+            merged.setdefault(
+                "research_learning_graph_weight_hints",
+                deepcopy(graph_weight_hints),
             )
         return merged
 
@@ -886,3 +1350,64 @@ class ResearchRuntimeService:
     ) -> None:
         if emit is not None:
             emit(event_type, payload)
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return False
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "y", "on", "enabled"}
+
+
+def _positive_int(value: Any, default: int) -> int:
+    if value in (None, ""):
+        return max(int(default), 0)
+    try:
+        return max(int(float(value)), 0)
+    except (TypeError, ValueError):
+        return max(int(default), 0)
+
+
+def _safe_float(value: Any, default: float) -> float:
+    if value in (None, ""):
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+_DOCUMENT_COUNT_KEYS = frozenset(
+    {
+        "processed_document_count",
+        "document_count",
+        "documents_processed",
+        "ingested_document_count",
+        "corpus_document_count",
+        "record_count",
+        "total_documents",
+    }
+)
+
+
+def _find_document_count(value: Any, *, depth: int = 0) -> int:
+    if value in (None, "") or depth > 5:
+        return 0
+    if isinstance(value, list):
+        child_counts = [_find_document_count(item, depth=depth + 1) for item in value]
+        return max([len(value), *child_counts], default=0)
+    if not isinstance(value, Mapping):
+        return 0
+    counts: List[int] = []
+    for key, item in value.items():
+        normalized_key = str(key or "").strip().lower()
+        if normalized_key in _DOCUMENT_COUNT_KEYS:
+            try:
+                counts.append(max(int(float(item)), 0))
+            except (TypeError, ValueError):
+                pass
+        elif isinstance(item, (Mapping, list)):
+            counts.append(_find_document_count(item, depth=depth + 1))
+    return max(counts, default=0)

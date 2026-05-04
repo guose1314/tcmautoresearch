@@ -12,6 +12,10 @@ from typing import Any, Dict, List, Optional
 from src.collector.ctext_corpus_collector import CTextCorpusCollector
 from src.collector.literature_retriever import LiteratureRetriever
 from src.collector.local_collector import LocalCorpusCollector
+from src.contexts.llm_reasoning.philology_templates import (
+    render_philology_reasoning_prompt,
+    select_philology_reasoning_template,
+)
 from src.core.adapters import (
     DefaultAnalysisAdapter,
     DefaultCollectionAdapter,
@@ -99,6 +103,7 @@ def _try_import(module_path: str, symbol: str, fallback=None):
 
 
 LLMEngine = _try_import("src.llm.llm_engine", "LLMEngine")
+LLMGateway = _try_import("src.llm.llm_gateway", "LLMGateway")
 CachedLLMService = _try_import("src.infra.llm_service", "CachedLLMService")
 CitationManager = _try_import("src.generation.citation_manager", "CitationManager")
 PaperWriter = _try_import("src.generation.paper_writer", "PaperWriter")
@@ -215,6 +220,26 @@ class ResearchPipeline:
 
         self.logger.info("研究流程管理器初始化完成")
 
+    def select_llm_reasoning_template(
+        self,
+        task_type: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        template = select_philology_reasoning_template(task_type, context or {})
+        return template.to_dict()
+
+    def render_llm_reasoning_template(
+        self,
+        task_type: str,
+        payload: Optional[Dict[str, Any]] = None,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        return render_philology_reasoning_prompt(
+            task_type,
+            payload=payload or {},
+            context=context or {},
+        ).to_dict()
+
     # ------------------------------------------------------------------
     # 初始化辅助方法
     # ------------------------------------------------------------------
@@ -276,9 +301,26 @@ class ResearchPipeline:
         self.quality_metrics = self.quality_assessor.quality_metrics
         self.resource_usage = self.quality_assessor.resource_usage
 
+        llm_source = self.config.get("llm_engine") or self.config.get("llm_service")
+        self.llm_gateway = None
+        if LLMGateway is not None and llm_source is not None:
+            try:
+                self.llm_gateway = LLMGateway(llm_source)
+                self.config.setdefault("llm_gateway", self.llm_gateway)
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(
+                    "LLMGateway 初始化失败，继续使用原 LLM 引擎: %s", exc
+                )
+
+        hypothesis_engine_config = dict(
+            self.config.get("hypothesis_engine_config") or {}
+        )
+        if self.llm_gateway is not None:
+            hypothesis_engine_config.setdefault("llm_gateway", self.llm_gateway)
+
         self.hypothesis_engine = HypothesisEngine(
-            self.config.get("hypothesis_engine_config") or {},
-            llm_engine=self.config.get("llm_engine") or self.config.get("llm_service"),
+            hypothesis_engine_config,
+            llm_engine=llm_source,
         )
         self.hypothesis_engine.initialize()
 

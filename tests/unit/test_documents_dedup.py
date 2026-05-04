@@ -129,6 +129,45 @@ class UpsertDocumentTests(unittest.TestCase):
             self.assertEqual(doc.source_file, "data/foo.txt")
             self.assertEqual(doc.ingest_run_id, "20240101_123456_abcdef01")
 
+    def test_upsert_dedup_by_canonical_document_key_across_filenames(self) -> None:
+        first = self.svc.persist_document_graph(
+            {
+                "document": {
+                    "source_file": "data/医方.txt",
+                    "content_hash": "e" * 64,
+                    "canonical_document_key": "f" * 64,
+                    "canonical_title": "医方",
+                    "normalized_title": "医方",
+                    "source_file_hash": "a" * 64,
+                    "document_key_version": "canonical-document-v1",
+                },
+                "entities": [],
+                "relationships": [],
+            }
+        )
+        second = self.svc.persist_document_graph(
+            {
+                "document": {
+                    "source_file": "data/醫方.txt",
+                    "content_hash": "e" * 64,
+                    "canonical_document_key": "f" * 64,
+                    "canonical_title": "医方",
+                    "normalized_title": "医方",
+                    "source_file_hash": "b" * 64,
+                    "document_key_version": "canonical-document-v1",
+                },
+                "entities": [],
+                "relationships": [],
+            }
+        )
+
+        self.assertEqual(first["document"]["id"], second["document"]["id"])
+        with self.db.session_scope() as session:
+            self.assertEqual(session.query(Document).count(), 1)
+            doc = session.query(Document).one()
+            self.assertEqual(doc.canonical_document_key, "f" * 64)
+            self.assertEqual(doc.canonical_title, "医方")
+
 
 if __name__ == "__main__":
     unittest.main()

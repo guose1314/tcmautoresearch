@@ -33,7 +33,9 @@ class _FakeLexicon:
 
 class TestAdvancedEntityExtractor(unittest.TestCase):
     def _build_module(self):
-        with patch("src.analysis.entity_extractor.get_lexicon", return_value=_FakeLexicon()):
+        with patch(
+            "src.analysis.entity_extractor.get_lexicon", return_value=_FakeLexicon()
+        ):
             module = AdvancedEntityExtractor()
         self.assertTrue(module.initialize())
         return module
@@ -62,7 +64,9 @@ class TestAdvancedEntityExtractor(unittest.TestCase):
             item
             for item in entities
             if item["name"] == "柴胡"
-            and first_formula["position"] <= item["position"] < first_formula["end_position"]
+            and first_formula["position"]
+            <= item["position"]
+            < first_formula["end_position"]
         ]
         self.assertEqual(overlapped_herb, [])
 
@@ -82,6 +86,21 @@ class TestAdvancedEntityExtractor(unittest.TestCase):
         self.assertIn("statistics", result)
         self.assertIn("confidence_scores", result)
         self.assertIn("average_confidence", result["confidence_scores"])
+
+    def test_execute_adds_term_sense_candidates(self):
+        module = self._build_module()
+        result = module.execute(
+            {
+                "processed_text": "风寒外感，恶风头痛，桂枝汤主之。",
+                "metadata": {"dynasty": "东汉"},
+            }
+        )
+
+        wind = next(item for item in result["entities"] if item["name"] == "风")
+        self.assertEqual(wind["sense_id"], "tcm.wind.external_pathogen")
+        self.assertTrue(wind["sense_candidates"])
+        self.assertGreater(result["statistics"]["sense_candidate_count"], 0)
+        self.assertGreater(result["statistics"]["sense_resolved_count"], 0)
 
 
 if __name__ == "__main__":

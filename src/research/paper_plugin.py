@@ -116,6 +116,7 @@ def _llm_translate_and_summarize(
 
     try:
         from src.infra.llm_service import get_llm_service
+        from src.llm.llm_gateway import generate_with_gateway
 
         engine = get_llm_service("paper_plugin")
         engine.load()
@@ -125,14 +126,40 @@ def _llm_translate_and_summarize(
             "如果原文已经是目标语言，可做轻微润色。\n\n"
             f"内容:\n{text[:12000]}"
         )
-        translated = engine.generate(prompt_translate, "You are an academic paper translator.")
+        translated_result = generate_with_gateway(
+            engine,
+            prompt_translate,
+            "You are an academic paper translator.",
+            prompt_version="paper_plugin.translate@v1",
+            phase="paper",
+            purpose="paper_translation",
+            task_type="translation",
+            metadata={
+                "prompt_name": "paper_plugin.translate",
+                "target_language": translate_to,
+            },
+        )
+        translated = str(translated_result.text or "")
 
         prompt_summary = (
             f"请用 {summary_lang} 输出论文摘要，结构为：研究问题、方法、结果、结论、局限。"
             "每个部分1-2句，保持简洁。\n\n"
             f"内容:\n{translated[:12000]}"
         )
-        summary = engine.generate(prompt_summary, "You are an academic paper reading assistant.")
+        summary_result = generate_with_gateway(
+            engine,
+            prompt_summary,
+            "You are an academic paper reading assistant.",
+            prompt_version="paper_plugin.summary@v1",
+            phase="paper",
+            purpose="paper_summary",
+            task_type="summarization",
+            metadata={
+                "prompt_name": "paper_plugin.summary",
+                "summary_language": summary_lang,
+            },
+        )
+        summary = str(summary_result.text or "")
         return translated, summary, True
     except Exception as exc:
         logger.warning("LLM unavailable, fallback to extractive summary: %s", exc)
@@ -196,7 +223,9 @@ def run_paper_plugin(
         json_path = out_dir / f"paper_plugin_{ts}.json"
         md_path = out_dir / f"paper_plugin_{ts}.md"
 
-        json_path.write_text(json.dumps(result_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+        json_path.write_text(
+            json.dumps(result_obj, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
         md = (
             "# 论文阅读插件输出\n\n"

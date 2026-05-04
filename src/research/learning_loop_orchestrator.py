@@ -596,16 +596,21 @@ class LearningLoopOrchestrator:
 
         limit = self._resolve_learning_insight_limit(pipeline)
         min_confidence = self._resolve_learning_insight_min_confidence(pipeline)
+        list_insights = getattr(repo, "list_prompt_bias_eligible", None)
+        if not callable(list_insights):
+            list_insights = getattr(repo, "list_active", None)
+        if not callable(list_insights):
+            return None, {}
         try:
-            insights = list(repo.list_active(limit=limit))
+            insights = list(list_insights(limit=limit))
         except TypeError:
             try:
-                insights = list(repo.list_active())
+                insights = list(list_insights())
             except Exception as exc:  # noqa: BLE001
-                logger.warning("LearningInsight list_active 失败: %s", exc)
+                logger.warning("LearningInsight eligible list 失败: %s", exc)
                 return None, {}
         except Exception as exc:  # noqa: BLE001
-            logger.warning("LearningInsight list_active 失败: %s", exc)
+            logger.warning("LearningInsight eligible list 失败: %s", exc)
             return None, {}
 
         try:

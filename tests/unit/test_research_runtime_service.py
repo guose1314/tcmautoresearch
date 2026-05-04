@@ -125,6 +125,32 @@ class _SkippedExecutionPipeline(_FakePipeline):
         return super().execute_research_phase(cycle_id, phase, phase_context)
 
 
+class _FakeResearchLearningService:
+    def __init__(self):
+        self.cycle_ids = []
+
+    def run_cycle_learning(self, cycle_id):
+        self.cycle_ids.append(cycle_id)
+        return {
+            "cycle_id": cycle_id,
+            "prompt_bias_blocks": {
+                "analyze": {
+                    "bias_text": "学习洞察提示：优先复核 EvidenceClaim 引用出处。",
+                    "avoid_fields": ["unsupported_claim"],
+                    "severity": "high",
+                }
+            },
+            "graph_weight_hints": [
+                {"node_ids": ["ev-1"], "boost": 1.8, "reason": "accepted insight"}
+            ],
+            "rejected_insights": [{"insight_id": "bad-1", "status": "rejected"}],
+            "policy_adjustment_summary": {
+                "prompt_bias_phases": ["analyze"],
+                "graph_weight_hint_count": 1,
+            },
+        }
+
+
 class TestResearchRuntimeService(unittest.TestCase):
     def test_run_returns_shared_orchestration_and_raw_phase_results(self):
         service = ResearchRuntimeService(
@@ -463,3 +489,50 @@ class TestResearchRuntimeService(unittest.TestCase):
         self.assertTrue(
             result.orchestration_result.pipeline_metadata["learning_strategy_active"]
         )
+
+    def test_runtime_schedules_research_learning_and_injects_next_run_bias(self):
+        service = ResearchRuntimeService(
+            {
+                "pipeline_config": {},
+                "phases": ["observe", "analyze"],
+                "research_learning_runtime": {
+                    "enabled": True,
+                    "every_n_documents": 2,
+                },
+            }
+        )
+        fake_learning_service = _FakeResearchLearningService()
+        service._build_research_learning_service = (  # type: ignore[method-assign]
+            lambda _runtime_config=None: fake_learning_service
+        )
+        events = []
+
+        def emit(event_type, payload):
+            events.append((event_type, payload))
+
+        research_pipeline_module = import_module("src.research.research_pipeline")
+
+        original_pipeline = research_pipeline_module.ResearchPipeline
+        try:
+            research_pipeline_module.ResearchPipeline = _FakePipeline
+            first = service.run("桂枝汤研究", emit=emit)
+            second = service.run("桂枝汤研究")
+        finally:
+            research_pipeline_module.ResearchPipeline = original_pipeline
+
+        self.assertEqual(len(fake_learning_service.cycle_ids), 2)
+        self.assertTrue(
+            fake_learning_service.cycle_ids[0].startswith("cycle-runtime-1:learning:")
+        )
+        self.assertIn("research_learning_completed", [name for name, _ in events])
+        first_learning = first.orchestration_result.pipeline_metadata[
+            "research_learning"
+        ]
+        self.assertEqual(first_learning["graph_weight_hint_count"], 1)
+        analyze_context = second.phase_results["analyze"]["metadata"][
+            "received_phase_context"
+        ]
+        self.assertIn("prompt_bias_blocks", analyze_context)
+        self.assertIn("bias", analyze_context)
+        self.assertIn("EvidenceClaim", analyze_context["bias"])
+        self.assertEqual(analyze_context["graph_weight_hints"][0]["node_ids"], ["ev-1"])

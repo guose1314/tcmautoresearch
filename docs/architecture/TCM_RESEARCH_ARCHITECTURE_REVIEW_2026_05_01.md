@@ -1,7 +1,7 @@
 # 中医文献研究平台架构评估与演进设计
 
 日期：2026-05-01
-范围：本地 `qwen1_5-7b-chat-q8_0.gguf`、ResearchRuntimeService 七阶段主链、PostgreSQL、Neo4j、Web/API/CLI 入口、文献学资产、GraphRAG、自学习与无监督科研增强。
+范围：本地 `qwen1_5-7b-chat-q8_0.gguf`、ResearchRuntimeService 七阶段主链、PostgreSQL、Neo4j、Web/API/CLI 入口、文献学资产、GraphRAG、自学习与无监督科研增强。本文已结合 2026-05-01 当前代码状态复核。
 
 ## 1. 执行摘要
 
@@ -17,7 +17,7 @@
 
 | 类别 | 关键文件 | 观察结论 |
 | --- | --- | --- |
-| 入口与运行时 | `src/api/main.py`, `src/web/main.py`, `src/orchestration/research_runtime_service.py`, `src/orchestration/research_orchestrator.py` | API/Web 已桥接统一 runtime；`ResearchOrchestrator` 已标记弃用但仍被 runtime 复用其 DTO 与辅助函数。 |
+| 入口与运行时 | `src/api/main.py`, `src/web/main.py`, `src/orchestration/research_runtime_service.py`, `src/orchestration/orchestration_contract.py`, `src/orchestration/research_orchestrator.py` | API/Web 已桥接统一 runtime；DTO 与 `topic_to_phase_context` 已抽到 `orchestration_contract.py`，`ResearchOrchestrator` 退为兼容门面。 |
 | 七阶段科研主链 | `src/research/research_pipeline.py`, `src/research/phase_orchestrator.py`, `src/research/phase_handlers/*`, `src/research/phases/*` | 七阶段边界清晰，但 `ResearchPipeline` 与 `PhaseOrchestrator` 仍是中心枢纽，承担模块工厂、事件、持久化、图资产导出、阶段汇总等多重职责。 |
 | 文献学能力 | `src/research/phases/observe_phase.py`, `src/research/observe_philology.py`, `src/research/catalog_contract.py`, `src/research/exegesis_contract.py`, `src/research/fragment_contract.py`, `src/research/textual_criticism/*`, `src/contexts/collation/*` | Observe 已具备目录、训诂、辑佚、考据、校勘、版本 witness、topic discovery 与工作台化资产入口，属于较成熟的首轮文献学主线。 |
 | 中医推理与分析 | `src/research/phases/analyze_phase.py`, `src/research/tcm_reasoning/*`, `src/research/reasoning_template_selector.py`, `src/research/data_miner.py` | Analyze 已具备统计、证据分级、文本考据摘要消费、TCM 规则推理、GraphRAG 注入与 SelfRefine 前置上下文。 |
@@ -34,10 +34,10 @@
 | 方法层 | 对应模块 | 实现程度 | 优点 | 不足与耦合点 |
 | --- | --- | ---: | --- | --- |
 | 文献学研究：目录、版本、校勘、辑佚、训诂、考据 | `ObservePhase`, `observe_philology`, `catalog_contract`, `exegesis_contract`, `fragment_contract`, `textual_criticism`, `CollationContext` | 82% | 已把文献学资产显式建模，能输出术语表、校勘条目、目录摘要、辑佚候选、证据链与版本 witness。 | 多义词义项、朝代/学派语义漂移、跨版本传抄链仍主要靠规则与字段合同；需要更强的上下文窗口、版本谱系图与人工复核闭环。 |
-| 类编研究：分段、实体、关系、图谱、主题、知识整合 | `DocumentPreprocessor`, `AdvancedEntityExtractor`, `SemanticGraphBuilder`, `unsupervised_research_enhancer`, `Neo4jDriver`, `GraphRAG` | 80% | 已有实体图、无监督社区主题、桥接实体、新颖性候选、PG/Neo4j 投影与 GraphRAG 检索。 | `src/analysis/semantic_graph.py` 与 `src/semantic_modeling/*` 存在功能重叠；Web 分析入口有独立投影逻辑，尚未完全复用 storage factory。 |
+| 类编研究：分段、实体、关系、图谱、主题、知识整合 | `DocumentPreprocessor`, `AdvancedEntityExtractor`, `SemanticGraphService`, `AnalysisIngestionService`, `OntologyRegistry`, `Neo4jDriver`, `GraphRAG` | 84% | 已有实体图、无监督社区主题、桥接实体、新颖性候选、PG/Neo4j outbox 投影、Ontology Registry 与 GraphRAG 检索。 | 高级方剂分析仍集中在 `SemanticGraphBuilder` 内部；Web analysis 仍保留兼容 wrapper；历史图标签迁移和 schema 漂移治理仍需继续推进。 |
 | 学术研究：假说、方案、外部执行、证据分级、论文、反思 | `HypothesisEngine`, `ExperimentPhase`, `ExperimentExecutionPhase`, `AnalyzePhase`, `PublishPhase`, `ReflectPhase`, `LearningLoopOrchestrator` | 78% | 七阶段主链成立，实验边界已明确为“方案设计 + 外部结果导入”，Publish 能生成论文/IMRD/引用，Reflect 能回灌策略。 | Experiment 不应被宣传为系统内真实实验；Reflect/PolicyAdjuster 对图模式、引用质量和文献学复核结果的策略消费仍偏轻。 |
-| 本地知识增强推理 | `LLMEngine`, `CachedLLMService`, `small_model_optimizer`, `GraphRAG`, `KGRAGService`, `SelfRefineRunner` | 76% | 本地模型可控，缓存与预算保护已经建立；Analyze 可在 SelfRefine 前注入 GraphRAG。 | GraphRAG 默认需要显式启用；Qwen 对复杂考据与跨文献归纳仍需要结构化推理模板和证据约束，不能单靠自由生成。 |
-| 数据资产闭环 | `ResearchSessionRepository`, `TransactionCoordinator`, `GraphPatternMiningDaemon`, `LFITL` | 68% | PG/Neo4j 已沉淀大量结构化资产；GraphPatternMiningDaemon 有增量模式挖掘雏形。 | 图模式到学习策略、prompt bias、证据权重、few-shot 样本的闭环还不够强；守护任务缺少统一调度、观测、幂等和失败补偿合同。 |
+| 本地知识增强推理 | `LLMGateway`, `LLMEngine`, `CachedLLMService`, `small_model_optimizer`, `GraphRAG`, `SelfDiscoverPlan`, `SelfRefineRunner` | 82% | 本地模型可控，缓存与预算保护已经建立；Analyze 默认尝试注入 GraphRAG；Gateway 已承接 schema validation、planner、token budget 与降级结果。 | 仍有历史调用点未完全迁入 `LLMGateway`；Qwen 7B 对复杂考据、跨文献归纳和长证据链仍需要检索约束、评测闭环与人工复核。 |
+| 数据资产闭环 | `ResearchSessionRepository`, `TransactionCoordinator`, `GraphPatternMiningDaemon`, `LearningInsightRepo`, `ResearchLearningService`, `LFITL` | 76% | PG/Neo4j 已沉淀结构化资产；LearningInsight 表、repository、GraphPatternMiningDaemon insight 转换、PromptBiasCompiler 与 GraphWeightUpdater 已形成闭环骨架。 | ResearchLearningService 尚未成为每轮 runtime 的强制调度任务；insight 噪声控制、过期策略、人工审核队列和 dashboard 仍需产品化。 |
 
 总体判断：系统已经具备中医文献科研平台骨架，尤其是文献学资产建模和结构化存储主链较扎实。若要达到“深层文献学 + 自学习科研助手”的目标，下一步必须让数据库中的资产成为下一轮研究的先验，而不是只成为查询结果。
 
@@ -53,8 +53,9 @@
 4. 七阶段顺序执行：Observe、Hypothesis、Experiment、ExperimentExecution、Analyze、Publish、Reflect。
 5. `PhaseResult` 将每阶段结果收敛为 `results / artifacts / metadata`。
 6. `StorageBackendFactory` 在可用时初始化 PostgreSQL 与 Neo4j。
-7. 研究 session、phase execution、artifact、文献学资产与图资产落库或投影。
-8. Reflect 与 PolicyAdjuster 形成下一轮学习策略。
+7. 研究 session、phase execution、artifact、文献学资产先写入 PostgreSQL；图资产优先通过 Graph Outbox 排队，再由 worker 幂等投影到 Neo4j。
+8. Analyze 默认尝试 GraphRAG 检索 EvidenceClaim、VersionWitness、Citation 等图谱证据；Publish 可进一步构造 citation trace。
+9. Reflect、LearningInsight 与 LFITL 把专家反馈、图模式和质量评估转成下一轮 prompt bias 或检索权重。
 
 ### 4.2 优点
 
@@ -63,13 +64,13 @@
 - **文献学资产已一等化**：Observe 不只是采集文本，已经开始承载版本、目录、校勘、训诂、辑佚、考据与 topic discovery。
 - **结构化存储真实接线**：开发/生产配置默认 PostgreSQL + Neo4j；事务协调器提供 PG flush、Neo4j 执行、PG commit 与补偿机制。
 - **本地模型保护较完整**：Qwen Q8_0 默认路径明确，GPU layers 从历史不稳定的全量卸载降为 28，且有缓存、预算、planner 和 purpose profile。
-- **无监督增强已有在线入口**：`/api/analysis/text` 与 `/api/analysis/distill` 已能生成社区主题、桥接实体、新颖性候选，并落入 PG/Neo4j 投影。
+- **无监督增强已有在线入口**：`/api/analysis/text` 与 `/api/analysis/distill` 已能生成社区主题、桥接实体、新颖性候选，并经 `AnalysisIngestionService` 与 outbox 投影治理接入 PG/Neo4j。
 
 ### 4.3 不足
 
-- **GraphRAG 尚非每轮强制能力**：Analyze 中 `_apply_graph_rag()` 需要 `enable_graph_rag` 或学习策略开启；如果上游没有明确打开，Qwen 仍可能缺少图谱事实约束。
-- **Web 分析入口仍有旁路**：`src/web/routes/analysis.py` 自建 Neo4j driver、SQLite KG singleton 与投影逻辑，未完全复用 `StorageBackendFactory` 与 `TransactionCoordinator`。
-- **图模式挖掘未产品化**：`GraphPatternMiningDaemon` 可查询高频 Herb-Prescription-Symptom 模式，但调度、状态、失败补偿、PG 记录与主链消费合同仍薄。
+- **GraphRAG 默认化仍依赖运行侧资产质量**：Analyze 已默认开启 GraphRAG，但 Neo4j 不可用、图资产未及时投影、typed asset 缺 traceability 时仍会降级为空证据块。
+- **Web 分析入口仍保留兼容包袱**：`src/web/routes/analysis.py` 已迁入 `AnalysisIngestionService` 与 outbox，但旧 `_project_to_neo4j()` wrapper 仍需保留一段时间以兼容历史测试和外部调用。
+- **图模式挖掘仍未完全产品化**：`GraphPatternMiningDaemon` 已禁止默认模拟输出并可转为 LearningInsight，但调度、状态、失败补偿、PG 记录与 dashboard 仍薄。
 - **文献学深层推断仍偏规则驱动**：文本考据服务已能做作者/年代/真伪裁定，但对传抄链、同词异义、异文沿袭和学派语义漂移的上下文建模还不足。
 - **中心类职责过宽**：`ResearchPipeline` 和 `PhaseOrchestrator` 承担太多胶水与治理职责，后续新增边界上下文时容易继续堆入中心枢纽。
 
@@ -77,16 +78,16 @@
 
 | 模块 | 优点 | 技术债务 / 耦合点 | 优先级 |
 | --- | --- | --- | --- |
-| `ResearchRuntimeService` | 统一入口、profile、phase context、publish policy、storage lifecycle。 | 仍导入弃用 `ResearchOrchestrator` 的 DTO 与辅助函数；后续可把 DTO 与 `topic_to_phase_context` 抽到独立 contract。 | 高 |
+| `ResearchRuntimeService` | 统一入口、profile、phase context、publish policy、storage lifecycle；已改用 `orchestration_contract.py`。 | 仍与 `ResearchPipeline` / legacy orchestrator 生命周期耦合，后续应把 phase runner 与 artifact persistence 再切小。 | 高 |
 | `ResearchPipeline` | 模块注册、注入、事件、服务启动完整；能承载七阶段主链。 | 仍是大中心，兼容导入多、可选依赖多、bootstrap 复杂；新能力容易继续塞入 pipeline。 | 高 |
 | `PhaseOrchestrator` | 阶段生命周期、事件、持久化导出、图资产投影能力强。 | 负责调度、持久化、图谱与 metadata 装配，fan-out 大；建议拆成 phase runner、artifact persister、graph projector。 | 高 |
 | `ObservePhase` | 文献学最关键入口，已经输出丰富资产。 | 子职责很多：采集、ingestion、collation、topic discovery、textual criticism、graph assets；建议按文献学 bounded context 拆服务。 | 高 |
-| `AnalyzePhase` | 统计、证据分级、TCM 推理、GraphRAG、SelfRefine 串联完整。 | `_apply_graph_rag()` 是可选注入；证据协议、TCM 规则、GraphRAG 结果与 self-refine 输入仍可形成更强 contract。 | 高 |
+| `AnalyzePhase` | 统计、证据分级、TCM 推理、GraphRAG、SelfRefine 串联完整；GraphRAG 已默认化并可显式关闭。 | GraphRAG、TCMReasoning、SelfRefine 与 metadata 装配仍在同一阶段 mixin 内，后续应抽出 AnalysisEvidenceContext。 | 高 |
 | `PublishPhase` | 论文、IMRD、引用、报告产出较成熟。 | 输出路径多，引用质量与证据链一致性需要更强审稿式检查；文献综述仍可被 GraphRAG 和 citation graph 增强。 | 中 |
-| `StorageBackendFactory` + `TransactionCoordinator` | PG/Neo4j 双写、降级、观测与补偿已有基础。 | 双写不是严格分布式事务；Neo4j 失败后依赖补偿/回填，建议增加 outbox 和幂等 projector。 | 高 |
-| `Neo4jDriver` | 约束、全文索引、schema version、schema drift 检查已有实现。 | schema 定义仍分散在 graph_schema、driver、GraphRAG typed assets、analysis projection；建议建立独立 ontology contract。 | 高 |
-| `LLMEngine` + `CachedLLMService` | 本地 GGUF 能稳定运行，缓存、token budget、small model optimizer 已接入。 | llama-cpp 初始化、CUDA DLL、生成锁、模型参数仍偏实现层；建议建立 LLM Gateway，把模型调用、GraphRAG、SelfRefine、role profile 全部纳入统一 contract。 | 中 |
-| `GraphPatternMiningDaemon` | 高频子图挖掘雏形清晰。 | 无统一调度和持久化 contract；无驱动时返回模拟模式，生产需要显式禁用模拟输出。 | 高 |
+| `StorageBackendFactory` + `TransactionCoordinator` | PG/Neo4j 双写、降级、观测、outbox 与幂等 projector 已具备基础。 | 仍需把 outbox worker 运行状态、DLQ、backfill 与 UI/dashboard 统一呈现；Neo4j 最终一致延迟需要对用户可见。 | 高 |
+| `Neo4jDriver` | 约束、全文索引、schema version、schema drift 检查已有实现；已优先读取 Ontology Registry。 | 仍需处理历史 `Prescription` 与新 `Formula` 标签、旧图资产回填、GraphRAG typed asset 与 ontology 字段完全一致。 | 高 |
+| `LLMGateway` + `CachedLLMService` | Gateway、schema validation、token budget、planner、缓存与降级结果已有统一入口。 | 历史阶段仍可能绕过 Gateway；需要把 role profile、Self-Discover、GraphRAG retrieval policy 更彻底地纳入同一请求合同。 | 中 |
+| `GraphPatternMiningDaemon` | 高频子图挖掘雏形清晰，可输出 LearningInsight，默认不再吐模拟生产数据。 | 仍缺统一 scheduler、游标持久化可视化、失败补偿和人工审核队列。 | 高 |
 | `self_learning_engine.py` | 兼容旧测试和导入。 | 已是“下版本删除” shim，新代码不应依赖；需要持续守门，避免主链回流旧类。 | 中 |
 
 ## 6. 没有真实进入主链或应收敛的模块
@@ -95,11 +96,11 @@
 
 | 模块 / 路径 | 当前状态 | 建议 |
 | --- | --- | --- |
-| `src/orchestration/research_orchestrator.py` | 构造函数已发出“改用 ResearchRuntimeService”的弃用警告，但 DTO/辅助函数仍被 runtime 引用。 | 抽出 `orchestration_contract.py`，让 runtime 不再导入弃用类文件。 |
+| `src/orchestration/research_orchestrator.py` | 已退为兼容门面，DTO/辅助函数已迁入 `orchestration_contract.py`。 | 继续保留弃用警告；下一阶段只保留薄 wrapper，主链不得新增依赖。 |
 | `src/learning/self_learning_engine.py` 与 `src/learning/adaptive_tuner.py` | 明确为 T5.6 兼容 shim，下版本删除。 | 新代码只使用 `PolicyAdjuster`、`GraphPatternMiner/LFITL`；测试继续守门主链不得直接导入 shim。 |
-| `src/web/routes/analysis.py` 的 Neo4j 投影与 KG singleton | 在线分析入口真实可用，但与 storage 主链存在并行投影逻辑。 | 迁入 `AnalysisIngestionService`，复用 `StorageBackendFactory`、outbox 和 graph projector。 |
+| `src/web/routes/analysis.py` 的旧 Neo4j 投影 wrapper | 在线分析入口已迁入 `AnalysisIngestionService`，直接 `GraphDatabase.driver` 旁路已关闭。 | 保留 `_project_to_neo4j()` 兼容 wrapper 并发出 `DeprecationWarning`；新代码只调用服务层与 outbox。 |
 | `src/knowledge/kg_rag.py` | AI assistant 场景可用，主科研 Analyze 主要使用 `src/llm/graph_rag.py`。 | 保留为交互问答 RAG；不要与科研主链 GraphRAG 混用合同。 |
-| `src/semantic_modeling/*` 与 `src/analysis/semantic_graph.py` | 语义建图职责有重叠。 | 选定一个为主建图服务，另一个只保留方法库/兼容导出。 |
+| `src/semantic_modeling/*` 与 `src/analysis/semantic_graph.py` | 主建图入口已收敛到 `src.analysis.semantic_graph.SemanticGraphService`；`src.semantic_modeling.semantic_graph_builder` 是弃用 shim。 | `src.semantic_modeling.methods` 保留为方剂结构、网络药理、复杂性分析等方法库，后续避免再承载主链建图职责。 |
 | `src/ai_assistant/*` | 历史聊天门面，具备 KG-RAG 接入。 | 定位为 Web/API 的交互 assistant bounded context，不应直接写科研主链事实。 |
 | `tools/backfill_*`, `legacy_learning_feedback_backfill.py` | 治理和历史回填工具。 | 保持工具属性，禁止业务运行时隐式调用。 |
 | `archive/dead_code_2026_04_28/*` | 已归档死代码与 shim 生成脚本。 | 不再作为实现参考，只可作为迁移历史。 |
@@ -267,6 +268,19 @@ flowchart TD
     J --> K[学习反馈: 修正词典、义项、权重、prompt]
     K --> D
 ```
+
+### 7.6 NLP 前沿方法到本地中医文献平台的落地映射
+
+本系统使用的是本地 7B 量级 Qwen GGUF 模型，优势是私有、可控、可缓存，弱点是长上下文、复杂跨文献推理与严格引用一致性不如大参数云模型。因此前沿 NLP 方法不能简单照搬“更大模型 + 更长 prompt”，而应转成“检索、结构、验证、学习闭环”四类工程能力。
+
+| 研究方向 | 本系统落地点 | 具体建议 | 理由 | 代价 |
+| --- | --- | --- | --- | --- |
+| Retrieval-Augmented Generation / GraphRAG | `src/llm/graph_rag.py`, `AnalyzePhase`, `PublishPhase`, Neo4j | 继续把 GraphRAG 作为 Analyze/Publish 默认证据层，并让 `RetrievalResult.traceability` 覆盖 EvidenceClaim、Citation、VersionWitness、VariantReading。 | 本地 7B 模型最需要外部事实约束；图检索能把方剂、药物、版本、引文和证据声明连成可审计上下文。 | Neo4j 投影延迟会影响召回；查询缓存、schema 对齐和缺图降级都要维护。 |
+| Self-Discover / structured reasoning | `src/contexts/llm_reasoning/self_discover.py`, `reasoning_template_selector.py` | 对训诂、版本沿革、病机链、引用综述四类复杂任务，先生成 reasoning plan，再调用 Qwen 填充证据槽。 | 中医文献研究强调方法次第；先定“校勘/训诂/考据/方证”的推理框架，比直接自由生成更稳。 | 多一步规划会增加延迟；模板维护不当会造成机械化推理。 |
+| Self-Refine / evaluator loop | `LLMGateway`, `quality/*`, `tools/evaluate_research_quality.py` | 将 citation grounding、gold set 指标、JSON schema validation 作为 evaluator，失败时触发重写或降级为 unsupported conclusion。 | 引用综述和文献考据最怕“说得像但无出处”；评估器能把 hallucination 变成可计数风险。 | 初期评估规则粗糙，可能误伤合理论述；需要专家标注持续校准。 |
+| Tool-using agent / ReAct style workflow | `ResearchRuntimeService`, phase context, tools/export/import expert review | 把每个阶段限制为明确工具动作：检索、建图、证据分级、生成、引用审计、专家复核回写，而不是让 LLM 自行决定全流程。 | 本地科研流程需要可复现；工具边界比自由 agent 更适合医学文献研究和审计。 | 编排代码会更多；阶段失败恢复、幂等和状态可视化需要额外工程。 |
+| Learning from feedback / preference-style loop | `LearningInsightRepo`, `ResearchLearningService`, `PromptBiasCompiler`, `GraphWeightUpdater` | 把专家驳回、弱证据、低质量引用、图模式高频关系沉淀为 LearningInsight，再进入 prompt bias 与 GraphRAG weight hints。 | PG/Neo4j 已沉淀资产，真正价值在下一轮研究能自动避错、加权和推荐主题。 | 噪声 insight 会污染推理；必须有置信度阈值、过期策略和人工审核。 |
+| Small model reliability engineering | `CachedLLMService`, `token_budget_policy`, `LLMRoleProfile`, `LLMGateway` | 为校勘家、训诂家、经方家等角色维护稳定 system prompt；用 token budget、缓存和 schema 限制输出形态。 | 7B 本地模型需要“窄任务 + 明确角色 + 强约束输出”才能稳定服务科研主链。 | 角色 prompt 和 schema 会增加维护成本；过强约束可能降低生成灵活性。 |
 
 ## 8. 具体优化方案：30 个代码生成指令
 
@@ -819,3 +833,33 @@ class CitationGroundingRecord(TypedDict):
 下一步最重要的不是继续新增零散模块，而是完成三件事：第一，把 GraphRAG 和引用证据约束变成 Qwen 生成的默认前提；第二，把 PG/Neo4j 中沉淀的资产转化成无监督学习 insight，并回灌到下一轮研究策略；第三，把文献学深层能力从“字段合同 + 规则判断”推进到“版本谱系 + 上下文义项 + 人工复核 + 学习反馈”的闭环。
 
 只要沿这个方向推进，本软件可以从“中医文献半自动科研助手”升级为“本地化、可追溯、可自学习的中医古代文献科研平台”。
+
+## 13. 2026-05-01 实施状态校准
+
+截至当前代码基线 `d96024a feat: consolidate research architecture evolution`，第 8 节中的核心演进项已经不再只是设计建议，而是进入了可测试的实现阶段。后续阅读本文时，应把第 8 节理解为“架构生成指令与验收合同”，把本节理解为“当前实现快照”。
+
+| 方向 | 当前状态 | 已落地文件 | 剩余工作 |
+| --- | --- | --- | --- |
+| 统一编排 contract | 已落地 | `src/orchestration/orchestration_contract.py`, `research_runtime_service.py`, `research_orchestrator.py` | 继续缩小 legacy orchestrator，只保留兼容入口。 |
+| LLM Gateway | 已落地骨架 | `src/contexts/llm_reasoning/*`, `src/infra/llm_service.py` | 将所有历史自由 LLM 调用迁入 Gateway，并补齐 role profile 默认策略。 |
+| GraphRAG 默认化 | 已落地 | `src/research/phases/analyze_phase.py`, `src/research/phases/publish_phase.py`, `src/llm/graph_rag.py` | 加强图资产缺失诊断、typed asset 覆盖率和 traceability 质量。 |
+| Ontology Registry | 已落地 | `config/ontology/tcm_literature_graph.yml`, `src/storage/ontology/*`, `src/storage/neo4j_driver.py` | 历史标签/关系回填，确保旧数据与新 ontology 完全一致。 |
+| Graph Outbox | 已落地 | `src/storage/outbox/graph_projection.py`, `graph_projector.py`, `outbox_worker.py`, `backend_factory.py` | 增加 DLQ、投影 dashboard、生产 backfill 与告警。 |
+| 无监督学习 insight | 已落地骨架 | `src/learning/learning_insight_repo.py`, `research_learning_service.py`, `graph_pattern_miner.py`, `src/contexts/lfitl/*` | 将 ResearchLearningService 纳入每轮 runtime 调度；建立人工审核和 insight 过期策略。 |
+| 文献学深层资产 | 已落地第一轮 | `observe_philology.py`, `version_lineage_contract.py`, `textual_criticism/*`, `exegesis_contract.py` | 扩充专家标注、上下文义项评测和版本谱系可视化。 |
+| 引用一致性 | 已落地第一轮 | `citation_evidence_synthesizer.py`, `citation_grounding_evaluator.py`, `tools/evaluate_research_quality.py` | 让 Publish 输出更稳定地携带 claim block 和 citation grounding record。 |
+| SemanticGraphService 收敛 | 已落地 | `src/analysis/semantic_graph.py`, `src/semantic_modeling/semantic_graph_builder.py`, `src/research/module_pipeline.py` | 清理历史导入，防止新代码继续依赖 shim。 |
+| 阶段化回归 | 已落地 | `tools/run_architecture_evolution_regression.py`, `.vscode/tasks.json`, `tests/unit/test_architecture_evolution_regression.py` | 随新增模块维护 manifest，并把关键 e2e 纳入可选严格模式。 |
+
+当前已验证的回归结果：
+
+- Architecture evolution regression：`369 passed, 3 warnings`。
+- Card G minimal regression：`140 passed`。
+- 追加模块测试：`36 passed`。
+- VS Code diagnostics：`No errors found`。
+
+当前仍需特别注意的工程事实：
+
+- `cache/task_layers/cache_store.db` 是运行时缓存，当前工作区仍可能显示为本地修改，不应纳入架构代码提交。
+- `src/web/routes/analysis.py` 保留兼容 wrapper 与一个已知 `invalid escape sequence` warning，后续可在不改变行为的情况下修正。
+- 本文中的阶段计划仍然有效，但阶段 1、2、3、4、5 的部分工作已经进入“实现后加固”而不是“从零开始”。下一轮重点应放在生产调度、dashboard、历史数据回填、专家审核与质量评测闭环。

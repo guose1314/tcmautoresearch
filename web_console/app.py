@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Optional
 
@@ -47,7 +48,27 @@ def create_app(
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
+        production_quality_task = None
+        try:
+            from src.monitoring.production_quality import (
+                start_production_quality_aggregation_task,
+                stop_production_quality_aggregation_task,
+            )
+
+            production_quality_task = start_production_quality_aggregation_task(
+                app.state
+            )
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "生产质量聚合任务启动失败", exc_info=True
+            )
+            stop_production_quality_aggregation_task = None  # type: ignore[assignment]
         yield
+        if (
+            production_quality_task is not None
+            and stop_production_quality_aggregation_task is not None
+        ):
+            await stop_production_quality_aggregation_task(production_quality_task)
         monitoring_service = getattr(app.state, "monitoring_service", None)
         if monitoring_service is not None:
             factory = getattr(monitoring_service, "_storage_factory", None)
@@ -129,15 +150,23 @@ def create_app(
     # ---- 仪表盘 & 业务页面路由 (HTMX 端点) ----
     from src.web.routes.analysis import router as analysis_router
     from src.web.routes.assistant import router as assistant_router
+    from src.web.routes.candidate_edge_review import (
+        router as candidate_edge_review_router,
+    )
     from src.web.routes.catalog import router as catalog_router
     from src.web.routes.dashboard import router as dashboard_router
+    from src.web.routes.production_monitoring import (
+        router as production_monitoring_router,
+    )
     from src.web.routes.research import router as research_router
 
     app.include_router(dashboard_router)
+    app.include_router(production_monitoring_router)
     app.include_router(analysis_router)
     app.include_router(assistant_router)
     app.include_router(research_router)
     app.include_router(catalog_router)
+    app.include_router(candidate_edge_review_router)
 
     # ---- Jinja2 模板支持 (统一登录页) ----
     if _WEB_TEMPLATES_DIR.is_dir():

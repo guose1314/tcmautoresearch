@@ -646,11 +646,31 @@ def call_registered_prompt(
     if cached is not None:
         return cached
 
-    response = str(
-        llm_engine.generate(
-            resolved_prompt.user_prompt, system_prompt=resolved_prompt.system_prompt
-        )
+    from src.llm.llm_gateway import generate_with_gateway
+
+    gateway_result = generate_with_gateway(
+        llm_engine,
+        resolved_prompt.user_prompt,
+        resolved_prompt.system_prompt,
+        prompt_version=f"{resolved_prompt.name}@{resolved_prompt.version}",
+        phase=str(
+            variables.get("phase") or resolved_prompt.purpose or "prompt_registry"
+        ),
+        purpose=resolved_prompt.purpose,
+        task_type=resolved_prompt.task,
+        json_output=str(resolved_prompt.output_kind or "").startswith("json"),
+        metadata={
+            "prompt_name": resolved_prompt.name,
+            "prompt_version": f"{resolved_prompt.name}@{resolved_prompt.version}",
+            "schema_version": resolved_prompt.schema_version,
+            "output_kind": resolved_prompt.output_kind,
+            "output_schema": resolved_prompt.output_schema,
+            "response_format": "json"
+            if str(resolved_prompt.output_kind or "").startswith("json")
+            else "text",
+        },
     )
+    response = str(gateway_result.text or "")
     task_cache.put_text(
         "prompt",
         resolved_prompt.name,
@@ -661,6 +681,7 @@ def call_registered_prompt(
             "task": resolved_prompt.task,
             "output_kind": resolved_prompt.output_kind,
             "llm": llm_descriptor,
+            "llm_gateway": dict(gateway_result.metadata or {}),
         },
     )
     return response

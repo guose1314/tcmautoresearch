@@ -6,16 +6,20 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets as _secrets
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from src.web.auth import create_access_token, get_current_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_CONSOLE_INDEX_FILE = _REPO_ROOT / "web_console" / "static" / "index.html"
 
 # ---------------------------------------------------------------------------
 # 用户加载（从 secrets.yml → security.console_auth.users）
@@ -60,7 +64,9 @@ def _get_management_api_key_from_sources() -> str:
     security = _load_security_config()
     candidates = (
         security.get("management_api_key"),
-        security.get("access_control", {}).get("management_api_key") if isinstance(security.get("access_control"), dict) else "",
+        security.get("access_control", {}).get("management_api_key")
+        if isinstance(security.get("access_control"), dict)
+        else "",
     )
     for value in candidates:
         text = str(value or "").strip()
@@ -78,11 +84,7 @@ def _load_users() -> Dict[str, Dict[str, Any]]:
     users: Dict[str, Dict[str, Any]] = {}
 
     # 1. 从安全配置加载（优先 project root，其次当前工作目录）
-    user_list = (
-        _load_security_config()
-        .get("console_auth", {})
-        .get("users", [])
-    )
+    user_list = _load_security_config().get("console_auth", {}).get("users", [])
     for entry in user_list:
         if isinstance(entry, dict) and entry.get("username"):
             uname = str(entry["username"]).strip().lower()
@@ -224,7 +226,10 @@ async def login(
                 api_key = str(body.get("api_key") or "").strip() or None
         except Exception:
             pass
-    elif "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+    elif (
+        "application/x-www-form-urlencoded" in content_type
+        or "multipart/form-data" in content_type
+    ):
         try:
             form_data = await request.form()
             req_username = str(form_data.get("username") or "").strip()
@@ -343,6 +348,16 @@ async def login_page(request: Request) -> HTMLResponse:
 @router.get("/dashboard", response_class=HTMLResponse, tags=["pages"])
 async def dashboard_page(request: Request) -> HTMLResponse:
     """渲染主控台页面（前端 JS 负责 JWT 校验）。"""
+    templates = request.app.state.templates
+    return templates.TemplateResponse(request, "dashboard.html")
+
+
+@router.get("/console", tags=["pages"])
+async def console_page(request: Request):
+    """渲染实时任务控制台，兼容登录页 ``next=console`` 跳转。"""
+    if _CONSOLE_INDEX_FILE.is_file():
+        return FileResponse(_CONSOLE_INDEX_FILE)
+
     templates = request.app.state.templates
     return templates.TemplateResponse(request, "dashboard.html")
 

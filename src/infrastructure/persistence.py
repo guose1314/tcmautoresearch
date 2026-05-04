@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import enum
+import hashlib
 import json
 import logging
 import os
@@ -229,6 +230,12 @@ class Document(Base):
         CHAR(64), nullable=True
     )  # SHA-256 hex; backfill 后才能 NOT NULL
     ingest_run_id = Column(String(64), nullable=True)
+    canonical_document_key = Column(String(128), nullable=True)
+    canonical_title = Column(String(500), nullable=True)
+    normalized_title = Column(String(500), nullable=True)
+    source_file_hash = Column(CHAR(64), nullable=True)
+    edition_hint = Column(String(255), nullable=True)
+    document_key_version = Column(String(32), nullable=True)
     document_urn = Column(String(500), nullable=True)
     document_title = Column(String(500), nullable=True)
     source_type = Column(String(64), nullable=True)
@@ -289,11 +296,20 @@ class Document(Base):
     logs = relationship(
         "ProcessingLog", back_populates="document", cascade="all, delete-orphan"
     )
+    edition_lineages = relationship(
+        "EditionLineage", back_populates="document", cascade="all, delete-orphan"
+    )
+    variant_readings = relationship(
+        "VariantReading", back_populates="document", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("idx_documents_status", "process_status"),
         Index("idx_documents_timestamp", "processing_timestamp"),
         Index("idx_documents_file", "source_file"),
+        Index("idx_documents_canonical_key", "canonical_document_key"),
+        Index("idx_documents_normalized_title", "normalized_title"),
+        Index("idx_documents_source_file_hash", "source_file_hash"),
         Index("idx_documents_urn", "document_urn"),
         Index("idx_documents_catalog_id", "catalog_id"),
         Index("idx_documents_lineage", "version_lineage_key"),
@@ -303,6 +319,9 @@ class Document(Base):
         Index("idx_documents_ingest_run", "ingest_run_id"),
         UniqueConstraint(
             "source_file", "content_hash", name="uq_documents_source_hash"
+        ),
+        UniqueConstraint(
+            "canonical_document_key", name="uq_documents_canonical_document_key"
         ),
         CheckConstraint(
             "quality_score >= 0 AND quality_score <= 1",
@@ -860,6 +879,160 @@ class ExternalEvidence(Base):
     )
 
 
+class EditionLineage(Base):
+    """Document edition / witness lineage attached to a canonical document."""
+
+    __tablename__ = "edition_lineages"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    document_id = Column(
+        GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True
+    )
+    canonical_document_key = Column(String(128), nullable=False)
+    version_lineage_key = Column(String(500), nullable=True)
+    witness_key = Column(String(500), nullable=False)
+    work_title = Column(String(500), nullable=True)
+    fragment_title = Column(String(500), nullable=True)
+    edition = Column(String(255), nullable=True)
+    dynasty = Column(String(255), nullable=True)
+    author = Column(String(255), nullable=True)
+    source_ref = Column(String(1000), nullable=True)
+    source_type = Column(String(64), nullable=True)
+    base_witness_key = Column(String(500), nullable=True)
+    lineage_relation = Column(String(64), nullable=True)
+    notes = Column(Text, nullable=True)
+    metadata_json = Column(JSON, default=dict, nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    document = relationship("Document", back_populates="edition_lineages")
+    variant_readings = relationship(
+        "VariantReading", back_populates="edition_lineage", passive_deletes=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "canonical_document_key",
+            "witness_key",
+            name="uq_edition_lineage_canonical_witness",
+        ),
+        Index("idx_edition_lineages_document", "document_id"),
+        Index("idx_edition_lineages_canonical", "canonical_document_key"),
+        Index("idx_edition_lineages_lineage", "version_lineage_key"),
+        Index("idx_edition_lineages_witness", "witness_key"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": str(self.id),
+            "document_id": str(self.document_id) if self.document_id else None,
+            "canonical_document_key": self.canonical_document_key,
+            "version_lineage_key": self.version_lineage_key,
+            "witness_key": self.witness_key,
+            "work_title": self.work_title,
+            "fragment_title": self.fragment_title,
+            "edition": self.edition,
+            "dynasty": self.dynasty,
+            "author": self.author,
+            "source_ref": self.source_ref,
+            "source_type": self.source_type,
+            "base_witness_key": self.base_witness_key,
+            "lineage_relation": self.lineage_relation,
+            "notes": self.notes,
+            "metadata": dict(self.metadata_json or {}),
+        }
+
+
+class VariantReading(Base):
+    """Variant reading, annotation, and source evidence at edition granularity."""
+
+    __tablename__ = "variant_readings"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    document_id = Column(
+        GUID(), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True
+    )
+    edition_lineage_id = Column(
+        GUID(), ForeignKey("edition_lineages.id", ondelete="SET NULL"), nullable=True
+    )
+    variant_key = Column(String(64), nullable=False)
+    canonical_document_key = Column(String(128), nullable=False)
+    version_lineage_key = Column(String(500), nullable=True)
+    witness_key = Column(String(500), nullable=True)
+    base_witness_key = Column(String(500), nullable=True)
+    segment_id = Column(String(128), nullable=True)
+    position_label = Column(String(255), nullable=True)
+    char_start = Column(Integer, nullable=True)
+    char_end = Column(Integer, nullable=True)
+    base_text = Column(Text, nullable=True)
+    variant_text = Column(Text, nullable=False)
+    normalized_meaning = Column(Text, nullable=True)
+    annotation = Column(Text, nullable=True)
+    source_ref = Column(String(1000), nullable=True)
+    evidence_ref = Column(String(1000), nullable=True)
+    evidence_json = Column(JSON, default=dict, nullable=False)
+    review_status = Column(String(32), nullable=False, default="pending")
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    document = relationship("Document", back_populates="variant_readings")
+    edition_lineage = relationship("EditionLineage", back_populates="variant_readings")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "canonical_document_key",
+            "witness_key",
+            "variant_key",
+            name="uq_variant_reading_canonical_witness_key",
+        ),
+        Index("idx_variant_readings_document", "document_id"),
+        Index("idx_variant_readings_edition", "edition_lineage_id"),
+        Index("idx_variant_readings_canonical", "canonical_document_key"),
+        Index("idx_variant_readings_witness", "witness_key"),
+        Index("idx_variant_readings_segment", "segment_id"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": str(self.id),
+            "document_id": str(self.document_id) if self.document_id else None,
+            "edition_lineage_id": str(self.edition_lineage_id)
+            if self.edition_lineage_id
+            else None,
+            "variant_key": self.variant_key,
+            "canonical_document_key": self.canonical_document_key,
+            "version_lineage_key": self.version_lineage_key,
+            "witness_key": self.witness_key,
+            "base_witness_key": self.base_witness_key,
+            "segment_id": self.segment_id,
+            "position_label": self.position_label,
+            "char_start": self.char_start,
+            "char_end": self.char_end,
+            "base_text": self.base_text,
+            "variant_text": self.variant_text,
+            "normalized_meaning": self.normalized_meaning,
+            "annotation": self.annotation,
+            "source_ref": self.source_ref,
+            "evidence_ref": self.evidence_ref,
+            "evidence": dict(self.evidence_json or {}),
+            "review_status": self.review_status,
+        }
+
+
 class ResearchLearningFeedback(Base):
     """Research feedback library entries for replay and long-term querying."""
 
@@ -1104,6 +1277,95 @@ class OutboxDLQORM(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# P19 — 生产质量监控 Outbox / DLQ / 聚合快照
+# ---------------------------------------------------------------------------
+
+
+class ProductionMonitoringOutboxORM(Base):
+    """生产监控 outbox：记录可重放的质量/失败事件。"""
+
+    __tablename__ = "production_monitoring_outbox"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    event_key = Column(String(128), nullable=False, unique=True)
+    event_type = Column(String(96), nullable=False)
+    source = Column(String(64), nullable=False, default="production_monitoring")
+    aggregate_id = Column(String(255), nullable=True)
+    payload = Column(JSON, default=dict, nullable=False)
+    status = Column(String(16), nullable=False, default=OutboxStatusEnum.PENDING.value)
+    retry_count = Column(Integer, default=0, nullable=False)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    processed_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("idx_prod_mon_outbox_status_created", "status", "created_at"),
+        Index("idx_prod_mon_outbox_event_type", "event_type"),
+        Index("idx_prod_mon_outbox_aggregate", "aggregate_id"),
+    )
+
+
+class ProductionMonitoringDLQORM(Base):
+    """生产监控死信：批处理、LLM、JSON、图谱投影等失败事件归档。"""
+
+    __tablename__ = "production_monitoring_dlq"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    event_key = Column(String(128), nullable=False, unique=True)
+    original_event_id = Column(GUID(), nullable=True, index=True)
+    event_type = Column(String(96), nullable=False)
+    category = Column(String(64), nullable=False)
+    source = Column(String(64), nullable=False, default="production_monitoring")
+    aggregate_id = Column(String(255), nullable=True)
+    payload = Column(JSON, default=dict, nullable=False)
+    retry_count = Column(Integer, default=0, nullable=False)
+    replay_count = Column(Integer, default=0, nullable=False)
+    replay_status = Column(String(16), nullable=False, default="pending")
+    last_error = Column(Text, nullable=True)
+    first_seen_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    last_seen_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    last_replayed_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("idx_prod_mon_dlq_category_seen", "category", "last_seen_at"),
+        Index("idx_prod_mon_dlq_replay_status", "replay_status", "last_seen_at"),
+        Index("idx_prod_mon_dlq_event_type", "event_type"),
+    )
+
+
+class ProductionQualitySnapshotORM(Base):
+    """生产质量指标快照，供 dashboard 快速读取和历史追踪。"""
+
+    __tablename__ = "production_quality_snapshots"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    source = Column(String(64), nullable=False, default="batch_distill")
+    window_label = Column(String(128), nullable=False, default="recent")
+    metrics_json = Column(JSON, default=dict, nullable=False)
+    event_counts_json = Column(JSON, default=dict, nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_prod_quality_snapshot_created", "created_at"),
+        Index("idx_prod_quality_snapshot_source", "source", "created_at"),
+    )
+
+
 def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
@@ -1232,9 +1494,11 @@ class DatabaseManager:
         report: Dict[str, Any] = {
             "status": "skip",
             "checked_at": dt_module.datetime.now(dt_module.timezone.utc).isoformat(),
-            "database_type": self.engine.dialect.name
-            if self.engine is not None
-            else make_url(self.connection_string).get_backend_name(),
+            "database_type": (
+                self.engine.dialect.name
+                if self.engine is not None
+                else make_url(self.connection_string).get_backend_name()
+            ),
             "normalized_enum_count": 0,
             "normalized_label_count": 0,
             "normalized_enums": [],
@@ -1400,20 +1664,24 @@ class DatabaseManager:
                 issues.append(
                     {
                         "kind": "legacy_enum",
-                        "status": "degraded"
-                        if label_lower == expected_lower
-                        else "fail",
+                        "status": (
+                            "degraded" if label_lower == expected_lower else "fail"
+                        ),
                         "table": table_name,
                         "column": column_name,
                         "enum_name": udt_name,
                         "expected_labels": list(expected_labels),
                         "actual_labels": enum_labels,
-                        "compatibility": "auto_normalized"
-                        if normalization_entry
-                        else "legacy_compatible",
-                        "message": "检测到 PostgreSQL 原生枚举列，仍处于 legacy schema 兼容模式"
-                        if label_lower == expected_lower
-                        else "PostgreSQL 原生枚举标签与当前运行时契约不兼容",
+                        "compatibility": (
+                            "auto_normalized"
+                            if normalization_entry
+                            else "legacy_compatible"
+                        ),
+                        "message": (
+                            "检测到 PostgreSQL 原生枚举列，仍处于 legacy schema 兼容模式"
+                            if label_lower == expected_lower
+                            else "PostgreSQL 原生枚举标签与当前运行时契约不兼容"
+                        ),
                     }
                 )
                 continue
@@ -1882,6 +2150,23 @@ class PersistenceService(BaseModule):
                 payload.get("relationships") or [],
                 entity_lookup,
             )
+            edition_lineages = self._persist_edition_lineages(
+                session,
+                document,
+                payload.get("edition_lineages")
+                or payload.get("editions")
+                or payload.get("version_lineages")
+                or [],
+            )
+            variant_readings = self._persist_variant_readings(
+                session,
+                document,
+                payload.get("variant_readings")
+                or payload.get("variants")
+                or payload.get("collation_entries")
+                or [],
+                edition_lineages,
+            )
 
             if "statistics" in payload:
                 self._upsert_processing_statistics(
@@ -1909,9 +2194,12 @@ class PersistenceService(BaseModule):
                 )
 
             session.flush()
-            return self._build_document_snapshot(
+            snapshot = self._build_document_snapshot(
                 session, document.id, len(relationships)
             )
+            snapshot["edition_lineage_count"] = len(edition_lineages)
+            snapshot["variant_reading_count"] = len(variant_readings)
+            return snapshot
 
     def get_document_snapshot(
         self,
@@ -2000,6 +2288,8 @@ class PersistenceService(BaseModule):
                 "documents": session.query(Document).count(),
                 "entities": session.query(Entity).count(),
                 "relationships": session.query(EntityRelationship).count(),
+                "edition_lineages": session.query(EditionLineage).count(),
+                "variant_readings": session.query(VariantReading).count(),
                 "relationship_types": session.query(RelationshipType).count(),
                 "research_records": session.query(ResearchRecord).count(),
                 "healthy": manager.health_check(),
@@ -2073,6 +2363,7 @@ class PersistenceService(BaseModule):
         document_id: Optional[str] = None,
         source_file: Optional[str] = None,
         content_hash: Optional[str] = None,
+        canonical_document_key: Optional[str] = None,
     ) -> Optional[Document]:
         if document_id:
             try:
@@ -2083,6 +2374,15 @@ class PersistenceService(BaseModule):
                 document = session.query(Document).filter_by(id=parsed_id).one_or_none()
                 if document is not None:
                     return document
+        if canonical_document_key:
+            document = (
+                session.query(Document)
+                .filter(Document.canonical_document_key == canonical_document_key)
+                .order_by(Document.created_at.asc())
+                .first()
+            )
+            if document is not None:
+                return document
         if source_file:
             query = session.query(Document).filter(Document.source_file == source_file)
             if content_hash:
@@ -2123,6 +2423,9 @@ class PersistenceService(BaseModule):
         source_file = normalized_sf
 
         content_hash = str(payload.get("content_hash") or "").strip().lower() or None
+        canonical_document_key = (
+            str(payload.get("canonical_document_key") or "").strip().lower() or None
+        )
         ingest_run_id = (
             str(payload.get("ingest_run_id") or suffix_run_id or "").strip() or None
         )
@@ -2137,12 +2440,14 @@ class PersistenceService(BaseModule):
             or None,
             source_file=source_file,
             content_hash=content_hash,
+            canonical_document_key=canonical_document_key,
         )
         if document is None:
             document = Document(
                 source_file=source_file,
                 content_hash=content_hash,
                 ingest_run_id=ingest_run_id,
+                canonical_document_key=canonical_document_key,
             )
             session.add(document)
         else:
@@ -2150,6 +2455,45 @@ class PersistenceService(BaseModule):
                 document.content_hash = content_hash
             if ingest_run_id and not document.ingest_run_id:
                 document.ingest_run_id = ingest_run_id
+            if canonical_document_key and not document.canonical_document_key:
+                document.canonical_document_key = canonical_document_key
+
+        for attr, source_key in (
+            ("canonical_title", "canonical_title"),
+            ("normalized_title", "normalized_title"),
+            ("source_file_hash", "source_file_hash"),
+            ("edition_hint", "edition_hint"),
+            ("document_key_version", "document_key_version"),
+            ("document_urn", "document_urn"),
+            ("document_title", "document_title"),
+            ("source_type", "source_type"),
+            ("catalog_id", "catalog_id"),
+            ("work_title", "work_title"),
+            ("fragment_title", "fragment_title"),
+            ("work_fragment_key", "work_fragment_key"),
+            ("version_lineage_key", "version_lineage_key"),
+            ("witness_key", "witness_key"),
+            ("dynasty", "dynasty"),
+            ("author", "author"),
+            ("edition", "edition"),
+        ):
+            value = self._optional_text(payload.get(source_key))
+            if value and not getattr(document, attr):
+                setattr(document, attr, value)
+        version_metadata = payload.get("version_metadata_json") or payload.get(
+            "version_metadata"
+        )
+        if isinstance(version_metadata, Mapping):
+            document.version_metadata_json = {
+                **dict(document.version_metadata_json or {}),
+                **dict(version_metadata),
+            }
+        if document.canonical_title and not document.document_title:
+            document.document_title = document.canonical_title
+        if document.canonical_title and not document.work_title:
+            document.work_title = document.canonical_title
+        if document.edition_hint and not document.edition:
+            document.edition = document.edition_hint
 
         document.processing_timestamp = self._parse_datetime(
             payload.get("processing_timestamp")
@@ -2184,6 +2528,12 @@ class PersistenceService(BaseModule):
                 )
             ).delete(synchronize_session=False)
         session.query(Entity).filter_by(document_id=document_id).delete(
+            synchronize_session=False
+        )
+        session.query(VariantReading).filter_by(document_id=document_id).delete(
+            synchronize_session=False
+        )
+        session.query(EditionLineage).filter_by(document_id=document_id).delete(
             synchronize_session=False
         )
         session.query(ProcessingLog).filter_by(document_id=document_id).delete(
@@ -2262,6 +2612,246 @@ class PersistenceService(BaseModule):
             relationships.append(relationship)
         session.flush()
         return relationships
+
+    def _persist_edition_lineages(
+        self,
+        session: Session,
+        document: Document,
+        payloads: Sequence[Mapping[str, Any]],
+    ) -> List[EditionLineage]:
+        rows: List[EditionLineage] = []
+        source_payloads = [dict(item) for item in payloads if isinstance(item, Mapping)]
+        if not source_payloads and any(
+            (document.witness_key, document.edition, document.version_lineage_key)
+        ):
+            source_payloads.append(self._document_to_edition_payload(document))
+
+        for payload in source_payloads:
+            canonical_key = self._canonical_document_key_for_version(document, payload)
+            witness_key = (
+                self._optional_text(
+                    payload.get("witness_key")
+                    or payload.get("witness_id")
+                    or payload.get("source_ref")
+                    or payload.get("edition")
+                )
+                or f"{canonical_key}:default"
+            )
+            row = (
+                session.query(EditionLineage)
+                .filter(
+                    EditionLineage.canonical_document_key == canonical_key,
+                    EditionLineage.witness_key == witness_key,
+                )
+                .one_or_none()
+            )
+            if row is None:
+                row = EditionLineage(
+                    document_id=document.id,
+                    canonical_document_key=canonical_key,
+                    witness_key=witness_key,
+                )
+                session.add(row)
+            elif row.document_id is None:
+                row.document_id = document.id
+            for attr, key in (
+                ("version_lineage_key", "version_lineage_key"),
+                ("work_title", "work_title"),
+                ("fragment_title", "fragment_title"),
+                ("edition", "edition"),
+                ("dynasty", "dynasty"),
+                ("author", "author"),
+                ("source_ref", "source_ref"),
+                ("source_type", "source_type"),
+                ("base_witness_key", "base_witness_key"),
+                ("lineage_relation", "lineage_relation"),
+                ("notes", "notes"),
+            ):
+                value = self._optional_text(payload.get(key))
+                if value:
+                    setattr(row, attr, value)
+            metadata = payload.get("metadata") or payload.get("metadata_json") or {}
+            if isinstance(metadata, Mapping):
+                row.metadata_json = {**dict(row.metadata_json or {}), **dict(metadata)}
+            row.updated_at = datetime.now(timezone.utc)
+            rows.append(row)
+        session.flush()
+        return rows
+
+    def _persist_variant_readings(
+        self,
+        session: Session,
+        document: Document,
+        payloads: Sequence[Mapping[str, Any]],
+        edition_lineages: Sequence[EditionLineage],
+    ) -> List[VariantReading]:
+        rows: List[VariantReading] = []
+        lineage_by_witness = {
+            str(row.witness_key or "").strip(): row for row in edition_lineages
+        }
+        for payload in payloads:
+            if not isinstance(payload, Mapping):
+                continue
+            variant_text = self._optional_text(
+                payload.get("variant_text")
+                or payload.get("target_text")
+                or payload.get("witness_text")
+            )
+            if not variant_text:
+                continue
+            canonical_key = self._canonical_document_key_for_version(document, payload)
+            witness_key = self._optional_text(
+                payload.get("witness_key")
+                or payload.get("target_witness")
+                or payload.get("witness_id")
+            )
+            base_witness_key = self._optional_text(
+                payload.get("base_witness_key") or payload.get("base_witness")
+            )
+            edition = lineage_by_witness.get(str(witness_key or ""))
+            if edition is None and witness_key:
+                edition = self._ensure_edition_lineage_for_variant(
+                    session, document, canonical_key, witness_key, payload
+                )
+                lineage_by_witness[witness_key] = edition
+
+            variant_key = self._variant_key(canonical_key, witness_key, payload)
+            row = (
+                session.query(VariantReading)
+                .filter(
+                    VariantReading.canonical_document_key == canonical_key,
+                    VariantReading.witness_key == witness_key,
+                    VariantReading.variant_key == variant_key,
+                )
+                .one_or_none()
+            )
+            if row is None:
+                row = VariantReading(
+                    document_id=document.id,
+                    edition_lineage_id=edition.id if edition is not None else None,
+                    canonical_document_key=canonical_key,
+                    witness_key=witness_key,
+                    variant_key=variant_key,
+                    variant_text=variant_text,
+                )
+                session.add(row)
+            row.document_id = document.id
+            row.edition_lineage_id = edition.id if edition is not None else None
+            row.version_lineage_key = self._optional_text(
+                payload.get("version_lineage_key")
+            ) or (edition.version_lineage_key if edition is not None else None)
+            row.base_witness_key = base_witness_key
+            row.segment_id = self._optional_text(
+                payload.get("segment_id") or payload.get("text_segment_id")
+            )
+            row.position_label = self._optional_text(
+                payload.get("position") or payload.get("location")
+            )
+            row.char_start = self._optional_int(payload.get("char_start"))
+            row.char_end = self._optional_int(payload.get("char_end"))
+            row.base_text = self._optional_text(payload.get("base_text"))
+            row.variant_text = variant_text
+            row.normalized_meaning = self._optional_text(
+                payload.get("normalized_meaning")
+                or payload.get("meaning")
+                or payload.get("semantic_delta")
+            )
+            row.annotation = self._optional_text(
+                payload.get("annotation") or payload.get("notes") or payload.get("note")
+            )
+            row.source_ref = self._optional_text(payload.get("source_ref"))
+            row.evidence_ref = self._optional_text(
+                payload.get("evidence_ref") or payload.get("source_ref")
+            )
+            evidence = payload.get("evidence") or payload.get("evidence_json") or {}
+            row.evidence_json = dict(evidence) if isinstance(evidence, Mapping) else {}
+            row.review_status = (
+                self._optional_text(payload.get("review_status")) or "pending"
+            )
+            row.updated_at = datetime.now(timezone.utc)
+            rows.append(row)
+        session.flush()
+        return rows
+
+    def _ensure_edition_lineage_for_variant(
+        self,
+        session: Session,
+        document: Document,
+        canonical_key: str,
+        witness_key: str,
+        payload: Mapping[str, Any],
+    ) -> EditionLineage:
+        row = (
+            session.query(EditionLineage)
+            .filter(
+                EditionLineage.canonical_document_key == canonical_key,
+                EditionLineage.witness_key == witness_key,
+            )
+            .one_or_none()
+        )
+        if row is None:
+            row = EditionLineage(
+                document_id=document.id,
+                canonical_document_key=canonical_key,
+                witness_key=witness_key,
+                version_lineage_key=self._optional_text(
+                    payload.get("version_lineage_key")
+                )
+                or document.version_lineage_key,
+                edition=self._optional_text(payload.get("edition")),
+                source_ref=self._optional_text(payload.get("source_ref")),
+            )
+            session.add(row)
+            session.flush()
+        return row
+
+    def _document_to_edition_payload(self, document: Document) -> Dict[str, Any]:
+        return {
+            "canonical_document_key": document.canonical_document_key,
+            "version_lineage_key": document.version_lineage_key,
+            "witness_key": document.witness_key,
+            "work_title": document.work_title or document.canonical_title,
+            "fragment_title": document.fragment_title,
+            "edition": document.edition or document.edition_hint,
+            "dynasty": document.dynasty,
+            "author": document.author,
+            "source_ref": document.document_urn or document.source_file,
+            "source_type": document.source_type,
+            "metadata": dict(document.version_metadata_json or {}),
+        }
+
+    def _canonical_document_key_for_version(
+        self, document: Document, payload: Mapping[str, Any]
+    ) -> str:
+        return (
+            self._optional_text(payload.get("canonical_document_key"))
+            or document.canonical_document_key
+            or document.content_hash
+            or document.source_file
+        )
+
+    def _variant_key(
+        self, canonical_key: str, witness_key: Optional[str], payload: Mapping[str, Any]
+    ) -> str:
+        explicit = self._optional_text(
+            payload.get("variant_key") or payload.get("reading_id") or payload.get("id")
+        )
+        if explicit:
+            return hashlib.sha1(explicit.encode("utf-8", errors="replace")).hexdigest()
+        seed = "|".join(
+            str(value or "")
+            for value in (
+                canonical_key,
+                witness_key,
+                payload.get("segment_id") or payload.get("position"),
+                payload.get("base_text"),
+                payload.get("variant_text")
+                or payload.get("target_text")
+                or payload.get("witness_text"),
+                payload.get("normalized_meaning") or payload.get("semantic_delta"),
+            )
+        )
+        return hashlib.sha1(seed.encode("utf-8", errors="replace")).hexdigest()
 
     def _persist_logs(
         self,
@@ -2480,11 +3070,44 @@ class PersistenceService(BaseModule):
             .filter_by(document_id=document_id)
             .one_or_none()
         )
+        edition_lineages = [
+            row.to_dict()
+            for row in session.query(EditionLineage)
+            .filter_by(document_id=document_id)
+            .order_by(EditionLineage.created_at.asc())
+            .all()
+        ]
+        variant_readings = [
+            row.to_dict()
+            for row in session.query(VariantReading)
+            .filter_by(document_id=document_id)
+            .order_by(VariantReading.created_at.asc())
+            .all()
+        ]
         return {
             "found": True,
             "document": {
                 "id": str(document.id),
                 "source_file": document.source_file,
+                "canonical_document_key": document.canonical_document_key,
+                "canonical_title": document.canonical_title,
+                "normalized_title": document.normalized_title,
+                "source_file_hash": document.source_file_hash,
+                "edition_hint": document.edition_hint,
+                "document_key_version": document.document_key_version,
+                "document_urn": document.document_urn,
+                "document_title": document.document_title,
+                "source_type": document.source_type,
+                "catalog_id": document.catalog_id,
+                "work_title": document.work_title,
+                "fragment_title": document.fragment_title,
+                "work_fragment_key": document.work_fragment_key,
+                "version_lineage_key": document.version_lineage_key,
+                "witness_key": document.witness_key,
+                "dynasty": document.dynasty,
+                "author": document.author,
+                "edition": document.edition,
+                "version_metadata": dict(document.version_metadata_json or {}),
                 "processing_timestamp": document.processing_timestamp.isoformat(),
                 "objective": document.objective,
                 "raw_text_size": document.raw_text_size,
@@ -2496,53 +3119,65 @@ class PersistenceService(BaseModule):
             "entities": entities,
             "entity_count": len(entities),
             "relationship_count": relationship_count,
-            "statistics": None
-            if stats is None
-            else {
-                "formulas_count": stats.formulas_count,
-                "herbs_count": stats.herbs_count,
-                "syndromes_count": stats.syndromes_count,
-                "efficacies_count": stats.efficacies_count,
-                "relationships_count": stats.relationships_count,
-                "graph_nodes_count": stats.graph_nodes_count,
-                "graph_edges_count": stats.graph_edges_count,
-                "graph_density": stats.graph_density,
-                "connected_components": stats.connected_components,
-                "source_modules": list(stats.source_modules or []),
-                "processing_time_ms": stats.processing_time_ms,
-            },
-            "quality_metrics": None
-            if quality is None
-            else {
-                "confidence_score": quality.confidence_score,
-                "completeness": quality.completeness,
-                "entity_precision": quality.entity_precision,
-                "relationship_precision": quality.relationship_precision,
-                "graph_quality_score": quality.graph_quality_score,
-                "evaluation_timestamp": quality.evaluation_timestamp.isoformat(),
-                "evaluator": quality.evaluator,
-                "assessment_notes": quality.assessment_notes,
-            },
-            "research_analysis": None
-            if analysis is None
-            else {
-                "research_perspectives": dict(analysis.research_perspectives or {}),
-                "formula_comparisons": dict(analysis.formula_comparisons or {}),
-                "herb_properties_analysis": dict(
-                    analysis.herb_properties_analysis or {}
-                ),
-                "pharmacology_integration": dict(
-                    analysis.pharmacology_integration or {}
-                ),
-                "network_pharmacology": dict(analysis.network_pharmacology or {}),
-                "supramolecular_physicochemistry": dict(
-                    analysis.supramolecular_physicochemistry or {}
-                ),
-                "knowledge_archaeology": dict(analysis.knowledge_archaeology or {}),
-                "complexity_dynamics": dict(analysis.complexity_dynamics or {}),
-                "research_scoring_panel": dict(analysis.research_scoring_panel or {}),
-                "summary_analysis": dict(analysis.summary_analysis or {}),
-            },
+            "edition_lineages": edition_lineages,
+            "edition_lineage_count": len(edition_lineages),
+            "variant_readings": variant_readings,
+            "variant_reading_count": len(variant_readings),
+            "statistics": (
+                None
+                if stats is None
+                else {
+                    "formulas_count": stats.formulas_count,
+                    "herbs_count": stats.herbs_count,
+                    "syndromes_count": stats.syndromes_count,
+                    "efficacies_count": stats.efficacies_count,
+                    "relationships_count": stats.relationships_count,
+                    "graph_nodes_count": stats.graph_nodes_count,
+                    "graph_edges_count": stats.graph_edges_count,
+                    "graph_density": stats.graph_density,
+                    "connected_components": stats.connected_components,
+                    "source_modules": list(stats.source_modules or []),
+                    "processing_time_ms": stats.processing_time_ms,
+                }
+            ),
+            "quality_metrics": (
+                None
+                if quality is None
+                else {
+                    "confidence_score": quality.confidence_score,
+                    "completeness": quality.completeness,
+                    "entity_precision": quality.entity_precision,
+                    "relationship_precision": quality.relationship_precision,
+                    "graph_quality_score": quality.graph_quality_score,
+                    "evaluation_timestamp": quality.evaluation_timestamp.isoformat(),
+                    "evaluator": quality.evaluator,
+                    "assessment_notes": quality.assessment_notes,
+                }
+            ),
+            "research_analysis": (
+                None
+                if analysis is None
+                else {
+                    "research_perspectives": dict(analysis.research_perspectives or {}),
+                    "formula_comparisons": dict(analysis.formula_comparisons or {}),
+                    "herb_properties_analysis": dict(
+                        analysis.herb_properties_analysis or {}
+                    ),
+                    "pharmacology_integration": dict(
+                        analysis.pharmacology_integration or {}
+                    ),
+                    "network_pharmacology": dict(analysis.network_pharmacology or {}),
+                    "supramolecular_physicochemistry": dict(
+                        analysis.supramolecular_physicochemistry or {}
+                    ),
+                    "knowledge_archaeology": dict(analysis.knowledge_archaeology or {}),
+                    "complexity_dynamics": dict(analysis.complexity_dynamics or {}),
+                    "research_scoring_panel": dict(
+                        analysis.research_scoring_panel or {}
+                    ),
+                    "summary_analysis": dict(analysis.summary_analysis or {}),
+                }
+            ),
             "logs": logs,
         }
 
@@ -2576,6 +3211,14 @@ class PersistenceService(BaseModule):
     def _optional_text(self, value: Any) -> Optional[str]:
         text_value = str(value).strip() if value is not None else ""
         return text_value or None
+
+    def _optional_int(self, value: Any) -> Optional[int]:
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def _parse_datetime(self, value: Any) -> Optional[datetime]:
         if isinstance(value, datetime):
@@ -2613,6 +3256,7 @@ __all__ = [
     "Base",
     "DatabaseManager",
     "Document",
+    "EditionLineage",
     "Entity",
     "EntityRelationship",
     "EntityTypeEnum",
@@ -2626,4 +3270,5 @@ __all__ = [
     "RelationshipType",
     "ResearchAnalysis",
     "ResearchRecord",
+    "VariantReading",
 ]

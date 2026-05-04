@@ -403,9 +403,23 @@ def disambiguate_polysemy(
         import json
 
         from src.infra.llm_service import CachedLLMService
+        from src.llm.llm_gateway import generate_with_gateway
 
         try:
-            llm_res = CachedLLMService().generate(prompt).strip()
+            gateway_result = generate_with_gateway(
+                CachedLLMService(),
+                prompt,
+                prompt_version="exegesis_contract.self_discover_refine@v1",
+                phase="philology",
+                purpose="exegesis_disambiguation",
+                task_type="term_sense_disambiguation",
+                json_output=True,
+                metadata={
+                    "prompt_name": "exegesis_contract.self_discover_refine",
+                    "response_format": "json",
+                },
+            )
+            llm_res = str(gateway_result.text or "").strip()
             # 尝试提取 json
             start = llm_res.find("{")
             end = llm_res.rfind("}")

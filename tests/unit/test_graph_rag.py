@@ -216,6 +216,60 @@ class TestGraphRAGTypedRetrieval(unittest.TestCase):
         self.assertIn("高置信证据主张", result.body.splitlines()[0])
         self.assertEqual(result.metadata["weight_hint_applied_count"], 1)
 
+    def test_weight_hints_demote_rejected_relationships(self) -> None:
+        rows = [
+            {
+                "node_id": "claim::cycle-1::cl-rejected",
+                "labels": ["EvidenceClaim"],
+                "props": {
+                    "cycle_id": "cycle-1",
+                    "phase": "analyze",
+                    "claim_id": "cl-rejected",
+                    "claim_text": "已拒绝的候选关系主张",
+                    "relation_type": "supports",
+                    "evidence_grade": "B",
+                    "confidence": 0.94,
+                },
+                "relationship_id": "rel-rejected",
+                "source_phase": "analyze",
+                "cycle_id": "cycle-1",
+            },
+            {
+                "node_id": "claim::cycle-1::cl-neutral",
+                "labels": ["EvidenceClaim"],
+                "props": {
+                    "cycle_id": "cycle-1",
+                    "phase": "analyze",
+                    "claim_id": "cl-neutral",
+                    "claim_text": "未被拒绝的普通关系主张",
+                    "relation_type": "supports",
+                    "evidence_grade": "C",
+                    "confidence": 0.62,
+                },
+                "relationship_id": "rel-neutral",
+                "source_phase": "analyze",
+                "cycle_id": "cycle-1",
+            },
+        ]
+        driver, _session = _build_driver(rows)
+
+        result = GraphRAG(neo4j_driver=driver).retrieve(
+            "local",
+            query="麻仁",
+            asset_type="claim",
+            cycle_id="cycle-1",
+            weight_hints=[
+                {
+                    "relationship_ids": ["rel-rejected"],
+                    "boost": 0.24,
+                    "effect": "suppress",
+                }
+            ],
+        )
+
+        self.assertIn("未被拒绝的普通关系主张", result.body.splitlines()[0])
+        self.assertEqual(result.metadata["weight_hint_applied_count"], 1)
+
 
 class TestGraphRAGRetrievalCache(unittest.TestCase):
     def test_same_request_uses_cached_result_and_returns_deep_copy(self) -> None:

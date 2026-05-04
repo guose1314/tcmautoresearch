@@ -164,7 +164,10 @@ class TestLLMServiceRegisteredPrompt(unittest.TestCase):
                 }
             )
             try:
-                with patch("src.infra.prompt_registry.get_layered_task_cache", return_value=cache):
+                with patch(
+                    "src.infra.prompt_registry.get_layered_task_cache",
+                    return_value=cache,
+                ):
                     result = svc.generate_registered(
                         "research_advisor.novelty_evaluation",
                         hypothesis="补中益气汤可能存在新机制",
@@ -193,13 +196,20 @@ class TestLLMServiceRegisteredPrompt(unittest.TestCase):
                 settings={
                     "enabled": True,
                     "cache_dir": tmp_dir,
-                    "prompt": {"enabled": True, "namespace": "prompt", "ttl_seconds": None},
+                    "prompt": {
+                        "enabled": True,
+                        "namespace": "prompt",
+                        "ttl_seconds": None,
+                    },
                     "evidence": {"enabled": False},
                     "artifact": {"enabled": False},
                 }
             )
             try:
-                with patch("src.infra.prompt_registry.get_layered_task_cache", return_value=cache):
+                with patch(
+                    "src.infra.prompt_registry.get_layered_task_cache",
+                    return_value=cache,
+                ):
                     first = svc.generate_registered(
                         "research_advisor.experiment_design",
                         hypothesis="黄芪补气可能改善疲劳",
@@ -222,7 +232,9 @@ class TestCallRegisteredPromptCache(unittest.TestCase):
         reset_token_budget_policy_settings_cache()
 
     def test_call_registered_prompt_reuses_cached_response(self):
-        llm = _CaptureLLM("[{\"hypothesis\":\"A\",\"confidence\":0.9,\"rationale\":\"B\",\"suggested_methods\":[\"C\"]}]")
+        llm = _CaptureLLM(
+            '[{"hypothesis":"A","confidence":0.9,"rationale":"B","suggested_methods":["C"]}]'
+        )
         rendered = render_prompt(
             "research_advisor.hypothesis_suggestion",
             topic="黄芪补气",
@@ -234,19 +246,64 @@ class TestCallRegisteredPromptCache(unittest.TestCase):
                 settings={
                     "enabled": True,
                     "cache_dir": tmp_dir,
-                    "prompt": {"enabled": True, "namespace": "prompt", "ttl_seconds": None},
+                    "prompt": {
+                        "enabled": True,
+                        "namespace": "prompt",
+                        "ttl_seconds": None,
+                    },
                     "evidence": {"enabled": False},
                     "artifact": {"enabled": False},
                 }
             )
             try:
-                with patch("src.infra.prompt_registry.get_layered_task_cache", return_value=cache):
-                    first = call_registered_prompt(llm, rendered.name, rendered=rendered)
-                    second = call_registered_prompt(llm, rendered.name, rendered=rendered)
+                with patch(
+                    "src.infra.prompt_registry.get_layered_task_cache",
+                    return_value=cache,
+                ):
+                    first = call_registered_prompt(
+                        llm, rendered.name, rendered=rendered
+                    )
+                    second = call_registered_prompt(
+                        llm, rendered.name, rendered=rendered
+                    )
             finally:
                 cache.close()
 
         self.assertEqual(first, second)
+        self.assertEqual(len(llm.calls), 1)
+
+    def test_call_registered_prompt_uses_gateway_json_repair(self):
+        llm = _CaptureLLM(
+            "```json\n{'novelty_score': 7, 'novelty_level': '显著', 'overlapping_studies': [], 'unique_aspects': ['方证线索'], 'improvement_suggestions': [],}\n```"
+        )
+        rendered = render_prompt(
+            "research_advisor.novelty_evaluation",
+            hypothesis="桂枝汤可能存在方证新线索",
+            literature_section="",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cache = LayeredTaskCache(
+                settings={
+                    "enabled": True,
+                    "cache_dir": tmp_dir,
+                    "prompt": {"enabled": False},
+                    "evidence": {"enabled": False},
+                    "artifact": {"enabled": False},
+                }
+            )
+            try:
+                with patch(
+                    "src.infra.prompt_registry.get_layered_task_cache",
+                    return_value=cache,
+                ):
+                    raw = call_registered_prompt(llm, rendered.name, rendered=rendered)
+            finally:
+                cache.close()
+
+        parsed = parse_registered_output(rendered.name, raw)
+        self.assertTrue(parsed.schema_valid)
+        self.assertEqual(parsed.parsed["novelty_score"], 7)
         self.assertEqual(len(llm.calls), 1)
 
 
@@ -286,7 +343,9 @@ class TestModulePromptIntegration(unittest.TestCase):
         )
         graph = MagicMock()
         graph.find_gaps.return_value = []
-        engine = HypothesisEngine({"max_hypotheses": 5}, llm_engine=llm, knowledge_graph=graph)
+        engine = HypothesisEngine(
+            {"max_hypotheses": 5}, llm_engine=llm, knowledge_graph=graph
+        )
         engine.initialize()
         self.addCleanup(engine.cleanup)
 
@@ -301,7 +360,10 @@ class TestModulePromptIntegration(unittest.TestCase):
                 }
             )
             try:
-                with patch("src.infra.prompt_registry.get_layered_task_cache", return_value=cache):
+                with patch(
+                    "src.infra.prompt_registry.get_layered_task_cache",
+                    return_value=cache,
+                ):
                     hypotheses = engine.generate_hypotheses(
                         {
                             "gap_type": "missing_direct_relation",
@@ -343,7 +405,10 @@ class TestModulePromptIntegration(unittest.TestCase):
                 }
             )
             try:
-                with patch("src.infra.prompt_registry.get_layered_task_cache", return_value=cache):
+                with patch(
+                    "src.infra.prompt_registry.get_layered_task_cache",
+                    return_value=cache,
+                ):
                     result = advisor.suggest_hypothesis("补中益气汤的现代机制")
             finally:
                 cache.close()

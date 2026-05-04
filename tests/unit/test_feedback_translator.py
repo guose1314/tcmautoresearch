@@ -244,6 +244,70 @@ class TestGraphWeightUpdater(unittest.TestCase):
         self.assertEqual(hints[0]["relationship_ids"], ["rel-boost"])
         self.assertGreater(hints[0]["boost"], 1.0)
 
+    def test_expert_review_feedback_compiles_to_boost_and_suppression_hints(
+        self,
+    ) -> None:
+        insights = [
+            {
+                "insight_id": "candidate-accepted",
+                "status": "accepted",
+                "insight_type": "candidate_edge",
+                "target_phase": "analyze",
+                "confidence": 0.86,
+                "description": "专家确认候选边",
+                "evidence_refs_json": [
+                    {
+                        "candidate_edge_id": "edge-ok",
+                        "source_entity_id": "entity-a",
+                        "target_entity_id": "entity-b",
+                    },
+                    {
+                        "type": "expert_review_feedback",
+                        "review_status": "accepted",
+                        "expert_vote": "accepted",
+                        "relationship_ids": ["rel-ok"],
+                        "grounding_score": 0.92,
+                        "evidence_grade": "A",
+                    },
+                ],
+            },
+            {
+                "insight_id": "candidate-rejected",
+                "status": "rejected",
+                "insight_type": "candidate_edge",
+                "target_phase": "analyze",
+                "confidence": 0.2,
+                "description": "专家驳回候选边",
+                "evidence_refs_json": [
+                    {
+                        "candidate_edge_id": "edge-bad",
+                        "source_entity_id": "entity-c",
+                        "target_entity_id": "entity-d",
+                    },
+                    {
+                        "type": "expert_review_feedback",
+                        "review_status": "rejected",
+                        "expert_vote": "rejected",
+                        "repeated_error_type": "relationship_type_error",
+                        "grounding_score": 0.31,
+                        "evidence_grade": "D",
+                    },
+                ],
+            },
+        ]
+
+        hints = GraphWeightUpdater().build_weight_hints_from_insights(
+            insights,
+            min_confidence=0.7,
+        )
+
+        by_id = {hint["insight_id"]: hint for hint in hints}
+        self.assertGreater(by_id["candidate-accepted"]["boost"], 1.0)
+        self.assertEqual(by_id["candidate-accepted"]["relationship_ids"], ["rel-ok"])
+        self.assertLess(by_id["candidate-rejected"]["factor"], 1.0)
+        self.assertEqual(by_id["candidate-rejected"]["effect"], "suppress")
+        self.assertIn("entity-c", by_id["candidate-rejected"]["node_ids"])
+
 
 # ---------------------------------------------------------------------------
 # PromptBiasCompiler

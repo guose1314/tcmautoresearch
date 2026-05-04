@@ -155,7 +155,8 @@ CYPHER_LOCAL_NEIGHBORS = (
     "MATCH (n) WHERE n.id IN $entity_ids "
     "OPTIONAL MATCH (n)-[r]-(m) "
     "RETURN n.id AS src, labels(n) AS src_labels, "
-    "       type(r) AS rel, m.id AS dst, labels(m) AS dst_labels "
+    "       type(r) AS rel, m.id AS dst, labels(m) AS dst_labels, "
+    "       elementId(r) AS relationship_id, m.id AS neighbor_id "
     "LIMIT $limit"
 )
 
@@ -250,6 +251,7 @@ class GraphRAG:
             if use_cache:
                 self._cache.put(cache_key, result)
             return result
+
         try:
             opener = self._resolve_session_opener()
         except Exception as exc:  # noqa: BLE001
@@ -318,9 +320,14 @@ class GraphRAG:
                         limit=self._local_neighbor_limit,
                     )
                 )
+                applied_count = 0
+                if normalized_weight_hints:
+                    rows, applied_count = self._apply_weight_hints(
+                        rows, normalized_weight_hints
+                    )
                 result = self._render_local(scope, rows)
                 if normalized_weight_hints:
-                    result.metadata["weight_hint_applied_count"] = 0
+                    result.metadata["weight_hint_applied_count"] = applied_count
                 if use_cache:
                     self._cache.put(cache_key, result)
                 return result
@@ -332,6 +339,25 @@ class GraphRAG:
             if use_cache:
                 self._cache.put(cache_key, result)
             return result
+
+    def retrieve_tiered(
+        self,
+        query: str,
+        *,
+        topic_keys: Optional[Sequence[str]] = None,
+        entity_ids: Optional[Sequence[str]] = None,
+        cycle_id: Optional[str] = None,
+        weight_hints: Optional[Sequence[Mapping[str, Any]]] = None,
+    ):
+        from src.knowledge.graphrag.tiered_retriever import TieredGraphRAGRetriever
+
+        return TieredGraphRAGRetriever(base_retriever=self).retrieve(
+            query,
+            topic_keys=topic_keys,
+            entity_ids=entity_ids,
+            cycle_id=cycle_id,
+            weight_hints=weight_hints,
+        )
 
     def _retrieve_typed_assets(
         self,
@@ -614,6 +640,8 @@ class GraphRAG:
         row_node_id = str(cls._field(row, "node_id") or "").strip()
         row_relationship_id = str(cls._field(row, "relationship_id") or "").strip()
         neighbor_id = str(cls._field(row, "neighbor_id") or "").strip()
+        source_id = str(cls._field(row, "src") or "").strip()
+        destination_id = str(cls._field(row, "dst") or "").strip()
         props = cls._field(row, "props") or {}
         if not isinstance(props, Mapping):
             props = {}
@@ -623,6 +651,8 @@ class GraphRAG:
                 row_node_id,
                 row_relationship_id,
                 neighbor_id,
+                source_id,
+                destination_id,
                 str(props.get("id") or "").strip(),
                 str(props.get("claim_id") or "").strip(),
                 str(props.get("evidence_id") or "").strip(),
@@ -645,7 +675,11 @@ class GraphRAG:
             )
             matches_target = bool(row_ids & target_ids)
             if matches_node or matches_relationship or matches_target:
-                score = max(score, _hint_boost_value(hint))
+                hint_score = _hint_boost_value(hint)
+                if hint_score < 1.0:
+                    score = min(score, hint_score)
+                elif score >= 1.0:
+                    score = max(score, hint_score)
         return score
 
     @staticmethod

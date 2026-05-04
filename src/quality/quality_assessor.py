@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from src.core.phase_tracker import PhaseTrackerMixin
-from src.infra.llm_service import prepare_planned_llm_call
+from src.llm.llm_gateway import generate_with_gateway
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ _REQUIRED_COMPLIANCE_KEYS = frozenset(["status", "phase"])
 # ---------------------------------------------------------------------------
 # 数据类
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class QualityScore:
@@ -178,6 +179,7 @@ def build_phase_fallback_metadata(
 # 主类
 # ---------------------------------------------------------------------------
 
+
 class QualityAssessor(PhaseTrackerMixin):
     """
     研究成果质量评估器。
@@ -224,15 +226,29 @@ class QualityAssessor(PhaseTrackerMixin):
 
         # consistency — status 值合法性
         status = result.get("status", "")
-        valid_statuses = {"completed", "success", "ok", "done", "failed", "error", "pending", "degraded", "blocked"}
-        consistency = 1.0 if isinstance(status, str) and status.lower() in valid_statuses else 0.5
+        valid_statuses = {
+            "completed",
+            "success",
+            "ok",
+            "done",
+            "failed",
+            "error",
+            "pending",
+            "degraded",
+            "blocked",
+        }
+        consistency = (
+            1.0 if isinstance(status, str) and status.lower() in valid_statuses else 0.5
+        )
 
         # evidence_quality — 深度指标
         evidence_keys = {"results", "artifacts", "evidence", "citations", "outcomes"}
         evidence_present = sum(1 for k in evidence_keys if result.get(k))
         evidence_quality = min(1.0, evidence_present / max(1, len(evidence_keys)))
 
-        overall = round(0.4 * completeness + 0.3 * consistency + 0.3 * evidence_quality, 4)
+        overall = round(
+            0.4 * completeness + 0.3 * consistency + 0.3 * evidence_quality, 4
+        )
         grade_level = self._score_to_grade(overall)
 
         return QualityScore(
@@ -265,8 +281,10 @@ class QualityAssessor(PhaseTrackerMixin):
         total = len(cycles)
         if total:
             from src.research.study_session_manager import ResearchCycleStatus
+
             completed = sum(
-                1 for c in cycles.values()
+                1
+                for c in cycles.values()
                 if getattr(c, "status", None) == ResearchCycleStatus.COMPLETED
             )
             completion_rate = round(completed / total, 4)
@@ -324,15 +342,20 @@ class QualityAssessor(PhaseTrackerMixin):
 
         # status 值合规性
         status = result.get("status", "")
-        valid_terminal = {"completed", "failed", "success", "error", "degraded", "blocked"}
+        valid_terminal = {
+            "completed",
+            "failed",
+            "success",
+            "error",
+            "degraded",
+            "blocked",
+        }
         if status and isinstance(status, str) and status.lower() not in valid_terminal:
             warnings.append(f"non-terminal status value: '{status}'")
 
         is_compliant = len(violations) == 0
         score = self.assess_quality(result)
-        grade_assessment = (
-            f"GRADE:{score.grade_level} overall={score.overall_score}"
-        )
+        grade_assessment = f"GRADE:{score.grade_level} overall={score.overall_score}"
 
         return ComplianceReport(
             is_compliant=is_compliant,
@@ -385,9 +408,7 @@ class QualityAssessor(PhaseTrackerMixin):
             status = "needs_followup"
         elif total > 0:
             status = (
-                "stable"
-                if completion_rate >= min_rate and failed == 0
-                else "degraded"
+                "stable" if completion_rate >= min_rate and failed == 0 else "degraded"
             )
 
         return {
@@ -596,25 +617,33 @@ class QualityAssessor(PhaseTrackerMixin):
             "```"
         )
 
-        planned_call = prepare_planned_llm_call(
-            phase=str(result.get("phase") or "analyze"),
-            task_type="quality_assessment",
-            purpose="default",
-            dossier_sections={
-                "result_summary": result_summary,
-                "phase": str(result.get("phase") or "analyze"),
-                "status": str(result.get("status") or "unknown"),
-            },
-            llm_engine=llm_engine,
-        )
-        if not planned_call.should_call_llm:
-            return None
-
         try:
-            raw = planned_call.create_proxy().generate(user_prompt, _QUALITY_SYSTEM_PROMPT)
+            gateway_result = generate_with_gateway(
+                llm_engine,
+                user_prompt,
+                _QUALITY_SYSTEM_PROMPT,
+                prompt_version="quality_assessor.phase_quality@v1",
+                phase=str(result.get("phase") or "analyze"),
+                purpose="quality_assessment",
+                task_type="quality_assessment",
+                json_output=True,
+                metadata={
+                    "prompt_name": "quality_assessor.phase_quality",
+                    "response_format": "json",
+                    "dossier_sections": {
+                        "result_summary": result_summary,
+                        "phase": str(result.get("phase") or "analyze"),
+                        "status": str(result.get("status") or "unknown"),
+                    },
+                },
+            )
+            raw = gateway_result.text
             parsed = self._parse_llm_quality_response(raw)
             if parsed is not None:
-                parsed["planner"] = planned_call.to_metadata()
+                parsed["planner"] = dict(
+                    gateway_result.metadata.get("planned_call") or {}
+                )
+                parsed["llm_gateway"] = dict(gateway_result.metadata or {})
             return parsed
         except Exception as exc:
             logger.warning("LLM 质量评估调用失败，回退规则评分: %s", exc)
@@ -633,14 +662,17 @@ class QualityAssessor(PhaseTrackerMixin):
         strengths = base_assessment.get("strengths", [])
         overall = base_assessment.get("overall_cycle_score", 0.0)
 
-        weakness_text = "\n".join(
-            f"- {w['phase']}: score={w['score']}, issues={w.get('issues', [])}"
-            for w in weaknesses
-        ) or "无明显弱项"
-        strength_text = "\n".join(
-            f"- {s['phase']}: score={s['score']}"
-            for s in strengths
-        ) or "无突出强项"
+        weakness_text = (
+            "\n".join(
+                f"- {w['phase']}: score={w['score']}, issues={w.get('issues', [])}"
+                for w in weaknesses
+            )
+            or "无明显弱项"
+        )
+        strength_text = (
+            "\n".join(f"- {s['phase']}: score={s['score']}" for s in strengths)
+            or "无突出强项"
+        )
 
         user_prompt = (
             "请对以下中医研究循环做综合质量诊断，并给出改进建议。\n\n"
@@ -658,27 +690,37 @@ class QualityAssessor(PhaseTrackerMixin):
             "```"
         )
 
-        planned_call = prepare_planned_llm_call(
-            phase="reflect",
-            task_type="reflection",
-            purpose="reflect",
-            dossier_sections={
-                "overall_score": str(overall),
-                "weaknesses": weakness_text,
-                "strengths": strength_text,
-            },
-            llm_engine=llm_engine,
-        )
-        if not planned_call.should_call_llm:
-            return None
-
         try:
-            raw = planned_call.create_proxy().generate(user_prompt, _QUALITY_SYSTEM_PROMPT)
+            gateway_result = generate_with_gateway(
+                llm_engine,
+                user_prompt,
+                _QUALITY_SYSTEM_PROMPT,
+                prompt_version="quality_assessor.cycle_diagnosis@v1",
+                phase="reflect",
+                purpose="reflect",
+                task_type="reflection",
+                json_output=True,
+                metadata={
+                    "prompt_name": "quality_assessor.cycle_diagnosis",
+                    "response_format": "json",
+                    "dossier_sections": {
+                        "overall_score": str(overall),
+                        "weaknesses": weakness_text,
+                        "strengths": strength_text,
+                    },
+                },
+            )
+            raw = gateway_result.text
             diagnosis = self._parse_llm_cycle_diagnosis(raw)
             if diagnosis is not None:
-                diagnosis["planner"] = planned_call.to_metadata()
-                diagnosis["llm_cost_report"] = planned_call.get_cost_report()
-                diagnosis["fallback_path"] = planned_call.fallback_path
+                diagnosis["planner"] = dict(
+                    gateway_result.metadata.get("planned_call") or {}
+                )
+                diagnosis["llm_cost_report"] = dict(
+                    gateway_result.llm_cost_report or {}
+                )
+                diagnosis["fallback_path"] = diagnosis["planner"].get("fallback_path")
+                diagnosis["llm_gateway"] = dict(gateway_result.metadata or {})
             return diagnosis
         except Exception as exc:
             logger.warning("LLM 循环诊断调用失败: %s", exc)
@@ -701,7 +743,11 @@ class QualityAssessor(PhaseTrackerMixin):
         if isinstance(results_data, dict):
             for k in list(results_data.keys())[:6]:
                 val = results_data[k]
-                val_str = str(val)[:200] if not isinstance(val, (int, float, bool)) else str(val)
+                val_str = (
+                    str(val)[:200]
+                    if not isinstance(val, (int, float, bool))
+                    else str(val)
+                )
                 lines.append(f"results.{k}: {val_str}")
         elif isinstance(results_data, list):
             lines.append(f"results: list[{len(results_data)} items]")
@@ -718,12 +764,19 @@ class QualityAssessor(PhaseTrackerMixin):
     @staticmethod
     def _parse_llm_quality_response(raw: str) -> Optional[Dict[str, float]]:
         """从 LLM 原始输出中提取四维分数。"""
-        required_keys = {"methodological_rigor", "evidence_coherence", "domain_relevance", "reproducibility"}
+        required_keys = {
+            "methodological_rigor",
+            "evidence_coherence",
+            "domain_relevance",
+            "reproducibility",
+        }
         parsed = _extract_json_from_llm_output(raw)
         if parsed is None:
             return None
         if not required_keys.issubset(parsed.keys()):
-            logger.warning("LLM 质量评分缺少必需维度: %s", required_keys - parsed.keys())
+            logger.warning(
+                "LLM 质量评分缺少必需维度: %s", required_keys - parsed.keys()
+            )
             return None
 
         scores: Dict[str, float] = {}
@@ -758,9 +811,13 @@ class QualityAssessor(PhaseTrackerMixin):
         for key in ("root_causes", "priority_improvements"):
             items = parsed.get(key)
             if isinstance(items, list):
-                diagnosis[key] = [str(item).strip() for item in items if str(item).strip()]
+                diagnosis[key] = [
+                    str(item).strip() for item in items if str(item).strip()
+                ]
         try:
-            diagnosis["confidence"] = max(0.0, min(1.0, float(parsed.get("confidence", 0.0))))
+            diagnosis["confidence"] = max(
+                0.0, min(1.0, float(parsed.get("confidence", 0.0)))
+            )
         except (TypeError, ValueError):
             pass
         return diagnosis
@@ -768,7 +825,12 @@ class QualityAssessor(PhaseTrackerMixin):
     @staticmethod
     def _compute_llm_overall(llm_assessment: Dict[str, Any]) -> float:
         """从四维 LLM 分数计算加权综合分（等权）。"""
-        dimension_keys = ["methodological_rigor", "evidence_coherence", "domain_relevance", "reproducibility"]
+        dimension_keys = [
+            "methodological_rigor",
+            "evidence_coherence",
+            "domain_relevance",
+            "reproducibility",
+        ]
         values = []
         for key in dimension_keys:
             val = llm_assessment.get(key)
@@ -795,6 +857,7 @@ _QUALITY_SYSTEM_PROMPT = (
 # ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
+
 
 def _extract_json_from_llm_output(raw: str) -> Optional[Dict[str, Any]]:
     """从 LLM 输出中提取 JSON 对象，支持 ```json``` 围栏。"""

@@ -37,7 +37,7 @@ _DEFAULT_MAX_WORKERS = 1
 
 @dataclass
 class MarkdownTranslateResult:
-    status: str                   # "completed" | "failed" | "partial"
+    status: str  # "completed" | "failed" | "partial"
     language: str
     input_path: str
     input_files: List[str]
@@ -78,12 +78,15 @@ class MarkdownTranslationJob:
 
 # ────────────────────────────── 工具函数 ──────────────────────────────
 
+
 def _lang_label(language: str) -> str:
     """将模式参数转换为可读语言名。"""
     return {"en->zh": "Chinese", "zh->en": "English"}.get(language, language)
 
 
-def _build_translate_prompt(fragment: str, language: str, additional_prompt: str = "") -> Tuple[str, str]:
+def _build_translate_prompt(
+    fragment: str, language: str, additional_prompt: str = ""
+) -> Tuple[str, str]:
     """构造与 gpt_academic 风格一致的翻译 prompt。"""
     lang_label = _lang_label(language)
     user = (
@@ -128,9 +131,9 @@ def _resolve_github_markdown_url(txt: str, proxies: Optional[dict]) -> Optional[
 
     logger.info("检测到 GitHub URL，正在获取资源...")
     if txt.endswith(".md"):
-        return txt.replace("https://github.com/", "https://raw.githubusercontent.com/").replace(
-            "/blob/", "/"
-        )
+        return txt.replace(
+            "https://github.com/", "https://raw.githubusercontent.com/"
+        ).replace("/blob/", "/")
 
     api_url = txt.replace("https://github.com/", "https://api.github.com/repos/")
     api_url = api_url.rstrip("/") + "/readme"
@@ -148,7 +151,9 @@ def _resolve_github_markdown_url(txt: str, proxies: Optional[dict]) -> Optional[
     return download_url
 
 
-def _download_remote_markdown(txt: str, proxies: Optional[dict]) -> Tuple[bool, List[str], str]:
+def _download_remote_markdown(
+    txt: str, proxies: Optional[dict]
+) -> Tuple[bool, List[str], str]:
     import tempfile
 
     resolved_url = _resolve_github_markdown_url(txt, proxies)
@@ -163,7 +168,10 @@ def _download_remote_markdown(txt: str, proxies: Optional[dict]) -> Tuple[bool, 
         return False, [], ""
 
     tmp_dir = tempfile.mkdtemp(prefix="md_translate_")
-    filename = re.sub(r"[^a-zA-Z0-9._-]", "_", resolved_url.split("/")[-1].split("?")[0]) or "readme.md"
+    filename = (
+        re.sub(r"[^a-zA-Z0-9._-]", "_", resolved_url.split("/")[-1].split("?")[0])
+        or "readme.md"
+    )
     if not filename.lower().endswith(".md"):
         filename += ".md"
     local_path = os.path.join(tmp_dir, filename)
@@ -225,13 +233,33 @@ def _translate_fragment_with_llm(
     engine,  # LLMEngine instance or None
 ) -> str:
     """调用 LLM 翻译单个片段。"""
-    user_prompt, system_prompt = _build_translate_prompt(fragment, language, additional_prompt)
+    user_prompt, system_prompt = _build_translate_prompt(
+        fragment, language, additional_prompt
+    )
 
     if engine is not None:
         try:
-            return engine.generate(user_prompt, system_prompt)
+            from src.llm.llm_gateway import generate_with_gateway
+
+            result = generate_with_gateway(
+                engine,
+                user_prompt,
+                system_prompt,
+                prompt_version="markdown_translate.fragment@v1",
+                phase="translation",
+                purpose="markdown_translation",
+                task_type="translation",
+                metadata={
+                    "prompt_name": "markdown_translate.fragment",
+                    "language": language,
+                    "fragment_chars": len(fragment),
+                },
+            )
+            return str(result.text or "")
         except Exception as exc:
-            logger.warning("LLM 翻译失败（片段长 %d 字符），原样返回: %s", len(fragment), exc)
+            logger.warning(
+                "LLM 翻译失败（片段长 %d 字符），原样返回: %s", len(fragment), exc
+            )
             return fragment
 
     # 无 LLM 时原样返回（供测试用）
@@ -311,7 +339,9 @@ def _translate_markdown_manifest(
     ok_frags = 0
 
     for file_path in file_manifest:
-        file_result, fragment_total, fragment_ok = _translate_markdown_file(file_path, job)
+        file_result, fragment_total, fragment_ok = _translate_markdown_file(
+            file_path, job
+        )
         total_frags += fragment_total
         ok_frags += fragment_ok
         if file_result is None:
@@ -370,6 +400,7 @@ def _build_failed_markdown_result(
 
 # ────────────────────────────── 主函数 ──────────────────────────────
 
+
 def run_markdown_translate(
     input_path: str,
     language: str = "en->zh",
@@ -403,7 +434,9 @@ def run_markdown_translate(
         err = f"找不到任何 .md 文件: {input_path}"
         return _build_failed_markdown_result(out_dir, ts, language, input_path, err)
 
-    logger.info("共找到 %d 个 Markdown 文件，翻译方向: %s", len(file_manifest), language)
+    logger.info(
+        "共找到 %d 个 Markdown 文件，翻译方向: %s", len(file_manifest), language
+    )
     engine = _load_markdown_engine(use_llm)
     job = MarkdownTranslationJob(
         out_dir=out_dir,
@@ -416,7 +449,9 @@ def run_markdown_translate(
     )
 
     try:
-        output_files, file_results, total_frags, ok_frags = _translate_markdown_manifest(file_manifest, job)
+        output_files, file_results, total_frags, ok_frags = (
+            _translate_markdown_manifest(file_manifest, job)
+        )
 
     finally:
         _unload_engine(engine)
@@ -469,7 +504,9 @@ def _translate_all_fragments(
     if max_workers <= 1 or engine is None:
         # 顺序翻译（本地 LLM 必须顺序）
         for idx, frag in enumerate(fragments):
-            translated = _translate_fragment_with_llm(frag, language, additional_prompt, engine)
+            translated = _translate_fragment_with_llm(
+                frag, language, additional_prompt, engine
+            )
             results[idx] = translated
             logger.debug("  片段 %d/%d 翻译完成", idx + 1, len(fragments))
     else:
@@ -477,7 +514,11 @@ def _translate_all_fragments(
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             future_map = {
                 pool.submit(
-                    _translate_fragment_with_llm, frag, language, additional_prompt, engine
+                    _translate_fragment_with_llm,
+                    frag,
+                    language,
+                    additional_prompt,
+                    engine,
                 ): idx
                 for idx, frag in enumerate(fragments)
             }

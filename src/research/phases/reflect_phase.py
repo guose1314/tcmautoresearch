@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     from src.research.research_pipeline import ResearchCycle, ResearchPipeline
 
-from src.infra.llm_service import prepare_planned_llm_call
+from src.llm.llm_gateway import generate_with_gateway
 from src.research.compute_tier_router import ComputeTierRouter
 from src.research.evidence_contract import build_phase_evidence_protocol
 from src.research.learning_feedback_contract import build_learning_feedback_library
@@ -43,21 +43,29 @@ class ReflectPhaseMixin:
 
     pipeline: "ResearchPipeline"  # provided by ResearchPhaseHandlers
 
-    def execute_reflect_phase(self, cycle: "ResearchCycle", context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute_reflect_phase(
+        self, cycle: "ResearchCycle", context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         context = context or {}
-        self._reflect_tracker = StrategyApplicationTracker("reflect", context, self.pipeline.config)
+        self._reflect_tracker = StrategyApplicationTracker(
+            "reflect", context, self.pipeline.config
+        )
         outcomes: List[Dict[str, Any]] = getattr(cycle, "outcomes", None) or []
         quality_assessor = self.pipeline.quality_assessor
 
         # ---- 推理结构自发现 ----
         reasoning_framework = select_reasoning_framework(
-            getattr(cycle, "research_objective", "") or context.get("research_objective") or "",
+            getattr(cycle, "research_objective", "")
+            or context.get("research_objective")
+            or "",
             context,
             force_framework=context.get("force_reasoning_framework"),
         )
 
         # ---- 1. 获取 LLM 引擎（可选） ----
-        llm_engine = self.pipeline.config.get("llm_engine") or self.pipeline.config.get("llm_service")
+        llm_engine = self.pipeline.config.get("llm_engine") or self.pipeline.config.get(
+            "llm_service"
+        )
         has_llm = llm_engine is not None and hasattr(llm_engine, "generate")
 
         # ---- 动态算力分配 ----
@@ -76,7 +84,9 @@ class ReflectPhaseMixin:
 
         # ---- 2. 基于 QualityAssessor 评估各阶段（LLM 可用时启用深度诊断） ----
         if has_llm:
-            cycle_assessment = quality_assessor.assess_cycle_for_reflection_with_llm(outcomes, llm_engine)
+            cycle_assessment = quality_assessor.assess_cycle_for_reflection_with_llm(
+                outcomes, llm_engine
+            )
         else:
             cycle_assessment = quality_assessor.assess_cycle_for_reflection(outcomes)
 
@@ -87,7 +97,9 @@ class ReflectPhaseMixin:
         llm_enhanced = False
         if has_llm:
             llm_reflection = self._generate_llm_reflection(
-                llm_engine, cycle_assessment, outcomes,
+                llm_engine,
+                cycle_assessment,
+                outcomes,
                 reflect_lens=reasoning_framework.reflect_lens,
             )
             if llm_reflection:
@@ -98,7 +110,9 @@ class ReflectPhaseMixin:
         improvement_plan = self._build_improvement_plan(cycle_assessment)
 
         # ---- 5. SelfLearningEngine 反馈（可选） ----
-        snapshot_before = getattr(self.pipeline, "get_learning_strategy_snapshot", lambda: {})()
+        snapshot_before = getattr(
+            self.pipeline, "get_learning_strategy_snapshot", lambda: {}
+        )()
         learning_summary = self._feed_self_learning(cycle_assessment)
         if learning_summary is not None:
             refresh_learning_runtime_feedback = getattr(
@@ -112,8 +126,14 @@ class ReflectPhaseMixin:
                 except Exception as exc:
                     logger.warning("刷新默认学习策略快照失败: %s", exc)
         snapshot_after = build_strategy_snapshot(None, self.pipeline.config)
-        strategy_diff = build_strategy_diff(snapshot_before, snapshot_after) if snapshot_before else {}
-        replay_feedback = getattr(self.pipeline, "get_previous_iteration_feedback", lambda: {})()
+        strategy_diff = (
+            build_strategy_diff(snapshot_before, snapshot_after)
+            if snapshot_before
+            else {}
+        )
+        replay_feedback = getattr(
+            self.pipeline, "get_previous_iteration_feedback", lambda: {}
+        )()
 
         quality_assessment = {
             "overall_cycle_score": cycle_assessment["overall_cycle_score"],
@@ -130,7 +150,11 @@ class ReflectPhaseMixin:
             "learning_fed": learning_summary is not None,
             "reasoning_framework": reasoning_framework.to_dict(),
         }
-        llm_diagnosis = cycle_assessment.get("llm_diagnosis") if isinstance(cycle_assessment, dict) else None
+        llm_diagnosis = (
+            cycle_assessment.get("llm_diagnosis")
+            if isinstance(cycle_assessment, dict)
+            else None
+        )
         if isinstance(llm_diagnosis, dict):
             if llm_diagnosis.get("planner") is not None:
                 metadata["small_model_plan"] = llm_diagnosis.get("planner")
@@ -150,7 +174,9 @@ class ReflectPhaseMixin:
             if llm_reflection_entry.get("planner") is not None:
                 metadata["small_model_plan"] = llm_reflection_entry.get("planner")
             if llm_reflection_entry.get("llm_cost_report") is not None:
-                metadata["llm_cost_report"] = llm_reflection_entry.get("llm_cost_report")
+                metadata["llm_cost_report"] = llm_reflection_entry.get(
+                    "llm_cost_report"
+                )
             if llm_reflection_entry.get("fallback_path") is not None:
                 metadata["fallback_path"] = llm_reflection_entry.get("fallback_path")
         # Phase I-4: 当未走 LLM 路径时（has_llm=False 或 LLM 调用失败未产生增强反思），
@@ -167,7 +193,12 @@ class ReflectPhaseMixin:
                 optimized_score=cycle_score,
                 reason_extra=reason_extra,
             )
-            metadata.setdefault("fallback_path", "rules_engine" if not has_llm else metadata.get("fallback_path") or "llm_partial")
+            metadata.setdefault(
+                "fallback_path",
+                "rules_engine"
+                if not has_llm
+                else metadata.get("fallback_path") or "llm_partial",
+            )
             metadata.update(
                 {
                     "fallback_quality_score": fallback_meta["fallback_quality_score"],
@@ -186,7 +217,9 @@ class ReflectPhaseMixin:
         # ---- Build learning application summary for the cycle ----
         learning_application_summary = {}
         if hasattr(self.pipeline, "build_learning_application_summary"):
-            learning_application_summary = self.pipeline.build_learning_application_summary()
+            learning_application_summary = (
+                self.pipeline.build_learning_application_summary()
+            )
         learning_feedback_library = build_learning_feedback_library(
             cycle_assessment=cycle_assessment,
             learning_summary=learning_summary,
@@ -202,7 +235,9 @@ class ReflectPhaseMixin:
             source_phase="reflect",
         )
         metadata["feedback_library_generated"] = True
-        metadata["feedback_record_count"] = len(learning_feedback_library.get("records") or [])
+        metadata["feedback_record_count"] = len(
+            learning_feedback_library.get("records") or []
+        )
         return build_phase_result(
             "reflect",
             status="completed",
@@ -217,7 +252,11 @@ class ReflectPhaseMixin:
                     evidence_grade="reflection",
                     evidence_summary={
                         "phase": "reflect",
-                        "quality_score": (quality_assessment.get("overall_score") if isinstance(quality_assessment, dict) else None),
+                        "quality_score": (
+                            quality_assessment.get("overall_score")
+                            if isinstance(quality_assessment, dict)
+                            else None
+                        ),
                     },
                 ),
             },
@@ -237,7 +276,9 @@ class ReflectPhaseMixin:
     # SelfLearningEngine 反馈
     # ------------------------------------------------------------------
 
-    def _feed_self_learning(self, cycle_assessment: Dict[str, Any]) -> Dict[str, Any] | None:
+    def _feed_self_learning(
+        self, cycle_assessment: Dict[str, Any]
+    ) -> Dict[str, Any] | None:
         """将循环评估结果反馈给 SelfLearningEngine（若可用）。"""
         learning_engine = self.pipeline.config.get("self_learning_engine")
         if learning_engine is None:
@@ -255,40 +296,48 @@ class ReflectPhaseMixin:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_reflections_from_assessment(assessment: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _build_reflections_from_assessment(
+        assessment: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
         reflections: List[Dict[str, Any]] = []
 
         for weakness in assessment.get("weaknesses", []):
-            reflections.append({
-                "topic": f"{weakness['phase']}阶段质量不足",
-                "reflection": (
-                    f"{weakness['phase']}阶段综合评分 {weakness['score']:.2f} "
-                    f"(GRADE: {weakness['grade']})，存在问题: "
-                    + "; ".join(weakness.get("issues", [])[:5])
-                ),
-                "action": f"在下一轮循环中重点优化{weakness['phase']}阶段的数据完整性与合规性",
-                "source": "quality_assessor",
-            })
+            reflections.append(
+                {
+                    "topic": f"{weakness['phase']}阶段质量不足",
+                    "reflection": (
+                        f"{weakness['phase']}阶段综合评分 {weakness['score']:.2f} "
+                        f"(GRADE: {weakness['grade']})，存在问题: "
+                        + "; ".join(weakness.get("issues", [])[:5])
+                    ),
+                    "action": f"在下一轮循环中重点优化{weakness['phase']}阶段的数据完整性与合规性",
+                    "source": "quality_assessor",
+                }
+            )
 
         for strength in assessment.get("strengths", []):
-            reflections.append({
-                "topic": f"{strength['phase']}阶段表现优秀",
-                "reflection": (
-                    f"{strength['phase']}阶段综合评分 {strength['score']:.2f} "
-                    f"(GRADE: {strength['grade']})，可作为最佳实践推广"
-                ),
-                "action": f"将{strength['phase']}阶段的方法论沉淀为模板",
-                "source": "quality_assessor",
-            })
+            reflections.append(
+                {
+                    "topic": f"{strength['phase']}阶段表现优秀",
+                    "reflection": (
+                        f"{strength['phase']}阶段综合评分 {strength['score']:.2f} "
+                        f"(GRADE: {strength['grade']})，可作为最佳实践推广"
+                    ),
+                    "action": f"将{strength['phase']}阶段的方法论沉淀为模板",
+                    "source": "quality_assessor",
+                }
+            )
 
         if not reflections:
             score = assessment.get("overall_cycle_score", 0.0)
-            reflections.append({
-                "topic": "循环整体评估",
-                "reflection": f"循环整体评分 {score:.2f}，各阶段质量均衡，无突出短板",
-                "action": "保持当前研究节奏，关注细节优化",
-                "source": "quality_assessor",
-            })
+            reflections.append(
+                {
+                    "topic": "循环整体评估",
+                    "reflection": f"循环整体评分 {score:.2f}，各阶段质量均衡，无突出短板",
+                    "action": "保持当前研究节奏，关注细节优化",
+                    "source": "quality_assessor",
+                }
+            )
 
         return reflections
 
@@ -327,34 +376,41 @@ class ReflectPhaseMixin:
             f"优势环节: {len(assessment['strengths'])} 个\n"
             + lens_section
             + "\n请基于以上评估数据，给出一条高层反思和关键改进方向。"
-            "输出严格 JSON: {\"reflection\": \"...\", \"action\": \"...\"}"
+            '输出严格 JSON: {"reflection": "...", "action": "..."}'
         )
-
-        planned_call = prepare_planned_llm_call(
-            phase="reflect",
-            task_type="reflection",
-            purpose="reflect",
-            dossier_sections={
-                "phase_summary": "\n".join(phase_summary),
-                "overall_score": f"{assessment['overall_cycle_score']:.2f}",
-                "reflect_lens": reflect_lens,
-            },
-            llm_engine=llm_engine,
-        )
-        if not planned_call.should_call_llm:
-            return None
 
         try:
-            raw = planned_call.create_proxy().generate(user_prompt, _REFLECT_SYSTEM_PROMPT)
+            gateway_result = generate_with_gateway(
+                llm_engine,
+                user_prompt,
+                _REFLECT_SYSTEM_PROMPT,
+                prompt_version="reflect_phase.deep_reflection@v1",
+                phase="reflect",
+                purpose="reflect",
+                task_type="reflection",
+                json_output=True,
+                metadata={
+                    "prompt_name": "reflect_phase.deep_reflection",
+                    "response_format": "json",
+                    "dossier_sections": {
+                        "phase_summary": "\n".join(phase_summary),
+                        "overall_score": f"{assessment['overall_cycle_score']:.2f}",
+                        "reflect_lens": reflect_lens,
+                    },
+                },
+            )
+            raw = gateway_result.text
             parsed = json.loads(raw)
+            planner = dict(gateway_result.metadata.get("planned_call") or {})
             return {
                 "topic": "LLM 深度反思",
                 "reflection": str(parsed.get("reflection", raw)),
                 "action": str(parsed.get("action", "")),
                 "source": "llm",
-                "planner": planned_call.to_metadata(),
-                "llm_cost_report": planned_call.get_cost_report(),
-                "fallback_path": planned_call.fallback_path,
+                "planner": planner,
+                "llm_cost_report": gateway_result.llm_cost_report,
+                "fallback_path": planner.get("fallback_path"),
+                "llm_gateway": dict(gateway_result.metadata or {}),
             }
         except Exception as exc:
             logger.warning("LLM 反思生成失败，回退规则反思: %s", exc)
@@ -373,7 +429,9 @@ class ReflectPhaseMixin:
             if any("missing required" in i for i in issues):
                 plan.append(f"补全{weakness['phase']}阶段的必要字段，提升数据完整性")
             if any("recommended field absent" in i for i in issues):
-                plan.append(f"为{weakness['phase']}阶段添加推荐字段（results/metadata/artifacts）")
+                plan.append(
+                    f"为{weakness['phase']}阶段添加推荐字段（results/metadata/artifacts）"
+                )
             if weakness["score"] < 0.4:
                 plan.append(f"重新设计{weakness['phase']}阶段的输出规范，当前评分过低")
 

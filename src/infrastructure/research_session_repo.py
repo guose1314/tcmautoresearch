@@ -13,7 +13,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from sqlalchemy import text
+from sqlalchemy import case, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.collector.corpus_bundle import build_document_version_metadata
@@ -138,6 +139,17 @@ def _as_aware_utc(value: Any) -> Optional[datetime]:
     if parsed.tzinfo is None or parsed.tzinfo.utcoffset(parsed) is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _is_session_cycle_id_integrity_error(error: IntegrityError) -> bool:
+    message = " ".join(
+        str(part or "") for part in (error, getattr(error, "orig", None))
+    ).lower()
+    return (
+        "research_sessions" in message
+        and "cycle_id" in message
+        and ("unique" in message or "duplicate" in message)
+    )
 
 
 def _graph_asset_subgraphs(graph_assets: Mapping[str, Any] | None) -> List[str]:
@@ -414,9 +426,20 @@ class ResearchSessionRepository:
         session: Optional[Session] = None,
     ) -> Dict[str, Any]:
         """创建研究会话，返回序列化字典。"""
+        cycle_id = str(payload.get("cycle_id") or uuid.uuid4())
         with self._session_scope(session) as db_session:
+            existing = (
+                db_session.query(ResearchSession)
+                .filter_by(cycle_id=cycle_id)
+                .one_or_none()
+            )
+            if existing is not None:
+                self._apply_session_updates(existing, payload)
+                db_session.flush()
+                return self._session_to_dict(existing)
+
             rs = ResearchSession(
-                cycle_id=str(payload.get("cycle_id") or uuid.uuid4()),
+                cycle_id=cycle_id,
                 cycle_name=str(payload["cycle_name"]),
                 description=str(payload.get("description") or ""),
                 status=_to_session_status(payload.get("status", "pending")),
@@ -440,7 +463,22 @@ class ResearchSessionRepository:
                 duration=float(payload.get("duration") or 0.0),
             )
             db_session.add(rs)
-            db_session.flush()
+            try:
+                db_session.flush()
+            except IntegrityError as exc:
+                if session is not None or not _is_session_cycle_id_integrity_error(exc):
+                    raise
+                db_session.rollback()
+                existing = (
+                    db_session.query(ResearchSession)
+                    .filter_by(cycle_id=cycle_id)
+                    .one_or_none()
+                )
+                if existing is None:
+                    raise
+                self._apply_session_updates(existing, payload)
+                db_session.flush()
+                return self._session_to_dict(existing)
             return self._session_to_dict(rs)
 
     def get_session(
@@ -2791,7 +2829,16 @@ class ResearchSessionRepository:
         items = (
             session.query(ResearchLearningFeedback)
             .filter(ResearchLearningFeedback.cycle_id == cycle_id)
-            .order_by(ResearchLearningFeedback.created_at.asc())
+            .order_by(
+                case(
+                    (ResearchLearningFeedback.feedback_scope == "cycle_summary", 0),
+                    (ResearchLearningFeedback.feedback_status == "strength", 1),
+                    (ResearchLearningFeedback.feedback_status == "weakness", 2),
+                    else_=3,
+                ),
+                ResearchLearningFeedback.created_at.asc(),
+                ResearchLearningFeedback.id.asc(),
+            )
             .all()
         )
         return [self._learning_feedback_to_dict(item) for item in items]

@@ -253,30 +253,14 @@ class ResearchDossierBuilder:
         )
 
         # 按 section 逐个构建
-        dossier.sections.append(
-            self._build_objective_section(objective, cycle)
-        )
-        dossier.sections.append(
-            self._build_evidence_section(records)
-        )
-        dossier.sections.append(
-            self._build_entities_section(records)
-        )
-        dossier.sections.append(
-            self._build_graph_section(graph_data)
-        )
-        dossier.sections.append(
-            self._build_terminology_section(terminology)
-        )
-        dossier.sections.append(
-            self._build_version_info_section(records, version_info)
-        )
-        dossier.sections.append(
-            self._build_controversies_section(records)
-        )
-        dossier.sections.append(
-            self._build_hypothesis_history_section(records, cycle)
-        )
+        dossier.sections.append(self._build_objective_section(objective, cycle))
+        dossier.sections.append(self._build_evidence_section(records))
+        dossier.sections.append(self._build_entities_section(records))
+        dossier.sections.append(self._build_graph_section(graph_data))
+        dossier.sections.append(self._build_terminology_section(terminology))
+        dossier.sections.append(self._build_version_info_section(records, version_info))
+        dossier.sections.append(self._build_controversies_section(records))
+        dossier.sections.append(self._build_hypothesis_history_section(records, cycle))
         dossier.sections.append(
             self._build_corpus_digest_section(records, corpus_excerpts)
         )
@@ -324,8 +308,12 @@ class ResearchDossierBuilder:
         observe_record = records.get("observe") or {}
         observe_results = self._resolve_phase_results_payload(observe_record)
         observe_phase_result = self._resolve_phase_result_payload(observe_record)
-        philology_assets = extract_observe_philology_assets_from_phase_result(observe_phase_result)
-        terminology_rows = self._as_dict_list(philology_assets.get("terminology_standard_table"))
+        philology_assets = extract_observe_philology_assets_from_phase_result(
+            observe_phase_result
+        )
+        terminology_rows = self._as_dict_list(
+            philology_assets.get("terminology_standard_table")
+        )
 
         dossier = ResearchDossier(
             cycle_id=getattr(cycle, "cycle_id", "") or "",
@@ -340,7 +328,9 @@ class ResearchDossierBuilder:
             self._build_phase_terminology_section(terminology_rows, "observe"),
             self._build_observe_corpus_digest_section(observe_results),
         ]
-        return self._finalize_dossier(dossier, dossier_kind="observe", source_phases=["observe"])
+        return self._finalize_dossier(
+            dossier, dossier_kind="observe", source_phases=["observe"]
+        )
 
     def build_analyze_dossier(
         self,
@@ -364,7 +354,9 @@ class ResearchDossierBuilder:
             self._build_analyze_textual_evidence_section(analyze_results),
             self._build_phase_entities_section({"analyze": analyze_record}, "analyze"),
         ]
-        return self._finalize_dossier(dossier, dossier_kind="analyze", source_phases=["analyze"])
+        return self._finalize_dossier(
+            dossier, dossier_kind="analyze", source_phases=["analyze"]
+        )
 
     def build_publish_dossier(
         self,
@@ -384,18 +376,26 @@ class ResearchDossierBuilder:
         )
         dossier.sections = [
             self._build_phase_objective_section(cycle, "publish"),
-            self._build_publish_summary_section(publish_results, publish_metadata, publish_source),
+            self._build_publish_summary_section(
+                publish_results, publish_metadata, publish_source
+            ),
             self._build_publish_paper_digest_section(publish_results, publish_source),
-            self._build_publish_reference_digest_section(publish_results, publish_metadata),
+            self._build_publish_reference_digest_section(
+                publish_results, publish_metadata
+            ),
             self._build_publish_artifact_digest_section(publish_results),
             self._build_publish_output_digest_section(publish_results),
         ]
-        return self._finalize_dossier(dossier, dossier_kind="publish", source_phases=["publish"])
+        return self._finalize_dossier(
+            dossier, dossier_kind="publish", source_phases=["publish"]
+        )
 
     # ── Section 构建器 ────────────────────────────────────────
 
     def _build_objective_section(
-        self, objective: str, cycle: Any,
+        self,
+        objective: str,
+        cycle: Any,
     ) -> DossierSection:
         budget = self._section_budget("objective")
         parts: list[str] = []
@@ -415,27 +415,37 @@ class ResearchDossierBuilder:
         )
 
     def _build_evidence_section(
-        self, records: Dict[str, Dict[str, Any]],
+        self,
+        records: Dict[str, Dict[str, Any]],
     ) -> DossierSection:
         budget = self._section_budget("evidence")
         evidence_items = self._collect_evidence_lines(records)
-        return self._build_text_section("证据摘要", "\n".join(evidence_items), len(evidence_items), budget)
+        return self._build_text_section(
+            "证据摘要", "\n".join(evidence_items), len(evidence_items), budget
+        )
 
     def _build_entities_section(
-        self, records: Dict[str, Dict[str, Any]],
+        self,
+        records: Dict[str, Dict[str, Any]],
     ) -> DossierSection:
         budget = self._section_budget("entities")
         entity_items = self._collect_entity_items(records)
         lines = [f"- {name} ({etype})" for name, etype in entity_items]
-        return self._build_text_section("实体列表", "\n".join(lines), len(entity_items), budget)
+        return self._build_text_section(
+            "实体列表", "\n".join(lines), len(entity_items), budget
+        )
 
     def _build_graph_section(
-        self, graph_data: Optional[Dict[str, Any]],
+        self,
+        graph_data: Optional[Dict[str, Any]],
     ) -> DossierSection:
         budget = self._section_budget("graph")
         if not graph_data:
             return DossierSection(
-                name="知识图谱", content="", item_count=0, token_budget=budget,
+                name="知识图谱",
+                content="",
+                item_count=0,
+                token_budget=budget,
             )
 
         lines: list[str] = []
@@ -467,12 +477,16 @@ class ResearchDossierBuilder:
         )
 
     def _build_terminology_section(
-        self, terminology: Optional[List[Dict[str, Any]]],
+        self,
+        terminology: Optional[List[Dict[str, Any]]],
     ) -> DossierSection:
         budget = self._section_budget("terminology")
         if not terminology:
             return DossierSection(
-                name="术语表", content="", item_count=0, token_budget=budget,
+                name="术语表",
+                content="",
+                item_count=0,
+                token_budget=budget,
             )
 
         lines = self._collect_terminology_lines(terminology)
@@ -490,10 +504,14 @@ class ResearchDossierBuilder:
         # 从显式传入的 version_info 提取
         if version_info:
             for item in version_info[:20]:
-                title = str(item.get("title") or item.get("document_title") or "").strip()
+                title = str(
+                    item.get("title") or item.get("document_title") or ""
+                ).strip()
                 dynasty = str(item.get("dynasty") or "").strip()
                 author = str(item.get("author") or "").strip()
-                lineage = str(item.get("version_lineage") or item.get("version_lineage_key") or "").strip()
+                lineage = str(
+                    item.get("version_lineage") or item.get("version_lineage_key") or ""
+                ).strip()
                 parts: list[str] = []
                 if title:
                     parts.append(title)
@@ -510,14 +528,20 @@ class ResearchDossierBuilder:
         if not lines:
             observe_record = records.get("observe") or {}
             observe_payload = self._resolve_phase_result_payload(observe_record)
-            philology_assets = extract_observe_philology_assets_from_phase_result(observe_payload)
+            philology_assets = extract_observe_philology_assets_from_phase_result(
+                observe_payload
+            )
             if isinstance(philology_assets, dict) and philology_assets.get("available"):
-                collation_entries = self._as_dict_list(philology_assets.get("collation_entries"))
+                collation_entries = self._as_dict_list(
+                    philology_assets.get("collation_entries")
+                )
                 for entry in collation_entries[:15]:
                     doc_title = str(entry.get("document_title") or "").strip()
                     witness = str(entry.get("witness_key") or "").strip()
                     lineage_key = str(entry.get("version_lineage_key") or "").strip()
-                    note = str(entry.get("note") or entry.get("collation_note") or "").strip()
+                    note = str(
+                        entry.get("note") or entry.get("collation_note") or ""
+                    ).strip()
                     desc = doc_title or witness or lineage_key
                     if desc:
                         line = f"- {desc}"
@@ -526,9 +550,13 @@ class ResearchDossierBuilder:
                         lines.append(line)
 
         if not lines:
-            return DossierSection(name="版本信息", content="", item_count=0, token_budget=budget)
+            return DossierSection(
+                name="版本信息", content="", item_count=0, token_budget=budget
+            )
 
-        return self._build_text_section("版本信息", "\n".join(lines), len(lines), budget)
+        return self._build_text_section(
+            "版本信息", "\n".join(lines), len(lines), budget
+        )
 
     def _build_controversies_section(
         self,
@@ -541,13 +569,26 @@ class ResearchDossierBuilder:
         # 从 observe 阶段的 philology conflict_claims 提取
         observe_record = records.get("observe") or {}
         observe_payload = self._resolve_phase_result_payload(observe_record)
-        philology_assets = extract_observe_philology_assets_from_phase_result(observe_payload)
+        philology_assets = extract_observe_philology_assets_from_phase_result(
+            observe_payload
+        )
         if isinstance(philology_assets, dict) and philology_assets.get("available"):
-            conflict_claims = self._as_dict_list(philology_assets.get("conflict_claims"))
+            conflict_claims = self._as_dict_list(
+                philology_assets.get("conflict_claims")
+            )
             for claim in conflict_claims[:10]:
-                subject = str(claim.get("subject") or claim.get("term") or claim.get("entity") or "").strip()
-                claim_a = str(claim.get("claim_a") or claim.get("position_a") or "").strip()
-                claim_b = str(claim.get("claim_b") or claim.get("position_b") or "").strip()
+                subject = str(
+                    claim.get("subject")
+                    or claim.get("term")
+                    or claim.get("entity")
+                    or ""
+                ).strip()
+                claim_a = str(
+                    claim.get("claim_a") or claim.get("position_a") or ""
+                ).strip()
+                claim_b = str(
+                    claim.get("claim_b") or claim.get("position_b") or ""
+                ).strip()
                 source_a = str(claim.get("source_a") or "").strip()
                 source_b = str(claim.get("source_b") or "").strip()
                 if subject and (claim_a or claim_b):
@@ -565,7 +606,9 @@ class ResearchDossierBuilder:
         # 从 analyze 阶段的 evidence 中提取相互矛盾的证据
         analyze_record = records.get("analyze") or {}
         analyze_results = self._resolve_phase_results_payload(analyze_record)
-        evidence_protocol = self._resolve_nested_dict(analyze_results, "evidence_protocol")
+        evidence_protocol = self._resolve_nested_dict(
+            analyze_results, "evidence_protocol"
+        )
         contradictions = self._as_dict_list(
             evidence_protocol.get("contradictions")
             or evidence_protocol.get("conflicting_evidence")
@@ -573,7 +616,9 @@ class ResearchDossierBuilder:
         )
         for contra in contradictions[:8]:
             topic = str(contra.get("topic") or contra.get("claim") or "").strip()
-            detail = str(contra.get("detail") or contra.get("description") or "").strip()
+            detail = str(
+                contra.get("detail") or contra.get("description") or ""
+            ).strip()
             if topic:
                 line = f"- 证据矛盾：{topic}"
                 if detail:
@@ -581,7 +626,9 @@ class ResearchDossierBuilder:
                 lines.append(line)
 
         if not lines:
-            return DossierSection(name="争议点", content="", item_count=0, token_budget=budget)
+            return DossierSection(
+                name="争议点", content="", item_count=0, token_budget=budget
+            )
 
         return self._build_text_section("争议点", "\n".join(lines), len(lines), budget)
 
@@ -602,8 +649,12 @@ class ResearchDossierBuilder:
             results = self._resolve_phase_results_payload(record)
             hypotheses = self._as_dict_list(
                 results.get("hypotheses")
-                or self._resolve_nested_dict(results, "hypothesis_result").get("hypotheses")
-                or self._resolve_nested_dict(results, "reasoning_results").get("hypotheses")
+                or self._resolve_nested_dict(results, "hypothesis_result").get(
+                    "hypotheses"
+                )
+                or self._resolve_nested_dict(results, "reasoning_results").get(
+                    "hypotheses"
+                )
             )
             if not hypotheses:
                 continue
@@ -630,22 +681,31 @@ class ResearchDossierBuilder:
         outcomes = getattr(cycle, "outcomes", None) or []
         if isinstance(outcomes, list):
             selected = [
-                o for o in outcomes
-                if isinstance(o, dict) and (
-                    o.get("type") == "hypothesis" or "hypothesis" in str(o.get("category") or "")
+                o
+                for o in outcomes
+                if isinstance(o, dict)
+                and (
+                    o.get("type") == "hypothesis"
+                    or "hypothesis" in str(o.get("category") or "")
                 )
             ]
             if selected:
                 lines.append("[最终选定假说]")
                 for s in selected[:3]:
-                    text = str(s.get("statement") or s.get("content") or s.get("title") or "").strip()
+                    text = str(
+                        s.get("statement") or s.get("content") or s.get("title") or ""
+                    ).strip()
                     if text:
                         lines.append(f"  ★ {text[:120]}")
 
         if not lines:
-            return DossierSection(name="假说历史", content="", item_count=0, token_budget=budget)
+            return DossierSection(
+                name="假说历史", content="", item_count=0, token_budget=budget
+            )
 
-        return self._build_text_section("假说历史", "\n".join(lines), len(lines), budget)
+        return self._build_text_section(
+            "假说历史", "\n".join(lines), len(lines), budget
+        )
 
     def _build_corpus_digest_section(
         self,
@@ -654,9 +714,13 @@ class ResearchDossierBuilder:
     ) -> DossierSection:
         budget = self._section_budget("corpus_digest")
         parts = self._collect_corpus_parts(records, corpus_excerpts)
-        return self._build_text_section("语料摘要", "\n".join(parts), len(parts), budget)
+        return self._build_text_section(
+            "语料摘要", "\n".join(parts), len(parts), budget
+        )
 
-    def _build_phase_objective_section(self, cycle: Any, phase_name: str) -> DossierSection:
+    def _build_phase_objective_section(
+        self, cycle: Any, phase_name: str
+    ) -> DossierSection:
         parts: list[str] = []
         objective = str(getattr(cycle, "research_objective", "") or "").strip()
         scope = str(getattr(cycle, "research_scope", "") or "").strip()
@@ -702,7 +766,9 @@ class ResearchDossierBuilder:
             item_count=len(lines),
         )
 
-    def _build_observe_summary_section(self, observe_results: Dict[str, Any]) -> DossierSection:
+    def _build_observe_summary_section(
+        self, observe_results: Dict[str, Any]
+    ) -> DossierSection:
         summary = self._first_non_empty_text(
             observe_results.get("summary"),
             observe_results.get("analysis_summary"),
@@ -710,8 +776,16 @@ class ResearchDossierBuilder:
         )
         observations = self._extract_text_items(observe_results.get("observations"))
         findings = self._extract_text_items(observe_results.get("findings"))
-        corpus_collection = observe_results.get("corpus_collection") if isinstance(observe_results.get("corpus_collection"), dict) else {}
-        literature_pipeline = observe_results.get("literature_pipeline") if isinstance(observe_results.get("literature_pipeline"), dict) else {}
+        corpus_collection = (
+            observe_results.get("corpus_collection")
+            if isinstance(observe_results.get("corpus_collection"), dict)
+            else {}
+        )
+        literature_pipeline = (
+            observe_results.get("literature_pipeline")
+            if isinstance(observe_results.get("literature_pipeline"), dict)
+            else {}
+        )
 
         parts: list[str] = []
         if summary:
@@ -750,12 +824,22 @@ class ResearchDossierBuilder:
             item_count=len(parts),
         )
 
-    def _build_observe_philology_section(self, philology_assets: Dict[str, Any]) -> DossierSection:
-        if not isinstance(philology_assets, dict) or not philology_assets.get("available"):
-            return self._build_phase_text_section("observe", "philology", "文献考据", "", item_count=0)
+    def _build_observe_philology_section(
+        self, philology_assets: Dict[str, Any]
+    ) -> DossierSection:
+        if not isinstance(philology_assets, dict) or not philology_assets.get(
+            "available"
+        ):
+            return self._build_phase_text_section(
+                "observe", "philology", "文献考据", "", item_count=0
+            )
 
-        terminology_rows = self._as_dict_list(philology_assets.get("terminology_standard_table"))
-        collation_entries = self._as_dict_list(philology_assets.get("collation_entries"))
+        terminology_rows = self._as_dict_list(
+            philology_assets.get("terminology_standard_table")
+        )
+        collation_entries = self._as_dict_list(
+            philology_assets.get("collation_entries")
+        )
         evidence_chains = self._as_dict_list(philology_assets.get("evidence_chains"))
         conflict_claims = self._as_dict_list(philology_assets.get("conflict_claims"))
 
@@ -784,7 +868,9 @@ class ResearchDossierBuilder:
                     row.get("normalized_term"),
                     row.get("normalized"),
                 )
-                notes = self._first_non_empty_text(row.get("definition"), row.get("notes"), row.get("label"))
+                notes = self._first_non_empty_text(
+                    row.get("definition"), row.get("notes"), row.get("label")
+                )
                 line = f"- {source_term}"
                 if canonical_term and canonical_term != source_term:
                     line += f" → {canonical_term}"
@@ -795,9 +881,24 @@ class ResearchDossierBuilder:
         if collation_entries:
             parts.append("关键校勘：")
             for entry in collation_entries[:4]:
-                lemma = self._first_non_empty_text(entry.get("lemma"), entry.get("canonical_text"), entry.get("source_text"), entry.get("term"))
-                variant = self._first_non_empty_text(entry.get("variant"), entry.get("variant_text"), entry.get("reading"), entry.get("target_text"))
-                witness = self._first_non_empty_text(entry.get("witness"), entry.get("witnesses"), entry.get("source_document"), entry.get("document_title"))
+                lemma = self._first_non_empty_text(
+                    entry.get("lemma"),
+                    entry.get("canonical_text"),
+                    entry.get("source_text"),
+                    entry.get("term"),
+                )
+                variant = self._first_non_empty_text(
+                    entry.get("variant"),
+                    entry.get("variant_text"),
+                    entry.get("reading"),
+                    entry.get("target_text"),
+                )
+                witness = self._first_non_empty_text(
+                    entry.get("witness"),
+                    entry.get("witnesses"),
+                    entry.get("source_document"),
+                    entry.get("document_title"),
+                )
                 line = f"- {lemma or '未命名条目'}"
                 if variant:
                     line += f" vs {variant}"
@@ -808,8 +909,17 @@ class ResearchDossierBuilder:
         if evidence_chains:
             parts.append("考据证据链：")
             for chain in evidence_chains[:4]:
-                claim = self._first_non_empty_text(chain.get("claim"), chain.get("statement"), chain.get("summary"), chain.get("conclusion"))
-                support = self._first_non_empty_text(chain.get("supporting_evidence"), chain.get("evidence"), chain.get("excerpt"))
+                claim = self._first_non_empty_text(
+                    chain.get("claim"),
+                    chain.get("statement"),
+                    chain.get("summary"),
+                    chain.get("conclusion"),
+                )
+                support = self._first_non_empty_text(
+                    chain.get("supporting_evidence"),
+                    chain.get("evidence"),
+                    chain.get("excerpt"),
+                )
                 line = f"- {claim or '未命名证据链'}"
                 if support:
                     line += f" | {_truncate(support, 100)}"
@@ -823,12 +933,22 @@ class ResearchDossierBuilder:
             item_count=len(parts),
         )
 
-    def _build_observe_corpus_digest_section(self, observe_results: Dict[str, Any]) -> DossierSection:
+    def _build_observe_corpus_digest_section(
+        self, observe_results: Dict[str, Any]
+    ) -> DossierSection:
         parts: list[str] = []
-        corpus_collection = observe_results.get("corpus_collection") if isinstance(observe_results.get("corpus_collection"), dict) else {}
+        corpus_collection = (
+            observe_results.get("corpus_collection")
+            if isinstance(observe_results.get("corpus_collection"), dict)
+            else {}
+        )
         documents = observe_results.get("documents")
         if not isinstance(documents, list):
-            documents = corpus_collection.get("documents") if isinstance(corpus_collection.get("documents"), list) else []
+            documents = (
+                corpus_collection.get("documents")
+                if isinstance(corpus_collection.get("documents"), list)
+                else []
+            )
 
         collection_summary = self._first_non_empty_text(
             corpus_collection.get("summary"),
@@ -840,8 +960,18 @@ class ResearchDossierBuilder:
         for document in documents[:5]:
             if not isinstance(document, dict):
                 continue
-            title = self._first_non_empty_text(document.get("title"), document.get("name"), document.get("source"), document.get("document_id"))
-            snippet = self._first_non_empty_text(document.get("summary"), document.get("excerpt"), document.get("description"), document.get("text"))
+            title = self._first_non_empty_text(
+                document.get("title"),
+                document.get("name"),
+                document.get("source"),
+                document.get("document_id"),
+            )
+            snippet = self._first_non_empty_text(
+                document.get("summary"),
+                document.get("excerpt"),
+                document.get("description"),
+                document.get("text"),
+            )
             if title or snippet:
                 line = f"- {title or '未命名语料'}"
                 if snippet:
@@ -856,27 +986,45 @@ class ResearchDossierBuilder:
             item_count=len(parts),
         )
 
-    def _build_analyze_summary_section(self, analyze_results: Dict[str, Any]) -> DossierSection:
+    def _build_analyze_summary_section(
+        self, analyze_results: Dict[str, Any]
+    ) -> DossierSection:
         analysis_summary = self._first_non_empty_text(
             analyze_results.get("analysis_summary"),
             analyze_results.get("summary"),
             analyze_results.get("description"),
         )
-        statistical_analysis = self._resolve_nested_dict(analyze_results, "statistical_analysis")
-        reasoning_results = self._resolve_nested_dict(analyze_results, "reasoning_results")
+        statistical_analysis = self._resolve_nested_dict(
+            analyze_results, "statistical_analysis"
+        )
+        reasoning_results = self._resolve_nested_dict(
+            analyze_results, "reasoning_results"
+        )
 
         parts: list[str] = []
         if analysis_summary:
             parts.append(f"阶段摘要：{analysis_summary}")
-        parts.extend(self._summarize_mapping(
-            statistical_analysis,
-            preferred_keys=("method", "sample_size", "test_count", "significant_result_count", "significant_findings"),
-            heading="统计分析摘要",
-        ))
+        parts.extend(
+            self._summarize_mapping(
+                statistical_analysis,
+                preferred_keys=(
+                    "method",
+                    "sample_size",
+                    "test_count",
+                    "significant_result_count",
+                    "significant_findings",
+                ),
+                heading="统计分析摘要",
+            )
+        )
         if reasoning_results:
-            evidence_count = len(self._as_dict_list(reasoning_results.get("evidence_records")))
+            evidence_count = len(
+                self._as_dict_list(reasoning_results.get("evidence_records"))
+            )
             claim_count = len(self._as_dict_list(reasoning_results.get("claims")))
-            parts.append(f"推理链路：证据记录 {evidence_count} 条，候选论断 {claim_count} 条。")
+            parts.append(
+                f"推理链路：证据记录 {evidence_count} 条，候选论断 {claim_count} 条。"
+            )
 
         return self._build_phase_text_section(
             "analyze",
@@ -886,31 +1034,54 @@ class ResearchDossierBuilder:
             item_count=len(parts),
         )
 
-    def _build_analyze_evidence_protocol_section(self, analyze_results: Dict[str, Any]) -> DossierSection:
-        evidence_protocol = self._resolve_nested_dict(analyze_results, "evidence_protocol")
+    def _build_analyze_evidence_protocol_section(
+        self, analyze_results: Dict[str, Any]
+    ) -> DossierSection:
+        evidence_protocol = self._resolve_nested_dict(
+            analyze_results, "evidence_protocol"
+        )
         claims = self._as_dict_list(evidence_protocol.get("claims"))
         evidence_records = self._collect_dict_list(
             evidence_protocol.get("evidence_records"),
-            self._resolve_nested_dict(analyze_results, "reasoning_results").get("evidence_records"),
+            self._resolve_nested_dict(analyze_results, "reasoning_results").get(
+                "evidence_records"
+            ),
         )
 
         parts = self._summarize_mapping(
             evidence_protocol,
-            preferred_keys=("summary", "protocol_summary", "claim_count", "evidence_record_count", "coverage_notes"),
+            preferred_keys=(
+                "summary",
+                "protocol_summary",
+                "claim_count",
+                "evidence_record_count",
+                "coverage_notes",
+            ),
             heading="证据协议",
         )
         if claims:
             parts.append("候选论断：")
             for claim in claims[:5]:
-                claim_text = self._first_non_empty_text(claim.get("claim"), claim.get("statement"), claim.get("text"), claim.get("description"))
-                grade = self._first_non_empty_text(claim.get("evidence_grade"), claim.get("grade"))
+                claim_text = self._first_non_empty_text(
+                    claim.get("claim"),
+                    claim.get("statement"),
+                    claim.get("text"),
+                    claim.get("description"),
+                )
+                grade = self._first_non_empty_text(
+                    claim.get("evidence_grade"), claim.get("grade")
+                )
                 line = f"- {claim_text or '未命名论断'}"
                 if grade:
                     line += f" [{grade}]"
                 parts.append(line)
         if evidence_records:
             parts.append("代表性证据：")
-            parts.extend(self._collect_evidence_lines({"analyze": {"results": {"evidence_records": evidence_records}}})[:5])
+            parts.extend(
+                self._collect_evidence_lines(
+                    {"analyze": {"results": {"evidence_records": evidence_records}}}
+                )[:5]
+            )
 
         return self._build_phase_text_section(
             "analyze",
@@ -920,8 +1091,12 @@ class ResearchDossierBuilder:
             item_count=len(parts),
         )
 
-    def _build_analyze_evidence_grade_section(self, analyze_results: Dict[str, Any]) -> DossierSection:
-        evidence_grade_summary = self._resolve_nested_dict(analyze_results, "evidence_grade_summary")
+    def _build_analyze_evidence_grade_section(
+        self, analyze_results: Dict[str, Any]
+    ) -> DossierSection:
+        evidence_grade_summary = self._resolve_nested_dict(
+            analyze_results, "evidence_grade_summary"
+        )
         parts = self._summarize_mapping(
             evidence_grade_summary,
             preferred_keys=(
@@ -943,19 +1118,32 @@ class ResearchDossierBuilder:
             item_count=len(parts),
         )
 
-    def _build_analyze_textual_evidence_section(self, analyze_results: Dict[str, Any]) -> DossierSection:
-        textual_evidence_summary = self._resolve_nested_dict(analyze_results, "textual_evidence_summary")
-        graph_evidence_summary = self._resolve_nested_dict(analyze_results, "similar_formula_graph_evidence_summary")
+    def _build_analyze_textual_evidence_section(
+        self, analyze_results: Dict[str, Any]
+    ) -> DossierSection:
+        textual_evidence_summary = self._resolve_nested_dict(
+            analyze_results, "textual_evidence_summary"
+        )
+        graph_evidence_summary = self._resolve_nested_dict(
+            analyze_results, "similar_formula_graph_evidence_summary"
+        )
         parts = self._summarize_mapping(
             textual_evidence_summary,
-            preferred_keys=("summary", "key_findings", "evidence_chain_count", "document_count"),
+            preferred_keys=(
+                "summary",
+                "key_findings",
+                "evidence_chain_count",
+                "document_count",
+            ),
             heading="文本证据",
         )
-        parts.extend(self._summarize_mapping(
-            graph_evidence_summary,
-            preferred_keys=("summary", "match_count", "top_match", "overall_score"),
-            heading="图谱证据",
-        ))
+        parts.extend(
+            self._summarize_mapping(
+                graph_evidence_summary,
+                preferred_keys=("summary", "match_count", "top_match", "overall_score"),
+                heading="图谱证据",
+            )
+        )
         return self._build_phase_text_section(
             "analyze",
             "textual_evidence",
@@ -981,14 +1169,24 @@ class ResearchDossierBuilder:
         ]
         review_summary = publish_results.get("paper_review_summary")
         if not isinstance(review_summary, dict):
-            review_summary = publish_metadata.get("paper_review_summary") if isinstance(publish_metadata.get("paper_review_summary"), dict) else {}
+            review_summary = (
+                publish_metadata.get("paper_review_summary")
+                if isinstance(publish_metadata.get("paper_review_summary"), dict)
+                else {}
+            )
         if not review_summary:
-            review_summary = publish_source.get("paper_review_summary") if isinstance(publish_source.get("paper_review_summary"), dict) else {}
-        parts.extend(self._summarize_mapping(
-            review_summary,
-            preferred_keys=("final_score", "rounds_completed", "accepted"),
-            heading="论文评审摘要",
-        ))
+            review_summary = (
+                publish_source.get("paper_review_summary")
+                if isinstance(publish_source.get("paper_review_summary"), dict)
+                else {}
+            )
+        parts.extend(
+            self._summarize_mapping(
+                review_summary,
+                preferred_keys=("final_score", "rounds_completed", "accepted"),
+                heading="论文评审摘要",
+            )
+        )
         if deliverables:
             parts.append("关键交付物：")
             parts.extend(f"- {item}" for item in deliverables[:6])
@@ -1006,12 +1204,26 @@ class ResearchDossierBuilder:
         publish_results: Dict[str, Any],
         publish_source: Dict[str, Any],
     ) -> DossierSection:
-        paper_draft = publish_results.get("paper_draft") if isinstance(publish_results.get("paper_draft"), dict) else {}
+        paper_draft = (
+            publish_results.get("paper_draft")
+            if isinstance(publish_results.get("paper_draft"), dict)
+            else {}
+        )
         if not paper_draft:
-            paper_draft = publish_source.get("paper_draft") if isinstance(publish_source.get("paper_draft"), dict) else {}
-        sections = paper_draft.get("sections") if isinstance(paper_draft.get("sections"), list) else []
+            paper_draft = (
+                publish_source.get("paper_draft")
+                if isinstance(publish_source.get("paper_draft"), dict)
+                else {}
+            )
+        sections = (
+            paper_draft.get("sections")
+            if isinstance(paper_draft.get("sections"), list)
+            else []
+        )
         parts: list[str] = []
-        title = self._first_non_empty_text(paper_draft.get("title"), publish_results.get("title"))
+        title = self._first_non_empty_text(
+            paper_draft.get("title"), publish_results.get("title")
+        )
         abstract = self._first_non_empty_text(paper_draft.get("abstract"))
         if title:
             parts.append(f"标题：{title}")
@@ -1022,10 +1234,16 @@ class ResearchDossierBuilder:
             for section in sections[:5]:
                 if not isinstance(section, dict):
                     continue
-                section_title = self._first_non_empty_text(section.get("title"), section.get("section_type"), section.get("type"))
+                section_title = self._first_non_empty_text(
+                    section.get("title"),
+                    section.get("section_type"),
+                    section.get("type"),
+                )
                 content = self._first_non_empty_text(section.get("content"))
                 if section_title or content:
-                    parts.append(f"- {section_title or '未命名章节'}: {_truncate(content, 120)}")
+                    parts.append(
+                        f"- {section_title or '未命名章节'}: {_truncate(content, 120)}"
+                    )
 
         return self._build_phase_text_section(
             "publish",
@@ -1047,8 +1265,16 @@ class ResearchDossierBuilder:
         )
         if formatted_references:
             parts.append("参考文献摘录：")
-            parts.extend(f"- {line.strip()}" for line in formatted_references.splitlines()[:8] if line.strip())
-        citation_count = self._coerce_int(publish_metadata.get("citation_count"), len(self._as_dict_list(publish_results.get("citations"))), default=0)
+            parts.extend(
+                f"- {line.strip()}"
+                for line in formatted_references.splitlines()[:8]
+                if line.strip()
+            )
+        citation_count = self._coerce_int(
+            publish_metadata.get("citation_count"),
+            len(self._as_dict_list(publish_results.get("citations"))),
+            default=0,
+        )
         if citation_count:
             parts.append(f"引用记录数：{citation_count}")
 
@@ -1060,25 +1286,55 @@ class ResearchDossierBuilder:
             item_count=len(parts),
         )
 
-    def _build_publish_artifact_digest_section(self, publish_results: Dict[str, Any]) -> DossierSection:
-        research_artifact = publish_results.get("research_artifact") if isinstance(publish_results.get("research_artifact"), dict) else {}
-        analysis_results = publish_results.get("analysis_results") if isinstance(publish_results.get("analysis_results"), dict) else {}
-        llm_analysis_context = analysis_results.get("llm_analysis_context") if isinstance(analysis_results.get("llm_analysis_context"), dict) else {}
+    def _build_publish_artifact_digest_section(
+        self, publish_results: Dict[str, Any]
+    ) -> DossierSection:
+        research_artifact = (
+            publish_results.get("research_artifact")
+            if isinstance(publish_results.get("research_artifact"), dict)
+            else {}
+        )
+        analysis_results = (
+            publish_results.get("analysis_results")
+            if isinstance(publish_results.get("analysis_results"), dict)
+            else {}
+        )
+        llm_analysis_context = (
+            analysis_results.get("llm_analysis_context")
+            if isinstance(analysis_results.get("llm_analysis_context"), dict)
+            else {}
+        )
 
         parts = self._summarize_mapping(
             research_artifact,
-            preferred_keys=("summary", "hypothesis_audit_summary", "similar_formula_graph_evidence_summary"),
+            preferred_keys=(
+                "summary",
+                "hypothesis_audit_summary",
+                "similar_formula_graph_evidence_summary",
+            ),
             heading="研究产物摘要",
         )
-        parts.extend(self._summarize_mapping(
-            analysis_results,
-            preferred_keys=("summary", "analysis_summary", "limitations"),
-            heading="分析结果摘要",
-        ))
-        module_presence = llm_analysis_context.get("module_presence") if isinstance(llm_analysis_context.get("module_presence"), dict) else {}
+        parts.extend(
+            self._summarize_mapping(
+                analysis_results,
+                preferred_keys=("summary", "analysis_summary", "limitations"),
+                heading="分析结果摘要",
+            )
+        )
+        module_presence = (
+            llm_analysis_context.get("module_presence")
+            if isinstance(llm_analysis_context.get("module_presence"), dict)
+            else {}
+        )
         if module_presence:
-            populated_modules = [name for name, present in module_presence.items() if present]
-            parts.append(f"LLM 分析模块：{', '.join(populated_modules[:8])}" if populated_modules else "LLM 分析模块：无")
+            populated_modules = [
+                name for name, present in module_presence.items() if present
+            ]
+            parts.append(
+                f"LLM 分析模块：{', '.join(populated_modules[:8])}"
+                if populated_modules
+                else "LLM 分析模块：无"
+            )
 
         return self._build_phase_text_section(
             "publish",
@@ -1088,9 +1344,19 @@ class ResearchDossierBuilder:
             item_count=len(parts),
         )
 
-    def _build_publish_output_digest_section(self, publish_results: Dict[str, Any]) -> DossierSection:
-        output_files = publish_results.get("output_files") if isinstance(publish_results.get("output_files"), dict) else {}
-        lines = [f"- {name}: {path}" for name, path in output_files.items() if str(path or "").strip()]
+    def _build_publish_output_digest_section(
+        self, publish_results: Dict[str, Any]
+    ) -> DossierSection:
+        output_files = (
+            publish_results.get("output_files")
+            if isinstance(publish_results.get("output_files"), dict)
+            else {}
+        )
+        lines = [
+            f"- {name}: {path}"
+            for name, path in output_files.items()
+            if str(path or "").strip()
+        ]
         return self._build_phase_text_section(
             "publish",
             "output_digest",
@@ -1151,8 +1417,11 @@ class ResearchDossierBuilder:
     def _llm_compress(self, text: str, budget_tokens: int) -> Optional[str]:
         """调用 LLM 对超长文本做摘要压缩。"""
         try:
+            from src.llm.llm_gateway import generate_with_gateway
+
             if self._llm_service is None:
                 from src.infra.llm_service import get_llm_service
+
                 self._llm_service = get_llm_service(self.llm_purpose)
                 self._llm_service.load()
 
@@ -1162,11 +1431,21 @@ class ResearchDossierBuilder:
                 "保留关键实体、证据和结论，不要遗漏重要关系：\n\n"
                 f"{text[:6000]}"
             )
-            result = self._llm_service.generate(
+            result = generate_with_gateway(
+                self._llm_service,
                 prompt,
-                system_prompt="你是中医药研究文献压缩专家。输出纯文本摘要，不要添加格式标记。",
+                "你是中医药研究文献压缩专家。输出纯文本摘要，不要添加格式标记。",
+                prompt_version="dossier_builder.compress@v1",
+                phase="dossier",
+                purpose="dossier_compression",
+                task_type="summarization",
+                token_budget=budget_tokens,
+                metadata={
+                    "prompt_name": "dossier_builder.compress",
+                    "target_budget_tokens": budget_tokens,
+                },
             )
-            return result.strip() if result else None
+            return result.text.strip() if result.text else None
         except Exception as exc:
             logger.warning("LLM 摘要压缩失败，回退到截断: %s", exc)
             return None
@@ -1178,7 +1457,10 @@ class ResearchDossierBuilder:
         item_count: int,
         token_budget: int,
     ) -> DossierSection:
-        if self.enable_llm_summarization and self._estimate_tokens(content) > token_budget:
+        if (
+            self.enable_llm_summarization
+            and self._estimate_tokens(content) > token_budget
+        ):
             compressed = self._llm_compress(content, token_budget)
             if compressed:
                 return DossierSection(
@@ -1233,7 +1515,9 @@ class ResearchDossierBuilder:
             "max_context_tokens": dossier.max_context_tokens,
             "enable_llm_summarization": self.enable_llm_summarization,
             "section_count": len(dossier.sections),
-            "non_empty_section_count": sum(1 for s in dossier.sections if s.content.strip()),
+            "non_empty_section_count": sum(
+                1 for s in dossier.sections if s.content.strip()
+            ),
         }
         logger.info(
             "ResearchDossier 构建完成: cycle=%s, kind=%s, sections=%d, estimated_tokens=%d / budget=%d",
@@ -1256,10 +1540,15 @@ class ResearchDossierBuilder:
         if isinstance(nested, dict):
             if is_phase_result_payload(nested):
                 return nested
-            metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+            metadata = (
+                record.get("metadata")
+                if isinstance(record.get("metadata"), dict)
+                else {}
+            )
             return {
                 "phase": str(record.get("phase") or "").strip(),
-                "status": str(record.get("status") or "completed").strip() or "completed",
+                "status": str(record.get("status") or "completed").strip()
+                or "completed",
                 "results": nested,
                 "metadata": metadata,
                 "error": record.get("error"),
@@ -1267,10 +1556,15 @@ class ResearchDossierBuilder:
 
         results = record.get("results")
         if isinstance(results, dict):
-            metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+            metadata = (
+                record.get("metadata")
+                if isinstance(record.get("metadata"), dict)
+                else {}
+            )
             return {
                 "phase": str(record.get("phase") or "").strip(),
-                "status": str(record.get("status") or "completed").strip() or "completed",
+                "status": str(record.get("status") or "completed").strip()
+                or "completed",
                 "results": results,
                 "metadata": metadata,
                 "error": record.get("error"),
@@ -1292,7 +1586,9 @@ class ResearchDossierBuilder:
         return metadata if isinstance(metadata, dict) else {}
 
     @staticmethod
-    def _resolve_cycle_phase_dossier_source(cycle: Any, phase_name: str) -> Dict[str, Any]:
+    def _resolve_cycle_phase_dossier_source(
+        cycle: Any, phase_name: str
+    ) -> Dict[str, Any]:
         metadata = getattr(cycle, "metadata", None) or {}
         if not isinstance(metadata, dict):
             return {}
@@ -1308,23 +1604,52 @@ class ResearchDossierBuilder:
             results = self._resolve_phase_results_payload(record)
             for ev in self._collect_dict_list(
                 results.get("evidence_records"),
-                self._resolve_nested_dict(results, "evidence_protocol").get("evidence_records"),
-                self._resolve_nested_dict(results, "reasoning_results").get("evidence_records"),
-                self._resolve_nested_dict(results, "analysis_results").get("evidence_protocol", {}).get("evidence_records") if isinstance(self._resolve_nested_dict(results, "analysis_results").get("evidence_protocol"), dict) else [],
+                self._resolve_nested_dict(results, "evidence_protocol").get(
+                    "evidence_records"
+                ),
+                self._resolve_nested_dict(results, "reasoning_results").get(
+                    "evidence_records"
+                ),
+                self._resolve_nested_dict(results, "analysis_results")
+                .get("evidence_protocol", {})
+                .get("evidence_records")
+                if isinstance(
+                    self._resolve_nested_dict(results, "analysis_results").get(
+                        "evidence_protocol"
+                    ),
+                    dict,
+                )
+                else [],
                 self._resolve_nested_dict(results, "research_artifact").get("evidence"),
             ):
-                grade = self._first_non_empty_text(ev.get("evidence_grade"), ev.get("grade"))
-                excerpt = self._first_non_empty_text(ev.get("excerpt"), ev.get("text"), ev.get("summary"))
-                source = self._first_non_empty_text(ev.get("source_entity"), ev.get("source"), ev.get("subject"))
-                target = self._first_non_empty_text(ev.get("target_entity"), ev.get("target"), ev.get("object"))
-                rel = self._first_non_empty_text(ev.get("relation_type"), ev.get("relation"), ev.get("predicate"))
-                line = f"[{grade}] {source} → {rel} → {target}" if any((source, rel, target)) else f"[{grade}] {_truncate(excerpt, 120)}"
+                grade = self._first_non_empty_text(
+                    ev.get("evidence_grade"), ev.get("grade")
+                )
+                excerpt = self._first_non_empty_text(
+                    ev.get("excerpt"), ev.get("text"), ev.get("summary")
+                )
+                source = self._first_non_empty_text(
+                    ev.get("source_entity"), ev.get("source"), ev.get("subject")
+                )
+                target = self._first_non_empty_text(
+                    ev.get("target_entity"), ev.get("target"), ev.get("object")
+                )
+                rel = self._first_non_empty_text(
+                    ev.get("relation_type"), ev.get("relation"), ev.get("predicate")
+                )
+                line = (
+                    f"[{grade}] {source} → {rel} → {target}"
+                    if any((source, rel, target))
+                    else f"[{grade}] {_truncate(excerpt, 120)}"
+                )
                 if excerpt and excerpt not in line:
                     line += f" | {_truncate(excerpt, 120)}"
                 evidence_items.append(line.strip())
         return evidence_items
 
-    def _collect_entity_items(self, records: Dict[str, Dict[str, Any]]) -> List[tuple[str, str]]:
+    def _collect_entity_items(
+        self, records: Dict[str, Dict[str, Any]]
+    ) -> List[tuple[str, str]]:
         entity_set: dict[str, str] = {}
         for record in records.values():
             results = self._resolve_phase_results_payload(record)
@@ -1335,13 +1660,19 @@ class ResearchDossierBuilder:
                 self._resolve_nested_dict(results, "research_artifact").get("entities"),
             )
             for ent in entities:
-                name = self._first_non_empty_text(ent.get("text"), ent.get("name"), ent.get("entity"))
-                etype = self._first_non_empty_text(ent.get("type"), ent.get("entity_type"), "unknown")
+                name = self._first_non_empty_text(
+                    ent.get("text"), ent.get("name"), ent.get("entity")
+                )
+                etype = self._first_non_empty_text(
+                    ent.get("type"), ent.get("entity_type"), "unknown"
+                )
                 if name:
                     entity_set[name] = etype
         return sorted(entity_set.items())
 
-    def _collect_terminology_lines(self, terminology: Optional[List[Dict[str, Any]]]) -> List[str]:
+    def _collect_terminology_lines(
+        self, terminology: Optional[List[Dict[str, Any]]]
+    ) -> List[str]:
         lines: list[str] = []
         for term_entry in terminology or []:
             if not isinstance(term_entry, dict):
@@ -1358,7 +1689,9 @@ class ResearchDossierBuilder:
                 term_entry.get("notes"),
             )
             if term:
-                lines.append(f"- **{term}**: {definition}" if definition else f"- **{term}**")
+                lines.append(
+                    f"- **{term}**: {definition}" if definition else f"- **{term}**"
+                )
         return lines
 
     def _collect_corpus_parts(
@@ -1444,9 +1777,9 @@ class ResearchDossierBuilder:
     def _summarize_mapping(
         payload: Mapping[str, Any] | None,
         *,
-        preferred_keys: Sequence[str]=(),
-        heading: str="",
-        max_items: int=6,
+        preferred_keys: Sequence[str] = (),
+        heading: str = "",
+        max_items: int = 6,
     ) -> List[str]:
         if not isinstance(payload, Mapping) or not payload:
             return []

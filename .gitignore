@@ -158,3 +158,7 @@ cache/llm/
 
 # Embedding index cache (runtime generated)
 cache/embedding_indexes/
+
+# Task-layer and retrieval trace cache (runtime generated)
+cache/task_layers/
+cache/graphrag/retrieval_traces/
